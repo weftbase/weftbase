@@ -2,6 +2,7 @@
 /weftbase
 /bin/
 /examples/studio-local/studio-local
+/studio/cmd/cmd
 /examples/approvals/approvals
 /studio/examples/basic/basic
 /runtime/examples/local/local
