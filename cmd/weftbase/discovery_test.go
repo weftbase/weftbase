@@ -118,7 +118,7 @@ func readDiscovery(t *testing.T, dir string) (discovery.Info, map[string]any) {
 // and writes nothing; the clean exit removes the file.
 func TestDiscoveryFileWrittenAndRemoved(t *testing.T) {
 	dir := discoveryDir(t)
-	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	t.Setenv("WEFTBASE_TOKEN", "")
 	base := freeBase(t, 2)
 	dbPath := filepath.Join(t.TempDir(), "weft.db")
 	var first syncBuffer
@@ -172,7 +172,7 @@ func TestReuseSaysMissingDiscovery(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, discovery.FileName)); err != nil {
 		t.Fatal(err)
 	}
-	// weft dev reuses (weft studio refuses): its reuse says the file
+	// weftbase dev reuses (weftbase dev refuses): its reuse says the file
 	// is missing.
 	var second syncBuffer
 	if _, err := devStudio(db, want{addr: loop(base), span: 2}, "tok", true, &second); err != nil {
@@ -181,7 +181,7 @@ func TestReuseSaysMissingDiscovery(t *testing.T) {
 	for _, want := range []string{
 		"reusing\n",
 		"studio: --rotate-token not applied: the running Studio keeps its token",
-		"studio: the running Studio wrote no discovery file; apps need WEFT_STUDIO_URL=http://" + loop(base) + "\n",
+		"studio: the running Studio wrote no discovery file; apps need WEFTBASE_URL=http://" + loop(base) + "\n",
 	} {
 		if !strings.Contains(second.String(), want) {
 			t.Errorf("reuse output %q, want %q", second.String(), want)
@@ -236,7 +236,7 @@ func TestWriterReplacesStale(t *testing.T) {
 // file alone.
 func TestStableTokenSurvivesRestart(t *testing.T) {
 	discoveryDir(t)
-	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	t.Setenv("WEFTBASE_TOKEN", "")
 	dbPath := filepath.Join(t.TempDir(), "weft.db")
 	db := "sqlite://" + dbPath
 	base := freeBase(t, 1)
@@ -291,7 +291,7 @@ func TestStableTokenSurvivesRestart(t *testing.T) {
 // names that address, and then it sends the stable token.
 func TestProbeSendsStableTokenOnlyToDiscovered(t *testing.T) {
 	dir := discoveryDir(t)
-	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	t.Setenv("WEFTBASE_TOKEN", "")
 	dbPath := filepath.Join(t.TempDir(), "weft.db")
 	stable, _, err := createTokenFile(dbPath + ".token")
 	if err != nil {
@@ -342,7 +342,7 @@ func TestProbeSendsStableTokenOnlyToDiscovered(t *testing.T) {
 // token — the loser of the atomic link reads the winner's complete file
 // instead of replacing it.
 func TestTokenCreateRace(t *testing.T) {
-	path := filepath.Join(t.TempDir(), ".weft", "weft.db.token")
+	path := filepath.Join(t.TempDir(), ".weftbase", "weft.db.token")
 	var winner string
 	old := linkFile
 	linkFile = func(oldname, newname string) error {
@@ -369,9 +369,9 @@ func TestTokenCreateRace(t *testing.T) {
 	if left, _ := filepath.Glob(filepath.Join(filepath.Dir(path), ".token-*")); len(left) != 0 {
 		t.Errorf("temporary files left: %v", left)
 	}
-	// The token creator guards .weft too (finding 10).
+	// The token creator guards .weftbase too (finding 10).
 	if b, err := os.ReadFile(filepath.Join(filepath.Dir(path), ".gitignore")); err != nil || !strings.Contains(string(b), "*") {
-		t.Errorf(".weft/.gitignore after the token file: %q, %v", b, err)
+		t.Errorf(".weftbase/.gitignore after the token file: %q, %v", b, err)
 	}
 }
 
@@ -381,7 +381,7 @@ func TestTokenCreateRace(t *testing.T) {
 // (and that start refused: one Studio per database file).
 func TestFixedTokenReusesOverStableFile(t *testing.T) {
 	discoveryDir(t)
-	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	t.Setenv("WEFTBASE_TOKEN", "")
 	dbPath := filepath.Join(t.TempDir(), "weft.db")
 	if _, _, err := createTokenFile(dbPath + ".token"); err != nil {
 		t.Fatal(err)
@@ -416,13 +416,13 @@ func TestDiscoveryRefreshedWhileServing(t *testing.T) {
 	}
 }
 
-// TestDiscoveryOffWritesNone: under WEFT_DISCOVERY=off neither `weft
-// studio` nor `weft dev`'s in-process Studio writes the discovery file
+// TestDiscoveryOffWritesNone: under WEFTBASE_DISCOVERY=off neither `weft
+// studio` nor `weftbase dev`'s in-process Studio writes the discovery file
 // — the switch that turns the read off turns the write off too — and
 // each start says so in one line.
 func TestDiscoveryOffWritesNone(t *testing.T) {
-	t.Setenv("WEFT_DISCOVERY", "off")
-	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	t.Setenv("WEFTBASE_DISCOVERY", "off")
+	t.Setenv("WEFTBASE_TOKEN", "")
 	t.Run("studio", func(t *testing.T) {
 		dir := discoveryDir(t)
 		base := freeBase(t, 2)
@@ -430,9 +430,9 @@ func TestDiscoveryOffWritesNone(t *testing.T) {
 		stop := bareStudio(t, "sqlite://"+filepath.Join(t.TempDir(), "weft.db"), base, 2, loop(base), "", false, &out)
 		defer stop()
 		if _, err := os.Stat(filepath.Join(dir, discovery.FileName)); !os.IsNotExist(err) {
-			t.Errorf("weft studio wrote a discovery file under WEFT_DISCOVERY=off: %v", err)
+			t.Errorf("weftbase dev wrote a discovery file under WEFTBASE_DISCOVERY=off: %v", err)
 		}
-		if want := discoveryOffLine + "; apps need WEFT_STUDIO_URL=http://" + loop(base) + "\n"; !strings.Contains(out.String(), want) {
+		if want := discoveryOffLine + "; apps need WEFTBASE_URL=http://" + loop(base) + "\n"; !strings.Contains(out.String(), want) {
 			t.Errorf("start output %q, want the line %q", out.String(), want)
 		}
 	})
@@ -446,9 +446,9 @@ func TestDiscoveryOffWritesNone(t *testing.T) {
 		}
 		defer r.stop(syscall.SIGTERM)
 		if _, err := os.Stat(filepath.Join(dir, discovery.FileName)); !os.IsNotExist(err) {
-			t.Errorf("weft dev wrote a discovery file under WEFT_DISCOVERY=off: %v", err)
+			t.Errorf("weftbase dev wrote a discovery file under WEFTBASE_DISCOVERY=off: %v", err)
 		}
-		if want := discoveryOffLine + "; the app gets WEFT_STUDIO_URL regardless\n"; !strings.Contains(out.String(), want) {
+		if want := discoveryOffLine + "; the app gets WEFTBASE_URL regardless\n"; !strings.Contains(out.String(), want) {
 			t.Errorf("dev output %q, want the line %q", out.String(), want)
 		}
 	})

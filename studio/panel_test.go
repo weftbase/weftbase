@@ -234,8 +234,8 @@ func TestPanelTokenMintExample(t *testing.T) {
 	if tok.PublicID != "pub_orders" || tok.Scope != "read" {
 		t.Fatalf("mint = %+v, want pub_orders read", tok)
 	}
-	if !strings.HasPrefix(tok.Token, "weft_pt.") {
-		t.Fatalf("token = %q, want the weft_pt. prefix", tok.Token)
+	if !strings.HasPrefix(tok.Token, "wb_pt.") {
+		t.Fatalf("token = %q, want the wb_pt. prefix", tok.Token)
 	}
 
 	// The panel reads its own conversation…

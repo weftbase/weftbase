@@ -28,7 +28,7 @@ const meta = {
   weft_version: "v0.7.0",
   studio_version: "v0.3.0",
   db: { kind: "sqlite" },
-  title: "weft studio",
+  title: "weftbase",
   has_manifest: false,
   ingest_open: true,
   interrupted_after_ms: 30000,
@@ -149,5 +149,5 @@ function handoffToken(): string {
   const claims = btoa(
     JSON.stringify({ scope: "read", public_id: "pub_1" })
   ).replace(/=+$/, "")
-  return `weft_pt.${claims}.sig`
+  return `wb_pt.${claims}.sig`
 }

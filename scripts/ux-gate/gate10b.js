@@ -529,7 +529,7 @@ async function phaseFresh() {
   await pw.go(page, "/runs", 2500);
   const wall = await pw.text(page, "main");
   let shot = await pw.shot(page, "e-fresh-token-wall");
-  const wallOK = /<db>\.token/.test(wall) && /weft open --with-token/.test(wall);
+  const wallOK = /<db>\.token/.test(wall) && /weftbase open --with-token/.test(wall);
   ev.push(`${ok(wallOK)} the fresh Studio's token wall (no browser token): ${q(cut(wall.split("Sign in to this Studio").pop(), 260))} [${shot}]`);
   await browser.close();
   ({ browser, page } = await pw.launch(S2));
@@ -544,13 +544,13 @@ async function phaseFresh() {
     firstText: (document.querySelector("[data-first-run]")?.innerText || "").replace(/\s+/g, " ").trim(),
   }));
   shot = await pw.shot(page, "a-fresh-empty-first-run");
-  const emptyOK = e.empty && e.connect === S2 && e.app.includes(S2) && e.first && e.firstText.includes(`WEFT_STUDIO_URL=${S2}`);
+  const emptyOK = e.empty && e.connect === S2 && e.app.includes(S2) && e.first && e.firstText.includes(`WEFTBASE_URL=${S2}`);
   ev.push(`${ok(emptyOK)} signed in with the token from ${process.env.TOKEN_FILE}: /runs' empty state ${e.empty ? "drawn" : "MISSING"}, data-connect ${q(e.connect)}, its app line ${q(cut(e.app, 120))}; the first-run card ${e.first ? "drawn" : "MISSING"}: ${q(cut(e.firstText, 140))} [${shot}]`);
   await browser.close();
   facts.wallOK = wallOK;
   facts.emptyOK = emptyOK;
   clause("a3", emptyOK ? "PASS" : "FAIL", "a fresh empty Studio's /runs names its own URL in the empty state and shows the first-run card", ev.slice(1));
-  clause("e4", wallOK ? "PASS" : "FAIL", "the token wall names <db>.token (a fresh `weft studio` with no --token)", ev.slice(0, 1));
+  clause("e4", wallOK ? "PASS" : "FAIL", "the token wall names <db>.token (a fresh `weftbase dev` with no --token)", ev.slice(0, 1));
 }
 
 (async () => {

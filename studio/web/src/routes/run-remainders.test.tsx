@@ -239,7 +239,7 @@ describe("the Studio remainders, part 2 (U30.3)", () => {
     "appr.breakpoint-own, a %s panel token: the parked card says why it cannot clear the breakpoint (UX-H-18)",
     async (_, scope) => {
       setStudioToken(
-        `weft_pt.${btoa(JSON.stringify({ public_id: "pub_1", scope, exp: "2099-01-01T00:00:00Z" })).replace(/=+$/, "")}.sig`
+        `wb_pt.${btoa(JSON.stringify({ public_id: "pub_1", scope, exp: "2099-01-01T00:00:00Z" })).replace(/=+$/, "")}.sig`
       )
       const studio = parkWith(() => [runtime("rt_1", ["status"])])
       await waitFor(() =>

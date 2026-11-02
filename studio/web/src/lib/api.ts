@@ -742,7 +742,7 @@ export interface Meta {
   capabilities: string[]
   /** Why each capability an option left off is off (plan B4): the
    * option and the CLI flag — e.g. playground: "the playground is off:
-   * turn it on with studio.Playground(true); weft studio
+   * turn it on with studio.Playground(true); weftbase dev
    * --no-playground turns it off". Absent when nothing is off. */
   capabilities_off?: Record<string, string>
   /** api/manifest's sources: the weft.json plus each manifest a
@@ -783,7 +783,7 @@ export interface Meta {
    * instead; absent with none open. */
   runtime_link?: { studio_url?: string; in_process: boolean }
   /** B7: the discovery file apps find this Studio through (the one
-   * `weft studio` / `weft dev` wrote, while it names this process);
+   * `weftbase dev` wrote, while it names this process);
    * db.path's rule — absent to a panel token, and with none. */
   discovery_file?: string
   manifest_check?: {
@@ -1139,7 +1139,7 @@ export function dropTabTokenIf(tok: string) {
  * fragment — `#token=…`, which never reaches a server or a log —
  * stores it, and strips it from the address bar so it is not
  * bookmarked or shared. This is how the reader of a token-walled
- * Studio (setup B's `weft studio` prints a dev token) gets in with
+ * Studio (setup B's `weftbase dev` prints a dev token) gets in with
  * one link; the shell's token prompt is the other way. A token in the
  * query (`?token=…`) is not adopted — loading that page already sent it
  * to Studio in a URL (plan C5) — only stripped from the address bar.

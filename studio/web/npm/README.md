@@ -66,7 +66,7 @@ and every rule: `studio/README.md`, "The devtools panel"):
 | 4 the page URL | `?weft_scope=pub_…` (or `#weft_scope=`) on the page's URL | no code: the zero-touch rung; Studio's dev links write it |
 | 3 a DOM marker | `data-weft-scope="pub_…"` on the chat's element (`useWeftDevtools`, `weftDevtools`) | the production rung |
 | 2 a response header | `Weft-Scope` on the page's own `fetch` responses (Go: `scope.Header`) | loopback dev by default |
-| 4b a panel token | the `public_id` claim of a `weft_pt.` token | when nothing above names one |
+| 4b a panel token | the `public_id` claim of a `wb_pt.` token | when nothing above names one |
 | 5 the fallback | none: the newest runs, each with its agent, and "how to scope" | — |
 
 A page of unrelated runs (a test batch) names its run metadata

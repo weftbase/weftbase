@@ -58,7 +58,7 @@ database. New modules: `weft/obsdb` (the observability database: model,
 `obsdb/clickhouse` (its own module, so the driver is opt-in), `weft/otel`
 (destinations, heartbeats, the local sink), `weft/runtime` (the playground
 link), `studio/cmd` (the local binary; superseded path: `cmd/weft`,
-`weft studio`, plan B1). Arrows only point down: `thread`
+`weftbase dev`, plan B1). Arrows only point down: `thread`
 never imports `obsdb`/`otel`/`runtime`; `obsdb` never imports
 `otel`/`runtime`/`studio`; `otel` never imports `thread`; root imports
 none of them. Studio ingests OTLP and serves one API; the devtools panel
@@ -96,7 +96,7 @@ redaction move out of the core because the core cannot discover them
 through that channel, and per destination is the better privacy shape
 anyway: Studio may keep full content while Datadog gets a redacted,
 capped copy. Environment variables (`OTEL_SERVICE_NAME`, the OTLP
-endpoint, the GenAI capture variable, `WEFT_STUDIO_URL`) are read only by
+endpoint, the GenAI capture variable, `WEFTBASE_URL`) are read only by
 `weft/otel` when it builds destinations; no weft-only variable exists
 where a standard one does.
 
@@ -420,7 +420,7 @@ remaining work is streaming live output to the app's own users and
 1. **Hosted Studio vs "never a hosted cloud" (D8).** THE-END-GOAL's cut
    list said never; setup C is a hosted Studio. The resolution, written
    into the goal doc: hosted Studio is the one hosted product, and it is
-   the same binary and the same API, self-hostable first — `WEFT_STUDIO_URL`
+   the same binary and the same API, self-hostable first — `WEFTBASE_URL`
    is one environment destination beside the standard OTLP one, no
    hosted UI is privileged (the panel and the Studio UI are both clients
    of the one API), and the SQLite sink stays first-class so "one binary,

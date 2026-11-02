@@ -2,7 +2,7 @@
 // observability: the destinations that write into Weft Studio's store
 // and the zero-config behaviour a developer expects on top of weft/otel.
 //
-//	defer exporter.Install()() // a running `weft studio`, else ./.weft/weft.db
+//	defer exporter.Install()() // a running `weftbase dev`, else ./.weftbase/weftbase.db
 //
 //	defer exporter.Install(
 //	    exporter.Local("weft.db"),                        // obsdb/sqlite, synchronous, content on
@@ -15,9 +15,9 @@
 // seams — otel.Sink (Local), otel.OTLP with otel.FirstParty (Studio),
 // otel.Fallback (Install's default) — and adds what the platform reads:
 //
-//	WEFT_STUDIO_URL, WEFT_STUDIO_TOKEN → a Studio destination (content on)
-//	(neither, nor WEFT_DISCOVERY=off)   → the discovery file a running `weft studio` / `weft dev` wrote
-//	WEFT_DB                             → the default Local path (else ./.weft/weft.db)
+//	WEFTBASE_URL, WEFTBASE_TOKEN → a Studio destination (content on)
+//	(neither, nor WEFTBASE_DISCOVERY=off)   → the discovery file a running `weftbase dev` wrote
+//	WEFTBASE_DB                             → the default Local path (else ./.weftbase/weftbase.db)
 //
 // The discovery file is read only by Install and Start, when their
 // options name no Local and no Studio, without NoDiscovery or

@@ -24,7 +24,7 @@ import type { Route } from "./testkit"
 import type { WeftDevtools } from "./element"
 
 const token = (scope?: string) =>
-  `weft_pt.${btoa(JSON.stringify({ public_id: "pub_orders", scope, exp: "2099-01-01T00:00:00Z" })).replace(/=+$/, "")}.sig`
+  `wb_pt.${btoa(JSON.stringify({ public_id: "pub_orders", scope, exp: "2099-01-01T00:00:00Z" })).replace(/=+$/, "")}.sig`
 const PLAYGROUND = token("playground")
 const READ = token("read")
 const HANDOFF_META = {
@@ -38,9 +38,9 @@ const ATTRS = {
 }
 const PLAIN = "http://studio.test/studio/runs/s_01-t1"
 /** What the server answers (studio/handoff.go): a path under the base, no origin. */
-const LOCATION = "/studio/runs/s_01-t1#token=weft_pt.minted.sig"
+const LOCATION = "/studio/runs/s_01-t1#token=wb_pt.minted.sig"
 /** What the panel opens: that path resolved against the endpoint, never the host page. */
-const MINTED = "http://studio.test/studio/runs/s_01-t1#token=weft_pt.minted.sig"
+const MINTED = "http://studio.test/studio/runs/s_01-t1#token=wb_pt.minted.sig"
 
 let opened: string[] = []
 beforeEach(() => {
@@ -169,7 +169,7 @@ describe("open in Studio under a playground panel token (setup C)", () => {
     expect(opened).toEqual([])
   })
 
-  it("the dev token (setup B, UX-D-18) hands off too: the answer's fragment carries it, as weft open's", async () => {
+  it("the dev token (setup B, UX-D-18) hands off too: the answer's fragment carries it, as weftbase open's", async () => {
     const studio = studioWith({
       location: "/studio/runs/s_01-t1#token=dev-token",
     })
@@ -196,7 +196,7 @@ describe("open in Studio under a playground panel token (setup C)", () => {
       {
         ...baseRoutes(),
         "panel-handoff?to=%2Fruns%2Fs_01-t1": {
-          location: "/runs/s_01-t1#token=weft_pt.minted.sig",
+          location: "/runs/s_01-t1#token=wb_pt.minted.sig",
         },
       },
       HANDOFF_META
@@ -209,7 +209,7 @@ describe("open in Studio under a playground panel token (setup C)", () => {
     expect(await clickExpand(el)).toBe(true)
     expect(studio.gets("panel-handoff").map(toOf)).toEqual(["/runs/s_01-t1"])
     expect(opened).toEqual([
-      "http://studio.test/runs/s_01-t1#token=weft_pt.minted.sig",
+      "http://studio.test/runs/s_01-t1#token=wb_pt.minted.sig",
     ])
     expect(opened[0].startsWith(location.origin)).toBe(false)
   })
@@ -233,7 +233,7 @@ describe("open in Studio under a playground panel token (setup C)", () => {
     ["a malformed location", "http://"],
     [
       "a location off the endpoint's origin",
-      "https://evil.example/studio/runs/s_01-t1#token=weft_pt.minted.sig",
+      "https://evil.example/studio/runs/s_01-t1#token=wb_pt.minted.sig",
     ],
   ] as const)
     it(`${name}: the plain link, nothing thrown`, async () => {

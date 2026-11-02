@@ -136,7 +136,7 @@ func TestRawBodiesRedact(t *testing.T) {
 func TestRawBodiesThroughTheGlobalProvider(t *testing.T) {
 	t.Setenv("WEFT_ENV", "dev")
 	isolate(t)
-	t.Setenv("WEFT_DB", filepath.Join(t.TempDir(), "weft.db"))
+	t.Setenv("WEFTBASE_DB", filepath.Join(t.TempDir(), "weft.db"))
 	shutdown := Install(otel.RawBodies(true), otel.Heartbeat(0))
 	defer shutdown()
 	var wanted bool

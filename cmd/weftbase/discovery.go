@@ -14,19 +14,19 @@ import (
 	"github.com/weftbase/weftbase/studio"
 )
 
-// The discovery file (plan B3, internal/discovery): `weft studio` and
-// `weft dev` write studio.json once the listener is bound — the real
+// The discovery file (plan B3, internal/discovery): `weftbase dev` and
+// `weftbase dev` write studio.json once the listener is bound — the real
 // port in it — and remove it on a clean exit; exporter.Install and
-// runtime.Install read it when WEFT_STUDIO_URL is unset and the
+// runtime.Install read it when WEFTBASE_URL is unset and the
 // pipeline names no exporter.Studio or exporter.Local (the README's "When
 // weft/otel reads the file"), so an app joins the running Studio with
 // no configuration. A reuse writes
-// nothing: the running Studio owns the file. Under WEFT_DISCOVERY=off
+// nothing: the running Studio owns the file. Under WEFTBASE_DISCOVERY=off
 // (discovery.Off) neither command writes one, and the start says so in
 // one line.
 
-// discoveryOffLine is the start line under WEFT_DISCOVERY=off.
-const discoveryOffLine = "studio: no discovery file written (WEFT_DISCOVERY=off)"
+// discoveryOffLine is the start line under WEFTBASE_DISCOVERY=off.
+const discoveryOffLine = "studio: no discovery file written (WEFTBASE_DISCOVERY=off)"
 
 // writeDiscovery writes the file for the Studio at url. dbPath is the
 // SQLite file, "" for a database with no file.
@@ -44,24 +44,24 @@ func writeDiscovery(url, token, dbPath string) (*discovery.Written, error) {
 
 // announce writes the discovery file and says where in one line (a
 // failure is said too: the Studio serves regardless — apps then need
-// WEFT_STUDIO_URL).
+// WEFTBASE_URL).
 func announce(out io.Writer, url, token, dbPath string) *discovery.Written {
 	if discovery.Off(os.Getenv) {
-		_, _ = fmt.Fprintf(out, "%s; apps need WEFT_STUDIO_URL=%s\n", discoveryOffLine, url)
+		_, _ = fmt.Fprintf(out, "%s; apps need WEFTBASE_URL=%s\n", discoveryOffLine, url)
 		return nil
 	}
 	w, err := writeDiscovery(url, token, dbPath)
 	if err != nil {
-		_, _ = fmt.Fprintf(out, "studio: no discovery file (%v); apps need WEFT_STUDIO_URL=%s\n", err, url)
+		_, _ = fmt.Fprintf(out, "studio: no discovery file (%v); apps need WEFTBASE_URL=%s\n", err, url)
 		return nil
 	}
-	_, _ = fmt.Fprintf(out, "studio: apps find this Studio through %s (WEFT_STUDIO_URL overrides it, WEFT_DISCOVERY=off ignores it)\n", w.Path)
+	_, _ = fmt.Fprintf(out, "studio: apps find this Studio through %s (WEFTBASE_URL overrides it, WEFTBASE_DISCOVERY=off ignores it)\n", w.Path)
 	return w
 }
 
 // knownStudio is the address (host:port) of the Studio this user's
 // discovery file names when it serves a database file, "" otherwise
-// (no file trusted, WEFT_DISCOVERY=off, a start with no database
+// (no file trusted, WEFTBASE_DISCOVERY=off, a start with no database
 // file): the port policy probes it first (listen.Request.Known), so a
 // Studio on the same file is found whatever its port (UX-S5a-13).
 func knownStudio(dbPath string) string {
@@ -69,7 +69,7 @@ func knownStudio(dbPath string) string {
 		return ""
 	}
 	info, _, ok := discovery.Lookup(func(k string) string {
-		if k == "WEFT_STUDIO_URL" {
+		if k == "WEFTBASE_URL" {
 			return ""
 		}
 		return os.Getenv(k)
@@ -86,7 +86,7 @@ func knownStudio(dbPath string) string {
 
 // discoveryOption names the discovery file a start is about to write to
 // its server (studio.DiscoveryFile: /api/meta's discovery_file, which
-// Studio's connect lines print); none under WEFT_DISCOVERY=off.
+// Studio's connect lines print); none under WEFTBASE_DISCOVERY=off.
 func discoveryOption() []studio.Option {
 	if discovery.Off(os.Getenv) {
 		return nil
@@ -105,7 +105,7 @@ func reuseNotes(out io.Writer, addr string, rotate bool) {
 		_, _ = fmt.Fprintln(out, "studio: --rotate-token not applied: the running Studio keeps its token (stop it, then start with --rotate-token)")
 	}
 	if discovery.Find("http://"+addr) == "" {
-		_, _ = fmt.Fprintf(out, "studio: the running Studio wrote no discovery file; apps need WEFT_STUDIO_URL=http://%s\n", addr)
+		_, _ = fmt.Fprintf(out, "studio: the running Studio wrote no discovery file; apps need WEFTBASE_URL=http://%s\n", addr)
 	}
 }
 

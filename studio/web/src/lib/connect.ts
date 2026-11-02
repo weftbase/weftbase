@@ -3,7 +3,7 @@
 // Settings page show, built from the page's own base URL — never a
 // fixed port, never "this command starts Studio" to someone already in
 // it. The token is never written: a token-walled Studio's lines name
-// where it lives (<db>.token, weft open --with-token).
+// where it lives (<db>.token, weftbase open --with-token).
 import { SIGN_IN_COMMAND, TOKEN_FILE, mcpCommand } from "./settings"
 
 /** studioURL is this Studio's URL as an app dials it: the page's base
@@ -41,8 +41,8 @@ export function connectLines(
     {
       key: "app",
       label: "Go app",
-      code: `export WEFT_STUDIO_URL=${url}\n${authRequired ? "export WEFT_STUDIO_TOKEN=<token>\n" : ""}go run .   # an app that calls otel.Install()`,
-      note: `otel.Install() records runs here; without WEFT_STUDIO_URL it finds the Studio a running \`weft studio\` names in its discovery file (${discoveryFile ?? "studio.json"}). WEFT_STUDIO_URL turns discovery off: a Studio with an ingest token needs WEFT_STUDIO_TOKEN too${authRequired ? ` (${TOKEN_PLACE})` : ""}. runtime.Install(...) lets Studio replay them.`,
+      code: `export WEFTBASE_URL=${url}\n${authRequired ? "export WEFTBASE_TOKEN=<token>\n" : ""}go run .   # an app that calls otel.Install()`,
+      note: `otel.Install() records runs here; without WEFTBASE_URL it finds the Studio a running \`weftbase dev\` names in its discovery file (${discoveryFile ?? "studio.json"}). WEFTBASE_URL turns discovery off: a Studio with an ingest token needs WEFTBASE_TOKEN too${authRequired ? ` (${TOKEN_PLACE})` : ""}. runtime.Install(...) lets Studio replay them.`,
     },
     {
       key: "panel",
@@ -56,9 +56,9 @@ export function connectLines(
       key: "mcp",
       label: "coding agent",
       code: authRequired
-        ? `claude mcp add weft -e WEFT_STUDIO_TOKEN=<token> -- ${mcpCommand(url)}`
+        ? `claude mcp add weft -e WEFTBASE_TOKEN=<token> -- ${mcpCommand(url)}`
         : `claude mcp add weft -- ${mcpCommand(url)}`,
-      note: "weft mcp reads this Studio for an MCP client (docs/mcp-recipe.md)",
+      note: "weftbase mcp reads this Studio for an MCP client (docs/mcp-recipe.md)",
     },
   ]
 }

@@ -145,7 +145,7 @@ func TestPackageAccessorsClearOnShutdown(t *testing.T) {
 // each through the Local sink's synchronous write, and Shutdown waited
 // for it with no bound: stopHeartbeat's <-p.beatDone ignored ctx, and
 // the pass ran to its end whatever stop said. With the database's write
-// lock held elsewhere (another process: Studio's delete, weft vacuum —
+// lock held elsewhere (another process: Studio's delete, weftbase vacuum —
 // here a second connection), each heartbeat write waits out SQLite's
 // 30 s busy timeout, so `defer exporter.Install()()` (a 5 s context) hung
 // for 30 s per open run; under concurrent runs on a slow disk the same

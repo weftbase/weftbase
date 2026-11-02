@@ -20,7 +20,7 @@
 #
 # The gate never touches the user's discovery file: every weft process
 # runs with XDG_RUNTIME_DIR / XDG_CACHE_HOME under $RUN, from a cwd with
-# no ./.weft, with WEFT_STUDIO_URL / WEFT_STUDIO_TOKEN / WEFT_DISCOVERY
+# no ./.weftbase, with WEFTBASE_URL / WEFTBASE_TOKEN / WEFTBASE_DISCOVERY
 # unset.
 #
 #   ARENA=… RUN=… PLAYWRIGHT_DIR=… scripts/ux-gate/gate10b.sh
@@ -61,7 +61,7 @@ RUN="$(cd "$RUN" && pwd)"
 rm -rf "$RUN/shots" "$RUN"/*.strace "$RUN"/*.log "$RUN"/gate10b-*.json "$RUN"/gate10b-*.txt "$RUN"/studio.db* "$RUN"/fresh.db* "$RUN/demo" "$RUN/xdg" "$RUN/cwd"
 mkdir -p "$RUN/shots" "$RUN/demo" "$RUN/xdg/run" "$RUN/xdg/cache" "$RUN/cwd"
 chmod 700 "$RUN/xdg/run"
-unset WEFT_STUDIO_URL WEFT_STUDIO_TOKEN WEFT_DISCOVERY
+unset WEFTBASE_URL WEFTBASE_TOKEN WEFTBASE_DISCOVERY
 # W runs a weft process in the gate's private discovery world.
 # (Go's and Playwright's caches stay where they were.)
 W=(env XDG_RUNTIME_DIR="$RUN/xdg/run" XDG_CACHE_HOME="$RUN/xdg/cache" GOCACHE="$(go env GOCACHE)" GOMODCACHE="$(go env GOMODCACHE)")
@@ -114,7 +114,7 @@ for a in "$ADDR" "$ADDR2"; do
 done
 
 # ---- 1. builds: weft from $REPO, the arena and the demo against it ------
-( cd "$REPO" && go build -o "$RUN/weft" ./cmd/weft ) > "$RUN/build.log" 2>&1 \
+( cd "$REPO" && go build -o "$RUN/weft" ./cmd/weftbase ) > "$RUN/build.log" 2>&1 \
   || { say "weft build failed: $(tail -5 "$RUN/build.log")"; exit 2; }
 printf 'go 1.26.0\n\nuse (\n\t%s\n\t%s\n\t%s/core\n)\n' "$ARENA" "$REPO" "$REPO" > "$RUN/arena.work"
 ( cd "$ARENA" && GOWORK="$RUN/arena.work" go build -o "$RUN/weft-arena" ./cmd/weft-arena ) > "$RUN/arena-build.log" 2>&1 \
@@ -131,14 +131,14 @@ demo() { # strace-name mode args…: the demo, its JSON lines on stdout
   ( cd "$RUN/cwd" && "${W[@]}" $(ST "$RUN/$n.strace") "$RUN/g10bdemo" "$@" ) 2> "$RUN/$n.log"
 }
 
-# ---- 2. Studio, a fresh DB, from a cwd with no ./.weft ---------------------
+# ---- 2. Studio, a fresh DB, from a cwd with no ./.weftbase ---------------------
 cd "$RUN/cwd" || exit 2
 bg "$RUN/studio.strace" "$RUN/studio.log" "${W[@]}" "$RUN/weft" studio --addr "$ADDR" --db "sqlite://$RUN/studio.db" --token "$TOKEN" --open=false
 SPID=$BGPID; SWRAP=$BGWRAP
 waitfor 30 api /api/meta || { say "Studio did not answer /api/meta"; cat "$RUN/studio.log"; exit 2; }
 say "studio $STUDIO pid $SPID: $(api /api/meta | jq -c '{weft_version, auth_required, discovery_file}')"
 
-# ---- 3. (e) the CLI, first half: bare weft doctor, a second studio, open ---
+# ---- 3. (e) the CLI, first half: bare weftbase doctor, a second studio, open ---
 dout=$( cd "$RUN/cwd" && "${W[@]}" "$RUN/weft" doctor 2> "$RUN/doctor.err" ); drc=$?
 derr=$(grep -v -E "$noise" "$RUN/doctor.err" | head -3 | tr '\n' ' ')
 e1=$(echo "$derr" | grep -qF "weft: Studio $STUDIO (discovery file $DISC)" && echo yes || echo no)
@@ -147,10 +147,10 @@ s2=$(grep -v -E "$noise" "$RUN/second.log" | head -2 | tr '\n' ' ')
 e2=$([ "$s2rc" != 0 ] && echo "$s2" | grep -qF "$STUDIO" && echo yes || echo no)
 oout=$( cd "$RUN/cwd" && "${W[@]}" "$RUN/weft" open --with-token 2> "$RUN/open.err" ); orc=$?
 e3=$([ "$orc" = 0 ] && [ "$oout" = "$STUDIO/#token=$TOKEN" ] && echo yes || echo no)
-say "cli    weft doctor (no flags, no env; XDG_RUNTIME_DIR=$RUN/xdg/run) exit $drc"
+say "cli    weftbase doctor (no flags, no env; XDG_RUNTIME_DIR=$RUN/xdg/run) exit $drc"
 
 # ---- 4. the arena's offline seed --------------------------------------------
-( cd "$ARENA" && "${W[@]}" WEFT_STUDIO_URL="$STUDIO" WEFT_STUDIO_TOKEN="$TOKEN" TMPDIR="$RUN/cwd" \
+( cd "$ARENA" && "${W[@]}" WEFTBASE_URL="$STUDIO" WEFTBASE_TOKEN="$TOKEN" TMPDIR="$RUN/cwd" \
   $(ST "$RUN/seed.strace") "$RUN/weft-arena" run --offline --studio --no-save --jobs 8 ) > "$RUN/seed.log" 2>&1
 SEEDRC=$?
 seedline=$(grep -E '^weft-arena — engine=' "$RUN/seed.log" | tail -1)
@@ -163,7 +163,7 @@ unknown=""; for f in $failed; do [[ " $KNOWN_STALE " == *" $f "* ]] || unknown="
 note() { case "$1" in
   rw.records-forensics) echo "expects the store at schema 22 (\"migrated to schema 22\"); weft adds migrations since (now $(grep -oE 'migrated to schema 22: got "[0-9]+"' "$RUN/seed.log" | grep -oE '[0-9]+"$' | tr -d '"')) — the check should read the current schema (or ≥ 22)";;
   runtimelab.transcript-edits) echo "expects \"transcript edits need engine live\"; U17 rewrote the scripted refusal: \"your edit changes step N's request, and scripted holds only the recorded answer to the original — run on live, or drop the edit\"";;
-  rw.ops-console) echo "runs \`weft export --wefttest --test …\` expecting the fixtures-only tree; U19 (Breaking) made --wefttest write the save-as-test tree — \`--test goes with --fixtures-only\` (exit 2): add --fixtures-only or follow the new tree (TestReplay_<run>); also \"13 tools\" now 22 (weft mcp grew stats, U33.1) and \"1 calls\" now \"1 call\" (U33.1's plurals)";;
+  rw.ops-console) echo "runs \`weftbase export --wefttest --test …\` expecting the fixtures-only tree; U19 (Breaking) made --wefttest write the save-as-test tree — \`--test goes with --fixtures-only\` (exit 2): add --fixtures-only or follow the new tree (TestReplay_<run>); also \"13 tools\" now 22 (weftbase mcp grew stats, U33.1) and \"1 calls\" now \"1 call\" (U33.1's plurals)";;
   runtime18.sources) echo "expects the 0.18 scripted-miss and refusal words; U18.1/U18.2 rewrote them (\"no recorded turn for step N (scripted engine, key …): … [component]\", \"scripted cannot try another model: …\", \"scripted replays a recorded run's answers: pick a source run, or run on live\")";;
   obs18.env-destinations) echo "expects \"otel: Blocking ignored: WEFT_ENV is not dev\" under otel.NoEnv(); I2b names the real cause there: \"otel: Blocking ignored: otel.NoEnv reads no WEFT_ENV\"";;
   mcp.policy-and-failures) echo "expects error.type mcp_transport for a JSON-RPC error answer; U23.2-fix (finding 7) types a server's JSON-RPC error answer mcp_rpc_error (\"MCP refused the call\"), keeping mcp_transport for no answer — the check should want mcp_rpc_error (or a closed session for mcp_transport)";;
@@ -239,10 +239,10 @@ ui fresh STUDIO2="$STUDIO2" TOKEN2="$TOKEN2" TOKEN_FILE="$RUN/fresh.db.token"
 stop "$FPID" "$FWRAP"
 sleep 1
 discback=$(jq -r .url "$DISC" 2>/dev/null)
-clause e1 "$([ "$e1" = yes ] && [ "$drc" = 0 ] && echo PASS || echo FAIL)" "bare \`weft doctor\` (no flags, no env; a private discovery dir) names the Studio started with --addr and its source on stderr" \
+clause e1 "$([ "$e1" = yes ] && [ "$drc" = 0 ] && echo PASS || echo FAIL)" "bare \`weftbase doctor\` (no flags, no env; a private discovery dir) names the Studio started with --addr and its source on stderr" \
   "stderr: $derr" "stdout: $(echo "$dout" | grep -E '^(ok|warn|FAIL|fail) +(studio|discovery|token)' | tr '\n' ' ' | sed -E 's/ +/ /g' | cut -c1-300)"
-clause e2 "$([ "$e2" = yes ] && echo PASS || echo FAIL)" "a second \`weft studio\` on the same db exits non-zero naming the first's URL" "exit $s2rc: $s2"
-clause e3 "$([ "$e3" = yes ] && echo PASS || echo FAIL)" "\`weft open --with-token\` with no id prints the root with #token=" \
+clause e2 "$([ "$e2" = yes ] && echo PASS || echo FAIL)" "a second \`weftbase dev\` on the same db exits non-zero naming the first's URL" "exit $s2rc: $s2"
+clause e3 "$([ "$e3" = yes ] && echo PASS || echo FAIL)" "\`weftbase open --with-token\` with no id prints the root with #token=" \
   "stdout: $oout (stderr: $(grep -v -E "$noise" "$RUN/open.err" | head -1))"
 say "      the fresh Studio's banner: $banner; token file $RUN/fresh.db.token $([ -n "$TOKEN2" ] && echo written || echo MISSING); discovery file after it stopped names $discback ($([ "$discback" = "$STUDIO" ] && echo restored || echo NOT RESTORED))"
 

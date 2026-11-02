@@ -71,7 +71,7 @@ describe("the token (S4.6, setup B)", () => {
     const claims = btoa(
       JSON.stringify({ scope: "read", pub: "pub_1" })
     ).replace(/=+$/, "")
-    const panel = `weft_pt.${claims}.sig`
+    const panel = `wb_pt.${claims}.sig`
     setStudioToken("dev-secret")
     window.history.replaceState(null, "", `/runs/r1#token=${panel}`)
     expect(adoptTokenFromLocation()).toBe(true)
@@ -88,7 +88,7 @@ describe("the token (S4.6, setup B)", () => {
     const claims = btoa(
       JSON.stringify({ scope: "read", pub: "pub_1" })
     ).replace(/=+$/, "")
-    const panel = `weft_pt.${claims}.sig`
+    const panel = `wb_pt.${claims}.sig`
     setStudioToken("dev-secret")
     window.history.replaceState(null, "", `/runs/r1#token=${panel}`)
     expect(adoptTokenFromLocation()).toBe(true)
@@ -108,7 +108,7 @@ describe("the token (S4.6, setup B)", () => {
     const claims = btoa(
       JSON.stringify({ scope: "read", pub: "pub_1" })
     ).replace(/=+$/, "")
-    const panel = `weft_pt.${claims}.sig`
+    const panel = `wb_pt.${claims}.sig`
     const origGet = Storage.prototype.getItem
     const origSet = Storage.prototype.setItem
     const get = vi
@@ -166,7 +166,7 @@ describe("a hand-off token refused", () => {
     const claims = btoa(
       JSON.stringify({ scope: "read", pub: "pub_1" })
     ).replace(/=+$/, "")
-    const panel = `weft_pt.${claims}.sig`
+    const panel = `wb_pt.${claims}.sig`
     setStudioToken("dev-secret")
     window.history.replaceState(null, "", `/runs#token=${panel}`)
     adoptTokenFromLocation()
@@ -200,7 +200,7 @@ describe("a hand-off token refused", () => {
     const claims = btoa(
       JSON.stringify({ scope: "read", pub: "pub_1" })
     ).replace(/=+$/, "")
-    const panel = `weft_pt.${claims}.sig`
+    const panel = `wb_pt.${claims}.sig`
     setStudioToken("dev-secret")
     window.history.replaceState(null, "", `/runs#token=${panel}`)
     adoptTokenFromLocation()
@@ -234,7 +234,7 @@ describe("a hand-off token refused", () => {
     const claims = btoa(
       JSON.stringify({ scope: "read", pub: "pub_1" })
     ).replace(/=+$/, "")
-    const panel = `weft_pt.${claims}.sig`
+    const panel = `wb_pt.${claims}.sig`
     window.history.replaceState(null, "", `/runs#token=${panel}`)
     adoptTokenFromLocation()
     const fetchMock = vi.fn(async () =>

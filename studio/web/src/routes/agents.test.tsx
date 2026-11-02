@@ -19,7 +19,7 @@ configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
 
 const OFF =
-  "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off"
+  "the playground is off: turn it on with studio.Playground(true); weftbase dev --no-playground turns it off"
 const meta = (over: Record<string, unknown> = {}) => ({
   ...golden<Record<string, unknown>>("meta"),
   ...over,

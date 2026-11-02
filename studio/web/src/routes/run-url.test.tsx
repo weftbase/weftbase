@@ -2,7 +2,7 @@
 // the URL's (written in place: cursor moves), the views are pushed,
 // the header's copy link copies the page as it stands — never a token
 // — and the tab is titled `orders · Where is order 42? · succeeded ·
-// weft studio` (U6: agent · the prompt), `run s_…-t3` while it loads.
+// weftbase dev` (U6: agent · the prompt), `run s_…-t3` while it loads.
 import {
   cleanup,
   configure,
@@ -276,7 +276,7 @@ describe("the run page's URL (G2)", () => {
     renderApp(`/runs/${RUN}`)
     await waitFor(() =>
       expect(document.title).toBe(
-        "orders · Where is order 42? · succeeded · weft studio"
+        "orders · Where is order 42? · succeeded · weftbase"
       )
     )
   })

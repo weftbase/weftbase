@@ -77,7 +77,7 @@ afterEach(() => {
   setStudioToken("")
 })
 
-const READ = `weft_pt.${btoa(JSON.stringify({ public_id: APP_PUB, pid: APP_PUB })).replace(/=+$/, "")}.sig`
+const READ = `wb_pt.${btoa(JSON.stringify({ public_id: APP_PUB, pid: APP_PUB })).replace(/=+$/, "")}.sig`
 
 async function open(o: AppTurnOptions = {}, run = PARKED) {
   // o itself is served: a test may change its runtimes or outcome later.
@@ -492,7 +492,7 @@ describe("the run page when no Sessions runtime of the run's service acts", () =
     const fake = await open({ noPlayground: true })
     // Go's offPlayground (the golden meta's capabilities_off), its lead dropped.
     const off =
-      "turn it on with studio.Playground(true); weft studio --no-playground turns it off"
+      "turn it on with studio.Playground(true); weftbase dev --no-playground turns it off"
     expect(parked().getAttribute("data-parked")).toBe("read-only")
     expect(line()).toBe(
       `app-owned turn · read-only: ${PLAYGROUND_OFF} — fix: ${off}`

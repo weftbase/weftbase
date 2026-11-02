@@ -1,5 +1,5 @@
 // Package dblock is the one-Studio-per-database rule of the weft
-// command (B7-fix): `weft studio` and `weft dev` hold an exclusive lock
+// command (B7-fix): `weftbase dev` hold an exclusive lock
 // on <db>.lock, beside a SQLite database file, for as long as they
 // serve it, taken before the port policy runs. A second start on the
 // same file — at the same moment, or from another directory whose
@@ -18,7 +18,7 @@
 // pid — anything else names nobody.
 //
 // One file, one lock: the caller passes the database path with its
-// symlinks resolved (cmd/weft does). Hard links, and two spellings of
+// symlinks resolved (cmd/weftbase does). Hard links, and two spellings of
 // one name on a case-insensitive filesystem, are not detected.
 //
 // Only a database with a file has a lock: ":memory:" and ClickHouse

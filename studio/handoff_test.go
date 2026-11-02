@@ -171,7 +171,7 @@ func TestPanelHandoff(t *testing.T) {
 	}
 
 	// The server token (setup B's dev token, U22 / UX-D-18): the same
-	// 303, the dev token in the fragment — as weft open --with-token —
+	// 303, the dev token in the fragment — as weftbase open --with-token —
 	// so the opened tab lands signed in; the JSON form says the same.
 	r = handoffGet(t, ts, "to=/runs/run_a", "srv-token", "")
 	if r.StatusCode != http.StatusSeeOther || r.Header.Get("Location") != "/studio/runs/run_a#token=srv-token" ||

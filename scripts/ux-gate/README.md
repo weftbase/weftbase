@@ -1,5 +1,12 @@
 # scripts/ux-gate — the UX audit's gate tooling
 
+Historical: these are the phase gates of the UX plan (phases 7–10b),
+run by hand against weft 0.16–0.20, when Studio was part of weft. They
+moved here with Studio and were rewritten mechanically to the split's
+names (`cmd/weftbase`, `weftbase dev`, `WEFTBASE_*`); they are not run
+in CI, and the demo modules they write still pin the weft releases of
+their phase.
+
 - `pw.js` — the Playwright helper (CommonJS): `launch(baseURL)`, `signIn(page, token)`
   (Studio takes the token from a `#token=` fragment), `go`, `shot(page, name)` →
   `$GATE_SHOTS/<name>.png`, `text`, `openPanel(page, base, {token, scope, query})`
@@ -13,7 +20,7 @@
   Run it with
   `ARENA=<weft-arena checkout> RUN=<scratch dir> PLAYWRIGHT_DIR=<playwright install> scripts/ux-gate/gate7.sh`
   (`REPO` defaults to the arena's `go.work` sibling `$ARENA/../weft`, `GO_TEST_DIR` to `$REPO`):
-  it builds `weft` from `$REPO`, starts `weft studio` on a fresh `$RUN/studio.db`
+  it builds `weft` from `$REPO`, starts `weftbase dev` on a fresh `$RUN/studio.db`
   (127.0.0.1:7341, token `gate7tok`), builds the arena as it is and seeds it
   `run --offline --studio --no-save --jobs 8` under `strace -e connect`, ingests the
   `tracer_only` contract fixture, walks the journeys (API, Studio UI, the panel) and
@@ -23,7 +30,7 @@
   `ARENA=<weft-arena checkout> RUN=<scratch dir> PLAYWRIGHT_DIR=<playwright install> scripts/ux-gate/gate8.sh`
   (`REPO` defaults to this script's own tree — the Studio, the demo and the principle
   gate's tests are built from it; the arena still compiles against its own `go.work`
-  sibling, which the header names): a fresh `weft studio` on `$RUN/studio.db`
+  sibling, which the header names): a fresh `weftbase dev` on `$RUN/studio.db`
   (127.0.0.1:7341, token `gate8tok`), the arena seeded `--offline` under `strace -e connect`,
   one `examples/studio-local` turn exported to it (its `otel.Slog()` lines: the logs path),
   then gate8.js — (a) the failed-run journey on rw.budget-guards, click by click; (b) the
@@ -37,7 +44,7 @@
 - `gate9.sh` + `gate9.js` — the phase 9 gate (the conversation, end to end). Run it with
   `ARENA=<weft-arena checkout> RUN=<scratch dir> PLAYWRIGHT_DIR=<playwright install> scripts/ux-gate/gate9.sh`
   (`REPO` defaults to this script's own tree; `PREV_TAG` to v0.17.0, the phase's range): a fresh
-  `weft studio` on `$RUN/studio.db` (127.0.0.1:7341, token `gate9tok`); the arena built against
+  `weftbase dev` on `$RUN/studio.db` (127.0.0.1:7341, token `gate9tok`); the arena built against
   `$REPO` through a scratch `$RUN/arena.work` (`go 1.26.0`, `use $ARENA $REPO $REPO/core` — an arena
   built against an older weft emits no thread records; the arena is never edited) and seeded
   `--offline` under `strace -e connect` (the known stale check `studio16.search-stopped-by` is
@@ -57,7 +64,7 @@
 - `gate10a.sh` + `gate10a.js` — the phase 10a gate (experiments you can trust, runtimes you can
   see). Run it with
   `ARENA=<weft-arena checkout> RUN=<scratch dir> PLAYWRIGHT_DIR=<playwright install> scripts/ux-gate/gate10a.sh`
-  (`REPO` defaults to this script's own tree): a fresh `weft studio` on `$RUN/studio.db`
+  (`REPO` defaults to this script's own tree): a fresh `weftbase dev` on `$RUN/studio.db`
   (127.0.0.1:7341, token `gate10atok`); the arena built against `$REPO` through `$RUN/arena.work`,
   seeded `--offline` (the failures in `KNOWN_STALE` are RECORDED with their arena notes), then
   `weft-arena serve --offline` (127.0.0.1:7789) with an rw.budget-guards batch and an offline thread
@@ -66,7 +73,7 @@
   build, a scripted Run and its compare, "edit this result" empty; only a Run reading
   `data-run-engine="scripted"` is ever pressed), (b) `/runtimes` told apart, gone, restored after a
   Studio restart over the same db, and the drawer's Runs in refusal, (c) `/agents`' stale marks and
-  stats strips, (d) the error-class facet → the matrix form's estimate (never run) — (e) `weft dev --
+  stats strips, (d) the error-class facet → the matrix form's estimate (never run) — (e) `weftbase dev --
   studio-local` (7397 / 8093) driven from the page's panel, its app killed, (f) `make mcp-check`,
   (g) `make studio-check` + the ledger (headroom ≥ 4,096 B under 106,496 B, dist ≤ 800 KiB), and
   h1–h7. Every process it starts runs under `strace -e connect` (h4). One line per clause in
@@ -76,8 +83,8 @@
   the onion, the CLI). Run it with
   `ARENA=<weft-arena checkout> RUN=<scratch dir> PLAYWRIGHT_DIR=<playwright install> scripts/ux-gate/gate10b.sh`
   (`REPO` defaults to this script's own tree; `IN_FLIGHT` names ledger items whose open rows are in flight):
-  a fresh `weft studio` on `$RUN/studio.db` (127.0.0.1:7351, token `gate10btok`) with every weft process in
-  a private discovery world (XDG_RUNTIME_DIR / XDG_CACHE_HOME under `$RUN`, a cwd with no ./.weft); the arena
+  a fresh `weftbase dev` on `$RUN/studio.db` (127.0.0.1:7351, token `gate10btok`) with every weft process in
+  a private discovery world (XDG_RUNTIME_DIR / XDG_CACHE_HOME under `$RUN`, a cwd with no ./.weftbase); the arena
   built against `$REPO` and seeded `--offline` (`KNOWN_STALE` failures RECORDED with their arena notes);
   `g10bdemo.go` (an ignore-tagged program built under `$RUN/demo`, never in the repo) stamps flow runs, calls
   an `mcp.Server("billing")` in-memory server (a tool error, a refusal, a transport failure), registers a
@@ -85,7 +92,7 @@
   fixtures through /v1/traces; then (a) the vocab audit and every sampled `<Term>` reached by Tab, the `?`
   Concepts tab, a fresh Studio's empty state and first-run card, (b) the panel by batch tag, flow, tag token
   and token wall, (c) the manifest's chain and the onion in the drawer and the panel's chips, (d) the
-  `mcp:billing` graph node, (e) bare `weft doctor`, a second `weft studio`, `weft open --with-token`, the
+  `mcp:billing` graph node, (e) bare `weftbase doctor`, a second `weftbase dev`, `weftbase open --with-token`, the
   wall's `<db>.token`, (f) derived runs, (g) `make studio-check` + the ledger (headroom ≥ 7,500 B, every
   panel.js commit since v0.19.0 with its row), (h) axe over the panel in both themes, (i) `make mcp-check`,
   j1–j7 and (k) the Coverage ledger. One line per clause in `$RUN/gate10b.txt`, ending `GATE 10b: PASSED` or

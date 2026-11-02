@@ -141,7 +141,7 @@ const call = (el: WeftDevtools) =>
   $(el, `.weft-call[data-key="${CALL.id}"]`) as HTMLElement
 
 /** A read-scoped panel token for the conversation (no "playground"). */
-const READ = `weft_pt.${btoa(JSON.stringify({ public_id: APP_PUB, pid: APP_PUB })).replace(/=+$/, "")}.sig`
+const READ = `wb_pt.${btoa(JSON.stringify({ public_id: APP_PUB, pid: APP_PUB })).replace(/=+$/, "")}.sig`
 
 const line = (el: WeftDevtools, kind = "read-only") =>
   $(el, `[data-weft-app-owned="${kind}"]`)?.textContent ?? ""

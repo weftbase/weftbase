@@ -17,7 +17,7 @@ import (
 // embedded Studio writes none): that line warns. With the playground
 // on and no runtime connected the runtimes line warns, and its
 // continuation lines name the variables this shell lacks (WEFT_ENV,
-// WEFT_STUDIO_URL).
+// WEFTBASE_URL).
 func ExampleRun() {
 	dir, _ := os.MkdirTemp("", "doctor")
 	defer func() { _ = os.RemoveAll(dir) }()

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
-import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 
+import { weftPath } from "../../scripts/weft-version"
 import { messageLine } from "@/lib/compaction"
 import type { Message } from "@/lib/api"
 import {
@@ -258,10 +258,7 @@ describe("attempt error types (UX-S2-15)", () => {
 
 describe("Repair's synthesised result (UX-S1-08)", () => {
   it("is core's constant, read from the Go source", () => {
-    const src = readFileSync(
-      resolve(process.cwd(), "../../core/repair.go"),
-      "utf8"
-    )
+    const src = readFileSync(weftPath("core/repair.go"), "utf8")
     expect(/const interruptedResult = "([^"]+)"/.exec(src)?.[1]).toBe(
       REPAIRED_RESULT
     )

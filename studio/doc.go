@@ -7,7 +7,7 @@
 // Setup A embeds the handler next to the app's own pipeline — the
 // five lines of WEFT-OTEL-DATA-ARCHITECTURE §10.1:
 //
-//	defer exporter.Install()() // local sink ./.weft/weft.db, content on, no network
+//	defer exporter.Install()() // local sink ./.weftbase/weftbase.db, content on, no network
 //	mux.Handle("/studio/", http.StripPrefix("/studio",
 //		studio.Handler(studio.DB(exporter.LocalDB())))) // same DB, same live hub [D4]
 //
@@ -20,9 +20,9 @@
 // Studio — so an app served on a real hostname lists its origin in
 // AllowOrigins or sets a Token.
 //
-// Setup B runs the binary (`weft studio`, cmd/weft): the UI, OTLP ingest, SQLite
+// Setup B runs the binary (`weftbase dev`, cmd/weftbase): the UI, OTLP ingest, SQLite
 // and a dev token on 127.0.0.1:7331 — any language's app points
-// WEFT_STUDIO_URL or OTEL_EXPORTER_OTLP_ENDPOINT at it.
+// WEFTBASE_URL or OTEL_EXPORTER_OTLP_ENDPOINT at it.
 //
 // Setup C hosts it behind a Token: the panel's scoped tokens are
 // HMAC-signed public-id handles minted through POST /api/panel-tokens.

@@ -1027,9 +1027,9 @@ func (s stubDB) Events(context.Context, string, int64, int) (obsdb.EventPage, er
 	return obsdb.EventPage{}, s.err
 }
 
-// TestOpenOption pins S4.1's Open and the $WEFT_DB default: Open(path)
+// TestOpenOption pins S4.1's Open and the $WEFTBASE_DB default: Open(path)
 // opens (creating) the sqlite file, and Handler without DB or Open
-// opens $WEFT_DB.
+// opens $WEFTBASE_DB.
 func TestOpenOption(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sub", "dev.db") // Open creates the parent
@@ -1043,10 +1043,10 @@ func TestOpenOption(t *testing.T) {
 	}
 
 	envDB := filepath.Join(dir, "env.db")
-	t.Setenv("WEFT_DB", envDB)
+	t.Setenv("WEFTBASE_DB", envDB)
 	_, _, body = get(t, Handler(), "/studio/api/meta")
 	if !strings.Contains(body, `"db":{"kind":"sqlite"`) {
-		t.Errorf("WEFT_DB default: %s", body)
+		t.Errorf("WEFTBASE_DB default: %s", body)
 	}
 	if _, err := os.Stat(envDB); err != nil {
 		t.Errorf("default did not open %s: %v", envDB, err)

@@ -328,7 +328,7 @@ func TestLiveGrantSetupA(t *testing.T) {
 
 // grantSigRe and grantExpRe normalize the grant's two values.
 var (
-	grantSigRe = regexp.MustCompile(`"sig": "weft_lg\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"`)
+	grantSigRe = regexp.MustCompile(`"sig": "wb_lg\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"`)
 	grantExpRe = regexp.MustCompile(`"exp": "[^"]*"`)
 )
 

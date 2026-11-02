@@ -7,7 +7,7 @@
 # thread lab's), the journeys (gate10a.js: (a) the experiment journey on
 # rw.budget-guards in Studio and the panel, (b) /runtimes with a Studio
 # restart over the same db, (c) /agents, (d) the error-class facet → the
-# matrix form), (e) `weft dev -- studio-local` driven from the page's
+# matrix form), (e) `weftbase dev -- studio-local` driven from the page's
 # panel, (f) `make mcp-check`, (g) `make studio-check` and the panel
 # ledger, (h1–h7) the principle gate. Every process the gate starts runs
 # under `strace -e connect` when strace is there (h4). One line per
@@ -102,7 +102,7 @@ for a in "$ADDR" "$SERVE_ADDR" "$DEV_ADDR" "$APP_ADDR"; do
 done
 
 # ---- 1. builds: weft and studio-local from $REPO, the arena against it ----
-( cd "$REPO" && go build -o "$RUN/weft" ./cmd/weft && go build -o "$RUN/studio-local" ./examples/studio-local ) > "$RUN/build.log" 2>&1 \
+( cd "$REPO" && go build -o "$RUN/weft" ./cmd/weftbase && go build -o "$RUN/studio-local" ./examples/studio-local ) > "$RUN/build.log" 2>&1 \
   || { say "weft / studio-local build failed: $(tail -5 "$RUN/build.log")"; exit 2; }
 printf 'go 1.26.0\n\nuse (\n\t%s\n\t%s\n\t%s/core\n)\n' "$ARENA" "$REPO" "$REPO" > "$RUN/arena.work"
 ( cd "$ARENA" && GOWORK="$RUN/arena.work" go build -o "$RUN/weft-arena" ./cmd/weft-arena ) > "$RUN/arena-build.log" 2>&1 \
@@ -118,7 +118,7 @@ start_studio "$RUN/studio.strace" "$RUN/studio.log"
 say "studio $STUDIO pid $SPID: $(api /api/meta | jq -c '{weft_version, auth_required, pricing: .pricing.source}')"
 
 # ---- 3. the arena's offline seed ------------------------------------------
-( cd "$ARENA" && WEFT_STUDIO_URL="$STUDIO" WEFT_STUDIO_TOKEN="$TOKEN" \
+( cd "$ARENA" && WEFTBASE_URL="$STUDIO" WEFTBASE_TOKEN="$TOKEN" \
   $([ $STRACE = 1 ] && echo strace -f -qq -e trace=connect -o "$RUN/seed.strace") \
   "$RUN/weft-arena" run --offline --studio --no-save --jobs 8 ) > "$RUN/seed.log" 2>&1
 SEEDRC=$?
@@ -131,7 +131,7 @@ unknown=""; for f in $failed; do [[ " $KNOWN_STALE " == *" $f "* ]] || unknown="
 note() { case "$1" in
   rw.records-forensics) echo "expects the store at schema 22 (\"migrated to schema 22\"); weft 0.19 adds migrations 0023 span_stats, 0024 pass_predicate, 0025 spans.attempt (U24.1) — the check should read the current schema (or ≥ 22)";;
   runtimelab.transcript-edits) echo "expects \"transcript edits need engine live\"; U17 rewrote the scripted refusal: \"your edit changes step N's request, and scripted holds only the recorded answer to the original — run on live, or drop the edit\"";;
-  rw.ops-console) echo "runs \`weft export --wefttest --test …\` expecting the fixtures-only tree; U19 (Breaking) made --wefttest write the save-as-test tree — \`--test goes with --fixtures-only\` (exit 2): add --fixtures-only or follow the new tree (TestReplay_<run>)";;
+  rw.ops-console) echo "runs \`weftbase export --wefttest --test …\` expecting the fixtures-only tree; U19 (Breaking) made --wefttest write the save-as-test tree — \`--test goes with --fixtures-only\` (exit 2): add --fixtures-only or follow the new tree (TestReplay_<run>)";;
   runtime18.sources) echo "expects the 0.18 scripted-miss and refusal words (\"no recorded turn for this request (scripted engine\", \"scripted engine with a model override would silently replay…\", \"…a source run is required\"); U18.1/U18.2 rewrote them (\"no recorded turn for step N (scripted engine, key …): … [component]\", \"scripted cannot try another model: …\", \"scripted replays a recorded run's answers: pick a source run, or run on live\")";;
   obs18.env-destinations) echo "expects \"otel: Blocking ignored: WEFT_ENV is not dev\" under otel.NoEnv(); I2b names the real cause there: \"otel: Blocking ignored: otel.NoEnv reads no WEFT_ENV\" (the old text stays for the env case)";;
   *) echo "not a known stale check: look at $RUN/seed.log";; esac; }
@@ -143,7 +143,7 @@ clause seed "$sst" "the arena's offline seed: every failure a known stale arena 
 
 # ---- 4. weft-arena serve: its three runtime links ----------------------------
 cd "$ARENA" || exit 2
-bg "$RUN/serve.strace" "$RUN/serve.log" env WEFT_STUDIO_URL="$STUDIO" WEFT_STUDIO_TOKEN="$TOKEN" "$RUN/weft-arena" serve --offline --addr "$SERVE_ADDR"
+bg "$RUN/serve.strace" "$RUN/serve.log" env WEFTBASE_URL="$STUDIO" WEFTBASE_TOKEN="$TOKEN" "$RUN/weft-arena" serve --offline --addr "$SERVE_ADDR"
 APID=$BGPID; AWRAP=$BGWRAP
 cd - >/dev/null || exit 2
 waitfor 60 rt_has writer || say "serve: no fleet runtime registered ($(tail -3 "$RUN/serve.log"))"
@@ -174,7 +174,7 @@ start_studio "$RUN/studio2.strace" "$RUN/studio2.log"
 say "studio restarted over $RUN/studio.db: pid $SPID — $(grep -oE 'restored from the store.*' "$RUN/studio2.log" | head -1 | cut -c1-120)"
 ui restart
 
-# ---- 7. (e) weft dev -- studio-local -----------------------------------------
+# ---- 7. (e) weftbase dev -- studio-local -----------------------------------------
 cd "$RUN/devapp" || exit 2
 bg "$RUN/dev.strace" "$RUN/dev.log" "$RUN/weft" dev --addr "$DEV_ADDR" --db "sqlite://$RUN/dev.db" --token "$DEV_TOKEN" --open=false -- "$RUN/studio-local" -addr "$APP_ADDR"
 DPID=$BGPID; DWRAP=$BGWRAP
@@ -188,13 +188,13 @@ if [ -n "$APP_PID" ]; then
 else
   devmode=fallback
 fi
-say "dev    weft dev after the kill: $(grep -E 'exited|restarts' "$RUN/dev.log" | tail -1)"
+say "dev    weftbase dev after the kill: $(grep -E 'exited|restarts' "$RUN/dev.log" | tail -1)"
 stop "$DPID" "$DWRAP"
 dt=$(cd "$REPO" && go test -count=1 -run '^(TestWeftDevApprovesFromThePagePanel)$' ./examples/studio-local 2>&1 | tail -1)
 dt2=$(cd "$REPO" && go test -count=1 -run '^(TestStoppedAppTurnReadsDisconnected)$' ./runtime 2>&1 | tail -1)
 if [ "$devmode" = fallback ]; then
   st=$(echo "$dt" | grep -q '^ok' && echo PASS || echo FAIL)
-  clause e "$st" "weft dev hosts studio-local (FALLBACK: the real command did not come up — the test instead)" "$(tail -5 "$RUN/dev.log" | tr '\n' ' ')" "go test -run TestWeftDevApprovesFromThePagePanel ./examples/studio-local → $dt"
+  clause e "$st" "weftbase dev hosts studio-local (FALLBACK: the real command did not come up — the test instead)" "$(tail -5 "$RUN/dev.log" | tr '\n' ' ')" "go test -run TestWeftDevApprovesFromThePagePanel ./examples/studio-local → $dt"
 else
   say "      supporting: go test -run TestWeftDevApprovesFromThePagePanel ./examples/studio-local → $dt · go test -run TestStoppedAppTurnReadsDisconnected ./runtime → $dt2"
 fi
@@ -267,7 +267,7 @@ if [ -n "$traces" ]; then
   outside=$(echo "$dests" | awk 'NF{print $2}' | grep -vE '^(127\.|::1:|::ffff:127\.)' | wc -l)
   net="strace -f -e connect over $(echo $traces | xargs -n1 basename | tr '\n' ' '): AF_INET/6 destinations $inet — $outside outside loopback"
 else outside=0; net="strace not available: the provider-host grep alone"; fi
-clause h4 "$([ "$outside" = 0 ] && ! echo "$hl" | grep -qE ':[1-9]' && echo PASS || echo FAIL)" "no outbound network call: the gate's Studio (both starts), the seed, serve and weft dev + studio-local make no request off 127.0.0.1" \
+clause h4 "$([ "$outside" = 0 ] && ! echo "$hl" | grep -qE ':[1-9]' && echo PASS || echo FAIL)" "no outbound network call: the gate's Studio (both starts), the seed, serve and weftbase dev + studio-local make no request off 127.0.0.1" \
   "$net" "provider hosts named in the logs: $hl" "engines: $(grep -ohE 'engine=[a-z]+' "$RUN/seed.log" "$RUN/serve.log" | sort -u | tr '\n' ' ')"
 
 M="$REPO/studio/auth_matrix_test.go"
@@ -291,7 +291,7 @@ rl=$(mj '.facts.runtime_link // null | tostring' dev)
 am=$(cd "$REPO" && go test -count=1 -run '^(TestAuthMatrix|TestAuthMatrixCompletenessCheck|TestMetaRuntimeLink|TestRunCommandsRoute|TestStatsGoldens|TestRuntimesToldApartRestoredAndForgotten)$' ./studio 2>&1 | tail -1)
 echo "$am" | grep -q '^ok' || h5bad="$h5bad tests"
 clause h5 "$([ -z "$h5bad" ] && echo PASS || echo FAIL)" "every new route in the auth matrix and /api/meta (runtime_forget, run_commands, stats, target_check, runtime_link)" \
-  "${h5l[@]}" "runtime_link live: studio-local's embedded /studio/api/meta under weft dev → $rl" \
+  "${h5l[@]}" "runtime_link live: studio-local's embedded /studio/api/meta under weftbase dev → $rl" \
   "go test -run '^(TestAuthMatrix|TestAuthMatrixCompletenessCheck|TestMetaRuntimeLink|TestRunCommandsRoute|TestStatsGoldens|TestRuntimesToldApartRestoredAndForgotten)\$' ./studio → $am" ${h5bad:+"missing:$h5bad"}
 
 C="$REPO/docs/record-contract.md"

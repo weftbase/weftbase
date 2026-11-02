@@ -42,7 +42,7 @@ const runs = golden<RunsPage>("runs")
 const rOK = runs.runs.find((r) => r.id === "r_ok")!
 const RUN = rOK.id
 const DEV = "dev-token-123"
-const READ = `weft_pt.${btoa(JSON.stringify({ pid: "pub_1", scope: "read" })).replace(/=+$/, "")}.sig`
+const READ = `wb_pt.${btoa(JSON.stringify({ pid: "pub_1", scope: "read" })).replace(/=+$/, "")}.sig`
 const baseMeta = golden<Record<string, unknown>>("meta")
 
 let saved: string[]
@@ -135,7 +135,7 @@ describe("export on the run page", () => {
     }
   })
 
-  it("copy as curl copies the export as a command naming $WEFT_STUDIO_TOKEN, never the token (U30.2, UX-A-15)", async () => {
+  it("copy as curl copies the export as a command naming $WEFTBASE_TOKEN, never the token (U30.2, UX-A-15)", async () => {
     setStudioToken(DEV)
     serve({ auth_required: true }).requireToken(DEV).install()
     const copied: string[] = []
@@ -160,7 +160,7 @@ describe("export on the run page", () => {
     ])
     fireEvent.click(curl[2])
     await waitFor(() => expect(copied).toHaveLength(1))
-    expect(copied[0]).toContain("$WEFT_STUDIO_TOKEN")
+    expect(copied[0]).toContain("$WEFTBASE_TOKEN")
     expect(copied[0]).not.toContain(DEV)
     expect(copied[0]).toContain(`/api/runs/${RUN}/export?format=otlp'`)
     // Nothing was fetched: a copy is no download.

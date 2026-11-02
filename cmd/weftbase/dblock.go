@@ -12,11 +12,11 @@ import (
 	"github.com/weftbase/weftbase/internal/discovery"
 )
 
-// One Studio per database file (B7-fix, UX-S5a-13): `weft studio` and
-// `weft dev` take <db>.lock (internal/dblock: flock / LockFileEx,
+// One Studio per database file (B7-fix, UX-S5a-13): `weftbase dev` and
+// `weftbase dev` take <db>.lock (internal/dblock: flock / LockFileEx,
 // released by the kernel when the process ends, however it ends)
 // before the port policy and hold it while they serve. A start that
-// cannot take it is refused — `weft dev` reuses the holder instead.
+// cannot take it is refused — `weftbase dev` reuses the holder instead.
 // A SQLite file only: ":memory:" has no file, and a ClickHouse
 // database is a shared server by design (out of scope).
 
@@ -60,10 +60,10 @@ var errHeld = errors.New("held")
 
 // dbHolder is the Studio holding dbPath's lock, as far as anything
 // trusted says: the lock file's {url, pid} under dblock.ReadHolder's
-// rules (0600 and this user's, a loopback IP url, a live pid — weft dev
+// rules (0600 and this user's, a loopback IP url, a live pid — weftbase dev
 // hands it the database's token), else a trusted discovery file naming
 // that database (loopback, fresh, a live pid). ok false when neither
-// does: a refusal then names nobody, and weft dev reuses nothing.
+// does: a refusal then names nobody, and weftbase dev reuses nothing.
 func dbHolder(dbPath string) (addr string, pid int, ok bool) {
 	if h, ok := dblock.ReadHolder(lockPath(dbPath)); ok {
 		if u, err := url.Parse(h.URL); err == nil && u.Host != "" {
@@ -71,7 +71,7 @@ func dbHolder(dbPath string) (addr string, pid int, ok bool) {
 		}
 	}
 	info, _, found := discovery.Lookup(func(k string) string {
-		if k == "WEFT_STUDIO_URL" {
+		if k == "WEFTBASE_URL" {
 			return ""
 		}
 		return os.Getenv(k)
@@ -100,6 +100,6 @@ func alreadyRunning(addr string, pid int, dbPath string) error {
 	if pid > 0 {
 		p = fmt.Sprintf("pid %d", pid)
 	}
-	return fmt.Errorf("studio already running at http://%s (%s) on %s: one Studio per database file — sign in to it with `weft open --with-token`, or stop it first",
+	return fmt.Errorf("studio already running at http://%s (%s) on %s: one Studio per database file — sign in to it with `weftbase open --with-token`, or stop it first",
 		loopbackAddr(addr), p, dbPath)
 }

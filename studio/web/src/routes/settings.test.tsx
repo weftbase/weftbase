@@ -63,7 +63,7 @@ const playgroundMeta = (): MetaDoc => {
 
 /** A read-scoped panel token (claims readable; Studio verifies). */
 const panelToken = (scope: "read" | "playground") =>
-  `weft_pt.${btoa(
+  `wb_pt.${btoa(
     JSON.stringify({
       public_id: "pub_orders",
       scope,
@@ -131,7 +131,7 @@ describe("the settings page renders every section from the goldens", () => {
   it("meta + settings-pricing + runtimes: each section, in order, with its data", async () => {
     studio.on("GET meta", playgroundMeta())
     await openSettings()
-    expect(document.title).toBe("settings · weft studio")
+    expect(document.title).toBe("settings · weftbase")
     const ids = [...document.querySelectorAll("[data-section]")].map((s) =>
       s.getAttribute("data-section")
     )
@@ -158,7 +158,7 @@ describe("the settings page renders every section from the goldens", () => {
       section("retention").querySelector("[data-retention]")!.textContent
     ).toContain("off")
     expect(section("retention").textContent).toContain("WEFT_RETAIN")
-    expect(section("retention").textContent).toContain("weft vacuum")
+    expect(section("retention").textContent).toContain("weftbase vacuum")
     // Pricing: the served table.
     const table = await within(section("pricing")).findByRole("table")
     expect(
@@ -475,25 +475,25 @@ describe("the token", () => {
     )
   })
 
-  // UX-S4-15: weft mcp is discoverable from Studio — the command with
+  // UX-S4-15: weftbase mcp is discoverable from Studio — the command with
   // this Studio's URL (the page's base), the token by environment when
   // the Studio is walled, the recipe named by its repository path.
-  it("names weft mcp with this Studio's URL and the recipe's path", async () => {
+  it("names weftbase mcp with this Studio's URL and the recipe's path", async () => {
     studio.on("GET meta", { ...metaG(), auth_required: false })
     await openSettings()
     const line = section("token").querySelector("[data-mcp]")!
     const url = new URL(".", document.baseURI).toString().replace(/\/+$/, "")
-    expect(line.textContent).toContain(`weft mcp --url ${url}`)
-    expect(line.textContent).not.toContain("WEFT_STUDIO_TOKEN")
+    expect(line.textContent).toContain(`weftbase mcp --url ${url}`)
+    expect(line.textContent).not.toContain("WEFTBASE_TOKEN")
     expect(line.textContent).toContain("docs/mcp-recipe.md")
     expect(line.querySelector("a")).toBeNull()
   })
 
-  it("a walled Studio's weft mcp line takes the token by environment", async () => {
+  it("a walled Studio's weftbase mcp line takes the token by environment", async () => {
     studio.on("GET meta", { ...metaG(), auth_required: true })
     await openSettings()
     expect(section("token").querySelector("[data-mcp]")!.textContent).toContain(
-      "WEFT_STUDIO_TOKEN=<token> weft mcp --url "
+      "WEFTBASE_TOKEN=<token> weftbase mcp --url "
     )
   })
 

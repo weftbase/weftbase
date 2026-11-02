@@ -1,4 +1,4 @@
-# weft studio — the Inspector
+# weftbase dev — the Inspector
 
 The UI, the JSON API, the live stream and the OTLP receiver over one
 [obsdb](../obsdb) database: the runs list, the run page (steps, tool
@@ -15,7 +15,7 @@ fully offline.
 with a thread session whose turns stream in live):
 
 ```go
-defer exporter.Install()() // local sink ./.weft/weft.db, content on, no network
+defer exporter.Install()() // local sink ./.weftbase/weftbase.db, content on, no network
 mux.Handle("/studio/", http.StripPrefix("/studio",
     studio.Handler(studio.DB(exporter.LocalDB())))) // same DB, same live hub
 ```
@@ -23,7 +23,7 @@ mux.Handle("/studio/", http.StripPrefix("/studio",
 Passing the pipeline's handle is what makes it live: writes publish to
 the handle's hub and `/api/live` follows, sub-100 ms, no network.
 `studio.Open(path)` opens an obsdb sqlite file; with neither, New
-opens `$WEFT_DB` or `./.weft/weft.db` (history only — a second handle
+opens `$WEFTBASE_DB` or `./.weftbase/weftbase.db` (history only — a second handle
 on the file, no live lane).
 
 Without a `Token`, setup A's API (the whole `/api` tree: reads, the
@@ -62,7 +62,7 @@ link (`weft/runtime`: Go only today; non-Go clients are backlog I2):
 
 ```sh
 go install github.com/weftbase/weftbase/cmd/weftbase@latest
-weft studio                            # UI + OTLP + SQLite + playground + dev token on 127.0.0.1:7331
+weftbase dev                            # UI + OTLP + SQLite + playground + dev token on 127.0.0.1:7331
 ./my-go-app                            # exporter.Install() finds it through the discovery file
 OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:7331 OTEL_METRICS_EXPORTER=none OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true opentelemetry-instrument python app.py
 ```
@@ -81,11 +81,11 @@ session document's `turn`, 1..n; the run's own row keeps 0; UX-H-35).
 
 The dev token is stable per database — `<db>.token` beside the SQLite
 file, 0600, never printed (`--rotate-token` renews it;
-`WEFT_STUDIO_TOKEN` or `--token` overrides it); a Go app with
+`WEFTBASE_TOKEN` or `--token` overrides it); a Go app with
 `exporter.Install()` / `runtime.Install()` finds the running Studio through
-the discovery file `studio.json` (`./.weft`, `$XDG_RUNTIME_DIR/weft`,
-the user cache directory; `WEFT_STUDIO_URL` always wins,
-`WEFT_DISCOVERY=off` ignores it, an explicit `exporter.Local` or
+the discovery file `studio.json` (`./.weftbase`, `$XDG_RUNTIME_DIR/weftbase`,
+the user cache directory; `WEFTBASE_URL` always wins,
+`WEFTBASE_DISCOVERY=off` ignores it, an explicit `exporter.Local` or
 `exporter.Studio` never reads it — the root README's "When weft/exporter
 reads the file"); ingest is open on loopback;
 `127.0.0.1:7331` is the one default port: started again on the same
@@ -94,19 +94,19 @@ held by `<db>.lock` beside a SQLite file — an exclusive OS lock (flock; LockFi
 directories whose discovery files differ, cannot both serve it; the
 refusal names the holder (`studio already running at
 http://127.0.0.1:7347 (pid n) on …/weft.db`, from the lock file or the
-discovery file, else `another Studio holds <db>`), exit 1; `weft dev`
-reuses it instead (`weft dev` takes the lock first too). The lock
+discovery file, else `another Studio holds <db>`), exit 1; `weftbase dev`
+reuses it instead (`weftbase dev` takes the lock first too). The lock
 stands for the file a symlinked path names; hard links and two
 spellings on a case-insensitive filesystem are not detected. The lock
 file names its holder only while it is yours (0600, your uid; Windows
 skips the owner check), its url a loopback IP and its pid alive — a
-crashed Studio's words name nobody, and `weft dev` hands the database's
+crashed Studio's words name nobody, and `weftbase dev` hands the database's
 token to no other host. A ClickHouse database is a shared server and
 takes no lock. The port probe still asks `/api/meta` (`db.path`, `pid`, read
 with the stable token — sent only to an address a trusted discovery
 file names), the discovery file's Studio first; anything else on the port
 moves it to the next free one in 7331–7340 with one line saying so.
-`--addr` (or `WEFT_STUDIO_ADDR`) pins: a busy pinned address is an
+`--addr` (or `WEFTBASE_ADDR`) pins: a busy pinned address is an
 error, never a fallback; `--db sqlite://path` picks the
 file, `--db clickhouse://user:pass@host:9000/db` the hosted backend
 (`obsdb/clickhouse`, the one place the driver is imported). The
@@ -116,38 +116,38 @@ is `--manifest` (`WEFT_MANIFEST`), else the nearest `weft.json` from
 the working directory upward — one line says which file, or that none
 was found. `--open` (default on when stdout is a terminal) opens the
 UI with the token in the URL fragment; without it the banner ends
-`studio: sign in with weft open --with-token`.
+`studio: sign in with weftbase open --with-token`.
 
 The same binary is the API over a terminal, each subcommand one
 route, one resolver picking the Studio for all of them: `--url`, else
-`WEFT_STUDIO_URL`, else the discovery file (the trust rules apps use;
-`WEFT_DISCOVERY=off` skips it), else `127.0.0.1:7331` — one stderr line
+`WEFTBASE_URL`, else the discovery file (the trust rules apps use;
+`WEFTBASE_DISCOVERY=off` skips it), else `127.0.0.1:7331` — one stderr line
 `weft: Studio <url> (discovery file …)` when you named none — and the
-token `--token`, else `WEFT_STUDIO_TOKEN`, else the file's when it
-names that Studio: `weft runs [--agent] [--since] [--failed] [--status] [--limit]
+token `--token`, else `WEFTBASE_TOKEN`, else the file's when it
+names that Studio: `weftbase runs [--agent] [--since] [--failed] [--status] [--limit]
 [--json]` (`GET /api/runs`; the error's kind and why, duration, cost
 and public id in the table; a limit that hid runs says so on stderr),
-`weft open [id] [--open] [--with-token]` (a run, public, session or
+`weftbase open [id] [--open] [--with-token]` (a run, public, session or
 trace id — `GET /api/runs/{id}`, `/api/public/{id}`,
 `/api/sessions/{id}`, `/api/traces/{id}` in turn — its bare page;
 no id, the Studio root; the token goes only to the browser, or to
-stdout on `--with-token`), `weft export <run id>
-[--format json|jsonl|otlp]` and `weft export <run id> --wefttest
+stdout on `--with-token`), `weftbase export <run id>
+[--format json|jsonl|otlp]` and `weftbase export <run id> --wefttest
 ./pkg [--fixtures-only [--test TestName]] [--force]` (`GET
 /api/runs/{id}/export`: the save-as-test zip's tree written into the
 package directory byte for byte — `<agent>_replay_test.go` beside
 `testdata/TestReplay_<run>/`; `--fixtures-only` the fixtures alone
 where `wefttest.Replay(t, "testdata")` reads them; `--force` replaces
-what is there), `weft doctor`
+what is there), `weftbase doctor`
 (`GET /api/meta`; with the discovery file, the OTLP door and the
-newest run's weft version among its lines), and `weft mcp` — the same read routes as a stdio MCP
+newest run's weft version among its lines), and `weftbase mcp` — the same read routes as a stdio MCP
 server for a coding agent, GET only (tools `runs`, `search`, `run`,
 `step`, `request`, `events`, `tools`, `diff`, `export`, `sessions`,
 `session`, `meta`, and `explain_failure`, a composition of `run` +
 `step` + the transcript; outputs the route's JSON, cut at `max_bytes`
 with a note; with no `--url` it reads the discovery file). `claude mcp
-add weft -- weft mcp`; Cursor's `.cursor/mcp.json`:
-`{"mcpServers":{"weft":{"command":"weft","args":["mcp"]}}}` — the
+add weft -- weftbase mcp`; Cursor's `.cursor/mcp.json`:
+`{"mcpServers":{"weft":{"command":"weftbase","args":["mcp"]}}}` — the
 discovery file finds the running Studio; `--url http://127.0.0.1:7331`
 names another. The recipe, with worked examples and troubleshooting:
 [docs/mcp-recipe.md](../docs/mcp-recipe.md).
@@ -231,13 +231,13 @@ once the answer takes over a second). Without the
 capability, under a read-scoped panel token (its Studio page is already a
 read view) or no token, the plain link opens; under the dev token (setup
 B, UX-D-18) the hand-off answers with that same token in the fragment, as
-`weft open --with-token` opens it, so the tab lands signed in; a refusal opens
+`weftbase open --with-token` opens it, so the tab lands signed in; a refusal opens
 the plain link too (a 403 or 404 silently, anything else with the note
 line). The host API's `studioLink()` stays the plain URL.
 
 **Retention.** Studio keeps everything until told otherwise.
 `studio.Retain(720*time.Hour)` — `--retain 720h` or `WEFT_RETAIN=720h`
-on `weft studio` and `weft dev` — starts a sweeper that deletes, as
+on `weftbase dev` — starts a sweeper that deletes, as
 `DELETE /api/runs/{id}` does, every run that is not running
 (succeeded, failed, interrupted) last seen longer ago than the
 retention, with its children that are not running: once at start, then
@@ -245,7 +245,7 @@ every `min(retention/10, 1h)`, at least a minute apart. Interrupted
 counts as not running and is swept: a run silent for 30 s reads
 interrupted, which is why the retention must be at least `1h` (`New`
 panics below it; `--retain` / `WEFT_RETAIN` under `1h` is a usage error,
-exit 2, on `weft studio`, `weft dev` and `weft vacuum`) — a shorter one
+exit 2, on `weftbase dev` and `weftbase vacuum`) — a shorter one
 would sweep a live run paused at a breakpoint. A running child of a
 swept parent stays and is listed only under `all=1` / `parent=*` until
 it is swept itself. Each sweep logs one Debug line with its count; a
@@ -255,13 +255,13 @@ runs until `Server.Close`, so a Studio with `Retain` is built with
 it, and it stops (one Debug line) only once the DB is closed. The sweep
 runs in batches of 500 root runs (`obsdb.SweepBatch`), one writer
 transaction each on SQLite, so ingest proceeds between them. `/api/meta`'s
-`retention` reports it. `weft vacuum [--db sqlite://path|clickhouse://…]
+`retention` reports it. `weftbase vacuum [--db sqlite://path|clickhouse://…]
 [--retain d]` is the one-shot form — one sweep when a retention is
 given, then VACUUM (SQLite: the file shrinks; it waits on the busy
 timeout while another process writes) or `OPTIMIZE TABLE … FINAL` on
 the tables deletions mutate (ClickHouse: every part merged — heavy on a
-large database) — and `make vacuum` runs it on `$WEFT_DB`, else
-`./.weft/weft.db`. All of it touches Studio's tables only. On
+large database) — and `make vacuum` runs it on `$WEFTBASE_DB`, else
+`./.weftbase/weftbase.db`. All of it touches Studio's tables only. On
 ClickHouse (25.6 or later, the schema's floor: obsdb/clickhouse/README.md)
 deletion is a lightweight `DELETE FROM … WHERE` and the tables' TTLs
 (`clickhouse.TTL`) stay as they are: retention is additive.
@@ -296,7 +296,7 @@ price has a long-context tier (Claude Haiku 5.5, Gemini 2.5 Pro) and any
 the author was unsure of are left out — they read unpriced, never a
 guess. `studio.Pricing(table)` replaces it, as does
 `WEFT_PRICING=<path>` (read by `New` when no `Pricing` is given) or
-`--pricing <path>` on `weft studio` and `weft dev` (the flag wins);
+`--pricing <path>` on `weftbase dev` (the flag wins);
 `studio.LoadPricing` reads such a file and the override replaces the
 default whole — start from `pricing.json`, the template. A file that
 does not load (does not parse, an unknown field, a missing `model_glob` or `input`, a
@@ -403,8 +403,8 @@ rest of this section is the reference.
 - *The Go app serves Studio* (setup A, `studio.Handler` mounted at
   `/studio/`): `<script type="module" src="/studio/panel.js" data-weft
   data-scope="pub_…"></script>` — same origin, no token.
-- *A separate `weft studio` / `weft dev`* (setup B): the tag names the
-  Studio and carries a token — in development the dev token (`weft open
+- *A separate `weftbase dev`* (setup B): the tag names the
+  Studio and carries a token — in development the dev token (`weftbase open
   --with-token` prints it in a link), on a page you ship a panel token
   your backend mints (`POST /api/panel-tokens`): `<script type="module"
   src="http://127.0.0.1:7341/panel.js" data-weft
@@ -452,8 +452,8 @@ release). A bundled app with no `<script>` tag uses the
 tarball with `make devtools-npm` and `npm pack` in `studio/web/npm`
 ([`studio/web/npm/README.md`](web/npm/README.md)).
 
-Against a Studio that wants a token — setup B, `weft studio`, whose
-token is in `<db>.token` (`weft open --with-token` prints a signed-in
+Against a Studio that wants a token — setup B, `weftbase dev`, whose
+token is in `<db>.token` (`weftbase open --with-token` prints a signed-in
 link) — the tag carries it (on a page you ship, a panel
 token your backend mints instead):
 
@@ -743,7 +743,7 @@ Studio page) and the step's compaction marker. The step shown is the one
 ⤢ carries and `J`/`K` move from (over the steps the record names too).
 The manifest is read per endpoint and token, asked again 30 s after a
 failure and once more when it does not list the run's manifest hash (a
-redeploy under `weft dev`). A derived prompt or catalog record (its
+redeploy under `weftbase dev`). A derived prompt or catalog record (its
 body did not parse) is badged `derived` and never diffed over, here and
 on the run page. A Studio without the `requests` capability is
 `not_recorded`, cause `not_served` (obsdb's table; `/api/meta`'s
@@ -951,10 +951,10 @@ it may be a wrong id (UX-D-37).
 | # | Rung | When it is on | The explicit alternative |
 |---|---|---|---|
 | 1 | explicit: `data-scope` (element, `weft:scope` meta, script tag), `window.__WEFT__ = { scope }` or `{ publicId }`, `scope()` / `mount({scope})` from `@weftgo/devtools`, the deprecated `data-public-id` | always; it wins over every detected scope | — |
-| 2 | response headers: the `Weft-Scope` header of the page's own same-origin `fetch` responses (the scope header below) | by default only with the page and the endpoint on loopback (`localhost`, `*.localhost`, `127.0.0.0/8`, `[::1]`) and no token or a dev/server token, and only once Studio has answered; anywhere with `data-detect="headers"` (or `mount({detect: "headers"})`); never under a panel token (`weft_pt.`) unless asked | `data-scope` |
+| 2 | response headers: the `Weft-Scope` header of the page's own same-origin `fetch` responses (the scope header below) | by default only with the page and the endpoint on loopback (`localhost`, `*.localhost`, `127.0.0.0/8`, `[::1]`) and no token or a dev/server token, and only once Studio has answered; anywhere with `data-detect="headers"` (or `mount({detect: "headers"})`); never under a panel token (`wb_pt.`) unless asked | `data-scope` |
 | 3 | the DOM marker: `data-weft-scope="pub_…;session=…;flow=…;run=…"` on any element of the page — the framework helpers (`useWeftDevtools` for React and Vue, the Svelte `weftDevtools` action) set it on the element they are given | by default everywhere except a page off loopback under a read-scoped panel token (a playground-scoped panel token, the dev token, no token, or any token on loopback keep it on); anywhere with `data-detect="markers"` (or `"headers,markers"`, `mount({detect: "markers"})`) | `data-scope` |
 | 4 | the page URL — the zero-code rung: `?weft_scope=…` (read first), else `#weft_scope=…` — the same string form, URL-decoded (`#weft_scope=pub_x%3Bflow%3Df_1`, `?weft_scope=tag.arena.batch%3Db1`); a value naming neither a public id nor a tag, agent or flow is ignored | always, every setup and token, `data-detect="off"` included; below rung 1, above rungs 2 and 3; re-read on `hashchange` and `popstate` | `data-scope` |
-| 4b | a panel token's claims (UX-D-09, I4): a `weft_pt.` token's `public_id` claim and its `tags` (each a `tag.<k>=<v>`), read as a hint (Studio still enforces the token) — the conversation or the batch it can read anyway | when 1–4 name nothing and the token is a panel token | `data-scope` |
+| 4b | a panel token's claims (UX-D-09, I4): a `wb_pt.` token's `public_id` claim and its `tags` (each a `tag.<k>=<v>`), read as a hint (Studio still enforces the token) — the conversation or the batch it can read anyway | when 1–4 name nothing and the token is a panel token | `data-scope` |
 | 5 | the fallback: no rung names a scope — the header reads "no conversation detected on this page · how to scope" and lists the newest runs, each with its agent, none selected and no summed cost | when 1–4 name nothing | any line under "how to scope": `add ?weft_scope=pub_… to this page's URL (no code)`, `data-scope="pub_…" on the panel's <script> tag (or <weft-devtools>)`, `scope("pub_…") from @weftgo/devtools`, `data-weft-scope="pub_…" on the chat's element`, `scope.Header(h, …) on the app's handler (Go, package weft/scope)` — and an "all rungs ⤢" link to this table; a batch of runs is named by its tags (above) |
 
 Rung 3 trusts the page's DOM: a `data-weft-scope` attribute anywhere
@@ -1049,7 +1049,7 @@ not offered. One known conversation shows no switcher.
 
 | `data-detect` | rung 2 (headers) | rung 3 (markers) |
 |---|---|---|
-| unset | page and endpoint on loopback, any token but a panel token (`weft_pt.`) | on, except a read-scoped panel token off loopback |
+| unset | page and endpoint on loopback, any token but a panel token (`wb_pt.`) | on, except a read-scoped panel token off loopback |
 | `headers` | on anywhere | as unset |
 | `markers` | as unset | on anywhere |
 | `headers,markers` | on anywhere | on anywhere |
@@ -1318,7 +1318,7 @@ reads `checking…` while it does). A Studio that answers 401 or 403 is
 there and wants a token (UX-S5a-03): never removed, whatever the
 install path, the line reads `Studio needs a token at <endpoint> — add
 data-token (the dev token) or a panel token (POST /api/panel-tokens)
-· retry` (`weft open --with-token` opens Studio
+· retry` (`weftbase open --with-token` opens Studio
 itself signed in). A Studio that stops answering after the panel
 booted (a turn-list read gets no answer, or a 401/403) gets the same
 line under the dock's header (U28, UX-F-09): the turns stay, dimmed;
@@ -1329,8 +1329,8 @@ retries one `/api/meta` read a minute, while the page is visible,
 brings it back by itself. The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 294,632 B raw / 98,986 B gzip
-(96.7 KiB, the bundle of the ledger's row "P020.2-fix"; 7,510 B — 7.3 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 294,636 B raw / 98,987 B gzip
+(96.7 KiB, the bundle of the ledger's row "weftbase split"; 7,509 B — 7.3 KiB — of headroom under
 the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -2407,7 +2407,7 @@ playground's own editor, under `breakpoints`), the latest run's content
 mark with its note and fix. Per browser: the token (`studio.token` in
 localStorage — masked, shown on request, copied, cleared, or switched by
 pasting another, which re-reads everything with it; its identity is
-read from its shape: a `weft_pt.` panel token names its scope and public
+read from its shape: a `wb_pt.` panel token names its scope and public
 id in its claims, any other bearer a walled Studio accepts is the server
 token, confirmed when meta served `db.path`'s fields), theme
 (auto/light/dark), density and the pricing edits. Studio never writes a
@@ -2549,7 +2549,7 @@ the header says "link copied". Where the browser refuses the clipboard
 `execCommand("copy")`, then shows the link in a prompt, and says "copy
 failed". Each page
 titles its tab through `lib/title.ts`: `run s_…-t3 · succeeded · weft
-studio`, `trace 0af76519…319c · weft studio`, `playground · weft
+studio`, `trace 0af76519…319c · weftbase`, `playground · weft
 studio`.
 
 **Open in app** in the run header (plan G3): a run whose request came
@@ -2800,7 +2800,7 @@ and logs the one WARN.
 **Retention.** The command rows' only retention is
 `obsdb.CommandStore.PruneCommands`, run from the server's own prune
 (24 h for terminal commands, 10 000 kept at most; queued and accepted
-never), at most once a minute; run deletion, `Retain` and `weft vacuum`
+never), at most once a minute; run deletion, `Retain` and `weftbase vacuum`
 never touch these rows. A runtime's LastSeen from the stream's keep-alive
 pings is written at most once a minute (registration, stream open and
 stream end always write).
@@ -2820,7 +2820,7 @@ given `<id>-<pid>`, so the old process coming back finds its id and those
 commands. A finished command's run route does not hold the id: a
 disconnected entry holding no unfinished work is reclaimed by whoever
 registers under its id next, Studio's breakpoint set kept — an app
-restarted minutes after a playground run (`weft dev` restarts on every
+restarted minutes after a playground run (`weftbase dev` restarts on every
 save) keeps its id and its `/runtimes/<id>` link. So an approval for a
 run parked on a runtime that went away may reach the process that took
 the id since, which refuses it ("no parked run …").
@@ -3188,7 +3188,7 @@ with the source's model), says so in the skeleton's header and the
 `<root>#<k>,<replay>#<m>`: k steps from the root, then m from that
 replay; the toast's "steps 0–0 from the source …"), and is a 409 naming
 why when the chain cannot give them (UX-C-30); an agentless run's
-test file is `run_replay_test.go`. `weft export <id> --wefttest <pkg>`
+test file is `run_replay_test.go`. `weftbase export <id> --wefttest <pkg>`
 writes this zip's tree byte for byte (UX-S5a-07), refusing a
 symlinked `testdata` or `testdata/<test>`. The run block's children carry their `holes`
 as `runs/{id}` serves them. A read-scoped panel token gets `json` and
@@ -3369,7 +3369,7 @@ manifest gives the same agent (`""` when it names none; equal to
 the one-agent `core.Manifest` document; Studio stores each agent of the
 weft.json it serves once, at `New` (a weft.json rewritten while Studio
 runs is stored after the next restart — or by the next registration of
-an app running that configuration: under `weft dev` an app with
+an app running that configuration: under `weftbase dev` an app with
 `runtime.Install` re-registers its agents on every save-and-restart, so
 the dev loop is covered) and every runtime
 registration's agents, content-addressed (the hash is the document's sha256, the first write
@@ -3472,7 +3472,7 @@ connection carries no resume cursor — the header is the only way
 run page's tail on its first open too. The UI adopts a token from the
 link's `#token=` fragment only; a `?token=` in the address is stripped,
 never kept.
-The `#token=` fragment `weft open` and `weft studio --open` hand the
+The `#token=` fragment `weftbase open` and `weftbase dev --open` hand the
 browser never reaches the server; the UI reads it. OTLP
 ingest is `POST /v1/traces` and `/v1/logs` (protobuf and JSON, gzip,
 16 MiB after decompression, publish-then-write, 503 on a write failure
@@ -3495,7 +3495,7 @@ fields, is never limited; a 5xx whose body is masked for a panel token
 still logs the real error as its `reason`; a handler panic is one
 ERROR line, `studio: handler panicked` with the request id and the
 panic. `X-Request-Id` is in `Access-Control-Expose-Headers`, so a
-cross-origin panel can read it. `weft studio` / `weft dev`
+cross-origin panel can read it. `weftbase dev`
 `--log-level debug|info|warn|error` (`WEFT_LOG_LEVEL`) and
 `--log-format text|json` (`WEFT_LOG_FORMAT`) pick that log's handler on
 stderr. `/api/meta`'s `ingest` adds `accepted` / `refused` (the OTLP
@@ -3528,7 +3528,7 @@ application/json` gets the same as `{"location","exp"}` for a fetch. The
 server token (setup B's dev token) gets the 303 to `<base><to>#token=<the
 server token>` (no `exp`): the non-JSON answer carries the dev token in its
 `Location` header's fragment — never sent on by a browser, and the answer is
-`Cache-Control: no-store` and `Referrer-Policy: no-referrer` — as `weft open
+`Cache-Control: no-store` and `Referrer-Policy: no-referrer` — as `weftbase open
 --with-token`'s link does. A read-scoped panel token is 403:
 it cannot widen, and its page links to Studio directly. `to` must be a path
 under the base — a single leading `/`, no scheme, host, fragment, backslash,
@@ -3575,8 +3575,9 @@ The dev loop is two terminals: `go run ./studio/examples/basic
 dev -- --base /studio/` (Vite on :3000 proxying `/studio/api`).
 
 Import path: `github.com/weftbase/weftbase/studio`, a package of the
-framework module (`go get github.com/weftbase/weft`); it imports `core`,
+platform module (`go get github.com/weftbase/weftbase`, beside the
+framework it imports, `github.com/weftbase/weft`); it imports `core`,
 `obsdb` and, for its tests, `otel`. The binary is
-[cmd/weft](../cmd/weft) (`go install
+[cmd/weftbase](../cmd/weftbase) (`go install
 github.com/weftbase/weftbase/cmd/weftbase@latest`, `make studio-bin` in this
 repo), the one place that imports the clickhouse driver.

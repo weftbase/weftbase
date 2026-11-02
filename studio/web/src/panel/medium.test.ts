@@ -286,7 +286,7 @@ describe("Studio stops answering after boot (UX-F-09)", () => {
     expect(line(el)).toBeNull()
   })
 
-  it("past the fast retries, a meta read a minute brings it back by itself (a weft dev restart minutes later)", async () => {
+  it("past the fast retries, a meta read a minute brings it back by itself (a weftbase dev restart minutes later)", async () => {
     const { st, studio } = stoppable()
     const el = await mount()
     vi.useFakeTimers()

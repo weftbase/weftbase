@@ -12,9 +12,9 @@
 import { mount } from "@weftgo/devtools"
 
 // /studio/ is studio-local's embedded Studio, proxied by vite.config.ts
-// in dev (same origin: no token, no CORS). VITE_WEFT_STUDIO points the
+// in dev (same origin: no token, no CORS). VITE_WEFTBASE_URL points the
 // panel anywhere else.
-mount({ endpoint: import.meta.env.VITE_WEFT_STUDIO ?? "/studio/" })
+mount({ endpoint: import.meta.env.VITE_WEFTBASE_URL ?? "/studio/" })
 
 // The fake chat: one POST /run per question, the reply rendered as
 // text. studio-local's /run answers with the Weft-Scope header, which

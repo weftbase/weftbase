@@ -408,11 +408,11 @@ func TestS7ReplayRebuildsTranscriptByteForByte(t *testing.T) {
 }
 
 // Install's zero-config rule: with no options and no env it writes the
-// local sink only (WEFT_DB pointed at a temp file), and the returned
+// local sink only (WEFTBASE_DB pointed at a temp file), and the returned
 // function shuts down cleanly.
 func TestInstallZeroConfigLocalOnly(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "zero.db")
-	t.Setenv("WEFT_DB", path)
+	t.Setenv("WEFTBASE_DB", path)
 	isolate(t)
 	shutdown := Install()
 	p := otel.Installed()

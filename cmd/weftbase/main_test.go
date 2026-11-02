@@ -22,19 +22,21 @@ import (
 
 	"github.com/weftbase/weft/version"
 	"github.com/weftbase/weftbase/internal/doctor"
+	"github.com/weftbase/weftbase/internal/release"
 	"github.com/weftbase/weftbase/studio"
 )
 
-// TestVersion pins `weft version` (and --version, the old studio
-// binary's flag): the one version (version.Runtime) and a newline on
-// stdout, exit 0, and no server.
+// TestVersion pins `weftbase version` (and --version, the old studio
+// binary's flag): weftbase's own version (release.Version) and the weft
+// version it embeds (version.Runtime) on one stdout line, exit 0, and
+// no server.
 func TestVersion(t *testing.T) {
 	for _, args := range [][]string{{"version"}, {"--version"}} {
 		var out, errb strings.Builder
 		if code := run(args, &out, &errb); code != 0 {
 			t.Fatalf("weft %v = exit %d: %s", args, code, errb.String())
 		}
-		if want := version.Runtime() + "\n"; out.String() != want {
+		if want := "weftbase " + release.Version + " (weft " + version.Runtime() + ")\n"; out.String() != want {
 			t.Errorf("weft %v printed %q, want %q", args, out.String(), want)
 		}
 	}
@@ -45,8 +47,8 @@ func TestVersion(t *testing.T) {
 func TestNewServer(t *testing.T) {
 	dir := t.TempDir()
 
-	// The default: the local sink path, honored through $WEFT_DB.
-	t.Setenv("WEFT_DB", dir+"/env.db")
+	// The default: the local sink path, honored through $WEFTBASE_DB.
+	t.Setenv("WEFTBASE_DB", dir+"/env.db")
 	srv, err := newServer("", "tok")
 	if err != nil {
 		t.Fatal(err)
@@ -217,7 +219,7 @@ func assertSetupB(t *testing.T, h http.Handler, token, dbPath string) {
 	}
 }
 
-// TestTokenPrecedence pins --token > WEFT_STUDIO_TOKEN > the
+// TestTokenPrecedence pins --token > WEFTBASE_TOKEN > the
 // database's stable token (plan B3) > generated (a database with no
 // file).
 func TestTokenPrecedence(t *testing.T) {
@@ -230,14 +232,14 @@ func TestTokenPrecedence(t *testing.T) {
 		}
 		return tok
 	}
-	t.Setenv("WEFT_STUDIO_TOKEN", "from-env")
+	t.Setenv("WEFTBASE_TOKEN", "from-env")
 	if got := resolve(db, ""); got.value != "from-env" || got.source != tokenFromEnv {
 		t.Errorf("env token: %+v", got)
 	}
 	if got := resolve(db, "from-flag"); got.value != "from-flag" || got.source != tokenFromFlag {
 		t.Errorf("flag token: %+v", got)
 	}
-	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	t.Setenv("WEFTBASE_TOKEN", "")
 	stable := resolve(db, "")
 	if stable.source != tokenFromFile || len(stable.value) < 40 || !stable.created || stable.printable() {
 		t.Errorf("stable token: %+v", stable)
@@ -255,14 +257,14 @@ func TestTokenPrecedence(t *testing.T) {
 }
 
 // TestBootBannerTokenAuthenticates pins the P0 the programme audit
-// found: with no --token and no WEFT_STUDIO_TOKEN the banner's dev
+// found: with no --token and no WEFTBASE_TOKEN the banner's dev
 // token must open the API of the very server that printed it. The
 // token is resolved once in serveBoot and shared by the wall and the
 // banner; the pre-fix code drew srvToken twice and the printed token
 // 401'd against /api/meta, breaking setup B's documented hand-off.
 func TestBootBannerTokenAuthenticates(t *testing.T) {
-	t.Setenv("WEFT_STUDIO_TOKEN", "")
-	t.Setenv("WEFT_DB", ":memory:") // no file: a token generated for this process
+	t.Setenv("WEFTBASE_TOKEN", "")
+	t.Setenv("WEFTBASE_DB", ":memory:") // no file: a token generated for this process
 	var banner strings.Builder
 	srv, err := serveBoot("", "127.0.0.1:7331", "", &banner)
 	if err != nil {
@@ -274,7 +276,7 @@ func TestBootBannerTokenAuthenticates(t *testing.T) {
 	var token string
 	for _, line := range strings.Split(banner.String(), "\n") {
 		if rest, ok := strings.CutPrefix(line, "studio: dev token "); ok {
-			token = strings.TrimSpace(strings.TrimSuffix(rest, "(WEFT_STUDIO_TOKEN fixes it)"))
+			token = strings.TrimSpace(strings.TrimSuffix(rest, "(WEFTBASE_TOKEN fixes it)"))
 		}
 	}
 	if token == "" {
@@ -296,9 +298,9 @@ func TestBootBannerTokenAuthenticates(t *testing.T) {
 // prints it (it is the panel tokens' signing key), naming the file
 // instead.
 func TestStableTokenAuthenticatesUnprinted(t *testing.T) {
-	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	t.Setenv("WEFTBASE_TOKEN", "")
 	db := filepath.Join(t.TempDir(), "boot.db")
-	t.Setenv("WEFT_DB", db)
+	t.Setenv("WEFTBASE_DB", db)
 	var banner strings.Builder
 	srv, err := serveBoot("", "127.0.0.1:7331", "", &banner)
 	if err != nil {
@@ -334,7 +336,7 @@ func TestDBLabelMasksPassword(t *testing.T) {
 	for dsn, want := range map[string]string{
 		"clickhouse://default@127.0.0.1:9000/weft": "clickhouse://default@127.0.0.1:9000/weft",
 		"sqlite:///tmp/weft.db":                    "/tmp/weft.db",
-		"":                                         "$WEFT_DB or ./.weft/weft.db (default)",
+		"":                                         "$WEFTBASE_DB or ./.weftbase/weftbase.db (default)",
 	} {
 		if got := dbLabel(dsn); got != want {
 			t.Errorf("dbLabel(%q) = %q, want %q", dsn, got, want)
@@ -392,10 +394,10 @@ func TestListenShutsDownGracefully(t *testing.T) {
 	}
 }
 
-// TestDoctorSubcommand pins `weft doctor`'s wiring (internal/doctor
+// TestDoctorSubcommand pins `weftbase doctor`'s wiring (internal/doctor
 // is the checking): --url picks the Studio, an unreachable one is the
-// first line and exit 1 without a second message, and WEFT_STUDIO_URL /
-// WEFT_STUDIO_TOKEN are the flags' defaults.
+// first line and exit 1 without a second message, and WEFTBASE_URL /
+// WEFTBASE_TOKEN are the flags' defaults.
 func TestDoctorSubcommand(t *testing.T) {
 	var out, errb strings.Builder
 	code := run([]string{"doctor", "--url", "http://127.0.0.1:1"}, &out, &errb)
@@ -410,8 +412,8 @@ func TestDoctorSubcommand(t *testing.T) {
 	defer func() { _ = srv.Close() }()
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
-	t.Setenv("WEFT_STUDIO_URL", ts.URL)
-	t.Setenv("WEFT_STUDIO_TOKEN", "tok")
+	t.Setenv("WEFTBASE_URL", ts.URL)
+	t.Setenv("WEFTBASE_TOKEN", "tok")
 	t.Setenv("WEFT_ENV", "")
 	out.Reset()
 	if code := run([]string{"doctor"}, &out, &errb); code != 0 {
@@ -518,7 +520,7 @@ func TestManifestFlag(t *testing.T) {
 		t.Errorf("a manifest that is not an object: %v", err)
 	}
 	var errb strings.Builder
-	if code := run([]string{"studio", "--manifest", dir + "/missing.json"}, io.Discard, &errb); code != 1 || !strings.Contains(errb.String(), "--manifest") {
+	if code := run([]string{"dev", "--manifest", dir + "/missing.json"}, io.Discard, &errb); code != 1 || !strings.Contains(errb.String(), "--manifest") {
 		t.Errorf("missing manifest: exit %d, stderr %q, want 1 and a start error naming --manifest", code, errb.String())
 	}
 }

@@ -19,7 +19,7 @@ import (
 // module's release, nothing else.
 const Version = version.Version
 
-const defaultTitle = "weft studio"
+const defaultTitle = "weftbase"
 
 // Option configures New.
 type Option func(*config)
@@ -48,7 +48,7 @@ type config struct {
 // DB serves Studio over db (setup A: DB(exporter.LocalDB()) — the same
 // handle weft/otel's Local destination writes, so the UI reads what
 // the run wrote, live, through the handle's own hub). Without DB or
-// Open, New opens the history database at $WEFT_DB or ./.weft/weft.db
+// Open, New opens the history database at $WEFTBASE_DB or ./.weftbase/weftbase.db
 // (history only: a second handle on the file, no live lane — passing
 // the pipeline's handle is what makes setup A live). A nil db panics
 // at New time — a Studio with nothing to read is a construction
@@ -137,7 +137,7 @@ func Manifest(json []byte) Option {
 	return func(c *config) { c.manifest = json }
 }
 
-// Title overrides the page title (default "weft studio").
+// Title overrides the page title (default "weftbase").
 func Title(s string) Option {
 	return func(c *config) { c.title = s }
 }
@@ -161,7 +161,7 @@ func Playground(on bool) Option {
 }
 
 // DiscoveryFile names the discovery file the command hosting this
-// server writes for it (`weft studio` and `weft dev`, plan B3: the
+// server writes for it (`weftbase dev`, plan B3: the
 // studio.json apps find a running Studio through). api/meta serves it
 // as discovery_file, under db.path's rule, while the file at path names
 // this process — a file never written, removed, or since taken over by
@@ -173,8 +173,8 @@ func DiscoveryFile(path string) Option {
 
 // OffReason replaces why meta.capabilities_off says capability is off
 // — and every capability off for the same cause (the playground's
-// eight) — with the host's own words: `weft studio --no-playground`
-// says "weft studio was started with --no-playground", not the Go
+// eight) — with the host's own words: `weftbase dev --no-playground`
+// says "weftbase dev was started with --no-playground", not the Go
 // option an embedding app would set. It changes words only, never
 // which capabilities are on. A capability that is no optional one
 // panics at New (a construction error, as Retain's floor is).
@@ -476,11 +476,11 @@ func (s *Server) serveUI(w http.ResponseWriter, r *http.Request) {
 	s.serveShell(w, r)
 }
 
-// defaultDBPath is S4.1's default history database: $WEFT_DB, else
-// ./.weft/weft.db.
+// defaultDBPath is S4.1's default history database: $WEFTBASE_DB, else
+// ./.weftbase/weftbase.db.
 func defaultDBPath() string {
-	if p := os.Getenv("WEFT_DB"); p != "" {
+	if p := os.Getenv("WEFTBASE_DB"); p != "" {
 		return p
 	}
-	return ".weft/weft.db"
+	return ".weftbase/weftbase.db"
 }

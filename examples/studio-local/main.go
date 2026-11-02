@@ -16,13 +16,13 @@
 //	curl -s -XPOST localhost:7331/run -d 'where is order 42?'
 //
 // 7331 is Studio's one default port, and this listener is the app's
-// own (setup A): it keeps its port. The binary (`weft studio`) started
+// own (setup A): it keeps its port. The binary (`weftbase dev`) started
 // beside it does not collide: it finds 7331 busy with something that
 // is not a Studio at /api/meta (this app mounts Studio under /studio/)
 // and moves to the next free port, saying so in one line (plan B2).
 //
 // The five lines (build): Install the otel defaults (the local sink at
-// ./.weft/weft.db, content on, no network; otel.Slog() bridges
+// ./.weftbase/weftbase.db, content on, no network; otel.Slog() bridges
 // slog.Default, so the agent's mw.Log lines land under each step's
 // span), build the Studio server
 // with Playground(true) over the pipeline's own handle — the same DB,
@@ -37,33 +37,33 @@
 // id) and the next question denies it before it runs. A real app
 // replaces the model with its own and changes nothing else.
 //
-// Under `weft dev` (plan B1.2) the same binary is the app beside the
+// Under `weftbase dev` (plan B1.2) the same binary is the app beside the
 // command's Studio — §10.1's setup B for the page (U20.2):
 //
-//	weft dev -- go run ./examples/studio-local
-//	# open http://127.0.0.1:8080/ (the panel docks, reading weft dev's Studio)
+//	weftbase dev -- go run ./examples/studio-local
+//	# open http://127.0.0.1:8080/ (the panel docks, reading weftbase dev's Studio)
 //
-// weft dev sets WEFT_STUDIO_URL, WEFT_STUDIO_TOKEN, WEFT_DB and
-// WEFT_ENV=dev; with WEFT_STUDIO_URL set the demo listens on
+// weftbase dev sets WEFTBASE_URL, WEFTBASE_TOKEN, WEFTBASE_DB and
+// WEFT_ENV=dev; with WEFTBASE_URL set the demo listens on
 // 127.0.0.1:8080 (that Studio holds 7331), the pipeline exports to that
 // Studio besides the local sink, and the runtime link registers there
 // instead of with the embedded server: build reads
 // exporter.StudioEndpoint() after Install. The page's panel follows the
 // runtime: its script tag loads panel.js from that Studio, with
 // data-endpoint naming it and a panel token the app mints for the
-// page's public id (POST /api/panel-tokens with WEFT_STUDIO_TOKEN,
+// page's public id (POST /api/panel-tokens with WEFTBASE_TOKEN,
 // "playground": true — the server token never reaches the page, and no
-// token rides a URL). So the panel, the runtime and weft dev's Studio
+// token rides a URL). So the panel, the runtime and weftbase dev's Studio
 // UI are one Studio: a refund the page parks is approved from the
 // page's panel (runtime.Sessions hands the runtime the demo's live
 // Session), and Studio's /runtimes lists this app. The embedded
 // /studio/ stays mounted as the app's own view of its local sink,
-// without the playground — weft dev's Studio owns the command store in
-// the shared WEFT_DB (one Studio per command store) — and its meta's
+// without the playground — weftbase dev's Studio owns the command store in
+// the shared WEFTBASE_DB (one Studio per command store) — and its meta's
 // runtime_link names the Studio the link dialled. The app writes the
-// shared WEFT_DB twice, through its local sink and through Studio's
+// shared WEFTBASE_DB twice, through its local sink and through Studio's
 // ingest: harmless, the sqlite writer is INSERT OR IGNORE. Run bare
-// beside a `weft studio` (no WEFT_STUDIO_URL), the demo stays its own
+// beside a `weftbase dev` (no WEFTBASE_URL), the demo stays its own
 // setup A: exporter.Local switches the discovery file off, so nothing joins
 // that Studio (README "When weft/exporter reads the file") — only the port
 // moves to 8080, because 7331 is taken. -addr still overrides 8080.
@@ -100,7 +100,7 @@ import (
 
 // page is the host app's own landing page: a plain HTML document
 // whose only weft-ness is the panel's script tag ({{PANEL}}: localTag
-// in setup A, §5.3 — same origin as Studio, no token; under weft dev
+// in setup A, §5.3 — same origin as Studio, no token; under weftbase dev
 // panelTag's setup B tag). Setup A's tag names no scope: the
 // page's own ask form POSTs /run with fetch, and the panel reads the
 // response's Weft-Scope header (detection rung 2, on by default on
@@ -178,8 +178,8 @@ func pageWith(tag string) string { return strings.Replace(page, "{{PANEL}}", tag
 
 func main() {
 	// 7331 is Studio's one default port, and this listener is the
-	// app's own; beside a Studio that already holds it (weft dev sets
-	// WEFT_STUDIO_URL, or a running weft studio has the port) the app
+	// app's own; beside a Studio that already holds it (weftbase dev sets
+	// WEFTBASE_URL, or a running weftbase dev has the port) the app
 	// takes 8080. -addr always wins.
 	addr := flag.String("addr", "127.0.0.1:7331", "listen address (default 127.0.0.1:7331; 127.0.0.1:8080 beside a running Studio)")
 	flag.Parse()
@@ -227,7 +227,7 @@ func trimGuidance(_ context.Context, step int, req weft.ModelRequest) (weft.Mode
 // serve is setup A (§10.1) plus this demo's own /run endpoint, on
 // the demo's listener; build is everything an embedding app writes.
 func serve(addr string, explicitAddr bool) error {
-	a, err := build("./.weft/threads")
+	a, err := build("./.weftbase/threads")
 	if err != nil {
 		return err
 	}
@@ -237,7 +237,7 @@ func serve(addr string, explicitAddr bool) error {
 		return err
 	}
 	if a.studioURL != "" {
-		log.Printf("studio-local: under weft dev: the page's panel at http://%s/ reads %s (where the runtime registers); /studio/ is this app's read-only view", addr, a.studioURL)
+		log.Printf("studio-local: under weftbase dev: the page's panel at http://%s/ reads %s (where the runtime registers); /studio/ is this app's read-only view", addr, a.studioURL)
 	} else {
 		log.Printf("studio-local: studio at http://%s/studio/ (live at /studio/live), panel at http://%s/", addr, addr)
 	}
@@ -251,23 +251,23 @@ func serve(addr string, explicitAddr bool) error {
 type app struct {
 	mux       *http.ServeMux
 	demo      *demo
-	studioURL string // weft dev's Studio ("" in setup A)
+	studioURL string // weftbase dev's Studio ("" in setup A)
 	close     func()
 }
 
 // build wires the demo. Everything between its first and last line is
 // what an embedding app writes; nothing else is configured.
 func build(threadsDir string) (*app, error) {
-	// The local sink ($WEFT_DB or ./.weft/weft.db), content on; named
+	// The local sink ($WEFTBASE_DB or ./.weftbase/weftbase.db), content on; named
 	// explicitly so it stays when the environment adds a destination
-	// (WEFT_STUDIO_URL under weft dev): the embedded Studio reads it.
+	// (WEFTBASE_URL under weftbase dev): the embedded Studio reads it.
 	// Slog bridges slog.Default, so the app's log lines (mw.Log's
 	// included) reach Studio under the span they were logged in.
 	stopOtel := exporter.Install(exporter.Local(""), otel.Slog())
 
-	// Under weft dev the pipeline also exports to the Studio
-	// WEFT_STUDIO_URL names (the explicit Local keeps the discovery
-	// file out: run bare, nothing joins a running weft studio).
+	// Under weftbase dev the pipeline also exports to the Studio
+	// WEFTBASE_URL names (the explicit Local keeps the discovery
+	// file out: run bare, nothing joins a running weftbase dev).
 	studioURL, studioToken := exporter.StudioEndpoint()
 
 	agent := demoAgent()
@@ -277,8 +277,8 @@ func build(threadsDir string) (*app, error) {
 	// Handler mounted, and the runtime link dials it in-process.
 	// The demo's sessions live in one jsonl store; the runtime gets it
 	// too, so the playground's fork mode (thread=fork) can branch them.
-	// The directory may not exist yet (weft dev --db elsewhere leaves
-	// no ./.weft): jsonl.Open needs it.
+	// The directory may not exist yet (weftbase dev --db elsewhere leaves
+	// no ./.weftbase): jsonl.Open needs it.
 	if err := os.MkdirAll(threadsDir, 0o755); err != nil {
 		stopOtel()
 		return nil, err
@@ -288,12 +288,12 @@ func build(threadsDir string) (*app, error) {
 		stopOtel()
 		return nil, err
 	}
-	// Under weft dev that Studio owns the playground and the command
-	// store (the shared WEFT_DB): the embedded one is a read-only view.
+	// Under weftbase dev that Studio owns the playground and the command
+	// store (the shared WEFTBASE_DB): the embedded one is a read-only view.
 	srv := studio.New(studio.DB(exporter.LocalDB()), studio.Playground(studioURL == ""))
 	demo := newDemo(store, agent)
 	// The runtime link dials the embedded server in-process — or, under
-	// weft dev, the Studio WEFT_STUDIO_URL names, so its playground
+	// weftbase dev, the Studio WEFTBASE_URL names, so its playground
 	// drives this app. runtime.Sessions hands it the demo's live
 	// Session: the page's panel approves a parked refund through it.
 	link := runtime.Local(srv)
@@ -318,7 +318,7 @@ func build(threadsDir string) (*app, error) {
 	// turn's run by the handler once the turn has started.
 	mux.Handle("POST /run", demo.handler())
 	// The page's panel reads the Studio the runtime registered with:
-	// the embedded one (setup A), or weft dev's (setup B).
+	// the embedded one (setup A), or weftbase dev's (setup B).
 	panel := panelTag{studioURL: studioURL, studioToken: studioToken}
 	// GET / alone: each page mints a panel token (one POST under weft
 	// dev), so a favicon or any other path is the mux's 404, not a mint.
@@ -335,7 +335,7 @@ func build(threadsDir string) (*app, error) {
 }
 
 // panelTag builds the page's panel script tag. With no Studio URL it
-// is setup A's localTag. Under weft dev (setup B) the tag loads
+// is setup A's localTag. Under weftbase dev (setup B) the tag loads
 // panel.js from that Studio and names it as data-endpoint, scoped to
 // the demo's public id with a panel token minted per page for it —
 // "playground": true, so the panel may decide the page's parked calls,
@@ -406,11 +406,11 @@ func (p panelTag) mint(ctx context.Context, base string) (string, error) {
 var demoFallbackAddr = "127.0.0.1:8080"
 
 // listen binds the demo's own listener. Beside a running Studio —
-// WEFT_STUDIO_URL set (weft dev), or a `weft studio` already holding
+// WEFTBASE_URL set (weftbase dev), or a `weftbase dev` already holding
 // the default 7331 — it takes 8080 instead; an -addr the user gave is
 // bound as given, or fails.
 func listen(addr string, explicitAddr bool) (net.Listener, string, error) {
-	if !explicitAddr && os.Getenv("WEFT_STUDIO_URL") != "" {
+	if !explicitAddr && os.Getenv("WEFTBASE_URL") != "" {
 		addr = demoFallbackAddr
 	}
 	ln, err := net.Listen("tcp", addr)

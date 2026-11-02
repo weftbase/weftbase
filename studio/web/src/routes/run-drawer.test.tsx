@@ -160,12 +160,12 @@ describe("the drawer on opt.usage-limit (the Done line)", () => {
     // One faint line says why, in capabilities_off's words (U10.1-fix #10).
     const off = document.querySelector("[data-drawer-verbs-off]")!
     expect(off.textContent).toBe(
-      `${REPLAY_OFF.playground} — the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off`
+      `${REPLAY_OFF.playground} — the playground is off: turn it on with studio.Playground(true); weftbase dev --no-playground turns it off`
     )
   })
 
   it("a read token and a running run: the verbs' place says why (U10.1-fix #10)", async () => {
-    const read = `weft_pt.${btoa(
+    const read = `wb_pt.${btoa(
       JSON.stringify({
         public_id: "pub_1",
         scope: "read",

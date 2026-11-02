@@ -406,7 +406,7 @@ describe("a tag-scoped panel token (I4)", () => {
   const BATCH = "cli-20261012-115753"
   /** A read panel token minted with {"tags": {"arena.batch": BATCH}}
    * and no public id (POST /api/panel-tokens, server token). */
-  const TAG_TOKEN = `weft_pt.${btoa(
+  const TAG_TOKEN = `wb_pt.${btoa(
     JSON.stringify({
       tags: { "arena.batch": BATCH },
       scope: "read",

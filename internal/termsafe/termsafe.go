@@ -1,5 +1,5 @@
 // Package termsafe makes untrusted text safe to print to an operator's
-// terminal: the CLI's tables (weft runs, weft doctor) print prompts,
+// terminal: the CLI's tables (weftbase runs, weftbase doctor) print prompts,
 // agent names and error text that came from an app or an OTLP sender,
 // and a control character in them — an escape sequence, a carriage
 // return — would reach the terminal raw.

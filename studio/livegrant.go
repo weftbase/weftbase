@@ -53,7 +53,7 @@ import (
 var liveGrantTTL = 60 * time.Second
 
 const (
-	liveGrantPrefix = "weft_lg."
+	liveGrantPrefix = "wb_lg."
 	// liveGrantDomain separates the grant MAC from every other use of
 	// the key: the key itself is derived (liveGrantKey), and the MAC
 	// input starts with this label and version.
@@ -149,7 +149,7 @@ func liveGrantMAC(key, payload, stream []byte) []byte {
 }
 
 // signLiveGrant signs claims for one stream:
-// weft_lg.<payload>.<mac>, both base64url.
+// wb_lg.<payload>.<mac>, both base64url.
 func signLiveGrant(key []byte, claims liveGrantClaims, stream []byte) (string, error) {
 	payload, err := json.Marshal(claims)
 	if err != nil {

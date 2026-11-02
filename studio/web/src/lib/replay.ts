@@ -83,7 +83,7 @@ function pos(n: number): number {
 export function tokenClaimsOf(
   token: string
 ): { scope?: unknown; public_id?: unknown; tags?: unknown } | null {
-  if (!token.startsWith("weft_pt.")) return null
+  if (!token.startsWith("wb_pt.")) return null
   try {
     const b64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")
     return JSON.parse(atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4))) ?? {}
@@ -363,7 +363,7 @@ export function replayVerdicts(input: VerdictInput): ToolVerdict[] {
   })
 }
 
-/** The token scope a bearer carries: a panel token (weft_pt.<claims>.
+/** The token scope a bearer carries: a panel token (wb_pt.<claims>.
  * <sig>) names "read" or "playground"; any other bearer (the dev or
  * server token, none) is "". An unreadable panel token is the default
  * mint, read. */

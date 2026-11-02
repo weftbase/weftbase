@@ -234,7 +234,7 @@ describe("the trace page's URL (G2)", () => {
   it("titles the tab with the trace", async () => {
     renderApp(`/traces/${TRACE}`)
     await waitFor(() =>
-      expect(document.title).toBe("trace 0af76519…319c · weft studio")
+      expect(document.title).toBe("trace 0af76519…319c · weftbase")
     )
   })
 

@@ -111,8 +111,8 @@ func agentService(t *testing.T, e *e2e) string {
 }
 
 // TestMetaNamesTheStudioTheLinkDialled (UX-D-01, A7): an app embeds a
-// Studio but its runtime link dials another (weft dev's, through
-// runtime.Studio / WEFT_STUDIO_URL). The embedded Studio's meta names
+// Studio but its runtime link dials another (weftbase dev's, through
+// runtime.Studio / WEFTBASE_URL). The embedded Studio's meta names
 // the Studio the link dialled (examples/studio-local's acceptance test
 // reads the refusal that names it on an app turn).
 func TestMetaNamesTheStudioTheLinkDialled(t *testing.T) {

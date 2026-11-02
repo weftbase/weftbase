@@ -146,7 +146,7 @@ func MetadataCapReason(n int64) string {
 // queueFix is the knob every gap's fix names (UX-A-41): the destination
 // queue the records waited in, the dev-only wait, the app's own WARN
 // and the counter Studio heard.
-const queueFix = "raise the destination's queue: otel.QueueSize(n) (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev (or otel.DevMode()); the app's WARN \"weft/otel: destination queue full\" names it, weft doctor the drops (weft.records.dropped)"
+const queueFix = "raise the destination's queue: otel.QueueSize(n) (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev (or otel.DevMode()); the app's WARN \"weft/otel: destination queue full\" names it, weftbase doctor the drops (weft.records.dropped)"
 
 // HoleCauses lists the causes the table words, in order.
 func HoleCauses() []HoleCause {

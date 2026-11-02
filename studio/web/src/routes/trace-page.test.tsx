@@ -570,7 +570,7 @@ describe("replay from this step on an errored model call (H7)", () => {
     cleanup()
     serve({ capabilities: ["traces", "playground"] })
     const claims = btoa(JSON.stringify({ scope: "read" })).replace(/=+$/, "")
-    setStudioToken(`weft_pt.${claims}.sig`)
+    setStudioToken(`wb_pt.${claims}.sig`)
     renderApp(`/traces/${TRACE}?sel=s1:m`)
     await waitFor(() => expect(selectedKey()).toBe("s1:m"))
     await new Promise((r) => setTimeout(r, 50))

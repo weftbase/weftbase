@@ -33,7 +33,7 @@ const PROMPT0 = "You are a support agent."
 const PROMPT1 = "You are a support agent. Refunds need a reason."
 
 const claims = (scope: string) =>
-  `weft_pt.${btoa(JSON.stringify({ public_id: "pub_orders", scope, exp: "2099-01-01T00:00:00Z" })).replace(/=+$/, "")}.c2ln`
+  `wb_pt.${btoa(JSON.stringify({ public_id: "pub_orders", scope, exp: "2099-01-01T00:00:00Z" })).replace(/=+$/, "")}.c2ln`
 
 /** The turn as TestRequestsRoutes recorded it: three steps. */
 function routes(requests: unknown) {

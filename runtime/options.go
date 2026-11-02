@@ -38,8 +38,8 @@ type config struct {
 // binary or the hosted one). Empty token is the dev mode of setup B.
 // Without a Studio or Local option, Install falls back to the pipeline's
 // own Studio destination — exporter.StudioEndpoint() — then, when that is
-// empty, to the discovery file a running `weft studio` / `weft dev`
-// wrote (unless WEFT_STUDIO_URL is set or WEFT_DISCOVERY=off; a stale
+// empty, to the discovery file a running `weftbase dev`
+// wrote (unless WEFTBASE_URL is set or WEFTBASE_DISCOVERY=off; a stale
 // file is never trusted), and opens nothing when there is none. A
 // pipeline with a Local destination and no Studio (exporter.LocalDB() set,
 // exporter.StudioEndpoint() empty) skips the file: the link would register
@@ -313,16 +313,16 @@ func Install(opts ...Option) (shutdown func()) {
 		return func() {}
 	}
 	if c.local == nil && url == "" {
-		// The discovery rung (plan B3): the file `weft studio` / `weft
+		// The discovery rung (plan B3): the file `weftbase dev` / `weft
 		// dev` writes names the running Studio — never read when
-		// WEFT_STUDIO_URL is set or WEFT_DISCOVERY=off, never trusted
+		// WEFTBASE_URL is set or WEFTBASE_DISCOVERY=off, never trusted
 		// when stale, never when the installed pipeline has a Local
 		// destination and no Studio (above). One INFO line says which
 		// Studio this joined.
 		if info, path, ok := discovery.Lookup(os.Getenv, slog.Default()); ok {
 			url, token = info.URL, info.Token
 			slog.Info("weft/runtime: joined the running Studio", "url", info.URL, "pid", info.PID, "file", path,
-				"hint", "WEFT_STUDIO_URL or runtime.Studio(url, token) names another; WEFT_DISCOVERY=off ignores the file")
+				"hint", "WEFTBASE_URL or runtime.Studio(url, token) names another; WEFTBASE_DISCOVERY=off ignores the file")
 		}
 	}
 	if c.local == nil && url == "" {

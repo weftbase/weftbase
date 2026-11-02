@@ -1,4 +1,4 @@
-# weft studio — the web source
+# weftbase studio — the web source
 
 The Bun project behind [`studio/dist`](../dist): the Studio UI (TanStack
 Start in SPA mode, React, shadcn/ui on Tailwind v4) and the devtools

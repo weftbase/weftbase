@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 
+import { weftPath } from "../../scripts/weft-version"
 import { CORE_TERMS, GROUPS, TERMS } from "./glossary"
 import { STATUS } from "./status"
 
@@ -15,7 +16,12 @@ const slug = (h: string) =>
     .replace(/[^\w\- ]/g, "")
     .replace(/ /g, "-")
 
+// studio/… is this repository's; every other docs path is the weft
+// framework's (docs/…, thread/…), read from the module go.work or the
+// module cache resolves.
 const repo = resolve(process.cwd(), "../..")
+const docPath = (file: string) =>
+  file.startsWith("studio/") ? resolve(repo, file) : weftPath(file)
 
 describe("the glossary's TERMS (U21.1)", () => {
   const entries = Object.entries(TERMS)
@@ -77,7 +83,7 @@ describe("the glossary's TERMS (U21.1)", () => {
       expect(GROUPS[t.group]).toBeDefined()
       // The anchor is a heading of the file it names.
       const [file, anchor] = t.docs.split("#")
-      const md = readFileSync(resolve(repo, file), "utf8")
+      const md = readFileSync(docPath(file), "utf8")
       const anchors = Array.from(md.matchAll(/^#+ (.+)$/gm), (m) => slug(m[1]))
       expect(anchors, t.docs).toContain(anchor)
     })

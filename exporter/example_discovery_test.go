@@ -13,10 +13,10 @@ import (
 )
 
 // NoDiscovery is for a harness that keeps the operator's environment
-// destinations (WEFT_STUDIO_URL, OTEL_EXPORTER_OTLP_ENDPOINT) but must
+// destinations (WEFTBASE_URL, OTEL_EXPORTER_OTLP_ENDPOINT) but must
 // never write into a Studio it happens to find on disk: here the
 // pipeline exports to the harness's own exporter (and whatever the
-// environment names), and a running `weft studio` on the machine gets
+// environment names), and a running `weftbase dev` on the machine gets
 // nothing. A pipeline that names a Local or a Studio needs no
 // NoDiscovery — either switches the discovery file off on its own.
 func ExampleNoDiscovery() {

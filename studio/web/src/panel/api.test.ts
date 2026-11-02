@@ -34,7 +34,7 @@ import type { Route } from "./testkit"
 
 const STUDIO = "http://studio.test/studio/"
 /** A read-scoped panel token (setup C's default mint). */
-const PANEL_TOKEN = `weft_pt.${btoa(JSON.stringify({ public_id: "pub_orders", exp: "2099-01-01T00:00:00Z" })).replace(/=+$/, "")}.sig`
+const PANEL_TOKEN = `wb_pt.${btoa(JSON.stringify({ public_id: "pub_orders", exp: "2099-01-01T00:00:00Z" })).replace(/=+$/, "")}.sig`
 
 type W = { weft?: unknown }
 const win = () => window as unknown as W

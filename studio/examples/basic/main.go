@@ -4,7 +4,7 @@
 //
 //	go run ./studio/examples/basic [-serve] [-addr 127.0.0.1:7331] [dir]
 //
-// The database lives at <dir>/dev.db (default .weft) and persists
+// The database lives at <dir>/dev.db (default .weftbase) and persists
 // across invocations; -serve skips recording and only serves; -addr
 // picks the listen address (loopback by default — bind loopback until
 // token auth exists, features doc L4). The manifest option feeds the
@@ -47,7 +47,7 @@ func main() {
 	serve := flag.Bool("serve", false, "serve only; record no new run")
 	addr := flag.String("addr", "127.0.0.1:7331", "listen address")
 	flag.Parse()
-	dir := ".weft"
+	dir := ".weftbase"
 	if flag.NArg() > 0 {
 		dir = flag.Arg(0)
 	}

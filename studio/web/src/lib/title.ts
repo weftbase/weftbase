@@ -1,7 +1,7 @@
 // Page titles (plan G2): one shape for every Studio page, so a tab
 // strip, the browser's history menu and a bookmark say which run,
 // trace or page each one is — `director · How many units… · succeeded
-// · weft studio`, `run s_…-t3 · succeeded · weft studio` before the
+// · weftbase`, `run s_…-t3 · succeeded · weftbase` before the
 // run is read. Plain strings, no DOM: hooks/use-document-title.ts
 // writes them.
 //
@@ -14,7 +14,7 @@ import { plural } from "./format"
 import { isLive } from "./honesty"
 
 /** The suffix every title ends with (the root route's own title). */
-export const STUDIO = "weft studio"
+export const STUDIO = "weftbase"
 
 /** What a page is, for its title. */
 export type TitlePlace =

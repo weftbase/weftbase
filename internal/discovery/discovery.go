@@ -1,5 +1,5 @@
 // Package discovery is how an app finds the running Studio with no
-// configuration (plan B3): `weft studio` and `weft dev` write a small
+// configuration (plan B3): `weftbase dev` write a small
 // file, studio.json, naming the Studio they serve, and weft/otel and
 // weft/runtime read it when nothing else names one.
 //
@@ -7,15 +7,15 @@
 // 0600, written after the listener is bound (so the port in it is the
 // real one) and removed on a clean exit. It lives in the first of:
 //
-//   - ./.weft/, when that directory exists (the local sink's own
+//   - ./.weftbase/, when that directory exists (the local sink's own
 //     directory, so a project's Studio is found by that project's apps —
-//     after a default `weft studio` it always exists, so run the app
-//     from the directory you ran `weft studio` in, or set
-//     WEFT_STUDIO_URL);
-//   - $XDG_RUNTIME_DIR/weft/, when XDG_RUNTIME_DIR is set (Linux);
-//   - os.UserCacheDir()/weft/ (macOS, Windows, bare containers).
+//     after a default `weftbase dev` it always exists, so run the app
+//     from the directory you ran `weftbase dev` in, or set
+//     WEFTBASE_URL);
+//   - $XDG_RUNTIME_DIR/weftbase/, when XDG_RUNTIME_DIR is set (Linux);
+//   - os.UserCacheDir()/weftbase/ (macOS, Windows, bare containers).
 //
-// The writer drops a .gitignore ("*") into ./.weft when there is none,
+// The writer drops a .gitignore ("*") into ./.weftbase when there is none,
 // so neither the file nor the token beside the database is committed.
 //
 // The reader walks the same order and takes the first file it trusts.
@@ -29,9 +29,9 @@
 // Two live Studios never erase each other's file: a writer that
 // displaces another live Studio's file restores it when it exits.
 //
-// The file is a convenience, never a requirement: WEFT_STUDIO_URL
-// always wins (the reader does not look), WEFT_DISCOVERY=off turns the
-// read off and the write too (Off: weft studio / weft dev write no
+// The file is a convenience, never a requirement: WEFTBASE_URL
+// always wins (the reader does not look), WEFTBASE_DISCOVERY=off turns the
+// read off and the write too (Off: weftbase dev write no
 // file), and runtime.Studio(url, tok) / exporter.Studio(url, tok) name a
 // Studio in code. weft/exporter skips the read when the pipeline names an
 // exporter.Studio or an exporter.Local, or under exporter.NoDiscovery / NoEnv;
@@ -90,24 +90,24 @@ type Info struct {
 // directory — no test touches the developer's real locations.
 var Dirs = DefaultDirs
 
-// DefaultDirs is the documented order: ./.weft when it exists, then
-// $XDG_RUNTIME_DIR/weft when XDG_RUNTIME_DIR is set, then
-// os.UserCacheDir()/weft. Paths are absolute. ./.weft is relative to
-// the working directory: an app finds a Studio's ./.weft file only when
+// DefaultDirs is the documented order: ./.weftbase when it exists, then
+// $XDG_RUNTIME_DIR/weftbase when XDG_RUNTIME_DIR is set, then
+// os.UserCacheDir()/weft. Paths are absolute. ./.weftbase is relative to
+// the working directory: an app finds a Studio's ./.weftbase file only when
 // run from the directory that Studio was started in (else
-// WEFT_STUDIO_URL names it).
+// WEFTBASE_URL names it).
 func DefaultDirs() []string {
 	var out []string
-	if fi, err := os.Stat(".weft"); err == nil && fi.IsDir() {
-		if abs, err := filepath.Abs(".weft"); err == nil {
+	if fi, err := os.Stat(".weftbase"); err == nil && fi.IsDir() {
+		if abs, err := filepath.Abs(".weftbase"); err == nil {
 			out = append(out, abs)
 		}
 	}
 	if x := os.Getenv("XDG_RUNTIME_DIR"); x != "" && filepath.IsAbs(x) {
-		out = append(out, filepath.Join(x, "weft"))
+		out = append(out, filepath.Join(x, "weftbase"))
 	}
 	if c, err := os.UserCacheDir(); err == nil {
-		out = append(out, filepath.Join(c, "weft"))
+		out = append(out, filepath.Join(c, "weftbase"))
 	}
 	return out
 }
@@ -164,7 +164,7 @@ type Written struct {
 }
 
 // Write writes info to the first location (created 0700 when missing;
-// a .weft directory gets its .gitignore) and returns the handle Remove
+// a .weftbase directory gets its .gitignore) and returns the handle Remove
 // takes. Untrusted files in every location are removed first — the
 // writer is the one that cleans up. The write is atomic (a temporary
 // file renamed over the old one) and the file is 0600: it carries the
@@ -175,7 +175,7 @@ type Written struct {
 func Write(info Info) (*Written, error) {
 	dirs := Dirs()
 	if len(dirs) == 0 {
-		return nil, errors.New("discovery: no location (no ./.weft, no XDG_RUNTIME_DIR, no user cache directory)")
+		return nil, errors.New("discovery: no location (no ./.weftbase, no XDG_RUNTIME_DIR, no user cache directory)")
 	}
 	for _, d := range dirs {
 		p := filepath.Join(d, FileName)
@@ -256,20 +256,20 @@ func (w *Written) Refresh() error {
 	return nil
 }
 
-// GuardDir drops a .gitignore ("*") into dir when dir is a .weft
+// GuardDir drops a .gitignore ("*") into dir when dir is a .weftbase
 // directory without one — the project's local data (the database, its
 // token, the discovery file) is never committed by accident. An
 // existing .gitignore is never touched; failures are ignored (the
 // guard is a courtesy, not a gate).
 func GuardDir(dir string) {
-	if filepath.Base(dir) != ".weft" {
+	if filepath.Base(dir) != ".weftbase" {
 		return
 	}
 	f, err := os.OpenFile(filepath.Join(dir, ".gitignore"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		return
 	}
-	_, _ = f.WriteString("# weft's local data (database, dev token, discovery file): never commit it.\n*\n")
+	_, _ = f.WriteString("# weftbase's local data (database, dev token, discovery file): never commit it.\n*\n")
 	_ = f.Close()
 }
 
@@ -335,23 +335,23 @@ func Path() string {
 // judging it fresh (Stale does).
 func Read(path string) (Info, error) { return load(path) }
 
-// Off reports whether getenv("WEFT_DISCOVERY") is "off" (any case,
+// Off reports whether getenv("WEFTBASE_DISCOVERY") is "off" (any case,
 // spaces trimmed): the file is then neither read (Lookup) nor written —
-// `weft studio` and `weft dev` call Write only when Off is false.
+// `weftbase dev` call Write only when Off is false.
 func Off(getenv func(string) string) bool {
-	return strings.EqualFold(strings.TrimSpace(getenv("WEFT_DISCOVERY")), "off")
+	return strings.EqualFold(strings.TrimSpace(getenv("WEFTBASE_DISCOVERY")), "off")
 }
 
 // Lookup is the reader the app side uses: the first trusted file of the
 // location order, with its path. It does not look when
-// getenv("WEFT_STUDIO_URL") is set (the explicit Studio always wins) or
-// getenv("WEFT_DISCOVERY") is "off". A missing file says nothing; an
+// getenv("WEFTBASE_URL") is set (the explicit Studio always wins) or
+// getenv("WEFTBASE_DISCOVERY") is "off". A missing file says nothing; an
 // untrusted one (malformed, stale, not loopback, not 0600 or not this
 // user's) is one Debug line on log (nil: slog.Default()) — observability
 // never changes behaviour, and a leftover file is no news. ok is false
 // when nothing trusted was found.
 func Lookup(getenv func(string) string, log *slog.Logger) (info Info, path string, ok bool) {
-	if getenv("WEFT_STUDIO_URL") != "" || Off(getenv) {
+	if getenv("WEFTBASE_URL") != "" || Off(getenv) {
 		return Info{}, "", false
 	}
 	if log == nil {

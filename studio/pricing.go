@@ -30,7 +30,7 @@ import (
 // — never stored, never sent anywhere, nothing fetched. The table is a
 // plain JSON file; the default ships in the repo with the day its rates
 // were read (pricing.json, generated from internal/pricingdata), and an
-// operator replaces it with Pricing, WEFT_PRICING=<path> or weft studio
+// operator replaces it with Pricing, WEFT_PRICING=<path> or weftbase dev
 // --pricing <path>.
 //
 // # The table

@@ -1035,7 +1035,7 @@ func (rs *RuntimeServer) freeIDLocked(reg Registration) string {
 // reg's: a live stream on it, or — disconnected — a queued or accepted
 // command addressed to it (the old process may come back for it). A
 // finished command's run route does not hold the id: an app restarted
-// within minutes of a playground run (weft dev's restart on save) keeps
+// within minutes of a playground run (weftbase dev's restart on save) keeps
 // its stable id, its breakpoint set and its /runtimes/<id> link; a late
 // decision for a run parked on the old process reaches the new one,
 // which refuses it ("no parked run …"). Caller holds mu.

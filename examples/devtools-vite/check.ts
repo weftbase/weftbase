@@ -38,7 +38,7 @@ const META = {
   weft_version: "v0.0.0",
   studio_version: "",
   db: { kind: "sqlite" },
-  title: "weft studio",
+  title: "weftbase dev",
   has_manifest: false,
   ingest_open: true,
   interrupted_after_ms: 30000,

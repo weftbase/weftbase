@@ -15,7 +15,7 @@ import (
 // panel token for the bearer's public id — the same HMAC claims and
 // signing as POST /api/panel-tokens, five minutes — and answers 303 to
 // <base><to>#token=<minted>: the fragment never reaches a server, the
-// UI reads it (as it reads `weft open`'s).
+// UI reads it (as it reads `weftbase open`'s).
 //
 // A read-scoped panel token cannot hand off — 403, even read-for-read:
 // a hand-off mints, and a read token mints nothing (a scope never
@@ -24,7 +24,7 @@ import (
 // the UI links to Studio directly instead. The server token (setup B's
 // dev token, which the panel holds as data-token) hands off too (U22,
 // UX-D-18): its answer carries that same token in the fragment — what
-// `weft studio` and `weft open --with-token` already open the browser
+// `weftbase dev` and `weftbase open --with-token` already open the browser
 // with — so a tab in a browser that never stored it lands signed in,
 // as setup C's does. No read token is minted for it: a read token is
 // one public id's, and the dev token's page may be a batch of many.
@@ -97,7 +97,7 @@ func (s *Server) servePanelHandoff(w http.ResponseWriter, r *http.Request) {
 	} else if id.server {
 		// The fragment never reaches a server; the answer is no-store
 		// and no-referrer (above). The UI reads #token= as it reads
-		// weft open's (url.QueryEscape: the CLI's runLink encoding).
+		// weftbase open's (url.QueryEscape: the CLI's runLink encoding).
 		location += "#token=" + url.QueryEscape(s.token)
 	}
 	if strings.Contains(r.Header.Get("Accept"), "application/json") {

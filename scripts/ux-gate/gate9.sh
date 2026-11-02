@@ -57,7 +57,7 @@ say "run    $RUN"
 if ss -ltn 2>/dev/null | grep -q " $ADDR "; then say "$ADDR is taken: $(ss -ltnp 2>/dev/null | grep " $ADDR ")"; exit 2; fi
 
 # ---- 1. Studio from $REPO, a fresh DB ---------------------------------
-( cd "$REPO" && go build -o "$RUN/weft" ./cmd/weft ) || { say "weft build failed"; exit 2; }
+( cd "$REPO" && go build -o "$RUN/weft" ./cmd/weftbase ) || { say "weft build failed"; exit 2; }
 rm -f "$RUN"/studio.db*
 "$RUN/weft" studio --addr "$ADDR" --db "sqlite://$RUN/studio.db" --token "$TOKEN" --open=false > "$RUN/studio.log" 2>&1 &
 SPID=$!; echo "$SPID" > "$RUN/studio.pid"
@@ -76,7 +76,7 @@ traced() {
   local f="$1"; shift
   if command -v strace >/dev/null && [ "${STRACE_ON:-1}" != 0 ]; then strace -f -qq -e trace=connect -o "$f" "$@"; else "$@"; fi
 }
-( cd "$ARENA" && WEFT_STUDIO_URL="$STUDIO" WEFT_STUDIO_TOKEN="$TOKEN" traced "$RUN/seed.strace" "${SEED[@]}" ) > "$RUN/seed.log" 2>&1
+( cd "$ARENA" && WEFTBASE_URL="$STUDIO" WEFTBASE_TOKEN="$TOKEN" traced "$RUN/seed.strace" "${SEED[@]}" ) > "$RUN/seed.log" 2>&1
 SEEDRC=$?
 seedline=$(grep -E '^weft-arena — engine=' "$RUN/seed.log" | tail -1)
 say "seed   exit $SEEDRC: $seedline"

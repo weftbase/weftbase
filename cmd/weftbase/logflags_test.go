@@ -15,7 +15,7 @@ import (
 func TestLogFlags(t *testing.T) {
 	install := func(t *testing.T, args ...string) (*strings.Builder, func(), error) {
 		t.Helper()
-		fs := flag.NewFlagSet("weft studio", flag.ContinueOnError)
+		fs := flag.NewFlagSet("weftbase dev", flag.ContinueOnError)
 		fs.SetOutput(io.Discard)
 		lf := addLogFlags(fs)
 		if err := fs.Parse(args); err != nil {

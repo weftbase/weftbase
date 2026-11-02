@@ -178,9 +178,9 @@ func mcpCallRun(t *testing.T, cs *sdk.ClientSession) (bool, []string) {
 // the "looks again" hint), the one after reads B, and stderr says the
 // switch once.
 func TestMCPReresolvesAfterStudioMoves(t *testing.T) {
-	t.Setenv("WEFT_STUDIO_URL", "")
-	t.Setenv("WEFT_STUDIO_TOKEN", "")
-	t.Setenv("WEFT_DISCOVERY", "")
+	t.Setenv("WEFTBASE_URL", "")
+	t.Setenv("WEFTBASE_TOKEN", "")
+	t.Setenv("WEFTBASE_DISCOVERY", "")
 	a := mcpSeed(t)
 	pointDiscovery(t, a.base, "tok")
 	var stderr syncBuffer
@@ -210,12 +210,12 @@ func TestMCPReresolvesAfterStudioMoves(t *testing.T) {
 
 // TestMCPReresolvesAfterTokenRotation: the same Studio restarted on its
 // port with a new token, the discovery file rewritten with it, and no
-// --token or WEFT_STUDIO_TOKEN — the next call is the 401 (with the
+// --token or WEFTBASE_TOKEN — the next call is the 401 (with the
 // hint), the one after reads the row with the file's new token.
 func TestMCPReresolvesAfterTokenRotation(t *testing.T) {
-	t.Setenv("WEFT_STUDIO_URL", "")
-	t.Setenv("WEFT_STUDIO_TOKEN", "")
-	t.Setenv("WEFT_DISCOVERY", "")
+	t.Setenv("WEFTBASE_URL", "")
+	t.Setenv("WEFTBASE_TOKEN", "")
+	t.Setenv("WEFTBASE_DISCOVERY", "")
 	s := mcpSeed(t)
 	pointDiscovery(t, s.base, "tok")
 	srv, err := startMCP(context.Background(), "", "", io.Discard)
@@ -352,8 +352,8 @@ func directBody(t *testing.T, base, token, route string) []byte {
 	return b
 }
 
-// TestMCPStdio pins `weft mcp` over real stdio: this binary re-executed
-// as `weft mcp --url <studio>` (the token from WEFT_STUDIO_TOKEN),
+// TestMCPStdio pins `weftbase mcp` over real stdio: this binary re-executed
+// as `weftbase mcp --url <studio>` (the token from WEFTBASE_TOKEN),
 // driven by the SDK's client over the command transport. Every tool is
 // listed and called once; each answer is a summary line, then the
 // route's own body (compacted) — request's transcript body after its
@@ -363,7 +363,7 @@ func directBody(t *testing.T, base, token, route string) []byte {
 func TestMCPStdio(t *testing.T) {
 	base := mcpSeedStudio(t)
 	cmd := exec.Command(os.Args[0], "mcp", "--url", base)
-	cmd.Env = append(os.Environ(), "WEFT_MCP_HELPER=1", "WEFT_STUDIO_TOKEN=tok", "WEFT_DISCOVERY=off", "WEFT_STUDIO_URL=")
+	cmd.Env = append(os.Environ(), "WEFT_MCP_HELPER=1", "WEFTBASE_TOKEN=tok", "WEFTBASE_DISCOVERY=off", "WEFTBASE_URL=")
 	var stderr syncBuffer
 	cmd.Stderr = &stderr
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -510,7 +510,7 @@ func TestMCPStdio(t *testing.T) {
 	}
 	_ = cs.Close()
 	if s := stderr.String(); strings.Contains(s, "tok)") || !strings.Contains(s, "read-only tools over stdio") ||
-		!strings.Contains(s, "token from WEFT_STUDIO_TOKEN") {
+		!strings.Contains(s, "token from WEFTBASE_TOKEN") {
 		t.Errorf("stderr %q: want the start line naming where the token came from, never the token", s)
 	}
 }
@@ -615,7 +615,7 @@ func TestMCPReadOnlyMethods(t *testing.T) {
 	}
 	// wefttest is refused before any request.
 	res, _ := cs.CallTool(ctx, &sdk.CallToolParams{Name: "export", Arguments: map[string]any{"id": "r_ok", "format": "wefttest"}})
-	if !res.IsError || !strings.Contains(texts(t, res)[0], "weft export <id> --wefttest") {
+	if !res.IsError || !strings.Contains(texts(t, res)[0], "weftbase export <id> --wefttest") {
 		t.Errorf("export wefttest = %q, want the refusal naming the terminal command", texts(t, res))
 	}
 }
@@ -654,12 +654,12 @@ func TestMCPTransportRefusesWrites(t *testing.T) {
 	}
 	got := texts(t, res)
 	t.Logf("mutated tool: isError=%v %q", res.IsError, got)
-	if !res.IsError || !strings.Contains(got[0], "weft mcp is read-only: POST refused") {
+	if !res.IsError || !strings.Contains(got[0], "weftbase mcp is read-only: POST refused") {
 		t.Errorf("a POST through the tools' client = %v %q, want the refusal", res.IsError, got)
 	}
 	for _, m := range []string{http.MethodPut, http.MethodDelete, http.MethodPatch} {
 		req, _ := http.NewRequest(m, studio.URL+"/api/runs/r", nil)
-		if _, err := c.http.Do(req); err == nil || !strings.Contains(err.Error(), "weft mcp is read-only: "+m+" refused") {
+		if _, err := c.http.Do(req); err == nil || !strings.Contains(err.Error(), "weftbase mcp is read-only: "+m+" refused") {
 			t.Errorf("%s through the transport = %v, want the refusal", m, err)
 		}
 	}
@@ -840,16 +840,16 @@ func TestMCPPanelToken(t *testing.T) {
 // refused, and with no Studio answering /api/meta it serves, WARNs
 // once, and a tool call isErrors with the line saying so.
 func TestMCPCommand(t *testing.T) {
-	t.Setenv("WEFT_STUDIO_URL", "")
-	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	t.Setenv("WEFTBASE_URL", "")
+	t.Setenv("WEFTBASE_TOKEN", "")
 	_, errb, code := weft("mcp", "-h")
 	for _, tool := range mcpTools {
 		if !strings.Contains(errb, "  "+tool.name+" ") {
 			t.Errorf("mcp -h lacks %s", tool.name)
 		}
 	}
-	if code != 0 || !strings.Contains(errb, "claude mcp add weft -- weft mcp\n") || !strings.Contains(errb, `"args":["mcp"]`) ||
-		!strings.Contains(errb, "claude mcp add weft -- weft mcp --url http://127.0.0.1:7331") {
+	if code != 0 || !strings.Contains(errb, "claude mcp add weft -- weftbase mcp\n") || !strings.Contains(errb, `"args":["mcp"]`) ||
+		!strings.Contains(errb, "claude mcp add weft -- weftbase mcp --url http://127.0.0.1:7331") {
 		t.Errorf("mcp -h = exit %d\n%s", code, errb)
 	}
 	if _, errb, code := weft("mcp", "--read-only=false"); code != 2 || !strings.Contains(errb, "no write mode") {
@@ -862,7 +862,7 @@ func TestMCPCommand(t *testing.T) {
 	// starts its servers once, maybe before the Studio), says so in one
 	// WARN, and each tool call isErrors with the line and its fix.
 	cmd := exec.Command(os.Args[0], "mcp", "--url", "http://127.0.0.1:1", "--token", "secret-tok")
-	cmd.Env = append(os.Environ(), "WEFT_MCP_HELPER=1", "WEFT_DISCOVERY=off", "WEFT_STUDIO_URL=", "WEFT_STUDIO_TOKEN=")
+	cmd.Env = append(os.Environ(), "WEFT_MCP_HELPER=1", "WEFTBASE_DISCOVERY=off", "WEFTBASE_URL=", "WEFTBASE_TOKEN=")
 	var stderr syncBuffer
 	cmd.Stderr = &stderr
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -889,12 +889,12 @@ func TestMCPCommand(t *testing.T) {
 
 // TestMCPServesBeforeStudio pins the order an MCP client imposes: the
 // server starts first (nothing answers: a WARN, it serves), a Studio
-// comes up later on a port only the discovery file names (weft dev
+// comes up later on a port only the discovery file names (weftbase dev
 // on 7332–7340), and the next tool call finds it — no restart.
 func TestMCPServesBeforeStudio(t *testing.T) {
-	t.Setenv("WEFT_STUDIO_URL", "")
-	t.Setenv("WEFT_STUDIO_TOKEN", "")
-	t.Setenv("WEFT_DISCOVERY", "")
+	t.Setenv("WEFTBASE_URL", "")
+	t.Setenv("WEFTBASE_TOKEN", "")
+	t.Setenv("WEFTBASE_DISCOVERY", "")
 	// A file naming a dead port first, so the default address (maybe
 	// the developer's own Studio) is never the one read.
 	dead, err := discovery.Write(discovery.Info{URL: "http://127.0.0.1:1", PID: os.Getpid(), Started: time.Now().UTC()})
@@ -977,12 +977,12 @@ func TestMCPExplainTailSurvivesCut(t *testing.T) {
 
 // TestMCPStudioResolution pins where the Studio and token come from:
 // --url and --token first, then the env, then a trusted discovery file
-// (its token only for the Studio it names), WEFT_DISCOVERY=off skipping
+// (its token only for the Studio it names), WEFTBASE_DISCOVERY=off skipping
 // it, then the default address with no token.
 func TestMCPStudioResolution(t *testing.T) {
-	t.Setenv("WEFT_STUDIO_URL", "")
-	t.Setenv("WEFT_STUDIO_TOKEN", "")
-	t.Setenv("WEFT_DISCOVERY", "")
+	t.Setenv("WEFTBASE_URL", "")
+	t.Setenv("WEFTBASE_TOKEN", "")
+	t.Setenv("WEFTBASE_DISCOVERY", "")
 	w, err := discovery.Write(discovery.Info{URL: "http://127.0.0.1:7339", Token: "disc-tok", PID: os.Getpid(), Started: time.Now().UTC()})
 	if err != nil {
 		t.Fatal(err)
@@ -997,13 +997,13 @@ func TestMCPStudioResolution(t *testing.T) {
 		{"another url: no file token", "http://127.0.0.1:7000", "", "", "", "", "http://127.0.0.1:7000", "", "none"},
 		{"env url", "", "", "http://127.0.0.1:7001", "", "", "http://127.0.0.1:7001", "", "none"},
 		{"flags win", "http://h:1", "f", "http://127.0.0.1:7001", "e", "", "http://h:1", "f", "from --token"},
-		{"env token", "", "", "", "e", "", "http://127.0.0.1:7339", "e", "from WEFT_STUDIO_TOKEN"},
+		{"env token", "", "", "", "e", "", "http://127.0.0.1:7339", "e", "from WEFTBASE_TOKEN"},
 		{"discovery off", "", "", "", "", "off", defaultURL, "", "none"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			t.Setenv("WEFT_STUDIO_URL", c.env)
-			t.Setenv("WEFT_STUDIO_TOKEN", c.envTok)
-			t.Setenv("WEFT_DISCOVERY", c.disc)
+			t.Setenv("WEFTBASE_URL", c.env)
+			t.Setenv("WEFTBASE_TOKEN", c.envTok)
+			t.Setenv("WEFTBASE_DISCOVERY", c.disc)
 			u, tok, from := mcpStudio(c.url, c.tok)
 			if u != c.wantURL || tok != c.wantTok || from != c.wantFrom {
 				t.Errorf("mcpStudio(%q, %q) = %q %q %q, want %q %q %q", c.url, c.tok, u, tok, from, c.wantURL, c.wantTok, c.wantFrom)

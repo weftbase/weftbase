@@ -9,8 +9,8 @@ import {
   exportFormatsFor,
 } from "./run-actions"
 
-const READ = `weft_pt.${btoa(JSON.stringify({ scope: "read" }))}.sig`
-const PLAY = `weft_pt.${btoa(JSON.stringify({ scope: "playground" }))}.sig`
+const READ = `wb_pt.${btoa(JSON.stringify({ scope: "read" }))}.sig`
+const PLAY = `wb_pt.${btoa(JSON.stringify({ scope: "playground" }))}.sig`
 
 describe("exportFormatsFor", () => {
   it("json, jsonl and otlp under export; a read token no otlp; none without the capability", () => {
@@ -67,7 +67,7 @@ describe("deleteOffWhy", () => {
 })
 
 describe("curlFor (U30.2, UX-A-15)", () => {
-  it("names $WEFT_STUDIO_TOKEN where the API is walled, never a token; the route and tree=1 as the page fetches them", () => {
+  it("names $WEFTBASE_TOKEN where the API is walled, never a token; the route and tree=1 as the page fetches them", () => {
     expect(
       curlFor({
         apiBase: "http://127.0.0.1:7331/studio/api/",
@@ -77,7 +77,7 @@ describe("curlFor (U30.2, UX-A-15)", () => {
         authRequired: true,
       })
     ).toBe(
-      `curl -fsSL -OJ -H "Authorization: Bearer $WEFT_STUDIO_TOKEN" 'http://127.0.0.1:7331/studio/api/runs/r%2F0%2Fcall%201/export?format=jsonl&tree=1'`
+      `curl -fsSL -OJ -H "Authorization: Bearer $WEFTBASE_TOKEN" 'http://127.0.0.1:7331/studio/api/runs/r%2F0%2Fcall%201/export?format=jsonl&tree=1'`
     )
     expect(
       curlFor({ apiBase: "http://h/api/", runID: "r'x", format: "json" })

@@ -31,7 +31,7 @@ const panelToken = (
   exp = Date.now() + 3600_000,
   publicId = "pub_orders"
 ) =>
-  `weft_pt.${btoa(
+  `wb_pt.${btoa(
     JSON.stringify({
       public_id: publicId,
       scope,

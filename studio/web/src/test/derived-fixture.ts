@@ -4,7 +4,7 @@
 // and every other route's body under ./derived/ is what a real Studio
 // answered for the record contract's stock_genai fixture ingested
 // through /v1/traces (a Python app's stock GenAI spans, no weft.*
-// attribute) — captured from `weft studio`, never hand-written, so the
+// attribute) — captured from `weftbase dev`, never hand-written, so the
 // UI's fixture is the server's truth.
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"

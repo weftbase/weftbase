@@ -181,7 +181,7 @@ export function FirstRunCard() {
           <li>
             connect your app to this Studio:{" "}
             <span className="font-mono text-foreground">
-              WEFT_STUDIO_URL={studioURL()}
+              WEFTBASE_URL={studioURL()}
             </span>{" "}
             <button
               type="button"

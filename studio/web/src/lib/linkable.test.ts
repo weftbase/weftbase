@@ -62,20 +62,20 @@ describe("connect an app to this Studio (U21.2)", () => {
     const open = connectLines(url)
     expect(open.map((l) => l.key)).toEqual(["app", "panel", "mcp"])
     for (const l of open) expect(l.code).toContain(url)
-    expect(open[0].code).toContain(`WEFT_STUDIO_URL=${url}`)
+    expect(open[0].code).toContain(`WEFTBASE_URL=${url}`)
     expect(open[1].code).toBe(
       `<script type="module" src="${url}/panel.js" data-weft data-endpoint="${url}/"></script>`
     )
     const walled = connectLines(url, true)
     expect(walled[1].code).toContain('data-token="<token>"')
     expect(walled[1].note).toContain("<db>.token")
-    expect(walled[2].code).toContain("WEFT_STUDIO_TOKEN=<token>")
-    // WEFT_STUDIO_URL turns discovery off: the token goes beside it.
-    expect(walled[0].code).toContain("export WEFT_STUDIO_TOKEN=<token>")
-    expect(open[0].code).not.toContain("WEFT_STUDIO_TOKEN")
-    expect(open[0].note).toContain("WEFT_STUDIO_TOKEN")
-    // Bare `weft open --with-token` prints the root signed in (B7).
-    expect(walled[1].note).toContain("`weft open --with-token`")
+    expect(walled[2].code).toContain("WEFTBASE_TOKEN=<token>")
+    // WEFTBASE_URL turns discovery off: the token goes beside it.
+    expect(walled[0].code).toContain("export WEFTBASE_TOKEN=<token>")
+    expect(open[0].code).not.toContain("WEFTBASE_TOKEN")
+    expect(open[0].note).toContain("WEFTBASE_TOKEN")
+    // Bare `weftbase open --with-token` prints the root signed in (B7).
+    expect(walled[1].note).toContain("`weftbase open --with-token`")
     // The discovery file this Studio wrote, when meta names it (B7).
     expect(open[0].note).toContain("(studio.json)")
     const named = connectLines(url, false, "/run/user/1000/weft/studio.json")

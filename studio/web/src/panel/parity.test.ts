@@ -1478,7 +1478,7 @@ describe("the wire pair: the panel links where the run page draws it (A6.2)", ()
 })
 
 describe("the saves say the same words on both surfaces (F6.2)", () => {
-  const PLAY = `weft_pt.${btoa(JSON.stringify({ pid: "pub_orders", scope: "playground" })).replace(/=+$/, "")}.sig`
+  const PLAY = `wb_pt.${btoa(JSON.stringify({ pid: "pub_orders", scope: "playground" })).replace(/=+$/, "")}.sig`
   const CAPS = ["export", "proposals"]
   const studioToasts = () =>
     [...document.querySelectorAll<HTMLElement>("[data-sonner-toast]")].map(
@@ -3489,7 +3489,7 @@ describe("a settling run on both surfaces (U2-fix2)", () => {
 // · 811 ms · How many units…" (P020.2: the title last, so a narrow
 // select cuts it, never the figures), its turn row "t3 How many units…"; the run page's
 // heading is "agent · the prompt" and the tab "agent · How many units…
-// · succeeded · weft studio"; the id rides in a title / a mono line,
+// · succeeded · weftbase"; the id rides in a title / a mono line,
 // never as the label. A content-off row reads "(content not captured)"
 // on both.
 const AT = (ms: number) => new Date(Date.parse(T0) + ms).toISOString()
@@ -3512,7 +3512,7 @@ describe("titles, not ids, on both surfaces (U6)", () => {
       option: `● parked t3 · 1 step · 811 ms · ${CUT}`,
       row: `t3 ${CUT}`,
       heading: `acme-support·${PROMPT}`,
-      tab: `acme-support · ${CUT} · succeeded · weft studio`,
+      tab: `acme-support · ${CUT} · succeeded · weftbase`,
       full: PROMPT,
     },
     {
@@ -3521,7 +3521,7 @@ describe("titles, not ids, on both surfaces (U6)", () => {
       option: `● succeeded t3 · 1 step · 0 ms · ${NO_CONTENT}`,
       row: `t3 ${NO_CONTENT}`,
       heading: `unnamed agent·${NO_CONTENT}`,
-      tab: `${NO_CONTENT} · succeeded · weft studio`,
+      tab: `${NO_CONTENT} · succeeded · weftbase`,
       full: NO_CONTENT,
     },
     // U6-fix: kind agent already leads with the agent — the heading
@@ -3532,7 +3532,7 @@ describe("titles, not ids, on both surfaces (U6)", () => {
       option: `● succeeded t3 · 1 step · 0 ms · director · ${NO_CONTENT}`,
       row: `t3 director · ${NO_CONTENT}`,
       heading: `director · ${NO_CONTENT}`,
-      tab: `director · ${NO_CONTENT} · succeeded · weft studio`,
+      tab: `director · ${NO_CONTENT} · succeeded · weftbase`,
       full: `director · ${NO_CONTENT}`,
     },
   ]
@@ -4771,7 +4771,7 @@ describe("the landing step's answer on both surfaces (P8-fix-a)", () => {
       .on(`GET runs/${UL}/requests`, pagedRequests(UL_REQUESTS))
       .on("GET runtimes", { runtimes: [] })
       .install()
-    const read = `weft_pt.${btoa(JSON.stringify({ public_id: "pub_x", scope: "read", exp: "2099-01-01T00:00:00Z" })).replace(/=+$/, "")}.sig`
+    const read = `wb_pt.${btoa(JSON.stringify({ public_id: "pub_x", scope: "read", exp: "2099-01-01T00:00:00Z" })).replace(/=+$/, "")}.sig`
     const el = await mount({
       "data-endpoint": "http://studio.test/studio/",
       "data-open": "true",

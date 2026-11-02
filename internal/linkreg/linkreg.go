@@ -4,7 +4,7 @@
 // reads the list for /api/meta's runtime_link — whether this process's
 // link talks to this very server in-process, or which Studio it dialled
 // instead. An app that embeds Studio (setup A) and whose link dialled
-// another Studio (weft dev's) can then say where its runtime went,
+// another Studio (weftbase dev's) can then say where its runtime went,
 // instead of reading as an app whose link is closed.
 //
 // It exists because weft/runtime imports weft/studio (runtime.Local

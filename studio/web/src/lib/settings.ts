@@ -350,7 +350,7 @@ export interface TokenIdentity {
 
 function panelClaims(token: string): { public_id?: string; exp?: string } {
   try {
-    const body = token.slice("weft_pt.".length).split(".")[0]
+    const body = token.slice("wb_pt.".length).split(".")[0]
     const b64 = body.replace(/-/g, "+").replace(/_/g, "/")
     const c = JSON.parse(
       atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4))
@@ -366,7 +366,7 @@ function panelClaims(token: string): { public_id?: string; exp?: string } {
 
 /**
  * tokenIdentity says what the stored bearer is: a panel token names its
- * scope in its claims (weft_pt.<claims>.<sig>; Studio verifies it, the
+ * scope in its claims (wb_pt.<claims>.<sig>; Studio verifies it, the
  * page only reads it); any other bearer accepted by a token-walled
  * Studio is the server (dev) token — confirmed when api/meta served
  * what only the server token or a loopback request without a Token
@@ -423,20 +423,20 @@ export function maskToken(token: string): string {
   return token ? "••••••••" : ""
 }
 
-/** The repository path of the `weft mcp` recipe (UX-S4-15): named as a
+/** The repository path of the `weftbase mcp` recipe (UX-S4-15): named as a
  * path, never an external link (D4: offline by construction). */
 export const MCP_RECIPE_PATH = "docs/mcp-recipe.md"
 
 /** mcpCommand is the command that reads this Studio from an MCP client
- * (`weft mcp`, docs/mcp-recipe.md): its URL is the page's base — where
+ * (`weftbase mcp`, docs/mcp-recipe.md): its URL is the page's base — where
  * this UI and its /api are served — without the trailing slash; a
  * token-walled Studio adds the token by environment (never in a
  * command line `ps` shows). */
 export function mcpCommand(studioURL: string, authRequired?: boolean): string {
   const url = studioURL.replace(/\/+$/, "")
   return authRequired
-    ? `WEFT_STUDIO_TOKEN=<token> weft mcp --url ${url}`
-    : `weft mcp --url ${url}`
+    ? `WEFTBASE_TOKEN=<token> weftbase mcp --url ${url}`
+    : `weftbase mcp --url ${url}`
 }
 
 /** What carries an app's own log lines here (UX-S1-10): the run's
@@ -448,12 +448,12 @@ export function mcpCommand(studioURL: string, authRequired?: boolean): string {
 export const LOGS_BRIDGE =
   "weft's records arrive with weft.LoggerProvider / otel.Install; the app's slog lines need a bridge to OTel logs — otel.Install(…, otel.Slog()) bridges slog.Default, otel.SlogHandler(h) any other handler. An Agent.CallTool outside a run records nothing."
 
-/** Where a token-walled `weft studio`'s token lives (B7, UX-S5a-02):
+/** Where a token-walled `weftbase dev`'s token lives (B7, UX-S5a-02):
  * the stable token's file beside the database — never printed; the
  * start banner names its path — and the command that prints this
  * Studio's link signed in (the token in its URL fragment). */
 export const TOKEN_FILE = "<db>.token"
-export const SIGN_IN_COMMAND = "weft open --with-token"
+export const SIGN_IN_COMMAND = "weftbase open --with-token"
 
 /** The token wall's words (UX-F-26, UX-S5a-02): its heading, the hint
  * on the sidebar's pages it hides until the token is in, and where a

@@ -21,18 +21,18 @@ import (
 // one-Studio-per-database rule, end to end through `run`.
 
 // TestBareDoctorFindsAddrStudio is B7's Done line: a Studio started
-// with --addr on a free port is found by bare `weft doctor` — no flag,
+// with --addr on a free port is found by bare `weftbase doctor` — no flag,
 // no env — through the discovery file, said on stderr; its token comes
-// from the file; `weft runs` and `weft open --with-token` find it the
+// from the file; `weftbase runs` and `weftbase open --with-token` find it the
 // same way; the start's banner says how to sign in; api/meta names the
-// file; and a second `weft studio` on the same SQLite file — no --addr,
+// file; and a second `weftbase dev` on the same SQLite file — no --addr,
 // so it would have bound 7331–7340 — is refused naming the first's URL
 // and pid.
 func TestBareDoctorFindsAddrStudio(t *testing.T) {
 	skipWithoutSelfSignal(t)
 	dir := discoveryDir(t)
 	file := filepath.Join(dir, discovery.FileName)
-	for _, k := range []string{"WEFT_STUDIO_URL", "WEFT_STUDIO_TOKEN", "WEFT_DISCOVERY", "WEFT_STUDIO_ADDR", "WEFT_DB"} {
+	for _, k := range []string{"WEFTBASE_URL", "WEFTBASE_TOKEN", "WEFTBASE_DISCOVERY", "WEFTBASE_ADDR", "WEFTBASE_DB"} {
 		t.Setenv(k, "")
 	}
 	port := freeBase(t, 1)
@@ -41,7 +41,7 @@ func TestBareDoctorFindsAddrStudio(t *testing.T) {
 	var banner syncBuffer
 	done := make(chan int, 1)
 	go func() {
-		done <- run([]string{"studio", "--addr", loop(port), "--db", "sqlite://" + db}, &banner, &banner)
+		done <- run([]string{"dev", "--addr", loop(port), "--db", "sqlite://" + db}, &banner, &banner)
 	}()
 	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
 		if _, err := os.Stat(file); err == nil {
@@ -64,10 +64,10 @@ func TestBareDoctorFindsAddrStudio(t *testing.T) {
 		t.Errorf("banner lacks the sign-in line:\n%s", banner.String())
 	}
 
-	from := "weft: Studio " + url + " (discovery file " + file + ")\n"
+	from := "weftbase: Studio " + url + " (discovery file " + file + ")\n"
 	out, errb, code := weft("doctor")
 	if code != 0 || errb != from {
-		t.Errorf("bare weft doctor = exit %d, stderr %q, want %q\n%s", code, errb, from, out)
+		t.Errorf("bare weftbase doctor = exit %d, stderr %q, want %q\n%s", code, errb, from, out)
 	}
 	// The source is said once, on stderr (B7-fix).
 	if strings.Contains(out, "(discovery file") {
@@ -83,14 +83,14 @@ func TestBareDoctorFindsAddrStudio(t *testing.T) {
 		}
 	}
 	if _, errb, code := weft("runs"); code != 0 || !strings.HasPrefix(errb, from) || !strings.Contains(errb, "no runs match") {
-		t.Errorf("bare weft runs = exit %d, stderr %q", code, errb)
+		t.Errorf("bare weftbase runs = exit %d, stderr %q", code, errb)
 	}
 	tok, err := os.ReadFile(db + ".token")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if out, errb, code := weft("open", "--with-token"); code != 0 || out != url+"/#token="+strings.TrimSpace(string(tok))+"\n" || errb != from {
-		t.Errorf("bare weft open --with-token = exit %d %q %q, want the root signed in", code, out, errb)
+		t.Errorf("bare weftbase open --with-token = exit %d %q %q, want the root signed in", code, out, errb)
 	}
 	b, err := newClient(url, strings.TrimSpace(string(tok))).get(context.Background(), "/api/meta", nil)
 	var meta struct {
@@ -101,9 +101,9 @@ func TestBareDoctorFindsAddrStudio(t *testing.T) {
 	}
 
 	// The second Studio on the same file: refused, exit 1, the first named.
-	_, errb, code = weft("studio", "--db", "sqlite://"+db)
-	if want := "weft: studio already running at " + url + " (pid " + strconv.Itoa(os.Getpid()) + ") on " + db + ":"; code != 1 || !strings.HasPrefix(errb, want) {
-		t.Errorf("second weft studio = exit %d %q, want %q…", code, errb, want)
+	_, errb, code = weft("dev", "--db", "sqlite://"+db)
+	if want := "weftbase: studio already running at " + url + " (pid " + strconv.Itoa(os.Getpid()) + ") on " + db + ":"; code != 1 || !strings.HasPrefix(errb, want) {
+		t.Errorf("second weftbase dev = exit %d %q, want %q…", code, errb, want)
 	}
 	stopped = true
 	if code := stopStudio(t, done); code != 0 {
@@ -112,13 +112,13 @@ func TestBareDoctorFindsAddrStudio(t *testing.T) {
 }
 
 // TestResolverOrder pins the one resolver (UX-S5a-01): --url >
-// WEFT_STUDIO_URL > the discovery file > the default address; the
-// token --token > WEFT_STUDIO_TOKEN > the file's, which goes only to
-// the Studio the file names; WEFT_DISCOVERY=off reads no file; the
+// WEFTBASE_URL > the discovery file > the default address; the
+// token --token > WEFTBASE_TOKEN > the file's, which goes only to
+// the Studio the file names; WEFTBASE_DISCOVERY=off reads no file; the
 // stderr line only when the user named no Studio.
 func TestResolverOrder(t *testing.T) {
 	dir := discoveryDir(t)
-	for _, k := range []string{"WEFT_STUDIO_URL", "WEFT_STUDIO_TOKEN", "WEFT_DISCOVERY"} {
+	for _, k := range []string{"WEFTBASE_URL", "WEFTBASE_TOKEN", "WEFTBASE_DISCOVERY"} {
 		t.Setenv(k, "")
 	}
 	say := func(r studioTarget) string {
@@ -127,7 +127,7 @@ func TestResolverOrder(t *testing.T) {
 		return b.String()
 	}
 	r := resolveStudio("", "")
-	if r.base != defaultURL || r.token != "" || say(r) != "weft: Studio "+defaultURL+" (the default address; no discovery file)\n" {
+	if r.base != defaultURL || r.token != "" || say(r) != "weftbase: Studio "+defaultURL+" (the default address; no discovery file)\n" {
 		t.Errorf("nothing = %+v %q", r, say(r))
 	}
 	w, err := discovery.Write(discovery.Info{URL: "http://127.0.0.1:7347", Token: "filetok", PID: os.Getpid(), Started: time.Now().UTC()})
@@ -140,17 +140,17 @@ func TestResolverOrder(t *testing.T) {
 		name, urlFlag, tokFlag, envURL, envTok, off string
 		base, token, line                           string
 	}{
-		{"the file", "", "", "", "", "", "http://127.0.0.1:7347", "filetok", "weft: Studio http://127.0.0.1:7347 (discovery file " + file + ")\n"},
+		{"the file", "", "", "", "", "", "http://127.0.0.1:7347", "filetok", "weftbase: Studio http://127.0.0.1:7347 (discovery file " + file + ")\n"},
 		{"env over the file", "", "", "http://127.0.0.1:7400", "", "", "http://127.0.0.1:7400", "", ""},
 		{"--url over env", "http://127.0.0.1:7500", "", "http://127.0.0.1:7400", "", "", "http://127.0.0.1:7500", "", ""},
 		{"--url naming the file's Studio takes its token", "http://127.0.0.1:7347/", "", "", "", "", "http://127.0.0.1:7347/", "filetok", ""},
-		{"env token over the file's", "", "", "", "envtok", "", "http://127.0.0.1:7347", "envtok", "weft: Studio http://127.0.0.1:7347 (discovery file " + file + ")\n"},
-		{"--token over env", "", "flagtok", "", "envtok", "", "http://127.0.0.1:7347", "flagtok", "weft: Studio http://127.0.0.1:7347 (discovery file " + file + ")\n"},
-		{"off", "", "", "", "", "off", defaultURL, "", "weft: Studio " + defaultURL + " (the default address; WEFT_DISCOVERY=off)\n"},
+		{"env token over the file's", "", "", "", "envtok", "", "http://127.0.0.1:7347", "envtok", "weftbase: Studio http://127.0.0.1:7347 (discovery file " + file + ")\n"},
+		{"--token over env", "", "flagtok", "", "envtok", "", "http://127.0.0.1:7347", "flagtok", "weftbase: Studio http://127.0.0.1:7347 (discovery file " + file + ")\n"},
+		{"off", "", "", "", "", "off", defaultURL, "", "weftbase: Studio " + defaultURL + " (the default address; WEFTBASE_DISCOVERY=off)\n"},
 	} {
-		t.Setenv("WEFT_STUDIO_URL", c.envURL)
-		t.Setenv("WEFT_STUDIO_TOKEN", c.envTok)
-		t.Setenv("WEFT_DISCOVERY", c.off)
+		t.Setenv("WEFTBASE_URL", c.envURL)
+		t.Setenv("WEFTBASE_TOKEN", c.envTok)
+		t.Setenv("WEFTBASE_DISCOVERY", c.off)
 		r := resolveStudio(c.urlFlag, c.tokFlag)
 		if r.base != c.base || r.token != c.token || say(r) != c.line {
 			t.Errorf("%s: base %q token %q line %q, want %q %q %q", c.name, r.base, r.token, say(r), c.base, c.token, c.line)
@@ -158,7 +158,7 @@ func TestResolverOrder(t *testing.T) {
 	}
 }
 
-// TestOpenIDKinds (UX-S5a-06): `weft open` tries a run id, then a
+// TestOpenIDKinds (UX-S5a-06): `weftbase open` tries a run id, then a
 // public id (the conversation page), a session id, a trace id; a
 // refusal other than 404 stops it.
 func TestOpenIDKinds(t *testing.T) {
@@ -208,7 +208,7 @@ func metaDB(addr, db string) string {
 	return m.DB.Path
 }
 
-// starts runs `weft studio` starts in the background and stops every
+// starts runs `weftbase dev` starts in the background and stops every
 // one still serving when the test ends — SIGTERM (signalSelf's guard
 // absorbs a signal nobody waits for), then each waited for, bounded —
 // so a broken lock fails the test instead of leaving Studios serving
@@ -253,13 +253,13 @@ func (s *starts) next(d time.Duration) (error, bool) {
 }
 
 // TestConcurrentStartsOneServes (B7-fix, review finding 1): two bare
-// `weft studio` starts on one database at the same moment — the
+// `weftbase dev` starts on one database at the same moment — the
 // second's probe of the busy port would go out bare, get a 401 and
 // move on — exactly one serves; the other is refused by the lock.
 func TestConcurrentStartsOneServes(t *testing.T) {
 	skipWithoutSelfSignal(t)
 	discoveryDir(t)
-	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	t.Setenv("WEFTBASE_TOKEN", "")
 	base := freeBase(t, 3)
 	db := filepath.Join(t.TempDir(), "weft.db")
 	s := newStarts(t)
@@ -299,12 +299,12 @@ func TestConcurrentStartsOneServes(t *testing.T) {
 // TestOtherDirectoryRefusedAndRestart (B7-fix, review finding 2): a
 // start whose discovery lookup finds another file (another directory)
 // on a database a Studio serves is refused naming it (the lock file
-// says who holds it), on another port and never bound; weft dev from
+// says who holds it), on another port and never bound; weftbase dev from
 // there reuses it instead; and once the first stops, its lock is gone —
 // a restart serves.
 func TestOtherDirectoryRefusedAndRestart(t *testing.T) {
 	discoveryDir(t)
-	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	t.Setenv("WEFTBASE_TOKEN", "")
 	base := freeBase(t, 3)
 	db := filepath.Join(t.TempDir(), "weft.db")
 	var first syncBuffer
@@ -328,11 +328,11 @@ func TestOtherDirectoryRefusedAndRestart(t *testing.T) {
 	var dev syncBuffer
 	r, err := devStudio("sqlite://"+db, want{addr: loop(base + 2), pinned: true}, "", false, &dev)
 	if err != nil || r.url != "http://"+loop(base) || !strings.Contains(dev.String(), "reusing") {
-		t.Fatalf("weft dev from another directory = %+v %v %q, want the running Studio reused", r, err, dev.String())
+		t.Fatalf("weftbase dev from another directory = %+v %v %q, want the running Studio reused", r, err, dev.String())
 	}
 	tok, _ := os.ReadFile(db + ".token")
 	if r.token != strings.TrimSpace(string(tok)) || metaStatus(t, loop(base), r.token) != http.StatusOK {
-		t.Errorf("weft dev's reuse token does not open the running Studio")
+		t.Errorf("weftbase dev's reuse token does not open the running Studio")
 	}
 
 	stop()
@@ -346,11 +346,11 @@ func TestOtherDirectoryRefusedAndRestart(t *testing.T) {
 // TestUntrustedHolderNamesNobody (B7-fix2, review findings 1 and 2):
 // a lock held by something whose file names a non-loopback url, or a
 // dead pid (a crashed Studio's leftover the new holder has not yet
-// overwritten), names nobody — weft studio's refusal does not print
-// it, and weft dev neither reuses it nor hands it the database's token.
+// overwritten), names nobody — weftbase dev's refusal does not print
+// it, and weftbase dev neither reuses it nor hands it the database's token.
 func TestUntrustedHolderNamesNobody(t *testing.T) {
 	discoveryDir(t)
-	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	t.Setenv("WEFTBASE_TOKEN", "")
 	db := filepath.Join(t.TempDir(), "weft.db")
 	if err := os.WriteFile(db+".token", []byte("secret-stable-token"), 0o600); err != nil {
 		t.Fatal(err)
@@ -372,10 +372,10 @@ func TestUntrustedHolderNamesNobody(t *testing.T) {
 		err, ok := s.next(5 * time.Second)
 		if !ok {
 			l.Release()
-			t.Fatalf("%s: weft studio has not returned in 5 s: it serves a held database", name)
+			t.Fatalf("%s: weftbase dev has not returned in 5 s: it serves a held database", name)
 		}
 		if err == nil || !strings.HasPrefix(err.Error(), "another Studio holds "+db) || strings.Contains(err.Error(), h.URL) {
-			t.Errorf("%s: weft studio = %v, want refused naming nobody", name, err)
+			t.Errorf("%s: weftbase dev = %v, want refused naming nobody", name, err)
 		}
 		var dev syncBuffer
 		r, err := devStudio("sqlite://"+db, want{addr: loop(port), pinned: true}, "", false, &dev)
@@ -383,7 +383,7 @@ func TestUntrustedHolderNamesNobody(t *testing.T) {
 			r.stop(syscall.SIGTERM) // a Studio it started (it must not have)
 		}
 		if err == nil || r != nil || strings.Contains(dev.String(), "reusing") || strings.Contains(err.Error(), h.URL) {
-			t.Errorf("%s: weft dev = %+v %v %q, want refused, nothing reused", name, r, err, dev.String())
+			t.Errorf("%s: weftbase dev = %+v %v %q, want refused, nothing reused", name, r, err, dev.String())
 		}
 		l.Release()
 	}
@@ -394,7 +394,7 @@ func TestUntrustedHolderNamesNobody(t *testing.T) {
 // names — a second start through the link is refused.
 func TestSymlinkedDBOneLock(t *testing.T) {
 	discoveryDir(t)
-	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	t.Setenv("WEFTBASE_TOKEN", "")
 	base := freeBase(t, 2)
 	real := filepath.Join(t.TempDir(), "c.db")
 	var first syncBuffer

@@ -50,7 +50,7 @@ const REMOTE = "https://studio.example/studio/"
 /** A Studio on loopback: the header rung on by default. */
 const LOCAL = `${location.origin}/studio/`
 /** A read-scoped panel token (setup C's default mint). */
-const PANEL_TOKEN = `weft_pt.${btoa(JSON.stringify({ public_id: "pub_a", exp: "2099-01-01T00:00:00Z" })).replace(/=+$/, "")}.sig`
+const PANEL_TOKEN = `wb_pt.${btoa(JSON.stringify({ public_id: "pub_a", exp: "2099-01-01T00:00:00Z" })).replace(/=+$/, "")}.sig`
 
 /** routesFor: a Studio that knows one finished turn of each public id,
  * and a dev list of those turns (one agent). */
@@ -688,7 +688,7 @@ describe("the fallback: no conversation detected", () => {
     const studio = fakeStudio(routesFor("pub_a"))
     const el = await mountWith({
       "data-endpoint": REMOTE,
-      "data-token": `weft_pt.${btoa(JSON.stringify({ scope: "read" }))}.sig`,
+      "data-token": `wb_pt.${btoa(JSON.stringify({ scope: "read" }))}.sig`,
       "data-open": "true",
     })
     expect(

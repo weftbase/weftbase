@@ -44,11 +44,11 @@ func takeOpened() []string {
 }
 
 func TestMain(m *testing.M) {
-	// `weft dev`'s helper process: this binary re-executed as the app.
+	// `weftbase dev`'s helper process: this binary re-executed as the app.
 	if mode := os.Getenv("WEFT_DEV_HELPER"); mode != "" {
 		os.Exit(devHelper(mode))
 	}
-	// `weft mcp` over real stdio: this binary re-executed as the
+	// `weftbase mcp` over real stdio: this binary re-executed as the
 	// command, its arguments after the test binary's name.
 	if os.Getenv("WEFT_MCP_HELPER") == "1" {
 		os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -56,7 +56,7 @@ func TestMain(m *testing.M) {
 	stdoutIsTTY = func() bool { return false }
 	// Every discovery file the tests' Studios write (and every read)
 	// goes to a directory of this process's own, never the developer's
-	// ./.weft, $XDG_RUNTIME_DIR/weft or user cache directory.
+	// ./.weftbase, $XDG_RUNTIME_DIR/weftbase or user cache directory.
 	discDir, err := os.MkdirTemp("", "weft-discovery-")
 	if err != nil {
 		panic(err)
@@ -75,7 +75,7 @@ func TestMain(m *testing.M) {
 
 // TestUsage pins the dispatcher: no command and an unknown one are
 // usage errors (exit 2, the usage on stderr), help is exit 0 on stdout,
-// and a bad `weft dev` flag or --watch directory is a usage error.
+// and a bad `weftbase dev` flag or --watch directory is a usage error.
 func TestUsage(t *testing.T) {
 	for _, c := range []struct {
 		args       []string
@@ -84,13 +84,15 @@ func TestUsage(t *testing.T) {
 	}{
 		{nil, 2, "", "a command is required"},
 		{[]string{"nope"}, 2, "", `unknown command "nope"`},
-		{[]string{"help"}, 0, "weft studio", ""},
+		{[]string{"help"}, 0, "weftbase dev", ""},
 		{[]string{"dev", "--bogus"}, 2, "", "flag provided but not defined: -bogus"},
-		{[]string{"dev", "--watch", "/nonexistent-weft-dev-dir"}, 2, "", "--watch /nonexistent-weft-dev-dir: not a directory"},
+		{[]string{"dev", "--no-watch"}, 2, "", "dev's loop runs a command"},
+		{[]string{"dev", "--"}, 2, "", "dev's loop runs a command"},
+		{[]string{"dev", "--watch", "/nonexistent-weft-dev-dir", "--", "true"}, 2, "", "--watch /nonexistent-weft-dev-dir: not a directory"},
 		{[]string{"version", "extra"}, 2, "", "version takes no arguments"},
 		{[]string{"runs", "--bogus"}, 2, "", "flag provided but not defined: -bogus"},
 		{[]string{"runs", "-h"}, 0, "", "-since"},
-		{[]string{"studio", "extra"}, 2, "", "studio takes no arguments"},
+		{[]string{"dev", "extra"}, 2, "", "dev takes no arguments"},
 	} {
 		var out, errb strings.Builder
 		code := run(c.args, &out, &errb)
@@ -101,7 +103,7 @@ func TestUsage(t *testing.T) {
 	}
 }
 
-// TestParseArgs pins the interspersed positional: `weft export <id>
+// TestParseArgs pins the interspersed positional: `weftbase export <id>
 // --wefttest dir` parses the flag after the id, and "--" ends the flags.
 func TestParseArgs(t *testing.T) {
 	fs := newFlags("t", io.Discard)
@@ -134,11 +136,11 @@ func waitMeta(t *testing.T, addr string, done <-chan int, out *syncBuffer) strin
 		}
 		select {
 		case code := <-done:
-			t.Fatalf("weft studio exited %d before serving on %s (stdout %q)", code, addr, out.String())
+			t.Fatalf("weftbase dev exited %d before serving on %s (stdout %q)", code, addr, out.String())
 		default:
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("weft studio never served on %s (stdout %q)", addr, out.String())
+			t.Fatalf("weftbase dev never served on %s (stdout %q)", addr, out.String())
 		}
 	}
 }
@@ -151,12 +153,12 @@ func stopStudio(t *testing.T, done <-chan int) int {
 	case code := <-done:
 		return code
 	case <-time.After(10 * time.Second):
-		t.Fatal("weft studio never returned after SIGTERM")
+		t.Fatal("weftbase dev never returned after SIGTERM")
 		return -1
 	}
 }
 
-// TestStudioCommand pins `weft studio` end to end (plan B1): the
+// TestStudioCommand pins `weftbase dev` end to end (plan B1): the
 // playground on by default (meta lists it), --no-playground off; the
 // manifest found upward from the working directory and said in one
 // line after the banner; --open hands the browser the UI link with the
@@ -175,8 +177,8 @@ func TestStudioCommand(t *testing.T) {
 	}
 	t.Chdir(wd)
 	t.Setenv("WEFT_MANIFEST", "")
-	t.Setenv("WEFT_STUDIO_ADDR", "")
-	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	t.Setenv("WEFTBASE_ADDR", "")
+	t.Setenv("WEFTBASE_TOKEN", "")
 	db := "sqlite://" + filepath.Join(t.TempDir(), "weft.db")
 
 	for _, c := range []struct {
@@ -192,7 +194,7 @@ func TestStudioCommand(t *testing.T) {
 			addr := loop(freeBase(t, 1))
 			var out syncBuffer
 			done := make(chan int, 1)
-			args := append([]string{"studio", "--addr", addr, "--db", db, "--token", "tok"}, c.extra...)
+			args := append([]string{"dev", "--addr", addr, "--db", db, "--token", "tok"}, c.extra...)
 			go func() { done <- run(args, &out, io.Discard) }()
 			meta := waitMeta(t, addr, done, &out)
 			var m struct {
@@ -247,7 +249,7 @@ func TestStudioCommand(t *testing.T) {
 		var second strings.Builder
 		err := serveWith(db, want{addr: loop(base), span: 2}, "tok", &second, afterBoot{notes: []string{"never printed"}, open: true})
 		if err == nil || !strings.Contains(err.Error(), "studio already running at http://"+loop(base)+" (pid "+strconv.Itoa(os.Getpid())+")") ||
-			!strings.Contains(err.Error(), "weft open --with-token") {
+			!strings.Contains(err.Error(), "weftbase open --with-token") {
 			t.Errorf("second start = %v, want refused naming the running Studio", err)
 		}
 		if second.String() != "" {
@@ -348,22 +350,22 @@ func weft(args ...string) (string, string, int) {
 	return out.String(), errb.String(), code
 }
 
-// TestRunsCommand pins `weft runs`: one row per run, newest first, from
+// TestRunsCommand pins `weftbase runs`: one row per run, newest first, from
 // GET /api/runs; --agent and --failed filter on the server, --since and
 // --limit cut the paging (pinned across a one-run page, so the cursor
 // is followed), --json prints Studio's rows; the token comes from
-// --token or WEFT_STUDIO_TOKEN and a missing one is Studio's 401.
+// --token or WEFTBASE_TOKEN and a missing one is Studio's 401.
 func TestRunsCommand(t *testing.T) {
 	url, _ := apiStudio(t, false)
-	t.Setenv("WEFT_STUDIO_TOKEN", "")
-	t.Setenv("WEFT_STUDIO_URL", "")
+	t.Setenv("WEFTBASE_TOKEN", "")
+	t.Setenv("WEFTBASE_URL", "")
 
 	out, errb, code := weft("runs", "--url", url, "--token", "tok")
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	if code != 0 || len(lines) != 3 || !strings.HasPrefix(lines[0], "ID") ||
 		!strings.HasPrefix(lines[1], "r_fail") || !strings.Contains(lines[1], "triage") || !strings.Contains(lines[1], "failed") ||
 		!strings.HasPrefix(lines[2], "r_ok") || !strings.Contains(lines[2], "orders") || !strings.Contains(lines[2], "succeeded") {
-		t.Errorf("weft runs = exit %d\n%s%s", code, out, errb)
+		t.Errorf("weftbase runs = exit %d\n%s%s", code, out, errb)
 	}
 	// STOPPED BY is the last column: what ended the run (U3.2) — r_ok's
 	// model answered; r_fail's model failed, which no control decided.
@@ -411,7 +413,7 @@ func TestRunsCommand(t *testing.T) {
 	if i := strings.Index(lines[0], "ERROR"); i < 0 || !strings.Contains(lines[1][i:], "upstream down") {
 		t.Errorf("r_fail's error column = %q, want its error", lines[1])
 	}
-	if !strings.Contains(errb, "weft open <id>") {
+	if !strings.Contains(errb, "weftbase open <id>") {
 		t.Errorf("stderr %q, want the next step named", errb)
 	}
 	for _, c := range []struct {
@@ -430,13 +432,13 @@ func TestRunsCommand(t *testing.T) {
 		}
 	}
 
-	t.Setenv("WEFT_STUDIO_URL", url) // the env mirrors --url
-	t.Setenv("WEFT_STUDIO_TOKEN", "tok")
+	t.Setenv("WEFTBASE_URL", url) // the env mirrors --url
+	t.Setenv("WEFTBASE_TOKEN", "tok")
 	rows := func(args ...string) []string {
 		t.Helper()
 		out, errb, code := weft(append([]string{"runs", "--json"}, args...)...)
 		if code != 0 {
-			t.Fatalf("weft runs --json %v = exit %d %s", args, code, errb)
+			t.Fatalf("weftbase runs --json %v = exit %d %s", args, code, errb)
 		}
 		var rs []runRow
 		if err := json.Unmarshal([]byte(out), &rs); err != nil {
@@ -470,7 +472,7 @@ func TestRunsCommand(t *testing.T) {
 		{[]string{"--limit", "1"}, "r_fail"},
 	} {
 		if got := strings.Join(rows(c.args...), ","); got != c.want {
-			t.Errorf("weft runs %v = %q, want %q", c.args, got, c.want)
+			t.Errorf("weftbase runs %v = %q, want %q", c.args, got, c.want)
 		}
 	}
 	// A word outside them is a usage error (exit 2) naming the words,
@@ -502,7 +504,7 @@ func TestRunsCommand(t *testing.T) {
 
 	// Truncation is visible: a limit that hid runs says so on stderr,
 	// --json too; one that hid nothing is silent.
-	if _, errb, _ := weft("runs", "--limit", "1"); !strings.HasPrefix(errb, "weft: showing the newest 1; --limit 0 lists all\n") {
+	if _, errb, _ := weft("runs", "--limit", "1"); !strings.HasPrefix(errb, "weftbase: showing the newest 1; --limit 0 lists all\n") {
 		t.Errorf("--limit 1 stderr = %q, want the notice", errb)
 	}
 	if _, errb, _ := weft("runs", "--limit", "2", "--json"); errb != "" {
@@ -514,14 +516,14 @@ func TestRunsCommand(t *testing.T) {
 		t.Errorf("paged one run at a time = %q, want both", got)
 	}
 	// The limit lands on a page's last row: the cursor says more exist.
-	if out, errb, _ := weft("runs", "--limit", "1", "--json"); !strings.Contains(out, `"r_fail"`) || errb != "weft: showing the newest 1; --limit 0 lists all\n" {
+	if out, errb, _ := weft("runs", "--limit", "1", "--json"); !strings.Contains(out, `"r_fail"`) || errb != "weftbase: showing the newest 1; --limit 0 lists all\n" {
 		t.Errorf("paged --limit 1 = %q, stderr %q, want r_fail and the notice", out, errb)
 	}
 	if got := strings.Join(rows("--since", "1h"), ","); got != "r_fail,r_ok" {
 		t.Errorf("paged --since = %q, want both", got)
 	}
 
-	if out, errb, code := weft("runs", "--since", time.Now().Add(time.Hour).UTC().Format(time.RFC3339)); code != 0 || out != "" || errb != "weft: no runs match\n" {
+	if out, errb, code := weft("runs", "--since", time.Now().Add(time.Hour).UTC().Format(time.RFC3339)); code != 0 || out != "" || errb != "weftbase: no runs match\n" {
 		t.Errorf("no match = exit %d %q %q", code, out, errb)
 	}
 	if _, errb, code := weft("runs", "--since", "yesterday"); code != 2 || !strings.Contains(errb, "--since") {
@@ -559,7 +561,7 @@ func TestRunsCommand(t *testing.T) {
 	lines = strings.Split(strings.TrimSpace(out), "\n")
 	if code != 0 || len(lines) != 2 || !strings.HasPrefix(lines[1], "r_cancel") ||
 		!strings.Contains(lines[1], " canceled (studio.cancel) ") {
-		t.Errorf("weft runs --agent support = exit %d, want r_cancel's STOPPED BY \"canceled (studio.cancel)\"\n%s%s", code, out, errb)
+		t.Errorf("weftbase runs --agent support = exit %d, want r_cancel's STOPPED BY \"canceled (studio.cancel)\"\n%s%s", code, out, errb)
 	}
 	out, _, _ = weft("runs", "--agent", "support", "--json")
 	var cr []runRow
@@ -569,8 +571,8 @@ func TestRunsCommand(t *testing.T) {
 		t.Errorf("--json for r_cancel = %v\n%s, want stopped_by canceled and cancel_cause studio.cancel", err, out)
 	}
 
-	t.Setenv("WEFT_STUDIO_TOKEN", "")
-	if _, errb, code := weft("runs"); code != 1 || !strings.Contains(errb, "401") || !strings.Contains(errb, "WEFT_STUDIO_TOKEN") {
+	t.Setenv("WEFTBASE_TOKEN", "")
+	if _, errb, code := weft("runs"); code != 1 || !strings.Contains(errb, "401") || !strings.Contains(errb, "WEFTBASE_TOKEN") {
 		t.Errorf("no token = exit %d %q, want 1 and Studio's 401", code, errb)
 	}
 	if _, errb, code := weft("runs", "--url", "http://127.0.0.1:1"); code != 1 || !strings.Contains(errb, "studio not reachable at http://127.0.0.1:1") {
@@ -578,7 +580,7 @@ func TestRunsCommand(t *testing.T) {
 	}
 }
 
-// TestOpenCommand pins `weft open <id>`: the run is checked against
+// TestOpenCommand pins `weftbase open <id>`: the run is checked against
 // GET /api/runs/<id>, its page <url>/runs/<id> printed bare — the token
 // (maybe the panel tokens' signing key) stays out of stdout unless
 // --with-token asks — and handed to the browser, token in the
@@ -586,12 +588,12 @@ func TestRunsCommand(t *testing.T) {
 // id travels escaped (GET /api/runs/p%2F0%2Fc).
 func TestOpenCommand(t *testing.T) {
 	url, _ := apiStudio(t, true)
-	t.Setenv("WEFT_STUDIO_URL", url)
-	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	t.Setenv("WEFTBASE_URL", url)
+	t.Setenv("WEFTBASE_TOKEN", "")
 	takeOpened()
 	out, errb, code := weft("open", "r_ok", "--token", "tok")
 	if want := url + "/runs/r_ok\n"; code != 0 || out != want {
-		t.Errorf("weft open = exit %d %q %q, want the bare %q", code, out, errb, want)
+		t.Errorf("weftbase open = exit %d %q %q, want the bare %q", code, out, errb, want)
 	}
 	if links := takeOpened(); len(links) != 0 {
 		t.Errorf("without --open the browser got %q", links)
@@ -687,19 +689,19 @@ func TestRunsCursorThatDoesNotMove(t *testing.T) {
 	}
 }
 
-// TestExportCommand is B1.1's Done line for export: `weft export <id>
+// TestExportCommand is B1.1's Done line for export: `weftbase export <id>
 // --wefttest dir --fixtures-only` writes the fixtures where wefttest.Replay reads them,
 // and the same agent definition over the replayed model reproduces the
 // recorded transcript message for message. Without --wefttest the
 // export goes to stdout; a non-empty target needs --force.
 func TestExportCommand(t *testing.T) {
 	url, recorded := apiStudio(t, false)
-	t.Setenv("WEFT_STUDIO_URL", url)
-	t.Setenv("WEFT_STUDIO_TOKEN", "tok")
+	t.Setenv("WEFTBASE_URL", url)
+	t.Setenv("WEFTBASE_TOKEN", "tok")
 	dir := filepath.Join(t.TempDir(), "testdata")
 
 	out, errb, code := weft("export", "r_ok", "--wefttest", dir, "--fixtures-only", "--test", t.Name())
-	if code != 0 || !strings.HasPrefix(out, "weft: wrote 2 fixtures to "+filepath.Join(dir, t.Name())) {
+	if code != 0 || !strings.HasPrefix(out, "weftbase: wrote 2 fixtures to "+filepath.Join(dir, t.Name())) {
 		t.Fatalf("export --wefttest = exit %d %q %q", code, out, errb)
 	}
 	replay := wefttest.Replay(t, dir)
@@ -775,18 +777,18 @@ func TestExportCommand(t *testing.T) {
 	}
 }
 
-// TestExportTreeIsTheUIZip is UX-S5a-07's Done line: `weft export <id>
+// TestExportTreeIsTheUIZip is UX-S5a-07's Done line: `weftbase export <id>
 // --wefttest <pkg dir>` writes the very tree Studio's "save as test"
 // zip holds — the generated test file at the root, the fixtures under
 // testdata/TestReplay_<run>/ — byte for byte; a second export is
 // refused without --force, and --force replaces a stray fixture.
 func TestExportTreeIsTheUIZip(t *testing.T) {
 	url, _ := apiStudio(t, false)
-	t.Setenv("WEFT_STUDIO_URL", url)
-	t.Setenv("WEFT_STUDIO_TOKEN", "tok")
+	t.Setenv("WEFTBASE_URL", url)
+	t.Setenv("WEFTBASE_TOKEN", "tok")
 	pkg := filepath.Join(t.TempDir(), "orders")
 	out, errb, code := weft("export", "r_ok", "--wefttest", pkg)
-	if code != 0 || !strings.HasPrefix(out, "weft: wrote orders_replay_test.go and 2 fixtures under testdata/TestReplay_r_ok/ in "+pkg) {
+	if code != 0 || !strings.HasPrefix(out, "weftbase: wrote orders_replay_test.go and 2 fixtures under testdata/TestReplay_r_ok/ in "+pkg) {
 		t.Fatalf("export --wefttest = exit %d %q %q", code, out, errb)
 	}
 	// The UI's zip, as the run page's save as test fetches it.
@@ -826,7 +828,7 @@ func TestExportTreeIsTheUIZip(t *testing.T) {
 	}
 	for name, body := range ui {
 		if cli[name] != body {
-			t.Errorf("%s differs between the UI zip and weft export --wefttest", name)
+			t.Errorf("%s differs between the UI zip and weftbase export --wefttest", name)
 		}
 	}
 	if _, ok := cli["orders_replay_test.go"]; !ok {
@@ -1001,7 +1003,7 @@ func TestUnzipFixturesFlat(t *testing.T) {
 	}
 }
 
-// TestRunsJSONCarriesProblems pins `weft runs --json` (U4-fix): the rows
+// TestRunsJSONCarriesProblems pins `weftbase runs --json` (U4-fix): the rows
 // are Studio's, so a failed run's error_type and a run's problem
 // counters ride them — a Fallback answering both steps after the
 // primary's failed try (attempts_retried 2, fallbacks 2, keyed on the
@@ -1039,13 +1041,13 @@ func TestRunsJSONCarriesProblems(t *testing.T) {
 	if err := p.Shutdown(ctx); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("WEFT_STUDIO_URL", ts.URL)
-	t.Setenv("WEFT_STUDIO_TOKEN", "tok")
+	t.Setenv("WEFTBASE_URL", ts.URL)
+	t.Setenv("WEFTBASE_TOKEN", "tok")
 	var rows []map[string]any
 	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
 		out, errb, code := weft("runs", "--json")
 		if code != 0 {
-			t.Fatalf("weft runs --json = exit %d %s", code, errb)
+			t.Fatalf("weftbase runs --json = exit %d %s", code, errb)
 		}
 		rows = nil
 		if err := json.Unmarshal([]byte(out), &rows); err != nil {
@@ -1099,7 +1101,7 @@ func TestUsageWords(t *testing.T) {
 			t.Errorf("weft %v = %d %q, want %q", c.args, code, errb, c.want)
 		}
 	}
-	for _, cmd := range []string{"open", "runs", "export", "studio", "doctor", "vacuum", "mcp", "dev"} {
+	for _, cmd := range []string{"open", "runs", "export", "doctor", "vacuum", "mcp", "dev"} {
 		_, errb, _ := weft(cmd, "-h")
 		for _, l := range strings.Split(errb, "\n") {
 			if strings.HasPrefix(l, "  -") && !strings.HasPrefix(l, "  --") {

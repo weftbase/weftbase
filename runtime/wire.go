@@ -36,7 +36,7 @@ type registration struct {
 	// for.
 	Instance string `json:"instance,omitempty"`
 	// StudioURL is the Studio this link dialled (runtime.Studio's url,
-	// WEFT_STUDIO_URL, or the discovery file's), credentials and query
+	// WEFTBASE_URL, or the discovery file's), credentials and query
 	// stripped; "" in-process (runtime.Local). A Studio that holds the
 	// registration can say where the runtime went (UX-D-01).
 	StudioURL   string     `json:"studio_url,omitempty"`

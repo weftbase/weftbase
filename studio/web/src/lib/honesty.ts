@@ -107,7 +107,7 @@ export function derivedWords(): string {
 
 /** A dropped record's fix (gap and its causes): one string, four uses. */
 const QUEUE_FIX =
-  "raise the destination's queue: otel.QueueSize(n) (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev (or otel.DevMode()); the app's WARN \"weft/otel: destination queue full\" names it, weft doctor the drops (weft.records.dropped)"
+  "raise the destination's queue: otel.QueueSize(n) (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev (or otel.DevMode()); the app's WARN \"weft/otel: destination queue full\" names it, weftbase doctor the drops (weft.records.dropped)"
 
 /** The closed table, in ADR 0028 §11's order. */
 export const HOLES: Record<Hole, HoleNote> = {
@@ -573,14 +573,14 @@ export const SESSION_UNREAD = "could not read the session"
 /** A failed GET /api/meta: no capabilities to gate on — said as such
  * (the error follows), never a verdict about the runtime link. */
 export const CAPS_UNREAD = "could not read the Studio's capabilities"
-/** A Studio without Playground(true) (weft studio --no-playground, or
+/** A Studio without Playground(true) (weftbase dev --no-playground, or
  * setup A without the option): the approvals route is not registered,
  * so no runtime is asked; the reason is meta.capabilities_off's. */
 export const PLAYGROUND_OFF = "the playground is off on this Studio"
 /** studio/manifest.go's offPlayground after its lead ("the playground
  * is off: "), for a Studio whose meta names no capabilities_off. */
 export const PLAYGROUND_OFF_FIX =
-  "turn it on with studio.Playground(true); weft studio --no-playground turns it off"
+  "turn it on with studio.Playground(true); weftbase dev --no-playground turns it off"
 /** A session turn of a thread session created without thread.PublicID:
  * appturn.go's 403 words (its fix is APP_PUBLIC_ID_FIX, which names it). */
 export const noPublicIDWords = (runID: string) =>

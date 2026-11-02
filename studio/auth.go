@@ -33,7 +33,7 @@ import (
 //     API answers only a loopback Host or one AllowOrigins names
 //     (hostAllowed below).
 //   - B local binary: a dev token (printed at start;
-//     WEFT_STUDIO_TOKEN fixes it) protects the API; AllowOrigins
+//     WEFTBASE_TOKEN fixes it) protects the API; AllowOrigins
 //     defaults to localhost and 127.0.0.1 on any port.
 //   - C hosted: the same Token is the signing key for panel tokens —
 //     HMAC-signed {public_id, tags, scope, exp} scoped to one public id,
@@ -48,8 +48,8 @@ import (
 // setup (plan C5), and the
 // live stream — which EventSource opens without headers — takes a
 // 60-second grant for one exact stream from POST /api/live-grant
-// instead (livegrant.go). A #token= fragment, which `weft open` and
-// `weft studio --open` hand the browser, never reaches the server: the
+// instead (livegrant.go). A #token= fragment, which `weftbase open` and
+// `weftbase dev --open` hand the browser, never reaches the server: the
 // UI reads it.
 
 // identityCtxKey carries the request's identity (server token, panel
@@ -159,7 +159,7 @@ func narrowTags(meta, tags map[string]string) (map[string]string, bool) {
 }
 
 const (
-	panelTokenPrefix = "weft_pt."
+	panelTokenPrefix = "wb_pt."
 	scopeRead        = "read"
 	scopePlayground  = "playground"
 )
@@ -167,7 +167,7 @@ const (
 var errBadToken = errors.New("studio: bad panel token")
 
 // signPanelToken signs claims with key (Token's value in setup C):
-// weft_pt.<payload>.<hmac>, both base64url, HMAC-SHA256 over the
+// wb_pt.<payload>.<hmac>, both base64url, HMAC-SHA256 over the
 // payload bytes.
 func signPanelToken(key []byte, claims panelClaims) (string, error) {
 	payload, err := json.Marshal(claims)
@@ -866,8 +866,8 @@ func isLoopbackName(host string) bool {
 }
 
 // DevToken generates a random dev token for setup B's binary: printed
-// at start, fixed by WEFT_STUDIO_TOKEN. Exported because the binary
-// lives in another package (cmd/weft).
+// at start, fixed by WEFTBASE_TOKEN. Exported because the binary
+// lives in another package (cmd/weftbase).
 func DevToken() string {
 	b := make([]byte, 18)
 	if _, err := rand.Read(b); err != nil {

@@ -11,8 +11,8 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
-// Local is the local sink: obsdb/sqlite at path ("" = $WEFT_DB or
-// ./.weft/weft.db), opened when the pipeline starts and written
+// Local is the local sink: obsdb/sqlite at path ("" = $WEFTBASE_DB or
+// ./.weftbase/weftbase.db), opened when the pipeline starts and written
 // synchronously through otel.Sink — nothing emitted is lost, and the
 // DB's in-process hub is the live lane a Studio sharing the handle
 // (studio.DB(exporter.LocalDB())) reads. Content on, traces + logs, raw
@@ -40,13 +40,13 @@ func Local(path string, opts ...otel.DestOption) otel.Option {
 	return m.opt
 }
 
-// defaultLocalPath is where Local writes when no path is given: $WEFT_DB
-// or ./.weft/weft.db.
+// defaultLocalPath is where Local writes when no path is given: $WEFTBASE_DB
+// or ./.weftbase/weftbase.db.
 func defaultLocalPath(getenv func(string) string) string {
-	if p := getenv("WEFT_DB"); p != "" {
+	if p := getenv("WEFTBASE_DB"); p != "" {
 		return p
 	}
-	return ".weft/weft.db"
+	return ".weftbase/weftbase.db"
 }
 
 // localHandle is one opened Local database, shared by its span and log

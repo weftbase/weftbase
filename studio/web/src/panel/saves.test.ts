@@ -29,7 +29,7 @@ const SAVES_META = {
   capabilities: [...META.capabilities, "export", "proposals"],
 }
 const tokenOf = (claims: Record<string, unknown>) =>
-  `weft_pt.${btoa(JSON.stringify(claims)).replace(/=+$/, "")}.sig`
+  `wb_pt.${btoa(JSON.stringify(claims)).replace(/=+$/, "")}.sig`
 const READ_TOKEN = tokenOf({ pid: "pub_orders" })
 const PLAY_TOKEN = tokenOf({ pid: "pub_orders", scope: "playground" })
 
@@ -62,7 +62,7 @@ describe("save as test on a panel turn (F6.2)", () => {
       "http://studio.test/studio/runs/s_01-t1?save=test"
     )
     expect(a?.getAttribute("href")).not.toContain("token")
-    expect(a?.getAttribute("href")).not.toContain("weft_pt")
+    expect(a?.getAttribute("href")).not.toContain("wb_pt")
     expect(a?.getAttribute("target")).toBe("_blank")
   })
 

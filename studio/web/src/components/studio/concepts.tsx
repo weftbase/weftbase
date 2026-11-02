@@ -5,7 +5,12 @@
 import { GROUPS, TERMS } from "@/lib/glossary"
 import type { TermGroup, TermName } from "@/lib/glossary"
 
-const DOCS = "https://github.com/weftbase/weft/blob/main/"
+// studio/… docs are this repository's (weftbase); every other path is
+// the weft framework's (the record contract, the loop, thread).
+const docsURL = (path: string) =>
+  (path.startsWith("studio/")
+    ? "https://github.com/weftbase/weftbase/blob/main/"
+    : "https://github.com/weftbase/weft/blob/main/") + path
 
 export function ConceptsBody({ anchors = true }: { anchors?: boolean }) {
   const byGroup = new Map<TermGroup, TermName[]>()
@@ -34,7 +39,7 @@ export function ConceptsBody({ anchors = true }: { anchors?: boolean }) {
                       <p key={l}>{l}</p>
                     ))}
                     <a
-                      href={DOCS + t.docs}
+                      href={docsURL(t.docs)}
                       target="_blank"
                       rel="noreferrer"
                       className="font-mono text-[10px] text-faint hover:text-thread-ink hover:underline"

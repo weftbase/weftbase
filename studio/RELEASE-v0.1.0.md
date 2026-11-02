@@ -6,7 +6,7 @@ Tagged 2026-09-28. One tag: the root and store need no change, so
 
 ---
 
-weft studio v0.1.0 — the Inspector (T1).
+weftbase dev v0.1.0 — the Inspector (T1).
 
 Studio is the read-only UI over a run store: mount one
 `http.Handler` beside your agent, record with `store.Record`, open
@@ -79,5 +79,5 @@ subagent call spans key apart from the parent's; missing assets 404;
 
 Known limits (by design, T1): no live view (T2a), no chat view, no
 lanes or durations — events carry no timestamps; the store's order is
-the truth. No auth yet — bind loopback; `WEFT_STUDIO_TOKEN` arrives
+the truth. No auth yet — bind loopback; `WEFTBASE_TOKEN` arrives
 when exposure does.

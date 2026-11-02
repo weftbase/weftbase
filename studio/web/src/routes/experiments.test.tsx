@@ -94,7 +94,7 @@ function toastTitles(): string[] {
   )
 }
 const panelToken = (scope: "read" | "playground") =>
-  `weft_pt.${btoa(
+  `wb_pt.${btoa(
     JSON.stringify({
       public_id: "pub_1",
       scope,
@@ -166,7 +166,7 @@ describe("/experiments", () => {
     expect(
       within(row).getByRole("link", { name: "exp_tone" }).getAttribute("href")
     ).toBe("/experiments/exp_tone")
-    expect(document.title).toBe("experiments · weft studio")
+    expect(document.title).toBe("experiments · weftbase")
     expect(row.querySelector("[title]")?.getAttribute("title")).toBeTruthy()
     // The row itself answers: no per-row detail read (F5.1).
     expect(studio.calls("GET experiments/exp_tone")).toHaveLength(0)
@@ -423,7 +423,7 @@ describe("/experiments/{id}", () => {
         .querySelector("[data-experiment-runs-link]")
         ?.getAttribute("href")
     ).toBe("/runs?experiment_id=exp_tone")
-    expect(document.title).toBe("experiment exp_tone · weft studio")
+    expect(document.title).toBe("experiment exp_tone · weftbase")
   })
 
   // The Done line, 1: a matrix reopens from /experiments/{id} with its

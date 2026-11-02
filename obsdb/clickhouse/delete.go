@@ -210,7 +210,7 @@ var vacuumTables = []string{"weft_runs", "weft_records", "weft_deltas", "weft_se
 // Vacuum runs OPTIMIZE TABLE … FINAL on the tables deletions mutate
 // (obsdb.DB): every part is merged, which is what drops rows a
 // lightweight DELETE masked. Heavy on a large database — the sweep
-// never calls it; `weft vacuum` does, on the operator's word.
+// never calls it; `weftbase vacuum` does, on the operator's word.
 func (d *DB) Vacuum(ctx context.Context) (err error) {
 	if err := d.checkOpen(); err != nil {
 		return err

@@ -1001,7 +1001,7 @@ const InterruptedAfter = 30 * time.Second
 // (each with its subtree of not-running children) are deleted per
 // writer transaction on SQLite, per round of DELETE mutations on
 // ClickHouse. Between passes the writer is free: a sweep of a large
-// backlog (the first sweep of `weft studio --retain` on an old
+// backlog (the first sweep of `weftbase dev --retain` on an old
 // database) interleaves with ingest instead of blocking it.
 const SweepBatch = 500
 

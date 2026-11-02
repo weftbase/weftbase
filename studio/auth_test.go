@@ -128,7 +128,7 @@ func TestPanelTokenMint(t *testing.T) {
 	if err := json.Unmarshal([]byte(body), &minted); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(minted.Token, "weft_pt.") || minted.PublicID != "pub_orders" ||
+	if !strings.HasPrefix(minted.Token, "wb_pt.") || minted.PublicID != "pub_orders" ||
 		minted.Scope != "read" || minted.Exp.IsZero() {
 		t.Fatalf("mint shape: %s", body)
 	}

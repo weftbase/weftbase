@@ -5,7 +5,7 @@
   "db": {
     "kind": "sqlite"
   },
-  "title": "weft studio",
+  "title": "weftbase",
   "has_manifest": true,
   "ingest_open": true,
   "ingest": {
@@ -35,18 +35,18 @@
     "panel-config"
   ],
   "capabilities_off": {
-    "auth": "no server token to sign panel tokens with: turn it on with studio.Token(tok); weft studio always sets one",
-    "breakpoints": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
-    "cancel": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
-    "handoff": "no Token: panel tokens do not exist here, so there is none to hand off from: turn it on with studio.Token(tok); weft studio always sets one",
-    "panel_token_tags": "no server token to sign panel tokens with: turn it on with studio.Token(tok); weft studio always sets one",
-    "playground": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
-    "preview": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
-    "run_commands": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
-    "runtime_forget": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
-    "runtimes": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
-    "steer": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
-    "target_check": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off"
+    "auth": "no server token to sign panel tokens with: turn it on with studio.Token(tok); weftbase dev always sets one",
+    "breakpoints": "the playground is off: turn it on with studio.Playground(true); weftbase dev --no-playground turns it off",
+    "cancel": "the playground is off: turn it on with studio.Playground(true); weftbase dev --no-playground turns it off",
+    "handoff": "no Token: panel tokens do not exist here, so there is none to hand off from: turn it on with studio.Token(tok); weftbase dev always sets one",
+    "panel_token_tags": "no server token to sign panel tokens with: turn it on with studio.Token(tok); weftbase dev always sets one",
+    "playground": "the playground is off: turn it on with studio.Playground(true); weftbase dev --no-playground turns it off",
+    "preview": "the playground is off: turn it on with studio.Playground(true); weftbase dev --no-playground turns it off",
+    "run_commands": "the playground is off: turn it on with studio.Playground(true); weftbase dev --no-playground turns it off",
+    "runtime_forget": "the playground is off: turn it on with studio.Playground(true); weftbase dev --no-playground turns it off",
+    "runtimes": "the playground is off: turn it on with studio.Playground(true); weftbase dev --no-playground turns it off",
+    "steer": "the playground is off: turn it on with studio.Playground(true); weftbase dev --no-playground turns it off",
+    "target_check": "the playground is off: turn it on with studio.Playground(true); weftbase dev --no-playground turns it off"
   },
   "manifest_sources": 1,
   "auth_required": false,

@@ -50,15 +50,15 @@ func (l *lockedBuf) String() string {
 	return l.b.String()
 }
 
-// TestInstallJoinsDiscoveredStudio: WEFT_ENV=dev, no WEFT_STUDIO_URL,
+// TestInstallJoinsDiscoveredStudio: WEFT_ENV=dev, no WEFTBASE_URL,
 // no Studio option and no otel Studio destination — Install dials the
 // Studio the discovery file names, with its token, registers there,
-// and says so in one INFO line. With WEFT_DISCOVERY=off it opens
+// and says so in one INFO line. With WEFTBASE_DISCOVERY=off it opens
 // nothing.
 func TestInstallJoinsDiscoveredStudio(t *testing.T) {
 	t.Setenv("WEFT_ENV", "dev")
-	t.Setenv("WEFT_STUDIO_URL", "")
-	t.Setenv("WEFT_DISCOVERY", "")
+	t.Setenv("WEFTBASE_URL", "")
+	t.Setenv("WEFTBASE_DISCOVERY", "")
 	const tok = "disc-token"
 	srv := studio.New(studio.Open(filepath.Join(t.TempDir(), "studio.db")), studio.Playground(true),
 		studio.Token(tok), studio.Base("/"))
@@ -101,13 +101,13 @@ func TestInstallJoinsDiscoveredStudio(t *testing.T) {
 		return ids
 	}
 
-	t.Run("WEFT_DISCOVERY=off", func(t *testing.T) {
-		t.Setenv("WEFT_DISCOVERY", "off")
+	t.Run("WEFTBASE_DISCOVERY=off", func(t *testing.T) {
+		t.Setenv("WEFTBASE_DISCOVERY", "off")
 		stop := Install(Agents(testAgent("disc-agent")))
 		time.Sleep(100 * time.Millisecond)
 		stop()
 		if ids := runtimes(); len(ids) != 0 {
-			t.Errorf("WEFT_DISCOVERY=off, and a runtime registered: %v", ids)
+			t.Errorf("WEFTBASE_DISCOVERY=off, and a runtime registered: %v", ids)
 		}
 	})
 
@@ -154,9 +154,9 @@ func TestInstallJoinsDiscoveredStudio(t *testing.T) {
 // join is claimed.
 func TestInstallLocalPipelineSkipsDiscovery(t *testing.T) {
 	t.Setenv("WEFT_ENV", "dev")
-	t.Setenv("WEFT_STUDIO_URL", "")
-	t.Setenv("WEFT_STUDIO_TOKEN", "")
-	t.Setenv("WEFT_DISCOVERY", "")
+	t.Setenv("WEFTBASE_URL", "")
+	t.Setenv("WEFTBASE_TOKEN", "")
+	t.Setenv("WEFTBASE_DISCOVERY", "")
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	const tok = "disc-token"
 	srv := studio.New(studio.Open(filepath.Join(t.TempDir(), "studio.db")), studio.Playground(true),

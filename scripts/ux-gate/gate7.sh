@@ -49,7 +49,7 @@ say "arena  $ARENA ($(git -C "$ARENA" status --porcelain | wc -l) uncommitted pa
 say "run    $RUN"
 
 # ---- 1. Studio from $REPO, a fresh DB ---------------------------------
-( cd "$REPO" && go build -o "$RUN/weft" ./cmd/weft ) || { say "weft build failed"; exit 2; }
+( cd "$REPO" && go build -o "$RUN/weft" ./cmd/weftbase ) || { say "weft build failed"; exit 2; }
 rm -f "$RUN"/studio.db*
 "$RUN/weft" studio --addr "$ADDR" --db "sqlite://$RUN/studio.db" --token "$TOKEN" --open=false > "$RUN/studio.log" 2>&1 &
 SPID=$!; echo "$SPID" > "$RUN/studio.pid"
@@ -66,7 +66,7 @@ SEED=( "$RUN/weft-arena" run --offline --studio --no-save --jobs 8 )
 if command -v strace >/dev/null && [ "${STRACE:-1}" != 0 ]; then
   SEED=( strace -f -qq -e trace=connect -o "$RUN/seed.strace" "${SEED[@]}" )
 fi
-( cd "$ARENA" && WEFT_STUDIO_URL="$STUDIO" WEFT_STUDIO_TOKEN="$TOKEN" "${SEED[@]}" ) > "$RUN/seed.log" 2>&1
+( cd "$ARENA" && WEFTBASE_URL="$STUDIO" WEFTBASE_TOKEN="$TOKEN" "${SEED[@]}" ) > "$RUN/seed.log" 2>&1
 SEEDRC=$?
 say "seed   exit $SEEDRC: $(grep -E '^weft-arena — engine=' "$RUN/seed.log" | tail -1)"
 sleep 3 # the exporter's last batch
@@ -84,7 +84,7 @@ sleep 1
 ( cd "$HERE" && STUDIO="$STUDIO" TOKEN="$TOKEN" RUN="$RUN" node gate7.js ) 2>&1 | grep -v -E '^(zoxide|Please ensure|If the issue|https://github.com/ajeetdsouza|Disable this message|$)' | tee -a "$OUT"
 [ "${PIPESTATUS[0]}" -ne 0 ] && FAILS=$((FAILS+1))
 
-# ---- (i) weft runs --json ---------------------------------------------
+# ---- (i) weftbase runs --json ---------------------------------------------
 J="$RUN/runs.json"
 "$RUN/weft" runs --url "$STUDIO" --token "$TOKEN" --json --limit 0 > "$J" 2>/dev/null
 "$RUN/weft" runs --url "$STUDIO" --token "$TOKEN" --json --limit 5 > "$RUN/runs-5.json" 2>/dev/null
@@ -97,8 +97,8 @@ tally=$(jq -c '{rows: length,
 ul=$(jq -c '[.[] | select(.meta["arena.scenario"]=="opt.usage-limit")][0] | {stopped_by, error_type, events_emitted, messages_emitted, prompt_preview}' "$J")
 first=$(jq -c '.[0] | {id, stopped_by, error_type, events_emitted, prompt_preview}' "$RUN/runs-5.json")
 ok=$(jq '(map(select(.stopped_by))|length) > 0 and (map(select(.error_type))|length) > 0 and (map(select(.tool_errors))|length) > 0 and (map(select(.prompt_preview))|length) > 0' "$J")
-clause i "$([ "$ok" = true ] && echo PASS || echo FAIL)" "weft runs --json carries stopped_by, error_type, the counters, prompt_preview" \
-  "weft runs --json --limit 0 — rows carrying each field: $tally" "opt.usage-limit: $ul" "--limit 5, first row: $first"
+clause i "$([ "$ok" = true ] && echo PASS || echo FAIL)" "weftbase runs --json carries stopped_by, error_type, the counters, prompt_preview" \
+  "weftbase runs --json --limit 0 — rows carrying each field: $tally" "opt.usage-limit: $ul" "--limit 5, first row: $first"
 
 # ---- (j) stress.event-storm --------------------------------------------
 sid=$(jq -r '[.[] | select(.meta["arena.scenario"]=="stress.event-storm")][0].id' "$J")

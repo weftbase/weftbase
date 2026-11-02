@@ -574,10 +574,10 @@ function RetentionFacts({ meta }: { meta: Meta }) {
         Set it with <span className="font-mono">studio.Retain(d)</span>,{" "}
         <span className="font-mono">--retain 720h</span> or{" "}
         <span className="font-mono">WEFT_RETAIN=720h</span> (at least 1h) on{" "}
-        <span className="font-mono">weft studio</span> /{" "}
-        <span className="font-mono">weft dev</span>;{" "}
-        <span className="font-mono">weft vacuum [--retain d]</span> sweeps once
-        and shrinks the file.
+        <span className="font-mono">weftbase dev</span> /{" "}
+        <span className="font-mono">weftbase dev</span>;{" "}
+        <span className="font-mono">weftbase vacuum [--retain d]</span> sweeps
+        once and shrinks the file.
       </p>
     </div>
   )

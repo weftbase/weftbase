@@ -12,17 +12,17 @@ package main
 //     app's live Session, which decides and resumes the turn.
 //
 // Setup A (§10.1): Studio is embedded under /studio/ over its own
-// local sink (<dir>/weft.db — never $WEFT_DB, so it shares no file with
+// local sink (<dir>/weft.db — never $WEFTBASE_DB, so it shares no file with
 // another Studio), the runtime link dials it in-process, and the
 // landing page carries the panel's script tag scoped to the session's
 // public id. The link opens only under WEFT_ENV=dev:
 //
 //	WEFT_ENV=dev go run ./thread/examples/approvals -serve 127.0.0.1:7331
-//	weft dev -- go run ./thread/examples/approvals -serve 127.0.0.1:8080
+//	weftbase dev -- go run ./thread/examples/approvals -serve 127.0.0.1:8080
 //	# open the address, ask "deploy to prod", and decide it in the panel
 //
-// Under weft dev the runs are exported to that Studio as well (its
-// WEFT_STUDIO_URL), but the panel on this page reads the embedded one,
+// Under weftbase dev the runs are exported to that Studio as well (its
+// WEFTBASE_URL), but the panel on this page reads the embedded one,
 // where the link registers.
 //
 // Without WEFT_ENV=dev the options are set but the link is closed: no
@@ -263,7 +263,7 @@ func (a *app) ask(w http.ResponseWriter, r *http.Request) {
 // playground, the runtime link dialling it in-process with the two
 // options, the page and /ask.
 func serve(addr, dir string) error {
-	// The embedded Studio's own file: weft dev's WEFT_DB belongs to its
+	// The embedded Studio's own file: weftbase dev's WEFTBASE_DB belongs to its
 	// Studio, and two Studios never share one database.
 	defer exporter.Install(exporter.Local(filepath.Join(dir, "weft.db")))()
 	served := filepath.Join(dir, "served")

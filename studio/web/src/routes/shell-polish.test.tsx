@@ -95,14 +95,14 @@ describe("the token wall (UX-F-26)", () => {
 })
 
 describe("the token wall tells a new user where the token is (B7, UX-S5a-02)", () => {
-  it("names <db>.token and weft open --with-token, and says no refusal before a submit", async () => {
+  it("names <db>.token and weftbase open --with-token, and says no refusal before a submit", async () => {
     studio.requireToken("dev-secret").on("GET runs", runs)
     renderApp("/runs")
     await screen.findByRole("heading", { level: 1, name: TOKEN_WALL.heading })
     const place = document.querySelector<HTMLElement>("[data-token-place]")
     expect(place?.textContent).toContain(TOKEN_FILE)
     expect(place?.textContent).toContain(SIGN_IN_COMMAND)
-    expect(SIGN_IN_COMMAND).toBe("weft open --with-token")
+    expect(SIGN_IN_COMMAND).toBe("weftbase open --with-token")
     expect(TOKEN_FILE).toBe("<db>.token")
     // The retired instruction (the token is never printed since B3).
     expect(place?.textContent).not.toContain("prints its dev token")

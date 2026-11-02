@@ -65,7 +65,7 @@ func retainOptions(flagVal string) ([]studio.Option, string, error) {
 		": runs that are not running and were last seen longer ago are deleted (studio's tables only)", nil
 }
 
-// runVacuum is `weft vacuum`: one retention sweep when a retention is
+// runVacuum is `weftbase vacuum`: one retention sweep when a retention is
 // given (--retain / WEFT_RETAIN), then the backend's Vacuum (SQLite:
 // VACUUM; ClickHouse: OPTIMIZE TABLE … FINAL on the tables deletions
 // mutate). It touches obsdb's tables only: a SQLite file that also
@@ -74,10 +74,10 @@ func retainOptions(flagVal string) ([]studio.Option, string, error) {
 func runVacuum(args []string, stdout, stderr io.Writer) error {
 	fs := newFlags("vacuum", stderr)
 	dbFlag := fs.String("db", "",
-		"`sqlite://path` or `clickhouse://user:pass@host:9000/db` (default: $WEFT_DB or ./.weft/weft.db)")
+		"`sqlite://path` or `clickhouse://user:pass@host:9000/db` (default: $WEFTBASE_DB or ./.weftbase/weftbase.db)")
 	retain := retainFlag(fs, "to sweep first: delete the runs not running last seen longer ago")
 	fs.Usage = func() {
-		_, _ = fmt.Fprintln(fs.Output(), "Usage: weft vacuum [--db sqlite://path|clickhouse://…] [--retain duration]")
+		_, _ = fmt.Fprintln(fs.Output(), "Usage: weftbase vacuum [--db sqlite://path|clickhouse://…] [--retain duration]")
 		_, _ = fmt.Fprintln(fs.Output(), "One retention sweep (with --retain or WEFT_RETAIN), then VACUUM (SQLite) or OPTIMIZE TABLE … FINAL (ClickHouse); studio's tables only.")
 		printDefaults(fs)
 	}
@@ -131,9 +131,9 @@ func openVacuumDB(dbFlag string) (obsdb.DB, string, error) {
 	case dbFlag == "" || strings.HasPrefix(dbFlag, "sqlite://"):
 		path, from := strings.TrimPrefix(dbFlag, "sqlite://"), "--db"
 		if dbFlag == "" {
-			path, from = os.Getenv("WEFT_DB"), "WEFT_DB"
+			path, from = os.Getenv("WEFTBASE_DB"), "WEFTBASE_DB"
 			if path == "" {
-				path, from = "./.weft/weft.db", "the default"
+				path, from = "./.weftbase/weftbase.db", "the default"
 			}
 		}
 		if path == "" {

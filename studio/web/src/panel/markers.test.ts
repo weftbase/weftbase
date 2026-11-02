@@ -44,7 +44,7 @@ const REMOTE = "https://studio.example/studio/"
 /** A Studio on loopback: the header rung on by default. */
 const LOCAL = `${location.origin}/studio/`
 /** A read-scoped panel token (setup C's default mint). */
-const PANEL_TOKEN = `weft_pt.${btoa(JSON.stringify({ pid: "pub_a" })).replace(/=+$/, "")}.sig`
+const PANEL_TOKEN = `wb_pt.${btoa(JSON.stringify({ pid: "pub_a" })).replace(/=+$/, "")}.sig`
 
 /** routesFor: a Studio that knows one turn of each public id. */
 function routesFor(...ids: string[]): Record<string, Route> {
@@ -532,7 +532,7 @@ describe("the panel's marker rung", () => {
       markerRungOn({ detect: "off", token: "" }, "http://localhost/")
     ).toBe(false)
     // A playground-scoped panel token, the dev token or none: on anywhere.
-    const playground = `weft_pt.${btoa(JSON.stringify({ pid: "pub_a", scope: "playground" })).replace(/=+$/, "")}.sig`
+    const playground = `wb_pt.${btoa(JSON.stringify({ pid: "pub_a", scope: "playground" })).replace(/=+$/, "")}.sig`
     for (const token of [playground, "dev-token", ""])
       expect(markerRungOn({ detect: "", token }, shop)).toBe(true)
     // Any token on loopback.

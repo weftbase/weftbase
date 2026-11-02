@@ -942,7 +942,7 @@ describe("runtime notices", () => {
 
 describe("runtime notices under a read-scoped panel token", () => {
   it("reads no runtimes: the token may not", async () => {
-    const tok = `weft_pt.${btoa(
+    const tok = `wb_pt.${btoa(
       JSON.stringify({
         public_id: "pub_1",
         scope: "read",
@@ -965,7 +965,7 @@ describe("runtime notices under a read-scoped panel token", () => {
 
   it("the playground's picker still follows the runtimes: the page is the one 5 s poller", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
-    const tok = `weft_pt.${btoa(
+    const tok = `wb_pt.${btoa(
       JSON.stringify({
         public_id: "pub_1",
         scope: "read",

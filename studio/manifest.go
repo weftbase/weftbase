@@ -29,10 +29,10 @@ const (
 // Why a capability is off: the option that turns it on and the CLI
 // flag that turns it off (meta.capabilities_off).
 const (
-	offPlayground = "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off"
+	offPlayground = "the playground is off: turn it on with studio.Playground(true); weftbase dev --no-playground turns it off"
 	offIngest     = "OTLP ingest is off: studio.NoIngest() turned it off"
-	offAuth       = "no server token to sign panel tokens with: turn it on with studio.Token(tok); weft studio always sets one"
-	offHandoff    = "no Token: panel tokens do not exist here, so there is none to hand off from: turn it on with studio.Token(tok); weft studio always sets one"
+	offAuth       = "no server token to sign panel tokens with: turn it on with studio.Token(tok); weftbase dev always sets one"
+	offHandoff    = "no Token: panel tokens do not exist here, so there is none to hand off from: turn it on with studio.Token(tok); weftbase dev always sets one"
 	offSearch     = "the database cannot search: its obsdb.DB does not implement obsdb.Searcher (obsdb/sqlite and obsdb/clickhouse both do)"
 	offSpansTree  = "the database cannot read a run tree: its obsdb.DB does not implement obsdb.TreeReader (obsdb/sqlite and obsdb/clickhouse both do); GET /api/runs/{id}/spans?tree=1 answers 501"
 	offStats      = "the database cannot aggregate: its obsdb.DB does not implement obsdb.Aggregator (obsdb/sqlite and obsdb/clickhouse both do); GET /api/stats and the error_class facet and filter are off"
@@ -192,9 +192,9 @@ func (s *Server) serveManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(reg) == 0 {
-		why := "no manifest: no weft.json configured (studio.Manifest, or weft studio --manifest) and no runtime has registered"
+		why := "no manifest: no weft.json configured (studio.Manifest, or weftbase dev --manifest) and no runtime has registered"
 		if s.runtimeSrv == nil {
-			why = "no manifest: no weft.json configured (studio.Manifest, or weft studio --manifest), and " + offPlayground + ", so no runtime can register one"
+			why = "no manifest: no weft.json configured (studio.Manifest, or weftbase dev --manifest), and " + offPlayground + ", so no runtime can register one"
 		}
 		notFound(w, r, why)
 		return

@@ -78,12 +78,12 @@ export function exportFormatsFor(
 
 /** "copy as curl" (U30.2; UX-A-15's remainder): the export as a
  * command line. It never carries a token — a token-walled Studio's
- * command names $WEFT_STUDIO_TOKEN, the env var weft dev sets and the
+ * command names $WEFTBASE_TOKEN, the env var weftbase dev sets and the
  * CLI reads — and -OJ saves under the server's own file name. */
 export const CURL = {
   label: "copy as curl",
   title:
-    "copy a curl command that downloads this export — it names $WEFT_STUDIO_TOKEN, never the token itself",
+    "copy a curl command that downloads this export — it names $WEFTBASE_TOKEN, never the token itself",
   copied: "copied a curl command",
   refused: "the browser refused the clipboard",
 } as const
@@ -102,7 +102,7 @@ export function curlFor(o: {
     new URL(exportPath(o.runID, o.format), o.apiBase).toString() +
     (o.tree ? "&tree=1" : "")
   const auth = o.authRequired
-    ? ` -H "Authorization: Bearer $WEFT_STUDIO_TOKEN"`
+    ? ` -H "Authorization: Bearer $WEFTBASE_TOKEN"`
     : ""
   return `curl -fsSL -OJ${auth} '${url.replaceAll("'", "%27")}'`
 }

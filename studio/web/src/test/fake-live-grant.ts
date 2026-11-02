@@ -118,9 +118,9 @@ interface PanelClaims {
 }
 
 function panelClaims(token: string): PanelClaims | null {
-  if (!token.startsWith("weft_pt.")) return null
+  if (!token.startsWith("wb_pt.")) return null
   try {
-    const body = token.slice("weft_pt.".length).split(".")[0]
+    const body = token.slice("wb_pt.".length).split(".")[0]
     const b64 = body.replace(/-/g, "+").replace(/_/g, "/")
     return JSON.parse(
       atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4))
@@ -215,7 +215,7 @@ export function answerLiveGrant(
     // The token's expiry caps the grant, as the server's does.
     exp = Math.min(exp, tokExp)
   }
-  const sig = `weft_lg.fake${++counter}.${btoa(s.stream).replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_")}`
+  const sig = `wb_lg.fake${++counter}.${btoa(s.stream).replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_")}`
   minted.set(sig, { stream: s.stream, exp, bearer })
   grantLedger.push({ sig, bearer, stream: s.stream, exp })
   // The Date header is how the client turns exp into a deadline on its

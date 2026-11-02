@@ -140,7 +140,7 @@ describe("isDate", () => {
 
 describe("tokenIdentity", () => {
   const claims = (o: object) =>
-    `weft_pt.${btoa(JSON.stringify(o)).replace(/=+$/, "")}.sig`
+    `wb_pt.${btoa(JSON.stringify(o)).replace(/=+$/, "")}.sig`
   const db = { kind: "sqlite" }
   it("reads a panel token's scope and public id from its claims", () => {
     const id = tokenIdentity(

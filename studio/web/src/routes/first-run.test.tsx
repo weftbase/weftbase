@@ -1,6 +1,6 @@
 // A fresh Studio's pages (U21.2; UX-F-11, UX-S5a-10, UX-A-20): every
 // page's empty state names how to connect an app to THIS Studio — its
-// own URL in WEFT_STUDIO_URL, never "this command starts Studio" — and
+// own URL in WEFTBASE_URL, never "this command starts Studio" — and
 // /runs carries a dismissible first-run card; the ? dialog and
 // /settings#concepts hold the glossary.
 import {
@@ -104,7 +104,7 @@ describe("every page's empty state names this Studio's URL (U21.2)", () => {
       expect(b).not.toBeNull()
       return b!
     })
-    expect(box.textContent).toContain(`WEFT_STUDIO_URL=${url}`)
+    expect(box.textContent).toContain(`WEFTBASE_URL=${url}`)
     expect(document.body.textContent).not.toContain(
       "This command starts Studio"
     )
@@ -123,7 +123,7 @@ describe("every page's empty state names this Studio's URL (U21.2)", () => {
         expect(b).not.toBeNull()
         return b!
       })
-      expect(box.textContent).toContain(`WEFT_STUDIO_URL=${url}\n`)
+      expect(box.textContent).toContain(`WEFTBASE_URL=${url}\n`)
       expect(box.textContent).toContain(`src="${url}/panel.js"`)
     } finally {
       cleanup()
@@ -168,8 +168,8 @@ describe("/settings' Connect an app (U21.2-fix, UX-S5a-10)", () => {
         l.getAttribute("data-connect-line")
       )
     ).toEqual(["app", "panel", "mcp"])
-    expect(section.textContent).toContain(`WEFT_STUDIO_URL=${url}`)
-    expect(section.textContent).toContain(`weft mcp --url ${url}`)
+    expect(section.textContent).toContain(`WEFTBASE_URL=${url}`)
+    expect(section.textContent).toContain(`weftbase mcp --url ${url}`)
   })
 
   it("the panel's 'how to connect ⤢' (lib/links.ts connectLink, U21.3-fix) lands on this section", async () => {
@@ -189,7 +189,7 @@ describe("the /runs first-run card (U21.2)", () => {
   it("shows until dismissed, and stays dismissed in this browser", async () => {
     renderApp("/runs")
     const card = await screen.findByRole("region", { name: "first run" })
-    expect(card.textContent).toContain(`WEFT_STUDIO_URL=${servedAt()}`)
+    expect(card.textContent).toContain(`WEFTBASE_URL=${servedAt()}`)
     expect(card.textContent).toContain("press ?")
     fireEvent.click(within(card).getByRole("button", { name: "dismiss" }))
     await waitFor(() =>

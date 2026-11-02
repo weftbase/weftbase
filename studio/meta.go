@@ -19,7 +19,7 @@ import (
 
 // api/meta (S4.3, plan B5): what this Studio is and how it is wired,
 // computed from the server's own state, never hard-coded. Every line
-// `weft doctor` prints reads one of these fields — the doctor
+// `weftbase doctor` prints reads one of these fields — the doctor
 // computes nothing Studio does not serve.
 
 // metaDoc is api/meta's body.
@@ -93,17 +93,17 @@ type metaDoc struct {
 	// (U20.2, UX-D-01): in_process when a link talks to this very server
 	// (runtime.Local(srv), or over HTTP to this server: it holds the
 	// link's registration), studio_url the Studio a link of this process
-	// dialled instead (runtime.Studio, weft dev's WEFT_STUDIO_URL) — so
+	// dialled instead (runtime.Studio, weftbase dev's WEFTBASE_URL) — so
 	// an embedded Studio whose app registered elsewhere says where,
 	// rather than reading as an app whose link is closed. Omitted when
-	// no link of this process is open (a standalone `weft studio`), and
+	// no link of this process is open (a standalone `weftbase dev`), and
 	// under db.path's rule (an address on the operator's network, as
 	// /api/runtimes' studio_url): absent to a panel token.
 	RuntimeLink *metaRuntimeLink `json:"runtime_link,omitempty"`
 	// DiscoveryFile is the discovery file apps find this Studio through
-	// (DiscoveryFile: the one `weft studio` / `weft dev` wrote), while
+	// (DiscoveryFile: the one `weftbase dev` wrote), while
 	// it names this process; omitted when there is none (setup A, or
-	// WEFT_DISCOVERY=off) and, under db.path's rule, to anyone else (a
+	// WEFTBASE_DISCOVERY=off) and, under db.path's rule, to anyone else (a
 	// local path).
 	DiscoveryFile string `json:"discovery_file,omitempty"`
 }
@@ -181,7 +181,7 @@ type metaContentRun struct {
 	Fix  string `json:"fix,omitempty"`
 	// Started, WeftVersion and Service are the run's own (its row's):
 	// when the newest data arrived and which weft and service sent it —
-	// `weft doctor`'s data line, which warns when the weft differs from
+	// `weftbase doctor`'s data line, which warns when the weft differs from
 	// this Studio's. weft_version and service are omitted when the run
 	// carries none (a non-weft exporter).
 	Started     time.Time `json:"started"`

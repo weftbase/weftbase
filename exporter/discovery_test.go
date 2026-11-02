@@ -92,9 +92,9 @@ func lines(s, level string) []string {
 // discovery file, Start configures the Studio destination the file
 // names — its url and token — and says so in exactly one INFO line.
 func TestDiscoveryJoinsTheRunningStudio(t *testing.T) {
-	t.Setenv("WEFT_STUDIO_URL", "")
-	t.Setenv("WEFT_STUDIO_TOKEN", "")
-	t.Setenv("WEFT_DISCOVERY", "")
+	t.Setenv("WEFTBASE_URL", "")
+	t.Setenv("WEFTBASE_TOKEN", "")
+	t.Setenv("WEFTBASE_DISCOVERY", "")
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
 	defer srv.Close()
@@ -119,9 +119,9 @@ func TestDiscoveryJoinsTheRunningStudio(t *testing.T) {
 // options and no environment — exports to the running Studio, which
 // exporter.StudioEndpoint (what weft/runtime dials) reports.
 func TestDiscoveryInstallJoins(t *testing.T) {
-	t.Setenv("WEFT_STUDIO_URL", "")
-	t.Setenv("WEFT_STUDIO_TOKEN", "")
-	t.Setenv("WEFT_DISCOVERY", "")
+	t.Setenv("WEFTBASE_URL", "")
+	t.Setenv("WEFTBASE_TOKEN", "")
+	t.Setenv("WEFTBASE_DISCOVERY", "")
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
 	defer srv.Close()
@@ -138,20 +138,20 @@ func TestDiscoveryInstallJoins(t *testing.T) {
 	}
 }
 
-// TestDiscoveryEscapes: WEFT_STUDIO_URL wins over the file (and no INFO
-// line claims a join); WEFT_DISCOVERY=off and NoEnv ignore it; a stale
+// TestDiscoveryEscapes: WEFTBASE_URL wins over the file (and no INFO
+// line claims a join); WEFTBASE_DISCOVERY=off and NoEnv ignore it; a stale
 // file (a dead pid, or 24 hours old) is ignored with no line above
 // Debug.
 func TestDiscoveryEscapes(t *testing.T) {
-	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	t.Setenv("WEFTBASE_TOKEN", "")
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
-	t.Setenv("WEFT_DISCOVERY", "")
-	t.Setenv("WEFT_DB", filepath.Join(t.TempDir(), "local.db"))
+	t.Setenv("WEFTBASE_DISCOVERY", "")
+	t.Setenv("WEFTBASE_DB", filepath.Join(t.TempDir(), "local.db"))
 	const fileURL = "http://127.0.0.1:1"
 
-	t.Run("WEFT_STUDIO_URL wins", func(t *testing.T) {
+	t.Run("WEFTBASE_URL wins", func(t *testing.T) {
 		discoveryFile(t, fileURL, "disc", os.Getpid(), time.Now())
-		t.Setenv("WEFT_STUDIO_URL", "http://127.0.0.1:2")
+		t.Setenv("WEFTBASE_URL", "http://127.0.0.1:2")
 		logs := captureLog(t)
 		p, err := Start(testCtx(t), otel.NoGlobal(), otel.Heartbeat(0))
 		if err != nil {
@@ -165,17 +165,17 @@ func TestDiscoveryEscapes(t *testing.T) {
 			t.Errorf("a join was claimed: %s", logs.String())
 		}
 	})
-	t.Run("WEFT_DISCOVERY=off", func(t *testing.T) {
+	t.Run("WEFTBASE_DISCOVERY=off", func(t *testing.T) {
 		discoveryFile(t, fileURL, "disc", os.Getpid(), time.Now())
-		t.Setenv("WEFT_STUDIO_URL", "")
-		t.Setenv("WEFT_DISCOVERY", "off")
+		t.Setenv("WEFTBASE_URL", "")
+		t.Setenv("WEFTBASE_DISCOVERY", "off")
 		if _, err := Start(testCtx(t), otel.NoGlobal(), otel.Heartbeat(0)); err != otel.ErrNoDestinations {
 			t.Errorf("Start = %v, want no destinations (the file ignored)", err)
 		}
 	})
 	t.Run("NoEnv", func(t *testing.T) {
 		discoveryFile(t, fileURL, "disc", os.Getpid(), time.Now())
-		t.Setenv("WEFT_STUDIO_URL", "")
+		t.Setenv("WEFTBASE_URL", "")
 		if _, err := Start(testCtx(t), otel.NoGlobal(), otel.NoEnv(), otel.Heartbeat(0)); err != otel.ErrNoDestinations {
 			t.Errorf("Start = %v, want no destinations (the file ignored)", err)
 		}
@@ -189,7 +189,7 @@ func TestDiscoveryEscapes(t *testing.T) {
 	} {
 		t.Run("stale: "+name, func(t *testing.T) {
 			discoveryFile(t, fileURL, "disc", f.pid, f.started)
-			t.Setenv("WEFT_STUDIO_URL", "")
+			t.Setenv("WEFTBASE_URL", "")
 			logs := captureLog(t)
 			if _, err := Start(testCtx(t), otel.NoGlobal(), otel.Heartbeat(0)); err != otel.ErrNoDestinations {
 				t.Errorf("Start = %v, want no destinations (the stale file ignored)", err)
@@ -208,9 +208,9 @@ func TestDiscoveryEscapes(t *testing.T) {
 // pipeline has the explicit destination alone, StudioEndpoint (what
 // runtime.Install dials) is the explicit one, and no join is claimed.
 func TestDiscoveryExplicitStudioWins(t *testing.T) {
-	t.Setenv("WEFT_STUDIO_URL", "")
-	t.Setenv("WEFT_STUDIO_TOKEN", "")
-	t.Setenv("WEFT_DISCOVERY", "")
+	t.Setenv("WEFTBASE_URL", "")
+	t.Setenv("WEFTBASE_TOKEN", "")
+	t.Setenv("WEFTBASE_DISCOVERY", "")
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	var mu sync.Mutex
 	hits := map[string]int{}
@@ -250,16 +250,16 @@ func TestDiscoveryExplicitStudioWins(t *testing.T) {
 }
 
 // runtimeDirDiscoveryFile writes a fresh discovery file naming url
-// where a running `weft studio` writes it on Linux —
-// $XDG_RUNTIME_DIR/weft/studio.json, XDG_RUNTIME_DIR a temporary
+// where a running `weftbase dev` writes it on Linux —
+// $XDG_RUNTIME_DIR/weftbase/studio.json, XDG_RUNTIME_DIR a temporary
 // directory of the test's own — and points the location order at the
 // documented one (DefaultDirs) restricted to that directory, so the
-// developer's own ./.weft or cache directory never answers.
+// developer's own ./.weftbase or cache directory never answers.
 func runtimeDirDiscoveryFile(t *testing.T, url, token string) {
 	t.Helper()
 	xdg := t.TempDir()
 	t.Setenv("XDG_RUNTIME_DIR", xdg)
-	dir := filepath.Join(xdg, "weft")
+	dir := filepath.Join(xdg, "weftbase")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +313,7 @@ func (s *countingSink) hits() int {
 // or skips the discovery read.
 func clearDestinationEnv(t *testing.T) {
 	t.Helper()
-	for _, k := range []string{"WEFT_STUDIO_URL", "WEFT_STUDIO_TOKEN", "WEFT_DISCOVERY", "OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_HEADERS"} {
+	for _, k := range []string{"WEFTBASE_URL", "WEFTBASE_TOKEN", "WEFTBASE_DISCOVERY", "OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_HEADERS"} {
 		t.Setenv(k, "")
 	}
 }
@@ -456,8 +456,8 @@ func TestDiscoveryLocalPlusStudio(t *testing.T) {
 	}
 }
 
-// TestDiscoveryWeftDevShape (I1-fix): the `weft dev` app — an explicit
-// Local, WEFT_STUDIO_URL naming the command's Studio, and a discovery
+// TestDiscoveryWeftDevShape (I1-fix): the `weftbase dev` app — an explicit
+// Local, WEFTBASE_URL naming the command's Studio, and a discovery
 // file naming a different one — has two destinations: the Local and
 // the env Studio, which StudioEndpoint reports; the file's Studio gets
 // nothing.
@@ -465,8 +465,8 @@ func TestDiscoveryWeftDevShape(t *testing.T) {
 	clearDestinationEnv(t)
 	dev, other := newCountingSink(t), newCountingSink(t)
 	runtimeDirDiscoveryFile(t, other.URL, "other-token")
-	t.Setenv("WEFT_STUDIO_URL", dev.URL)
-	t.Setenv("WEFT_STUDIO_TOKEN", "dev-token")
+	t.Setenv("WEFTBASE_URL", dev.URL)
+	t.Setenv("WEFTBASE_TOKEN", "dev-token")
 	path := filepath.Join(t.TempDir(), "local.db")
 
 	p, err := Start(testCtx(t), otel.NoGlobal(), otel.Heartbeat(0), Local(path))
@@ -487,7 +487,7 @@ func TestDiscoveryWeftDevShape(t *testing.T) {
 		t.Errorf("the Local store has no spans for run %s", id)
 	}
 	if dev.hits() == 0 {
-		t.Error("the WEFT_STUDIO_URL Studio got nothing")
+		t.Error("the WEFTBASE_URL Studio got nothing")
 	}
 	if n := other.hits(); n != 0 {
 		t.Errorf("the discovery file's Studio got %d requests", n)

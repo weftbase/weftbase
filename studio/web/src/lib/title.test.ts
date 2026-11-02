@@ -17,13 +17,13 @@ describe("pageTitle", () => {
   it.each([
     [
       { page: "run", id: "s_01J9ZKQ3M5X7AB-t3", status: "succeeded" },
-      "run s_…-t3 · succeeded · weft studio",
+      "run s_…-t3 · succeeded · weftbase",
     ],
     [
       { page: "run", id: "r_ok", status: "running" },
-      "run r_ok · running · weft studio",
+      "run r_ok · running · weftbase",
     ],
-    [{ page: "run", id: "r_ok" }, "run r_ok · weft studio"],
+    [{ page: "run", id: "r_ok" }, "run r_ok · weftbase"],
     [
       {
         page: "run",
@@ -32,36 +32,36 @@ describe("pageTitle", () => {
         agent: "director",
         title: "How many units of SKU A-17 are in stock right now?",
       },
-      "director · How many units of SKU A-17 are in stock… · succeeded · weft studio",
+      "director · How many units of SKU A-17 are in stock… · succeeded · weftbase",
     ],
     [
       { page: "run", id: "r_ok", status: "failed", title: NO_CONTENT },
-      `${NO_CONTENT} · failed · weft studio`,
+      `${NO_CONTENT} · failed · weftbase`,
     ],
     [
       { page: "session", id: "s_1", title: "Acme support desk", turns: 9 },
-      "Acme support desk · 9 turns · weft studio",
+      "Acme support desk · 9 turns · weftbase",
     ],
     [
       { page: "trace", id: "0af7651916cd43dd8448eb211c80319c" },
-      "trace 0af76519…319c · weft studio",
+      "trace 0af76519…319c · weftbase",
     ],
-    [{ page: "session", id: "s_1" }, "session s_1 · weft studio"],
+    [{ page: "session", id: "s_1" }, "session s_1 · weftbase"],
     [
       { page: "compare", a: "r_a", b: ["r_b", "r_c"] },
-      "compare r_a ↔ r_b ↔ r_c · weft studio",
+      "compare r_a ↔ r_b ↔ r_c · weftbase",
     ],
-    [{ page: "compare" }, "compare · weft studio"],
-    [{ page: "playground" }, "playground · weft studio"],
+    [{ page: "compare" }, "compare · weftbase"],
+    [{ page: "playground" }, "playground · weftbase"],
     [
       { page: "playground", experiment: "exp_1" },
-      "playground exp_1 · weft studio",
+      "playground exp_1 · weftbase",
     ],
-    [{ page: "runs" }, "runs · weft studio"],
-    [{ page: "sessions" }, "sessions · weft studio"],
-    [{ page: "live" }, "live · weft studio"],
-    [{ page: "agents" }, "agents · weft studio"],
-    [{ page: "settings" }, "settings · weft studio"],
+    [{ page: "runs" }, "runs · weftbase"],
+    [{ page: "sessions" }, "sessions · weftbase"],
+    [{ page: "live" }, "live · weftbase"],
+    [{ page: "agents" }, "agents · weftbase"],
+    [{ page: "settings" }, "settings · weftbase"],
   ] as const)("%o → %s", (place, want) => {
     expect(pageTitle(place)).toBe(want)
   })

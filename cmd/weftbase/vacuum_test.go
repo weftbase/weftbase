@@ -31,7 +31,7 @@ func vacuumRun(t *testing.T, db obsdb.DB, id string, at time.Time) {
 	}
 }
 
-// weft vacuum: one sweep with --retain (or WEFT_RETAIN), then VACUUM;
+// weftbase vacuum: one sweep with --retain (or WEFT_RETAIN), then VACUUM;
 // without a retention it only vacuums.
 func TestVacuum(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "vac.db")
@@ -109,13 +109,13 @@ func TestVacuumUsage(t *testing.T) {
 		{[]string{"vacuum", "--db", "sqlite://" + path, "extra"}, "", 2, "vacuum takes no arguments"},
 		{[]string{"vacuum", "--db", "sqlite://" + filepath.Join(dir, "missing.db")}, "", 1, "missing.db"},
 		{[]string{"vacuum", "--db", "postgres://x"}, "", 1, "--db must be"},
-		{[]string{"studio", "--retain", "soon"}, "", 2, `--retain "soon"`},
+		{[]string{"dev", "--retain", "soon"}, "", 2, `--retain "soon"`},
 		// Retain's floor: under an hour is a usage error on all three.
 		{[]string{"vacuum", "--db", "sqlite://" + path, "--retain", "30m"}, "", 2, `--retain "30m": retention must be at least 1h`},
 		{[]string{"vacuum", "--db", "sqlite://" + path}, "59m", 2, `WEFT_RETAIN "59m": retention must be at least 1h`},
-		{[]string{"studio", "--retain", "10m"}, "", 2, "retention must be at least 1h"},
-		{[]string{"studio"}, "30s", 2, `WEFT_RETAIN "30s": retention must be at least 1h`},
-		{[]string{"dev", "--no-watch", "--retain", "30m"}, "", 2, "retention must be at least 1h"},
+		{[]string{"dev", "--retain", "10m"}, "", 2, "retention must be at least 1h"},
+		{[]string{"dev"}, "30s", 2, `WEFT_RETAIN "30s": retention must be at least 1h`},
+		{[]string{"dev", "--no-watch", "--retain", "30m", "--", "true"}, "", 2, "retention must be at least 1h"},
 	} {
 		t.Setenv("WEFT_RETAIN", c.env)
 		var out, errb bytes.Buffer
@@ -124,14 +124,14 @@ func TestVacuumUsage(t *testing.T) {
 		}
 	}
 	var out, errb bytes.Buffer
-	if code := run([]string{"vacuum", "-h"}, &out, &errb); code != 0 || !strings.Contains(errb.String(), "Usage: weft vacuum") {
+	if code := run([]string{"vacuum", "-h"}, &out, &errb); code != 0 || !strings.Contains(errb.String(), "Usage: weftbase vacuum") {
 		t.Errorf("vacuum -h = %d %q", code, errb.String())
 	}
 }
 
-// weft vacuum with no --db and no WEFT_DB, and no ./.weft/weft.db,
+// weftbase vacuum with no --db and no WEFTBASE_DB, and no ./.weftbase/weftbase.db,
 // refuses (exit 1) and creates nothing: sqlite.Open would have made an
-// empty database to vacuum. A missing --db or WEFT_DB file the same.
+// empty database to vacuum. A missing --db or WEFTBASE_DB file the same.
 func TestVacuumNoDatabase(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
@@ -140,11 +140,11 @@ func TestVacuumNoDatabase(t *testing.T) {
 		env, args []string
 		msg       string
 	}{
-		{nil, []string{"vacuum"}, "no database at ./.weft/weft.db (nothing to vacuum)"},
-		{[]string{"WEFT_DB", filepath.Join(dir, "env.db")}, []string{"vacuum"}, "no database at " + filepath.Join(dir, "env.db") + " (nothing to vacuum)"},
+		{nil, []string{"vacuum"}, "no database at ./.weftbase/weftbase.db (nothing to vacuum)"},
+		{[]string{"WEFTBASE_DB", filepath.Join(dir, "env.db")}, []string{"vacuum"}, "no database at " + filepath.Join(dir, "env.db") + " (nothing to vacuum)"},
 		{nil, []string{"vacuum", "--db", "sqlite://flag.db"}, "no database at flag.db (nothing to vacuum)"},
 	} {
-		t.Setenv("WEFT_DB", "")
+		t.Setenv("WEFTBASE_DB", "")
 		if c.env != nil {
 			t.Setenv(c.env[0], c.env[1])
 		}
@@ -153,7 +153,7 @@ func TestVacuumNoDatabase(t *testing.T) {
 			t.Errorf("%v = %d %q, want 1 naming %q", c.args, code, errb.String(), c.msg)
 		}
 	}
-	for _, p := range []string{".weft", "env.db", "flag.db"} {
+	for _, p := range []string{".weftbase", "env.db", "flag.db"} {
 		if _, err := os.Stat(filepath.Join(dir, p)); !errors.Is(err, fs.ErrNotExist) {
 			t.Errorf("%s after a refused vacuum: %v, want never created", p, err)
 		}
@@ -197,7 +197,7 @@ func TestRetainFloorMatchesStudio(t *testing.T) {
 	_ = studio.New(studio.DB(db), studio.Retain(30*time.Minute))
 }
 
-// weft studio --retain reaches api/meta as retention.
+// weftbase dev --retain reaches api/meta as retention.
 func TestStudioRetainInMeta(t *testing.T) {
 	t.Setenv("WEFT_RETAIN", "")
 	opts, _, err := retainOptions("168h")

@@ -363,7 +363,7 @@ export function weftPublicId(): string {
 export { isLoopback }
 
 /** What a token may do, as far as the page can tell (§6). A panel
- * token (setup C) is `weft_pt.<claims>.<signature>` with its scope in
+ * token (setup C) is `wb_pt.<claims>.<signature>` with its scope in
  * the claims: "read" (the default mint) or "playground". Anything else
  * is "" — the server token, or none (setups A and B). A hint for what
  * to draw, never a check: Studio enforces the scope on every route,
@@ -530,7 +530,7 @@ export function readConfig(
  * "headers" turns it on anywhere and "off" turns it off; by default it
  * is on only where the host has said so by its setup — the page AND
  * the endpoint on loopback, with no token (setup A) or the dev/server
- * token (setup B), never under a panel token (weft_pt., setup C). A
+ * token (setup B), never under a panel token (wb_pt., setup C). A
  * production page pointed at a loopback endpoint is not patched by
  * default; every other page's window.fetch is never touched. page is
  * the page's URL (default location.href). */
@@ -543,7 +543,7 @@ export function headerRungOn(
   return (
     isLoopback(page) &&
     isLoopback(cfg.endpoint) &&
-    !cfg.token.startsWith("weft_pt.")
+    !cfg.token.startsWith("wb_pt.")
   )
 }
 

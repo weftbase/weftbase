@@ -75,7 +75,7 @@ function serve(doc: RunDoc) {
 }
 
 const panelToken = (scope: "read" | "playground") =>
-  `weft_pt.${btoa(
+  `wb_pt.${btoa(
     JSON.stringify({
       public_id: "pub_1",
       scope,

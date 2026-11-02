@@ -37,7 +37,7 @@ const record = (pos: number, kind = "event") => ({
 /** A panel token whose claims say scope and exp (the fake does not
  * check the signature; the wall compares the whole string). */
 export const panelToken = (exp: number, scope = "read", publicId = "pub_1") =>
-  `weft_pt.${btoa(
+  `wb_pt.${btoa(
     JSON.stringify({
       public_id: publicId,
       scope,
@@ -84,7 +84,7 @@ describe("openLive", () => {
     expect(url.pathname).toBe("/api/live")
     expect(url.searchParams.get("run")).toBe("a/0/c 1")
     expect(url.searchParams.get("kinds")).toBe("event,delta")
-    expect(url.searchParams.get("sig")).toMatch(/^weft_lg\./)
+    expect(url.searchParams.get("sig")).toMatch(/^wb_lg\./)
     expect(url.searchParams.has("token")).toBe(false)
     expect(es.url).not.toContain(encodeURIComponent("tok +/="))
     live.close()
@@ -509,7 +509,7 @@ describe("freshBearer", () => {
     expect(freshBearer(behind, ahead, now)).toBe(false)
     expect(freshBearer(ahead, behind, now)).toBe(true)
     expect(freshBearer("server-token", ahead, now)).toBe(true)
-    expect(freshBearer("weft_pt.not-claims.sig", ahead, now)).toBe(false)
+    expect(freshBearer("wb_pt.not-claims.sig", ahead, now)).toBe(false)
     expect(panelTokenExp(ahead)).toBe(now + 60_000)
     expect(panelTokenExp("server-token")).toBeNull()
   })

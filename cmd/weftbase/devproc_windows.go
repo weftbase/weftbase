@@ -29,7 +29,7 @@ func (c *child) kill() {
 // groupAlive has no group to ask about on Windows.
 func (c *child) groupAlive() bool { return false }
 
-// devSignals are the signals that stop weft dev (the app first).
+// devSignals are the signals that stop weftbase dev (the app first).
 var devSignals = []os.Signal{os.Interrupt, syscall.SIGTERM}
 
 // appSignal is the signal the app is stopped with (Windows ends the

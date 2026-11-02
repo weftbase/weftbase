@@ -16,12 +16,12 @@ import (
 
 // The dev token (plan B3): stable per database. On a database file's
 // first start the token is 32 random bytes (base64url) written beside
-// it, <db>.token (.weft/weft.db.token by default), mode 0600; every
+// it, <db>.token (.weftbase/weftbase.db.token by default), mode 0600; every
 // later start on that file serves the same token, so a restart keeps
-// the browser's tab, the app's WEFT_STUDIO_TOKEN and the discovery
+// the browser's tab, the app's WEFTBASE_TOKEN and the discovery
 // file valid, and a second start's port probe can carry it (the reuse
 // verdict). --rotate-token writes a new one. --token and
-// WEFT_STUDIO_TOKEN override it and leave the file alone. A database
+// WEFTBASE_TOKEN override it and leave the file alone. A database
 // with no file (":memory:", ClickHouse) gets a token generated for
 // this process alone, printed at start as before.
 //
@@ -34,7 +34,7 @@ type tokenSource int
 const (
 	tokenGenerated tokenSource = iota // this process alone; printed
 	tokenFromFlag                     // --token
-	tokenFromEnv                      // WEFT_STUDIO_TOKEN
+	tokenFromEnv                      // WEFTBASE_TOKEN
 	tokenFromFile                     // <db>.token, stable per database
 )
 
@@ -52,13 +52,13 @@ type resolvedToken struct {
 func (r resolvedToken) printable() bool { return r.source == tokenGenerated }
 
 // resolveToken is the token a start serves: --token, then
-// WEFT_STUDIO_TOKEN, then the database's token file (created on first
+// WEFTBASE_TOKEN, then the database's token file (created on first
 // use; rewritten with rotate), else a generated one.
 func resolveToken(dbFlag, flagTok string, rotate bool) (resolvedToken, error) {
 	if flagTok != "" {
 		return resolvedToken{value: flagTok, source: tokenFromFlag}, nil
 	}
-	if env := os.Getenv("WEFT_STUDIO_TOKEN"); env != "" {
+	if env := os.Getenv("WEFTBASE_TOKEN"); env != "" {
 		return resolvedToken{value: env, source: tokenFromEnv}, nil
 	}
 	dbPath, err := dbFile(dbFlag)
@@ -102,7 +102,7 @@ func stableProbe(dbPath string) func(addr string) string {
 }
 
 // probeToken is the bearer a probe of addr sends: the fixed token
-// (--token, WEFT_STUDIO_TOKEN), else stableProbe's answer — what a
+// (--token, WEFTBASE_TOKEN), else stableProbe's answer — what a
 // reused Studio on the same database serves.
 func probeToken(dbPath, flagTok, addr string) string {
 	if tok := fixedToken(flagTok); tok != "" {
@@ -127,7 +127,7 @@ func readTokenFile(path string) string {
 func newSecret() string {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
-		panic("weft: token: " + err.Error())
+		panic("weftbase: token: " + err.Error())
 	}
 	return base64.RawURLEncoding.EncodeToString(b)
 }
@@ -136,7 +136,7 @@ func newSecret() string {
 // the token goes to a temporary file, complete, and os.Link publishes
 // it — an atomic create-if-absent, so two first starts can never see a
 // half-written file or end on different tokens (the loser of the link
-// reads the winner's). A .weft directory gets its .gitignore first.
+// reads the winner's). A .weftbase directory gets its .gitignore first.
 func createTokenFile(path string) (tok string, created bool, err error) {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {

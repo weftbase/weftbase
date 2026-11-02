@@ -13,7 +13,7 @@ import (
 	"github.com/weftbase/weftbase/internal/discovery"
 )
 
-// TestStudioStopsOnSIGHUP (review finding 5): `weft studio` stops
+// TestStudioStopsOnSIGHUP (review finding 5): `weftbase dev` stops
 // gracefully on SIGHUP (the terminal closing) like SIGINT and SIGTERM,
 // so its discovery file is removed.
 func TestStudioStopsOnSIGHUP(t *testing.T) {

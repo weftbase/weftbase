@@ -47,15 +47,15 @@ func TestPricingOptions(t *testing.T) {
 	if _, _, err := pricingOptions(""); err == nil || !strings.Contains(err.Error(), "WEFT_PRICING") || !strings.Contains(err.Error(), bad) {
 		t.Errorf("WEFT_PRICING=bad.json = %v", err)
 	}
-	// weft studio refuses to start on it: exit 1, the error on stderr.
+	// weftbase dev refuses to start on it: exit 1, the error on stderr.
 	var out, errb bytes.Buffer
-	code := run([]string{"studio", "--db", "sqlite://" + filepath.Join(dir, "w.db"), "--addr", "127.0.0.1:0", "--open=false"}, &out, &errb)
+	code := run([]string{"dev", "--db", "sqlite://" + filepath.Join(dir, "w.db"), "--addr", "127.0.0.1:0", "--open=false"}, &out, &errb)
 	if code != 1 || !strings.Contains(errb.String(), bad) || !strings.Contains(errb.String(), "models[0].input") {
-		t.Errorf("weft studio under a malformed WEFT_PRICING = %d %q, want exit 1 naming the path and the field", code, errb.String())
+		t.Errorf("weftbase dev under a malformed WEFT_PRICING = %d %q, want exit 1 naming the path and the field", code, errb.String())
 	}
 }
 
-// weft studio --pricing reaches api/meta as pricing {source file, path
+// weftbase dev --pricing reaches api/meta as pricing {source file, path
 // (the server token's), dated, models}.
 func TestStudioPricingInMeta(t *testing.T) {
 	t.Setenv("WEFT_PRICING", "")

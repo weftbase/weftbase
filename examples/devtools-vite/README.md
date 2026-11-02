@@ -52,24 +52,24 @@ Install the package once (the check above does it), then run these
 two commands in two terminals:
 
 ```sh
-weft dev -- go run ./examples/studio-local        # repository root
+weftbase dev -- go run ./examples/studio-local        # repository root
 cd examples/devtools-vite && npm run dev          # http://localhost:5173/
 ```
 
-`weft dev` runs Studio on 127.0.0.1:7331 and studio-local beside it
+`weftbase dev` runs Studio on 127.0.0.1:7331 and studio-local beside it
 on 127.0.0.1:8080. Vite proxies `/run` and `/studio` to 8080
 (`vite.config.ts`; `WEFT_BACKEND` overrides it). The panel's endpoint
 is `/studio/`, studio-local's embedded Studio, on the page's own
 origin: no token and no CORS. Ask a question in the chat; studio-local's
 offline echo model answers, `/run`'s `Weft-Scope` response header
 scopes the panel to the turn, and the dock shows it. Set
-`VITE_WEFT_STUDIO` to point the panel at another Studio. Under `weft
+`VITE_WEFTBASE_URL` to point the panel at another Studio. Under `weft
 dev` the embedded Studio is studio-local's read-only view: its runtime
-registers with weft dev's Studio, so this panel shows the turns
+registers with weftbase dev's Studio, so this panel shows the turns
 and a parked call is decided from studio-local's own page
-(http://127.0.0.1:8080/), whose panel reads weft dev's Studio. Without
-`weft dev` installed, use
-`go run ./cmd/weft dev -- go run ./examples/studio-local`.
+(http://127.0.0.1:8080/), whose panel reads weftbase dev's Studio. Without
+`weftbase dev` installed, use
+`go run ./cmd/weftbase dev -- go run ./examples/studio-local`.
 
 `mount()` is the host's own mount: if Studio does not answer, it
 shows one "Studio not reachable" line and stays. The other form,

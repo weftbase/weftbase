@@ -629,7 +629,7 @@ describe("a child row replays the child as its own run (A10)", () => {
 
 describe("the verbs are capability-gated", () => {
   const panelToken = (scope: "read" | "playground") =>
-    `weft_pt.${btoa(
+    `wb_pt.${btoa(
       JSON.stringify({
         public_id: "pub_1",
         scope,
@@ -2046,7 +2046,7 @@ describe("the replay drawer's state in the URL (G2)", () => {
   it("the tab is titled while the run loads", async () => {
     studio.on(`GET runs/${RUN}`, () => new Promise(() => {}))
     renderApp(`/runs/${RUN}`)
-    await waitFor(() => expect(document.title).toBe("run r_fail · weft studio"))
+    await waitFor(() => expect(document.title).toBe("run r_fail · weftbase"))
   })
 })
 
@@ -2064,7 +2064,7 @@ describe("the replay drawer's link, closing round (F2.2)", () => {
       .replace(/=+$/, "")
       .replace(/\+/g, "-")
       .replace(/\//g, "_")
-    setStudioToken(`weft_pt.${claims}.c2ln`)
+    setStudioToken(`wb_pt.${claims}.c2ln`)
     const { router } = renderApp(
       `/runs/${RUN}?view=story&replay=from_step&from=2`
     )

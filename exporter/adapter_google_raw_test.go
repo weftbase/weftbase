@@ -29,8 +29,8 @@ import (
 
 func TestGoogleRawBodiesRoundTripLocalSink(t *testing.T) {
 	t.Setenv("WEFT_ENV", "dev")
-	t.Setenv("WEFT_DISCOVERY", "off")
-	t.Setenv("WEFT_STUDIO_URL", "")
+	t.Setenv("WEFTBASE_DISCOVERY", "off")
+	t.Setenv("WEFTBASE_URL", "")
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	sse, err := os.ReadFile(weftsrc.Path(t, "google/testdata/text_only.sse"))
 	if err != nil {

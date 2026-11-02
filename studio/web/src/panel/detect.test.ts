@@ -43,7 +43,7 @@ const LOCAL = `${HERE}/studio/`
 /** A Studio somewhere else (setup C's shape). */
 const REMOTE = "https://studio.example/studio/"
 /** A setup C panel token (read scope: the claims carry none). */
-const PANEL_TOKEN = `weft_pt.${btoa(JSON.stringify({ pid: "pub_demo" })).replace(/=+$/, "")}.sig`
+const PANEL_TOKEN = `wb_pt.${btoa(JSON.stringify({ pid: "pub_demo" })).replace(/=+$/, "")}.sig`
 
 /** A response the page's own app sends, carrying the header. */
 const scoped = (value: string | null, body = "run r_1 ok") =>

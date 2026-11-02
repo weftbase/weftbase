@@ -20,7 +20,7 @@ import (
 // TestStudioAgentsFromRuntime pins plan B4 end to end: a bare `weft
 // studio` (no weft.json anywhere, a temp database, a free port) and an
 // app whose runtime.Install dials it — this test binary re-executed as
-// `weft dev`'s helper app (dev_helper_test.go; WEFT_ENV=dev opens its
+// `weftbase dev`'s helper app (dev_helper_test.go; WEFT_ENV=dev opens its
 // runtime link) — serve the Agents page from the registration alone
 // (api/manifest lists the agent, live), the playground and the
 // debugger (their capabilities). With --no-playground all three are
@@ -33,8 +33,8 @@ func TestStudioAgentsFromRuntime(t *testing.T) {
 	}
 	t.Chdir(wd)
 	t.Setenv("WEFT_MANIFEST", "")
-	t.Setenv("WEFT_STUDIO_ADDR", "")
-	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	t.Setenv("WEFTBASE_ADDR", "")
+	t.Setenv("WEFTBASE_TOKEN", "")
 
 	type metaDoc struct {
 		HasManifest     bool              `json:"has_manifest"`
@@ -55,7 +55,7 @@ func TestStudioAgentsFromRuntime(t *testing.T) {
 			db := "sqlite://" + filepath.Join(t.TempDir(), "weft.db")
 			var out syncBuffer
 			done := make(chan int, 1)
-			args := append([]string{"studio", "--addr", addr, "--db", db, "--token", "tok"}, c.extra...)
+			args := append([]string{"dev", "--addr", addr, "--db", db, "--token", "tok"}, c.extra...)
 			go func() { done <- run(args, &out, io.Discard) }()
 			// The Studio stops once, whether the test ends or fails:
 			// SIGTERM, then its exit code, bounded.
@@ -72,7 +72,7 @@ func TestStudioAgentsFromRuntime(t *testing.T) {
 					select {
 					case studioCode = <-done:
 					case <-time.After(10 * time.Second):
-						t.Errorf("weft studio never returned after SIGTERM")
+						t.Errorf("weftbase dev never returned after SIGTERM")
 					}
 				})
 			}
@@ -82,7 +82,7 @@ func TestStudioAgentsFromRuntime(t *testing.T) {
 			app := exec.Command(os.Args[0])
 			app.Env = append(os.Environ(),
 				"WEFT_DEV_HELPER=app", "WEFT_DEV_HELPER_RUNTIME=1", "WEFT_ENV=dev",
-				"WEFT_STUDIO_URL=http://"+addr, "WEFT_STUDIO_TOKEN=tok")
+				"WEFTBASE_URL=http://"+addr, "WEFTBASE_TOKEN=tok")
 			var appOut syncBuffer
 			app.Stdout, app.Stderr = &appOut, &appOut
 			if err := app.Start(); err != nil {
@@ -195,7 +195,7 @@ func TestStudioAgentsFromRuntime(t *testing.T) {
 			stopApp()
 			stopStudioOnce()
 			if studioCode != 0 {
-				t.Errorf("weft studio exited %d", studioCode)
+				t.Errorf("weftbase dev exited %d", studioCode)
 			}
 			notListening(t, addr)
 		})

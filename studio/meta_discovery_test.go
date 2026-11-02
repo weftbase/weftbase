@@ -15,7 +15,7 @@ import (
 )
 
 // writeDiscoveryFile writes a discovery file naming pid (0600, as
-// `weft studio` writes it) and returns its path.
+// `weftbase dev` writes it) and returns its path.
 func writeDiscoveryFile(t *testing.T, pid int) string {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), discovery.FileName)
@@ -82,7 +82,7 @@ func TestMetaDiscoveryFile(t *testing.T) {
 // capability it names and every capability off for the same cause —
 // the playground's family — and nothing else; nothing turns on.
 func TestOffReason(t *testing.T) {
-	words := "weft studio was started with --no-playground: drop the flag to turn the playground on"
+	words := "weftbase dev was started with --no-playground: drop the flag to turn the playground on"
 	srv := New(DB(fixtureDB(t)), OffReason("playground", words))
 	t.Cleanup(func() { _ = srv.Close() })
 	off := srv.capabilitiesOff()

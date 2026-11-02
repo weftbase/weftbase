@@ -14,19 +14,19 @@ import (
 	"github.com/weftbase/weftbase/studio"
 )
 
-// U20.2's Done line, offline: `weft dev -- go run ./examples/studio-local`
+// U20.2's Done line, offline: `weftbase dev -- go run ./examples/studio-local`
 // approves a parked call from the page's panel, and a killed app's turn
 // reads disconnected with the right fix.
 //
-// The test is weft dev's half by hand: a Studio with a server token and
-// the playground over its own database (what `weft dev` serves), and
-// the environment it hands the app — WEFT_STUDIO_URL, WEFT_STUDIO_TOKEN,
-// WEFT_DB (that Studio's file) and WEFT_ENV=dev. The app is the
+// The test is weftbase dev's half by hand: a Studio with a server token and
+// the playground over its own database (what `weftbase dev` serves), and
+// the environment it hands the app — WEFTBASE_URL, WEFTBASE_TOKEN,
+// WEFTBASE_DB (that Studio's file) and WEFT_ENV=dev. The app is the
 // example's own build, its deterministic echo model (no provider key,
 // no live call). The panel's API path is the page's own: the panel
 // token the page's tag carries, data-endpoint the Studio it names.
 
-// devStudio is the Studio `weft dev` would serve.
+// devStudio is the Studio `weftbase dev` would serve.
 type devStudio struct {
 	ts    *httptest.Server
 	token string
@@ -71,14 +71,14 @@ func TestWeftDevApprovesFromThePagePanel(t *testing.T) {
 	defer func() { _ = srv.Close() }()
 	dev := devStudio{ts: httptest.NewServer(srv.Handler()), token: devToken}
 	defer dev.ts.Close()
-	// weft dev's environment (cmd/weft/dev.go devEnv).
-	t.Setenv("WEFT_STUDIO_URL", dev.ts.URL)
-	t.Setenv("WEFT_STUDIO_TOKEN", devToken)
-	t.Setenv("WEFT_DB", dbPath)
+	// weftbase dev's environment (cmd/weftbase/dev.go devEnv).
+	t.Setenv("WEFTBASE_URL", dev.ts.URL)
+	t.Setenv("WEFTBASE_TOKEN", devToken)
+	t.Setenv("WEFTBASE_DB", dbPath)
 	t.Setenv("WEFT_ENV", "dev")
 
 	// A threads directory under a parent that does not exist yet (weft
-	// dev --db elsewhere leaves no ./.weft): build creates it.
+	// dev --db elsewhere leaves no ./.weftbase): build creates it.
 	a, err := build(filepath.Join(dir, "no-such-dir", "threads"))
 	if err != nil {
 		t.Fatal(err)
@@ -90,12 +90,12 @@ func TestWeftDevApprovesFromThePagePanel(t *testing.T) {
 		}
 	}()
 	if a.studioURL != dev.ts.URL {
-		t.Fatalf("the app reads Studio %q, want weft dev's %q", a.studioURL, dev.ts.URL)
+		t.Fatalf("the app reads Studio %q, want weftbase dev's %q", a.studioURL, dev.ts.URL)
 	}
 	app := httptest.NewServer(a.mux)
 	defer app.Close()
 
-	// The page: its panel tag loads panel.js from weft dev's Studio and
+	// The page: its panel tag loads panel.js from weftbase dev's Studio and
 	// names it as data-endpoint, scoped to pub_demo, with a panel token
 	// — never the server token, never a token in a URL.
 	resp, err := http.Get(app.URL + "/")
@@ -105,12 +105,12 @@ func TestWeftDevApprovesFromThePagePanel(t *testing.T) {
 	b, _ := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
 	pg := string(b)
-	tag := regexp.MustCompile(`<script type="module" src="([^"]+)" data-weft data-endpoint="([^"]+)" data-scope="pub_demo" data-token="(weft_pt\.[^"]+)" data-open="true"></script>`).FindStringSubmatch(pg)
+	tag := regexp.MustCompile(`<script type="module" src="([^"]+)" data-weft data-endpoint="([^"]+)" data-scope="pub_demo" data-token="(wb_pt\.[^"]+)" data-open="true"></script>`).FindStringSubmatch(pg)
 	if tag == nil {
 		t.Fatalf("the page carries no setup B panel tag:\n%s", pg)
 	}
 	if tag[1] != dev.ts.URL+"/panel.js" || tag[2] != dev.ts.URL+"/" {
-		t.Errorf("the tag loads %s with endpoint %s, want weft dev's Studio %s", tag[1], tag[2], dev.ts.URL)
+		t.Errorf("the tag loads %s with endpoint %s, want weftbase dev's Studio %s", tag[1], tag[2], dev.ts.URL)
 	}
 	if strings.Contains(pg, devToken) || strings.Contains(pg, "/studio/panel.js") {
 		t.Error("the page carries the server token, or the embedded Studio's panel")
@@ -126,12 +126,12 @@ func TestWeftDevApprovesFromThePagePanel(t *testing.T) {
 		}
 	}
 	if code, _ := dev.call(t, http.MethodGet, "/panel.js", "", ""); code != http.StatusOK {
-		t.Errorf("weft dev's Studio does not serve the tag's panel.js: %d", code)
+		t.Errorf("weftbase dev's Studio does not serve the tag's panel.js: %d", code)
 	}
 
-	// The runtime registered with weft dev's Studio, with Sessions —
+	// The runtime registered with weftbase dev's Studio, with Sessions —
 	// the panel token reads the list.
-	poll(t, "the app's runtime on weft dev's Studio", func() bool {
+	poll(t, "the app's runtime on weftbase dev's Studio", func() bool {
 		_, body := dev.call(t, http.MethodGet, "/api/runtimes", panelToken, "")
 		// The service is the binary's name: studio-local under go run,
 		// studio-local.test here.
@@ -155,7 +155,7 @@ func TestWeftDevApprovesFromThePagePanel(t *testing.T) {
 		t.Fatalf("the refund did not park: %q", answer)
 	}
 	parked := strings.Fields(answer)[1]
-	poll(t, "the parked run in weft dev's Studio", func() bool {
+	poll(t, "the parked run in weftbase dev's Studio", func() bool {
 		code, body := dev.call(t, http.MethodGet, "/api/runs/"+parked+"/events", panelToken, "")
 		return code == http.StatusOK && strings.Contains(body, "run_finish")
 	})
@@ -184,7 +184,7 @@ func TestWeftDevApprovesFromThePagePanel(t *testing.T) {
 		t.Fatalf("the approval = %+v, want finished succeeded naming the resumed turn", cmd)
 	}
 	// The run finishes: the resumed turn ran the refund and answered.
-	poll(t, "the resumed turn's answer in weft dev's Studio", func() bool {
+	poll(t, "the resumed turn's answer in weftbase dev's Studio", func() bool {
 		_, tr := dev.call(t, http.MethodGet, "/api/runs/"+cmd.RunID+"/transcript", panelToken, "")
 		return strings.Contains(tr, "order 42: refunded")
 	})
@@ -216,7 +216,7 @@ func TestWeftDevApprovesFromThePagePanel(t *testing.T) {
 		t.Fatalf("the second refund did not park: %q", answer)
 	}
 	second := strings.Fields(answer)[1]
-	poll(t, "the second parked run in weft dev's Studio", func() bool {
+	poll(t, "the second parked run in weftbase dev's Studio", func() bool {
 		code, body := dev.call(t, http.MethodGet, "/api/runs/"+second+"/events", panelToken, "")
 		return code == http.StatusOK && strings.Contains(body, "run_finish")
 	})

@@ -33,14 +33,14 @@ func TestHTTPServerTimeouts(t *testing.T) {
 
 // TestBannerDoesNotPrintAFixedToken: the banner printed whatever token
 // was in force as "dev token" — including one the operator fixed
-// through WEFT_STUDIO_TOKEN or --token, which is also the panel
+// through WEFTBASE_TOKEN or --token, which is also the panel
 // tokens' signing key (S4.6 setup C) and has no business in a log.
 // Only a generated dev token is printed: nobody knows it otherwise.
 func TestBannerDoesNotPrintAFixedToken(t *testing.T) {
-	t.Setenv("WEFT_DB", t.TempDir()+"/banner.db")
+	t.Setenv("WEFTBASE_DB", t.TempDir()+"/banner.db")
 	for name, set := range map[string]func() string{
-		"env":  func() string { t.Setenv("WEFT_STUDIO_TOKEN", "s3cr3t-signing-key"); return "" },
-		"flag": func() string { t.Setenv("WEFT_STUDIO_TOKEN", ""); return "s3cr3t-signing-key" },
+		"env":  func() string { t.Setenv("WEFTBASE_TOKEN", "s3cr3t-signing-key"); return "" },
+		"flag": func() string { t.Setenv("WEFTBASE_TOKEN", ""); return "s3cr3t-signing-key" },
 	} {
 		var banner strings.Builder
 		srv, err := serveBoot("", "127.0.0.1:7331", set(), &banner)
@@ -90,8 +90,8 @@ func TestBadDatabaseIsAnErrorNotAPanic(t *testing.T) {
 // fixed is not printed, in the link either; nor is a database's stable
 // token (TestStableTokenAuthenticatesUnprinted).
 func TestBannerLinkCarriesAGeneratedToken(t *testing.T) {
-	t.Setenv("WEFT_DB", ":memory:") // no file: the token is this process's alone
-	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	t.Setenv("WEFTBASE_DB", ":memory:") // no file: the token is this process's alone
+	t.Setenv("WEFTBASE_TOKEN", "")
 	var banner strings.Builder
 	srv, err := serveBoot("", "127.0.0.1:7331", "", &banner)
 	if err != nil {
@@ -101,7 +101,7 @@ func TestBannerLinkCarriesAGeneratedToken(t *testing.T) {
 	var token string
 	for _, line := range strings.Split(banner.String(), "\n") {
 		if rest, ok := strings.CutPrefix(line, "studio: dev token "); ok {
-			token = strings.TrimSpace(strings.TrimSuffix(rest, "(WEFT_STUDIO_TOKEN fixes it)"))
+			token = strings.TrimSpace(strings.TrimSuffix(rest, "(WEFTBASE_TOKEN fixes it)"))
 		}
 	}
 	if token == "" || !strings.Contains(banner.String(), "studio: http://127.0.0.1:7331/#token="+token+"\n") {
@@ -129,7 +129,7 @@ func TestBannerLinkCarriesAGeneratedToken(t *testing.T) {
 // was never true. The streams now see the shutdown and end at once.
 func TestShutdownEndsOpenStreams(t *testing.T) {
 	skipWithoutSelfSignal(t)
-	t.Setenv("WEFT_DB", t.TempDir()+"/stop.db")
+	t.Setenv("WEFTBASE_DB", t.TempDir()+"/stop.db")
 	srv, err := serveBoot("", "127.0.0.1:0", "tok", io.Discard)
 	if err != nil {
 		t.Fatal(err)

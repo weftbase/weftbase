@@ -40,6 +40,6 @@ var openURL = func(link string) error {
 // link is printed (or the banner's) and the operator can open it.
 func openBrowser(stdout io.Writer, link string) {
 	if err := openURL(link); err != nil {
-		_, _ = fmt.Fprintf(stdout, "weft: could not open a browser (%v); open the link yourself\n", err)
+		_, _ = fmt.Fprintf(stdout, "weftbase: could not open a browser (%v); open the link yourself\n", err)
 	}
 }

@@ -42,7 +42,7 @@ const metaWithRequests = {
   capabilities: [...META.capabilities, "requests"],
 }
 const claims = (scope: string) =>
-  `weft_pt.${btoa(JSON.stringify({ public_id: "pub_orders", scope, exp: "2099-01-01T00:00:00Z" })).replace(/=+$/, "")}.c2ln`
+  `wb_pt.${btoa(JSON.stringify({ public_id: "pub_orders", scope, exp: "2099-01-01T00:00:00Z" })).replace(/=+$/, "")}.c2ln`
 
 /** One step that delegates (call `call` to `tool`), then a stop. */
 function delegating(id: string, call: string, tool: string): unknown[] {

@@ -23,7 +23,7 @@ const (
 // a non-loopback host needs otel.Insecure(). Naming a Studio switches
 // the discovery file off in Install and Start (as naming a Local does),
 // and makes it the endpoint StudioEndpoint reports for that pipeline
-// (WEFT_STUDIO_URL still adds its own, de-duplicated by URL).
+// (WEFTBASE_URL still adds its own, de-duplicated by URL).
 func Studio(url, token string, opts ...otel.DestOption) otel.Option {
 	m := &marker{kind: kindStudio, url: normalizeEndpoint(url), token: token}
 	base := []otel.DestOption{

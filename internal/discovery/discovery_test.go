@@ -109,7 +109,7 @@ func TestWriteShapeModeAndRemove(t *testing.T) {
 		t.Errorf("Find = %q, want %q", got, p)
 	}
 	if _, err := os.Stat(filepath.Join(first, ".gitignore")); err == nil {
-		t.Error("a .gitignore in a directory that is not .weft")
+		t.Error("a .gitignore in a directory that is not .weftbase")
 	}
 
 	// A handle for another Studio does not remove it; its own does.
@@ -190,10 +190,10 @@ func TestWriterRemovesStale(t *testing.T) {
 	}
 }
 
-// TestGuardDir: the writer drops .weft/.gitignore ("*") when there is
+// TestGuardDir: the writer drops .weftbase/.gitignore ("*") when there is
 // none, and never touches an existing one.
 func TestGuardDir(t *testing.T) {
-	weft := filepath.Join(t.TempDir(), ".weft")
+	weft := filepath.Join(t.TempDir(), ".weftbase")
 	useDirs(t, weft)
 	if _, err := Write(fresh("http://127.0.0.1:1")); err != nil {
 		t.Fatal(err)
@@ -227,7 +227,7 @@ func TestLookupOrder(t *testing.T) {
 	writeRaw(t, weft, fresh("http://localhost:1"))
 	info, p, ok := Lookup(env(), nil)
 	if !ok || info.URL != "http://localhost:1" || p != filepath.Join(weft, FileName) || info.Token != "tok" {
-		t.Errorf("./.weft first: %+v %s %v", info, p, ok)
+		t.Errorf("./.weftbase first: %+v %s %v", info, p, ok)
 	}
 
 	stale := fresh("http://127.0.0.1:1")
@@ -244,20 +244,20 @@ func TestLookupOrder(t *testing.T) {
 	}
 }
 
-// TestLookupEscapes: WEFT_STUDIO_URL wins (the file is not read) and
-// WEFT_DISCOVERY=off turns the read off; a dead pid or an old file is
+// TestLookupEscapes: WEFTBASE_URL wins (the file is not read) and
+// WEFTBASE_DISCOVERY=off turns the read off; a dead pid or an old file is
 // ignored silently, and the reader never removes it.
 func TestLookupEscapes(t *testing.T) {
 	dir := t.TempDir()
 	useDirs(t, dir)
 	writeRaw(t, dir, fresh("http://127.0.0.1:9"))
-	if _, _, ok := Lookup(env("WEFT_STUDIO_URL", "http://explicit"), nil); ok {
-		t.Error("WEFT_STUDIO_URL set, and the file was read")
+	if _, _, ok := Lookup(env("WEFTBASE_URL", "http://explicit"), nil); ok {
+		t.Error("WEFTBASE_URL set, and the file was read")
 	}
-	if _, _, ok := Lookup(env("WEFT_DISCOVERY", "off"), nil); ok {
-		t.Error("WEFT_DISCOVERY=off, and the file was read")
+	if _, _, ok := Lookup(env("WEFTBASE_DISCOVERY", "off"), nil); ok {
+		t.Error("WEFTBASE_DISCOVERY=off, and the file was read")
 	}
-	if _, _, ok := Lookup(env("WEFT_DISCOVERY", "on"), nil); !ok {
+	if _, _, ok := Lookup(env("WEFTBASE_DISCOVERY", "on"), nil); !ok {
 		t.Error("a fresh file was not read")
 	}
 	for name, mut := range map[string]func(*Info){
@@ -283,7 +283,7 @@ func TestLookupEscapes(t *testing.T) {
 }
 
 // TestUntrustedFiles (review finding 2): a url that is not loopback is
-// never trusted — a committed .weft/studio.json naming
+// never trusted — a committed .weftbase/studio.json naming
 // https://evil.example with pid 1 (EPERM: "alive") exports nothing —
 // and, on unix, neither is a file that is not 0600 or not this user's.
 // Each is one Debug line.
@@ -398,7 +398,7 @@ func itoa(n int) string {
 	return string(b)
 }
 
-// TestDefaultDirs: ./.weft first only when it exists; XDG next when
+// TestDefaultDirs: ./.weftbase first only when it exists; XDG next when
 // set; the user cache directory last.
 func TestDefaultDirs(t *testing.T) {
 	wd := t.TempDir()
@@ -407,18 +407,18 @@ func TestDefaultDirs(t *testing.T) {
 	t.Setenv("XDG_RUNTIME_DIR", xdg)
 	cache, cerr := os.UserCacheDir()
 	dirs := DefaultDirs()
-	if len(dirs) == 0 || dirs[0] != filepath.Join(xdg, "weft") {
-		t.Errorf("without ./.weft: %v, want XDG first", dirs)
+	if len(dirs) == 0 || dirs[0] != filepath.Join(xdg, "weftbase") {
+		t.Errorf("without ./.weftbase: %v, want XDG first", dirs)
 	}
-	if cerr == nil && dirs[len(dirs)-1] != filepath.Join(cache, "weft") {
+	if cerr == nil && dirs[len(dirs)-1] != filepath.Join(cache, "weftbase") {
 		t.Errorf("last %v, want the user cache dir", dirs)
 	}
-	if err := os.Mkdir(".weft", 0o700); err != nil {
+	if err := os.Mkdir(".weftbase", 0o700); err != nil {
 		t.Fatal(err)
 	}
 	dirs = DefaultDirs()
-	if real, _ := filepath.EvalSymlinks(dirs[0]); filepath.Base(dirs[0]) != ".weft" || !strings.HasPrefix(real, mustEval(t, wd)) {
-		t.Errorf("with ./.weft: %v, want it first", dirs)
+	if real, _ := filepath.EvalSymlinks(dirs[0]); filepath.Base(dirs[0]) != ".weftbase" || !strings.HasPrefix(real, mustEval(t, wd)) {
+		t.Errorf("with ./.weftbase: %v, want it first", dirs)
 	}
 	t.Setenv("XDG_RUNTIME_DIR", "")
 	for _, d := range DefaultDirs() {
@@ -545,12 +545,12 @@ func TestCleanupErrorClasses(t *testing.T) {
 	}
 }
 
-// TestOff: WEFT_DISCOVERY=off in any case, spaces trimmed, is Off; any
+// TestOff: WEFTBASE_DISCOVERY=off in any case, spaces trimmed, is Off; any
 // other value (or none) is not.
 func TestOff(t *testing.T) {
 	for v, want := range map[string]bool{"off": true, " OFF ": true, "Off": true, "": false, "on": false, "0": false} {
 		if got := Off(func(k string) string {
-			if k == "WEFT_DISCOVERY" {
+			if k == "WEFTBASE_DISCOVERY" {
 				return v
 			}
 			return ""

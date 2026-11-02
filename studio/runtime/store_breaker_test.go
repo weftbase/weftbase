@@ -245,7 +245,7 @@ func TestHeldByOther(t *testing.T) {
 
 // TestRestartKeepsStableID: an app restarted as a new process (new pid,
 // new instance) minutes after a playground run finished re-registers
-// under the SAME stable id — weft dev restarts on every save — so it
+// under the SAME stable id — weftbase dev restarts on every save — so it
 // gets Studio's breakpoint set and the /runtimes/<id> link. Only a live
 // stream or unfinished work holds an id for the old process.
 func TestRestartKeepsStableID(t *testing.T) {

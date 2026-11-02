@@ -620,7 +620,7 @@ function RunPage() {
   // That span ships only when the run ends, so the story view reads
   // the spans once the run is over (the end-of-run invalidation above
   // reads them again) and never polls them while it runs. Over OTLP
-  // (weft dev, setup B) spans batch later than the run_finish record
+  // (weftbase dev, setup B) spans batch later than the run_finish record
   // that flips the status, so a read just after the end may come back
   // without the run's invoke_agent span: until one is seen, the spans
   // are read again every 2 s for 30 s after the end (endSeen) — a

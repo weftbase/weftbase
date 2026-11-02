@@ -54,7 +54,7 @@ const rOK = golden<RunsPage>("runs").runs.find((r) => r.id === "r_ok")!
 const RUN = rOK.id
 const DEV = "dev-token-123"
 const tokenOf = (claims: Record<string, unknown>) =>
-  `weft_pt.${btoa(JSON.stringify(claims)).replace(/=+$/, "")}.sig`
+  `wb_pt.${btoa(JSON.stringify(claims)).replace(/=+$/, "")}.sig`
 const PLAY_TOKEN = tokenOf({ pid: "pub_orders", scope: "playground" })
 const READ_TOKEN = tokenOf({ pid: "pub_orders" })
 const meta = (capabilities: string[]) => ({

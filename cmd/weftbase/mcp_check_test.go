@@ -24,13 +24,13 @@ import (
 )
 
 // TestMCPLiveCheck is `make mcp-check` (plan I4.2): the phase 6 gate's
-// third clause — "`weft mcp` answers 'why did run X fail'" — proven end
+// third clause — "`weftbase mcp` answers 'why did run X fail'" — proven end
 // to end with no model and no fake: the real `weft` binary built, a real
-// `weft studio` on a free loopback port over a scratch SQLite file, the
+// `weftbase dev` on a free loopback port over a scratch SQLite file, the
 // record contract's fixtures (real recorded pipeline output) POSTed to
-// its OTLP ingest, then `weft mcp` spawned and driven over stdio by the
+// its OTLP ingest, then `weftbase mcp` spawned and driven over stdio by the
 // MCP SDK's client, the way Claude Code or Cursor drives it — once with
-// --url and WEFT_STUDIO_TOKEN, once with no flag at all (the discovery
+// --url and WEFTBASE_TOKEN, once with no flag at all (the discovery
 // file the scratch Studio wrote). Each tool's summary line is printed;
 // the last line is "MCP CHECK PASS". docs/mcp-recipe.md's worked
 // examples are this output.
@@ -38,8 +38,8 @@ import (
 // It never touches the developer's discovery file or Studio: both
 // processes run in a scratch directory with XDG_RUNTIME_DIR,
 // XDG_CACHE_HOME and HOME pointed into it (where a starting Studio
-// writes studio.json and where the reader looks), WEFT_STUDIO_URL/TOKEN
-// unset, and WEFT_DISCOVERY=off only on the --url spawn — the Studio
+// writes studio.json and where the reader looks), WEFTBASE_URL/TOKEN
+// unset, and WEFTBASE_DISCOVERY=off only on the --url spawn — the Studio
 // must write its file (none is written under off) and the no-flag spawn
 // must read it, both inside scratch; the developer's own discovery
 // files are compared before and after.
@@ -65,16 +65,16 @@ func TestMCPLiveCheck(t *testing.T) {
 	env := mcpCheckEnv(scratch, home)
 
 	// 1. The binary, built as a user would `go install` it.
-	bin := filepath.Join(scratch, "weft")
+	bin := filepath.Join(scratch, "weftbase")
 	if b, err := exec.CommandContext(ctx, "go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, b)
 	}
-	say("built %s", "weft")
+	say("built %s", "weftbase")
 
 	// 2. A real Studio on a free loopback port, no playground.
 	addr := freeAddr(t)
 	db := filepath.Join(scratch, "weft.db")
-	studio := exec.Command(bin, "studio", "--db", "sqlite://"+db, "--addr", addr, "--no-playground")
+	studio := exec.Command(bin, "dev", "--db", "sqlite://"+db, "--addr", addr, "--no-playground")
 	studio.Dir, studio.Env = home, env // discovery on: it writes scratch/run/weft/studio.json
 	var studioOut syncBuffer
 	studio.Stdout, studio.Stderr = &studioOut, &studioOut
@@ -106,7 +106,7 @@ func TestMCPLiveCheck(t *testing.T) {
 	base := "http://" + addr
 	token := waitStudio(t, ctx, base, db+".token", exited, &studioOut)
 	say("studio %s (db %s, dev token from <db>.token, never printed)", base, "sqlite://<scratch>/weft.db")
-	if _, err := os.Stat(filepath.Join(run, "weft", "studio.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(run, "weftbase", "studio.json")); err != nil {
 		t.Fatalf("the scratch Studio wrote no discovery file in the scratch XDG_RUNTIME_DIR: %v", err)
 	}
 
@@ -158,10 +158,10 @@ func TestMCPLiveCheck(t *testing.T) {
 	}
 	say("seeded failed, parked, interrupted, tool_calls, session_turns, stock_genai (obsdb/testdata/contract) through /v1/traces and /v1/logs")
 
-	// 4. `weft mcp --url …`, the token from WEFT_STUDIO_TOKEN (the
+	// 4. `weftbase mcp --url …`, the token from WEFTBASE_TOKEN (the
 	// recommended form: an argument shows in ps, an env value does not),
 	// over stdio, driven by the SDK client.
-	cs, mcpErr := spawnMCP(t, ctx, bin, home, append(env, "WEFT_DISCOVERY=off", "WEFT_STUDIO_TOKEN="+token), "--url", base)
+	cs, mcpErr := spawnMCP(t, ctx, bin, home, append(env, "WEFTBASE_DISCOVERY=off", "WEFTBASE_TOKEN="+token), "--url", base)
 	defer func() { _ = cs.Close() }()
 	if !strings.Contains(cs.InitializeResult().Instructions, "READ-ONLY") {
 		t.Errorf("instructions %q, want READ-ONLY", cs.InitializeResult().Instructions)
@@ -170,7 +170,7 @@ func TestMCPLiveCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	say("weft mcp --url %s (token from WEFT_STUDIO_TOKEN): initialize ok, %d tools listed", base, len(lt.Tools))
+	say("weftbase mcp --url %s (token from WEFTBASE_TOKEN): initialize ok, %d tools listed", base, len(lt.Tools))
 
 	call := func(cs *sdk.ClientSession, tool string, args map[string]any, want ...string) []string {
 		t.Helper()
@@ -318,25 +318,25 @@ func TestMCPLiveCheck(t *testing.T) {
 	call(cs, "transcript", map[string]any{"id": t2}, "run "+t2+" transcript: ")
 	call(cs, "live", nil, "live: running now: 0 runs")
 	_ = cs.Close()
-	if strings.Contains(mcpErr.String(), token) || !strings.Contains(mcpErr.String(), "token from WEFT_STUDIO_TOKEN") {
-		t.Errorf("weft mcp stderr %q: want the start line naming WEFT_STUDIO_TOKEN, never the token", mcpErr.String())
+	if strings.Contains(mcpErr.String(), token) || !strings.Contains(mcpErr.String(), "token from WEFTBASE_TOKEN") {
+		t.Errorf("weftbase mcp stderr %q: want the start line naming WEFTBASE_TOKEN, never the token", mcpErr.String())
 	}
 
-	// 5. `weft mcp` with no flag and no token: the path `claude mcp add
-	// weft -- weft mcp` takes. WEFT_DISCOVERY unset, so it reads the
+	// 5. `weftbase mcp` with no flag and no token: the path `claude mcp add
+	// weft -- weftbase mcp` takes. WEFTBASE_DISCOVERY unset, so it reads the
 	// discovery file the scratch Studio wrote under the scratch
 	// XDG_RUNTIME_DIR, and takes that Studio's URL and token from it.
 	cs2, mcpErr2 := spawnMCP(t, ctx, bin, home, env)
 	defer func() { _ = cs2.Close() }()
-	say("weft mcp (no flags; discovery file): initialize ok, server %s", cs2.InitializeResult().ServerInfo.Name)
+	say("weftbase mcp (no flags; discovery file): initialize ok, server %s", cs2.InitializeResult().ServerInfo.Name)
 	call(cs2, "meta", nil, "Studio at "+base+": capabilities ")
 	_ = cs2.Close()
 	if s := mcpErr2.String(); strings.Contains(s, token) || !strings.Contains(s, "for the Studio at "+base+" (token from the discovery file)") {
-		t.Errorf("no-flag weft mcp stderr %q: want the Studio %s with the token from the discovery file, never the token", s, base)
+		t.Errorf("no-flag weftbase mcp stderr %q: want the Studio %s with the token from the discovery file, never the token", s, base)
 	}
 
 	stop()
-	if _, err := os.Stat(filepath.Join(run, "weft", "studio.json")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(run, "weftbase", "studio.json")); !os.IsNotExist(err) {
 		t.Errorf("the stopped Studio left its discovery file: %v", err)
 	}
 	if t.Failed() {
@@ -346,7 +346,7 @@ func TestMCPLiveCheck(t *testing.T) {
 	fmt.Println("MCP CHECK PASS")
 }
 
-// spawnMCP starts `weft mcp args…` and connects the SDK client to it
+// spawnMCP starts `weftbase mcp args…` and connects the SDK client to it
 // over stdio; stderr is collected.
 func spawnMCP(t *testing.T, ctx context.Context, bin, dir string, env []string, args ...string) (*sdk.ClientSession, *syncBuffer) {
 	t.Helper()
@@ -357,7 +357,7 @@ func spawnMCP(t *testing.T, ctx context.Context, bin, dir string, env []string, 
 	cs, err := sdk.NewClient(&sdk.Implementation{Name: "mcp-check", Version: "0"}, nil).
 		Connect(ctx, &sdk.CommandTransport{Command: cmd}, nil)
 	if err != nil {
-		t.Fatalf("connect weft mcp %q: %v (stderr %q)", args, err, stderr.String())
+		t.Fatalf("connect weftbase mcp %q: %v (stderr %q)", args, err, stderr.String())
 	}
 	return cs, stderr
 }
@@ -365,15 +365,15 @@ func spawnMCP(t *testing.T, ctx context.Context, bin, dir string, env []string, 
 // mcpCheckEnv is the environment every process runs with: the
 // caller's, minus anything that could name another Studio or reach the
 // developer's discovery file, the discovery locations inside scratch.
-// WEFT_DISCOVERY is removed; only the --url mcp spawn adds "off" (the
+// WEFTBASE_DISCOVERY is removed; only the --url mcp spawn adds "off" (the
 // Studio writes the scratch discovery file, the no-flag spawn reads it).
 func mcpCheckEnv(scratch, home string) []string {
 	var env []string
 	for _, kv := range os.Environ() {
 		k, _, _ := strings.Cut(kv, "=")
 		switch k {
-		case "WEFT_STUDIO_URL", "WEFT_STUDIO_TOKEN", "WEFT_DISCOVERY", "WEFT_DB", "WEFT_MANIFEST",
-			"WEFT_STUDIO_ADDR", "WEFT_RETAIN", "WEFT_PRICING", "XDG_RUNTIME_DIR", "XDG_CACHE_HOME", "HOME":
+		case "WEFTBASE_URL", "WEFTBASE_TOKEN", "WEFTBASE_DISCOVERY", "WEFTBASE_DB", "WEFT_MANIFEST",
+			"WEFTBASE_ADDR", "WEFT_RETAIN", "WEFT_PRICING", "XDG_RUNTIME_DIR", "XDG_CACHE_HOME", "HOME":
 			continue
 		}
 		env = append(env, kv)
@@ -427,7 +427,7 @@ func waitStudio(t *testing.T, ctx context.Context, base, tokenFile string, exite
 	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(50 * time.Millisecond) {
 		select {
 		case <-exited:
-			t.Fatalf("weft studio exited before it answered %s/api/meta:\n%s", base, out.String())
+			t.Fatalf("weftbase dev exited before it answered %s/api/meta:\n%s", base, out.String())
 		default:
 		}
 		if time.Now().After(deadline) {

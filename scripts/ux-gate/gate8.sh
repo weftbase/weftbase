@@ -53,7 +53,7 @@ say "run    $RUN"
 if ss -ltn 2>/dev/null | grep -q " $ADDR "; then say "$ADDR is taken: $(ss -ltnp 2>/dev/null | grep " $ADDR ")"; exit 2; fi
 
 # ---- 1. Studio from $REPO, a fresh DB ---------------------------------
-( cd "$REPO" && go build -o "$RUN/weft" ./cmd/weft ) || { say "weft build failed"; exit 2; }
+( cd "$REPO" && go build -o "$RUN/weft" ./cmd/weftbase ) || { say "weft build failed"; exit 2; }
 rm -f "$RUN"/studio.db*
 "$RUN/weft" studio --addr "$ADDR" --db "sqlite://$RUN/studio.db" --token "$TOKEN" --open=false > "$RUN/studio.log" 2>&1 &
 SPID=$!; echo "$SPID" > "$RUN/studio.pid"
@@ -69,7 +69,7 @@ SEED=( "$RUN/weft-arena" run --offline --studio --no-save --jobs 8 )
 if command -v strace >/dev/null && [ "${STRACE:-1}" != 0 ]; then
   SEED=( strace -f -qq -e trace=connect -o "$RUN/seed.strace" "${SEED[@]}" )
 fi
-( cd "$ARENA" && WEFT_STUDIO_URL="$STUDIO" WEFT_STUDIO_TOKEN="$TOKEN" "${SEED[@]}" ) > "$RUN/seed.log" 2>&1
+( cd "$ARENA" && WEFTBASE_URL="$STUDIO" WEFTBASE_TOKEN="$TOKEN" "${SEED[@]}" ) > "$RUN/seed.log" 2>&1
 SEEDRC=$?
 say "seed   exit $SEEDRC: $(grep -E '^weft-arena — engine=' "$RUN/seed.log" | tail -1)"
 grep -E '^❌' -A3 "$RUN/seed.log" | grep -E '^(❌|     ❌)' | sed 's/^/         /' | tee -a "$OUT"
@@ -81,7 +81,7 @@ say "seed   WARN/ERROR lines: $(grep -cE ' (WARN|ERROR) ' "$RUN/seed.log")"
 LOGS_RUN=""
 if ( cd "$REPO/examples/studio-local" && go build -o "$RUN/studio-local" . ) > "$RUN/studio-local-build.log" 2>&1; then
   mkdir -p "$RUN/sl"
-  ( cd "$RUN/sl" && exec env WEFT_STUDIO_URL="$STUDIO" WEFT_STUDIO_TOKEN="$TOKEN" WEFT_DISCOVERY=off "$RUN/studio-local" -addr "$APP_ADDR" ) > "$RUN/studio-local.log" 2>&1 &
+  ( cd "$RUN/sl" && exec env WEFTBASE_URL="$STUDIO" WEFTBASE_TOKEN="$TOKEN" WEFTBASE_DISCOVERY=off "$RUN/studio-local" -addr "$APP_ADDR" ) > "$RUN/studio-local.log" 2>&1 &
   APID=$!
   for i in $(seq 1 40); do curl -sf -o /dev/null "http://$APP_ADDR/" && break; sleep 0.25; done
   curl -s -D "$RUN/studio-local.headers" -o "$RUN/studio-local.reply" -X POST "http://$APP_ADDR/run" -d 'where is order 42?'

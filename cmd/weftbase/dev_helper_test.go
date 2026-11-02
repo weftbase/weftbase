@@ -15,16 +15,16 @@ import (
 	"github.com/weftbase/weftbase/runtime"
 )
 
-// The helper process `weft dev`'s tests run as the app: this test
+// The helper process `weftbase dev`'s tests run as the app: this test
 // binary re-executed with WEFT_DEV_HELPER set (TestMain hands it here
 // before any test runs). Modes:
 //
-//	app        prints its pid and the four variables weft dev sets, then
+//	app        prints its pid and the four variables weftbase dev sets, then
 //	           — per WEFT_DEV_HELPER_EXIT — exits with that code, or
 //	           sleeps until a signal; WEFT_DEV_HELPER_GRANDCHILD=<dir>
 //	           first starts a grandchild that writes <dir>/<app pid>;
 //	           WEFT_DEV_HELPER_RUNTIME=1 registers a runtime with the
-//	           Studio weft dev named.
+//	           Studio weftbase dev named.
 //	grandchild writes its pid to WEFT_DEV_HELPER_PIDFILE and sleeps
 //	           until a signal (its group's).
 func devHelper(mode string) int {
@@ -41,8 +41,8 @@ func devHelper(mode string) int {
 	default:
 		return 8
 	}
-	fmt.Printf("helper pid=%d WEFT_ENV=%s WEFT_STUDIO_URL=%s WEFT_STUDIO_TOKEN=%s WEFT_DB=%s\n", os.Getpid(),
-		os.Getenv("WEFT_ENV"), os.Getenv("WEFT_STUDIO_URL"), os.Getenv("WEFT_STUDIO_TOKEN"), os.Getenv("WEFT_DB"))
+	fmt.Printf("helper pid=%d WEFT_ENV=%s WEFTBASE_URL=%s WEFTBASE_TOKEN=%s WEFTBASE_DB=%s\n", os.Getpid(),
+		os.Getenv("WEFT_ENV"), os.Getenv("WEFTBASE_URL"), os.Getenv("WEFTBASE_TOKEN"), os.Getenv("WEFTBASE_DB"))
 	if code := os.Getenv("WEFT_DEV_HELPER_EXIT"); code != "" {
 		n, _ := strconv.Atoi(code)
 		return n
@@ -59,7 +59,7 @@ func devHelper(mode string) int {
 	if os.Getenv("WEFT_DEV_HELPER_RUNTIME") == "1" {
 		agent := weftfw.New(wefttest.Script(wefttest.Say("hi")), weftfw.Name("dev-helper"))
 		stop := runtime.Install(
-			runtime.Studio(os.Getenv("WEFT_STUDIO_URL"), os.Getenv("WEFT_STUDIO_TOKEN")),
+			runtime.Studio(os.Getenv("WEFTBASE_URL"), os.Getenv("WEFTBASE_TOKEN")),
 			runtime.Agents(agent))
 		defer stop()
 	}

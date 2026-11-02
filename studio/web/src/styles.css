@@ -11,7 +11,7 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ─────────────────────────────────────────────────────────────────────
-   weft studio · design system v6 "paper loom" — the landing page's
+   weftbase · design system v6 "paper loom" — the landing page's
    tokens (site/index.html :root), mapped onto shadcn's variables
    (plan §5). Geist for reading, Geist Mono for what the machine says
    (ids, models, JSON, tokens, durations, seq). One accent: the thread.

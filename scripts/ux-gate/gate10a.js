@@ -10,7 +10,7 @@
 //            sample for h3)
 //   restart  Studio restarted over the same db: (b) restored after
 //            restart, and the drawer's Runs in refusal holds Run
-//   dev      (e) `weft dev -- studio-local`: the page's panel approves a
+//   dev      (e) `weftbase dev -- studio-local`: the page's panel approves a
 //            parked call; the killed app's next approval reads
 //            "disconnected — last seen …" with the restart fix
 //
@@ -581,7 +581,7 @@ async function phaseDev() {
   const e2 = !!(t3 && rt && rt.connected === false && /disconnected — last seen \d{4}-\d\d-\d\dT[\d:]+Z/.test(refusal) && /fix: restart the app: its runtime link registers again/.test(refusal));
   if (!e2) bad.push("disconnected");
   ev.push(`${ok(e2)} asked "refund order 43" → ${t3 || "NO PARK"} parked; app pid ${pid} killed → runtime ${rt ? `${rt.id} connected=${rt.connected} last_seen ${rt.last_seen}` : "?"}; the panel's approve (${dis ? "disabled, its reason inline" : "pressed"}): ${q(refusal || "NO REFUSAL")} [${shot}]`);
-  clause("e", bad.length ? "FAIL" : "PASS", "weft dev hosts studio-local: the page's panel approves a parked call; a killed app's next approval reads \"disconnected — last seen …\" with the restart fix (the real command)", ev);
+  clause("e", bad.length ? "FAIL" : "PASS", "weftbase dev hosts studio-local: the page's panel approves a parked call; a killed app's next approval reads \"disconnected — last seen …\" with the restart fix (the real command)", ev);
   await browser.close();
 }
 

@@ -117,7 +117,7 @@ describe("the token wall (S4.6, setup B)", () => {
     expect(es.refused).toBeNull()
     expect(es.url).not.toContain("token=")
     expect(es.url).not.toContain("dev-secret")
-    expect(new URL(es.url).searchParams.get("sig")).toMatch(/^weft_lg\./)
+    expect(new URL(es.url).searchParams.get("sig")).toMatch(/^wb_lg\./)
     expect(studio.calls("POST live-grant")).toHaveLength(1)
     expect(studio.calls("POST live-grant")[0].body).toEqual({
       run: "r_ok",

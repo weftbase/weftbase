@@ -21,9 +21,9 @@ import (
 	"github.com/weftbase/weft/version"
 )
 
-// `weft mcp` (plan I4.1): a stdio MCP server over the Studio read API,
+// `weftbase mcp` (plan I4.1): a stdio MCP server over the Studio read API,
 // so a coding agent (Claude Code, Cursor) reads runs while you debug.
-// It is a third client of the same routes `weft runs`/`open`/`export`
+// It is a third client of the same routes `weftbase runs`/`open`/`export`
 // call — it adds no route and computes nothing Studio does not serve:
 // each tool is one GET (explain_failure composes the run, its steps,
 // its children and the transcript, mcp_explain.go), its output the
@@ -45,7 +45,7 @@ const (
 
 // mcpInstructions is what an MCP client reads about this server as a
 // whole.
-const mcpInstructions = `weft mcp is READ-ONLY: it reads a weft Studio's recorded agent runs ` +
+const mcpInstructions = `weftbase mcp is READ-ONLY: it reads a weft Studio's recorded agent runs ` +
 	`(the Studio JSON API, GET only); it never approves, denies, steers, cancels, deletes, ` +
 	`replays or starts anything. Start with explain_failure <run id> for "why did run X fail"; ` +
 	`find runs with runs (newest first, filters) or search (text and filters; its error_class facet groups the failures); ` +
@@ -101,36 +101,36 @@ func mcpToolTable() string {
 	return b.String()
 }
 
-// runMCP is `weft mcp`: resolve the Studio (--url, WEFT_STUDIO_URL,
+// runMCP is `weftbase mcp`: resolve the Studio (--url, WEFTBASE_URL,
 // the discovery file, the default address), check it answers
 // /api/meta, then serve the read tools over stdio until stdin closes.
 // A Studio that does not answer yet is no reason to exit: an MCP
 // client starts its servers once, at session start, before the
-// developer's `weft studio`/`weft dev` may be up — so it WARNs and
+// developer's `weftbase dev` may be up — so it WARNs and
 // serves, and each tool call looks again (startMCP).
 // stdout is the protocol: every line of ours goes to stderr.
 func runMCP(args []string, stdout, stderr io.Writer) error {
 	fs := newFlags("mcp", stderr)
-	base := fs.String("url", "", "the Studio to talk to (default: $WEFT_STUDIO_URL, else the discovery file's, else "+defaultURL+")")
-	token := fs.String("token", "", "API token (default: $WEFT_STUDIO_TOKEN, else the discovery file's when it names that Studio; never printed)")
+	base := fs.String("url", "", "the Studio to talk to (default: $WEFTBASE_URL, else the discovery file's, else "+defaultURL+")")
+	token := fs.String("token", "", "API token (default: $WEFTBASE_TOKEN, else the discovery file's when it names that Studio; never printed)")
 	readOnly := fs.Bool("read-only", true, "implied and the only mode: every tool is a GET; write verbs (approve, deny, steer, cancel, delete, …) are not offered")
 	fs.Usage = func() {
-		_, _ = fmt.Fprint(fs.Output(), `Usage: weft mcp [--url] [--token]
+		_, _ = fmt.Fprint(fs.Output(), `Usage: weftbase mcp [--url] [--token]
 
 A stdio MCP server over a running Studio's read API, for a coding agent
 (Claude Code, Cursor) to read runs while you debug. Read only: every tool
 is a GET; nothing is approved, denied, steered, cancelled or deleted.
 
-  claude mcp add weft -- weft mcp
-  .cursor/mcp.json: {"mcpServers":{"weft":{"command":"weft","args":["mcp"]}}}
+  claude mcp add weft -- weftbase mcp
+  .cursor/mcp.json: {"mcpServers":{"weft":{"command":"weftbase","args":["mcp"]}}}
 
 The running Studio is found through its discovery file; to name another:
-  claude mcp add weft -- weft mcp --url http://127.0.0.1:7331
-  .cursor/mcp.json: {"mcpServers":{"weft":{"command":"weft","args":["mcp","--url","http://127.0.0.1:7331"]}}}
+  claude mcp add weft -- weftbase mcp --url http://127.0.0.1:7331
+  .cursor/mcp.json: {"mcpServers":{"weft":{"command":"weftbase","args":["mcp","--url","http://127.0.0.1:7331"]}}}
 
-The Studio: --url, else $WEFT_STUDIO_URL, else the discovery file a running
-weft studio/weft dev wrote (WEFT_DISCOVERY=off ignores it), else `+defaultURL+`.
-The token: --token, else $WEFT_STUDIO_TOKEN, else the discovery file's (when it
+The Studio: --url, else $WEFTBASE_URL, else the discovery file a running
+weftbase dev wrote (WEFTBASE_DISCOVERY=off ignores it), else `+defaultURL+`.
+The token: --token, else $WEFTBASE_TOKEN, else the discovery file's (when it
 names that Studio); sent in the Authorization header only, never printed.
 
 Tools (each output is the route's JSON — compact rows on the list tools and
@@ -148,7 +148,7 @@ Flags:
 		return usageError("mcp takes no arguments (got %s)", gotArgs(pos))
 	}
 	if !*readOnly {
-		return usageError("--read-only=false: weft mcp has no write mode (write verbs stay out until the approval story for agents exists)")
+		return usageError("--read-only=false: weftbase mcp has no write mode (write verbs stay out until the approval story for agents exists)")
 	}
 	srv, err := startMCP(context.Background(), *base, *token, stderr)
 	if err != nil {
@@ -172,8 +172,8 @@ func startMCP(ctx context.Context, urlFlag, tokenFlag string, stderr io.Writer) 
 	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	var resolve func() (string, string)
 	if urlFlag == "" {
-		// No --url: every look re-reads WEFT_STUDIO_URL and the
-		// discovery file — a Studio started later, or `weft dev` on
+		// No --url: every look re-reads WEFTBASE_URL and the
+		// discovery file — a Studio started later, or `weftbase dev` on
 		// 7332–7340, is found without a restart. An explicit --url is
 		// retried as given.
 		resolve = func() (string, string) { u, tok, _ := mcpStudio("", tokenFlag); return u, tok }
@@ -182,20 +182,20 @@ func startMCP(ctx context.Context, urlFlag, tokenFlag string, stderr io.Writer) 
 	if _, err := c.get(ctx, "/api/meta", nil); err != nil {
 		var se *statusError
 		if errors.As(err, &se) {
-			return nil, fmt.Errorf("mcp: no Studio answers /api/meta: %w", err) // main prefixes "weft: "
+			return nil, fmt.Errorf("mcp: no Studio answers /api/meta: %w", err) // main prefixes "weftbase: "
 		}
 		down = true
-		log.Warn("weft mcp: no Studio answers /api/meta yet; tools will retry per call", "err", err.Error())
+		log.Warn("weftbase mcp: no Studio answers /api/meta yet; tools will retry per call", "err", err.Error())
 	}
-	_, _ = fmt.Fprintf(stderr, "weft mcp: %d read-only tools over stdio for the Studio at %s (token %s)\n",
+	_, _ = fmt.Fprintf(stderr, "weftbase mcp: %d read-only tools over stdio for the Studio at %s (token %s)\n",
 		len(mcpTools), c.redacted(), from)
 	link := newStudioLink(c, resolve, down, stderr)
 	// The token too comes from the discovery file when neither --token
-	// nor WEFT_STUDIO_TOKEN named one: a Studio restarted on the same
+	// nor WEFTBASE_TOKEN named one: a Studio restarted on the same
 	// port with a new token (a fileless DB's per-process one,
 	// --rotate-token) answers 401 to the old one, and the next call
 	// re-reads the file.
-	link.rereadToken = resolve != nil && tokenFlag == "" && os.Getenv("WEFT_STUDIO_TOKEN") == ""
+	link.rereadToken = resolve != nil && tokenFlag == "" && os.Getenv("WEFTBASE_TOKEN") == ""
 	return newMCPServerLink(link, log), nil
 }
 
@@ -210,7 +210,7 @@ type studioLink struct {
 	c       *client
 	resolve func() (base, token string) // nil: --url given, retried as given
 	down    bool                        // the next request looks again first
-	// rereadToken: no --token or WEFT_STUDIO_TOKEN with no --url — a
+	// rereadToken: no --token or WEFTBASE_TOKEN with no --url — a
 	// 401 means the file's token may have changed, so it looks again.
 	rereadToken bool
 	stderr      io.Writer
@@ -219,7 +219,7 @@ type studioLink struct {
 // hint is what a failure that makes the next call look again says.
 func (l *studioLink) hint() string {
 	if l.resolve != nil {
-		return "the next call looks again (WEFT_STUDIO_URL, the discovery file): no restart needed"
+		return "the next call looks again (WEFTBASE_URL, the discovery file): no restart needed"
 	}
 	return "the next call retries the --url given"
 }
@@ -257,7 +257,7 @@ func (l *studioLink) client(ctx context.Context) (*client, error) {
 		}
 	}
 	if c.base != l.c.base {
-		_, _ = fmt.Fprintf(l.stderr, "weft mcp: now reading the Studio at %s\n", c.redacted())
+		_, _ = fmt.Fprintf(l.stderr, "weftbase mcp: now reading the Studio at %s\n", c.redacted())
 	}
 	l.c, l.down = c, false
 	return c, nil
@@ -295,9 +295,9 @@ type nopWriteCloser struct{ io.Writer }
 func (nopWriteCloser) Close() error { return nil }
 
 // mcpStudio resolves the Studio and its token through the one
-// resolver every client shares (resolveStudio: --url, WEFT_STUDIO_URL,
+// resolver every client shares (resolveStudio: --url, WEFTBASE_URL,
 // the discovery file, the default address; the token --token,
-// WEFT_STUDIO_TOKEN, else the discovery file's when it names that
+// WEFTBASE_TOKEN, else the discovery file's when it names that
 // Studio) and says where the token came from (never the token).
 func mcpStudio(urlFlag, tokenFlag string) (base, token, from string) {
 	t := resolveStudio(urlFlag, tokenFlag)
@@ -317,7 +317,7 @@ func (t readOnlyTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 		if r.Body != nil {
 			_ = r.Body.Close()
 		}
-		return nil, fmt.Errorf("weft mcp is read-only: %s refused", r.Method)
+		return nil, fmt.Errorf("weftbase mcp is read-only: %s refused", r.Method)
 	}
 	next := t.next
 	if next == nil {
@@ -436,7 +436,7 @@ func newMCPServerLink(link *studioLink, log *slog.Logger) *sdk.Server {
 		m.diff)
 	addTool(srv, "export", `The whole run as one document (GET /api/runs/{id}/export): format json (default), jsonl or otlp. `+
 		`Large: usually cut by max_bytes — prefer run/step/request for questions. The wefttest format is a zip of replay `+
-		`fixtures and is not offered here: run "weft export <id> --wefttest dir" in a terminal.`,
+		`fixtures and is not offered here: run "weftbase export <id> --wefttest dir" in a terminal.`,
 		m.export)
 	addTool(srv, "sessions", `List thread sessions (GET /api/sessions), newest first: agent and public_id filter, before + before_id page. Compact rows (full=true: as served).`,
 		m.sessions)
@@ -1085,7 +1085,7 @@ func (m *mcpReader) export(ctx context.Context, _ *sdk.CallToolRequest, in mcpEx
 		format = "json"
 	case "json", "jsonl", "otlp":
 	case "wefttest":
-		return nil, nil, errors.New(`format wefttest is a zip of replay fixtures, not offered over MCP: run "weft export <id> --wefttest dir" in a terminal`)
+		return nil, nil, errors.New(`format wefttest is a zip of replay fixtures, not offered over MCP: run "weftbase export <id> --wefttest dir" in a terminal`)
 	default:
 		return nil, nil, fmt.Errorf("format must be json, jsonl or otlp, got %q", format)
 	}

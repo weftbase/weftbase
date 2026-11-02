@@ -37,7 +37,7 @@ import { FakeEventSource } from "@/test/fake-event-source"
 import { grantLedger, withLiveGrant } from "@/test/fake-live-grant"
 
 const SERVER = "tok_SECRET+/=value"
-const PANEL = `weft_pt.${btoa(
+const PANEL = `wb_pt.${btoa(
   JSON.stringify({
     public_id: "pub_1",
     scope: "playground",

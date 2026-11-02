@@ -54,7 +54,7 @@ func ExampleHandler() {
 // ExampleServer shows the Server surface (S4.1): New when the
 // playground is in play, Handler() to serve, Close for what New
 // opened, Runtime() nil without Playground(true). New without DB or
-// Open would open the default path ($WEFT_DB or ./.weft/weft.db) —
+// Open would open the default path ($WEFTBASE_DB or ./.weftbase/weftbase.db) —
 // pinned by TestOpenOption — so the example opens a throwaway sqlite
 // file instead of writing into the package directory.
 func ExampleServer() {
@@ -68,7 +68,7 @@ func ExampleServer() {
 	srv := studio.New(studio.Open(dir+"/weft.db"), studio.NoIngest()) // read-only: no OTLP receiver
 	defer func() { _ = srv.Close() }()                                // New opened that DB: closed here
 
-	_ = srv.Handler() // mount it; the weft binary (cmd/weft) does
+	_ = srv.Handler() // mount it; the weft binary (cmd/weftbase) does
 	_ = srv.Runtime() // nil without Playground(true) (studio/runtime)
 	fmt.Println("ok")
 	// Output:
@@ -154,7 +154,7 @@ func ExampleToken_tagScope() {
 	// /api/runs?tag.arena.batch=b2 403
 }
 
-// ExampleDiscoveryFile is what `weft studio` does for the discovery
+// ExampleDiscoveryFile is what `weftbase dev` does for the discovery
 // file it writes: it names the path to the server, and api/meta serves
 // it (to the server token, or loopback with no Token) while the file
 // there names this process — Studio's connect lines print it. Here the
@@ -194,9 +194,9 @@ func ExampleDiscoveryFile() {
 	// Output: true
 }
 
-// ExampleOffReason is how `weft studio --no-playground` words the
+// ExampleOffReason is how `weftbase dev --no-playground` words the
 // playground's absence for a user who never wrote Go: meta's
-// capabilities_off (and `weft doctor`) say the flag.
+// capabilities_off (and `weftbase doctor`) say the flag.
 func ExampleOffReason() {
 	dir, err := os.MkdirTemp("", "weft-studio-offreason-")
 	if err != nil {
@@ -205,7 +205,7 @@ func ExampleOffReason() {
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
 	srv := studio.New(studio.Open(dir+"/weft.db"), studio.Playground(false),
-		studio.OffReason("playground", "weft studio was started with --no-playground"))
+		studio.OffReason("playground", "weftbase dev was started with --no-playground"))
 	defer func() { _ = srv.Close() }()
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -224,5 +224,5 @@ func ExampleOffReason() {
 		return
 	}
 	fmt.Println(meta.Off["runtimes"])
-	// Output: weft studio was started with --no-playground
+	// Output: weftbase dev was started with --no-playground
 }

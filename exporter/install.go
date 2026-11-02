@@ -73,10 +73,10 @@ func find(o otel.Option) *marker {
 }
 
 // NoDiscovery makes Install and Start skip the discovery file a running
-// `weft studio` / `weft dev` wrote, and nothing else: WEFT_STUDIO_URL,
+// `weftbase dev` wrote, and nothing else: WEFTBASE_URL,
 // the OTEL_* variables and the WEFT_ENV development gate are read as
 // usual (otel.NoEnv drops them all). The per-pipeline form of
-// WEFT_DISCOVERY=off. A pipeline that names a Studio or a Local needs
+// WEFTBASE_DISCOVERY=off. A pipeline that names a Studio or a Local needs
 // no NoDiscovery: either turns the read off on its own.
 func NoDiscovery() otel.Option {
 	m := &marker{kind: kindNoDiscovery, opt: otel.Options()}
@@ -84,11 +84,11 @@ func NoDiscovery() otel.Option {
 	return m.opt
 }
 
-// Start is otel.Start with the platform's environment: WEFT_STUDIO_URL
-// and WEFT_STUDIO_TOKEN add a Studio destination (content on), and,
+// Start is otel.Start with the platform's environment: WEFTBASE_URL
+// and WEFTBASE_TOKEN add a Studio destination (content on), and,
 // when they are unset and the options name no Local and no Studio,
-// the discovery file of a running `weft studio` / `weft dev` stands in
-// for them (unless NoDiscovery, otel.NoEnv or WEFT_DISCOVERY=off). It
+// the discovery file of a running `weftbase dev` stands in
+// for them (unless NoDiscovery, otel.NoEnv or WEFTBASE_DISCOVERY=off). It
 // adds no fallback: with nothing configured it returns
 // otel.ErrNoDestinations.
 func Start(ctx context.Context, opts ...otel.Option) (*otel.Pipeline, error) {
@@ -103,8 +103,8 @@ func Start(ctx context.Context, opts ...otel.Option) (*otel.Pipeline, error) {
 
 // Install is otel.Install with Start's environment, plus the
 // zero-config rule: with no destination configured (in code, the
-// OTEL_* variables, WEFT_STUDIO_URL or the discovery file) it writes
-// Local("") — $WEFT_DB or ./.weft/weft.db — and so it does, with one
+// OTEL_* variables, WEFTBASE_URL or the discovery file) it writes
+// Local("") — $WEFTBASE_DB or ./.weftbase/weftbase.db — and so it does, with one
 // WARN, when only environment destinations were configured and none
 // could be built. Like otel.Install it never fails the program; the
 // returned function flushes and shuts everything down.
@@ -153,14 +153,14 @@ func plan(opts []otel.Option, fallback bool) (all []otel.Option, info *startInfo
 	if !noEnv {
 		getenv := envGetenv
 		// Explicit > environment > file: a Studio or a Local named in
-		// code switches the discovery read off, as WEFT_STUDIO_URL and
+		// code switches the discovery read off, as WEFTBASE_URL and
 		// NoDiscovery do — the file never adds a second Studio, never
 		// writes runs into a store the caller did not name, and never
 		// becomes the one StudioEndpoint (and runtime.Install) reports.
 		if !noDisc && !named {
 			getenv, joined = discoverStudio(getenv)
 		}
-		if u := getenv("WEFT_STUDIO_URL"); u != "" {
+		if u := getenv("WEFTBASE_URL"); u != "" {
 			u = normalizeEndpoint(u)
 			dup := false
 			for _, e := range explicit {
@@ -171,9 +171,9 @@ func plan(opts []otel.Option, fallback bool) (all []otel.Option, info *startInfo
 				// destination that cannot be built leaves Install its
 				// Local fallback (otel falls back only when no
 				// destination was named in code).
-				slog.Warn("weft/exporter: WEFT_STUDIO_URL skipped", "err", err.Error())
+				slog.Warn("weft/exporter: WEFTBASE_URL skipped", "err", err.Error())
 			} else if !dup {
-				tok := getenv("WEFT_STUDIO_TOKEN")
+				tok := getenv("WEFTBASE_TOKEN")
 				all = append(all, Studio(u, tok, otel.Name("studio(env)")))
 				info.url, info.token = u, tok
 			}
@@ -196,7 +196,7 @@ func remember(p *otel.Pipeline, info *startInfo, joined *discovered) {
 		// to stop it doing so.
 		slog.Info("weft/exporter: joined the running Studio", "url", joined.info.URL,
 			"pid", joined.info.PID, "file", joined.path,
-			"hint", "WEFT_STUDIO_URL names another; exporter.NoDiscovery() or WEFT_DISCOVERY=off ignores the file")
+			"hint", "WEFTBASE_URL names another; exporter.NoDiscovery() or WEFTBASE_DISCOVERY=off ignores the file")
 	}
 }
 
@@ -242,7 +242,7 @@ func LocalDBOf(p *otel.Pipeline) obsdb.DB {
 
 // StudioEndpoint returns the installed pipeline's Studio destination
 // (url and token), which weft/runtime dials by default: the
-// environment's (WEFT_STUDIO_URL or the discovery file) when it added
+// environment's (WEFTBASE_URL or the discovery file) when it added
 // one, else the last Studio option. Known for a pipeline Install or
 // Start built; "" otherwise, before an install and after its shutdown.
 func StudioEndpoint() (string, string) {
@@ -270,11 +270,11 @@ type discovered struct {
 	path string
 }
 
-// discoverStudio is the discovery rung: when WEFT_STUDIO_URL is unset
-// and WEFT_DISCOVERY is not "off", the discovery file `weft studio` /
-// `weft dev` writes (internal/discovery: ./.weft, then
-// $XDG_RUNTIME_DIR/weft, then the user cache directory) stands in for
-// WEFT_STUDIO_URL and WEFT_STUDIO_TOKEN — its url and token, together.
+// discoverStudio is the discovery rung: when WEFTBASE_URL is unset
+// and WEFTBASE_DISCOVERY is not "off", the discovery file `weftbase dev` /
+// `weftbase dev` writes (internal/discovery: ./.weftbase, then
+// $XDG_RUNTIME_DIR/weftbase, then the user cache directory) stands in for
+// WEFTBASE_URL and WEFTBASE_TOKEN — its url and token, together.
 // A stale file (its pid gone, or 24 hours old) is never trusted; a
 // missing, stale or malformed one changes nothing and logs Debug at
 // most.
@@ -285,9 +285,9 @@ func discoverStudio(getenv func(string) string) (func(string) string, *discovere
 	}
 	return func(k string) string {
 		switch k {
-		case "WEFT_STUDIO_URL":
+		case "WEFTBASE_URL":
 			return info.URL
-		case "WEFT_STUDIO_TOKEN":
+		case "WEFTBASE_TOKEN":
 			return info.Token
 		}
 		return getenv(k)
@@ -306,7 +306,7 @@ func dedupURL(raw string) string {
 
 // envStudioURL is the check otel applies to an OTLP endpoint, for the
 // environment's Studio: an http(s) URL with a host, http:// only to a
-// loopback host — WEFT_STUDIO_URL carries a bearer token, so plaintext
+// loopback host — WEFTBASE_URL carries a bearer token, so plaintext
 // to another host takes Studio(url, token, otel.Insecure()) in code.
 // The errors never echo the raw value: a URL may carry credentials.
 func envStudioURL(raw string) error {

@@ -323,7 +323,7 @@ describe("notify", () => {
       { kind: "copy-link", ok: true, n: 1 },
     ]
     for (const n of all)
-      expect(noticeText(n).title).not.toMatch(/token|Bearer|weft_pt\./)
+      expect(noticeText(n).title).not.toMatch(/token|Bearer|wb_pt\./)
   })
 })
 

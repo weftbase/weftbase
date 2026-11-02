@@ -1,13 +1,13 @@
-// Package doctor is `weft doctor` (plan B5): it asks a running
+// Package doctor is `weftbase doctor` (plan B5): it asks a running
 // Studio what it is and how it is wired, and prints one line per
 // check. Every line reads one field of GET /api/meta (Lines is the
 // table) — beside it, for the runtime check, the two environment
-// variables the doctor's own shell can see (WEFT_ENV, WEFT_STUDIO_URL),
+// variables the doctor's own shell can see (WEFT_ENV, WEFTBASE_URL),
 // and for the discovery check the discovery file this shell reads
 // (Target.Discovery, the command's resolver's). The doctor computes
 // nothing Studio does not serve: a second source of truth would drift.
 //
-// The logic lives here, apart from the command wiring (cmd/weft), so
+// The logic lives here, apart from the command wiring (cmd/weftbase), so
 // the command stays a thin client of it.
 package doctor
 
@@ -49,7 +49,7 @@ var Lines = []Line{
 	{"data", []string{"content.latest.started", "content.latest.weft_version", "content.latest.service", "weft_version"}},
 	{"otlp", []string{"ingest_open", "capabilities"}},
 	{"ingest", []string{"ingest.dropped", "ingest.accepted", "ingest.refused", "ingest.last_error", "ingest.last_at"}},
-	{"runtimes", []string{"runtimes", "capabilities", "capabilities_off", "env:WEFT_ENV", "env:WEFT_STUDIO_URL"}},
+	{"runtimes", []string{"runtimes", "capabilities", "capabilities_off", "env:WEFT_ENV", "env:WEFTBASE_URL"}},
 	{"panel", []string{"panel_version", "studio_version"}},
 	{"manifest", []string{"has_manifest", "manifest_check.source", "manifest_check.agents", "manifest_check.checked", "manifest_check.stale", "manifest_check.error"}},
 }
@@ -115,8 +115,8 @@ type meta struct {
 	} `json:"manifest_check"`
 }
 
-// Target is the Studio the doctor checks, found by cmd/weft's one
-// resolver (--url, WEFT_STUDIO_URL, the discovery file, the default
+// Target is the Studio the doctor checks, found by cmd/weftbase's one
+// resolver (--url, WEFTBASE_URL, the discovery file, the default
 // address), which names the source on stderr itself: the doctor's own
 // lines do not repeat it.
 type Target struct {
@@ -131,7 +131,7 @@ type Target struct {
 // Discovery is the discovery file the doctor's shell reads (the
 // resolver's view of it, read with internal/discovery's trust rules).
 type Discovery struct {
-	// Off is WEFT_DISCOVERY=off in this shell: no file is read.
+	// Off is WEFTBASE_DISCOVERY=off in this shell: no file is read.
 	Off bool
 	// Path is the trusted file found, "" when none.
 	Path string
@@ -145,7 +145,7 @@ var ErrUnhealthy = errors.New("doctor: a check failed")
 
 // Run checks the Studio t names (t.Token "" sends none) and prints one
 // line per check to w. getenv reads the doctor's own environment (the
-// runtime check reports WEFT_ENV and WEFT_STUDIO_URL as this shell sees
+// runtime check reports WEFT_ENV and WEFTBASE_URL as this shell sees
 // them). It returns ErrUnhealthy when a check failed — Studio not
 // reachable, the token refused, a stale panel bundle — and nil
 // otherwise; warnings (no runtime connected, content stripped, a stale
@@ -173,7 +173,7 @@ func Run(ctx context.Context, w io.Writer, t Target, getenv func(string) string)
 	resp, err := client.Do(req)
 	if err != nil {
 		p.raw("studio not reachable at %s: %v", where, err)
-		p.sub("start one with `weft studio`, or point --url (WEFT_STUDIO_URL) at the one you run")
+		p.sub("start one with `weftbase dev`, or point --url (WEFTBASE_URL) at the one you run")
 		return ErrUnhealthy
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -188,10 +188,10 @@ func Run(ctx context.Context, w io.Writer, t Target, getenv func(string) string)
 	case http.StatusUnauthorized:
 		p.line(ok, "studio", "reachable at %s", url)
 		if token == "" {
-			p.line(fail, "token", "studio requires one: it is in <db>.token beside the database (the start banner names the file); set WEFT_STUDIO_TOKEN or --token to it")
-			p.sub("or run `weft open --with-token` from the directory the Studio started in (where its discovery file is found), or pass --token \"$(cat <db>.token)\"")
+			p.line(fail, "token", "studio requires one: it is in <db>.token beside the database (the start banner names the file); set WEFTBASE_TOKEN or --token to it")
+			p.sub("or run `weftbase open --with-token` from the directory the Studio started in (where its discovery file is found), or pass --token \"$(cat <db>.token)\"")
 		} else {
-			p.line(fail, "token", "refused: it is not this studio's token (WEFT_STUDIO_TOKEN / --token)")
+			p.line(fail, "token", "refused: it is not this studio's token (WEFTBASE_TOKEN / --token)")
 		}
 		return ErrUnhealthy
 	default:
@@ -382,7 +382,7 @@ func (p *printer) runtimes(m meta, url string, getenv func(string) string) {
 		// No runtime link at all: the shell's variables do not apply.
 		why := m.CapabilitiesOff["runtimes"]
 		if why == "" {
-			why = "the playground is off (weft studio --no-playground, or an app's studio.Playground(false))"
+			why = "the playground is off (weftbase dev --no-playground, or an app's studio.Playground(false))"
 		}
 		p.line(ok, "runtimes", "none: studio has no runtime link (%s)", why)
 		return
@@ -397,11 +397,11 @@ func (p *printer) runtimes(m meta, url string, getenv func(string) string) {
 	} else {
 		p.sub("WEFT_ENV=dev in this shell: check the app's own environment, and that it calls runtime.Install")
 	}
-	switch su := strings.TrimRight(getenv("WEFT_STUDIO_URL"), "/"); {
+	switch su := strings.TrimRight(getenv("WEFTBASE_URL"), "/"); {
 	case su == "":
-		p.sub("WEFT_STUDIO_URL is unset in this shell: the app dials the Studio a running `weft studio` names in its discovery file, else its otel Studio destination; set WEFT_STUDIO_URL=%s to pin this one (or runtime.Studio(url, token))", url)
+		p.sub("WEFTBASE_URL is unset in this shell: the app dials the Studio a running `weftbase dev` names in its discovery file, else its otel Studio destination; set WEFTBASE_URL=%s to pin this one (or runtime.Studio(url, token))", url)
 	case su != url:
-		p.sub("WEFT_STUDIO_URL=%s in this shell, not %s: the app dials the former", su, url)
+		p.sub("WEFTBASE_URL=%s in this shell, not %s: the app dials the former", su, url)
 	}
 }
 
@@ -475,7 +475,7 @@ func lastRunHash(stale []string, latest map[string]string) string {
 
 // discovery prints how apps find this Studio: the discovery file this
 // shell reads, against the one this Studio says it wrote. Another
-// Studio's file is a warning — apps that set no WEFT_STUDIO_URL send
+// Studio's file is a warning — apps that set no WEFTBASE_URL send
 // there — and two Studios on one database a second one.
 func (p *printer) discovery(m meta, url string, d Discovery) {
 	var dbPath string
@@ -487,18 +487,18 @@ func (p *printer) discovery(m meta, url string, d Discovery) {
 	}
 	switch {
 	case d.Off:
-		p.line(ok, "discovery", "WEFT_DISCOVERY=off in this shell: no file read; apps and this command need WEFT_STUDIO_URL=%s", url)
+		p.line(ok, "discovery", "WEFTBASE_DISCOVERY=off in this shell: no file read; apps and this command need WEFTBASE_URL=%s", url)
 	case d.Path == "" && m.DiscoveryFile != "":
-		p.line(warn, "discovery", "this Studio wrote %s, which this shell does not find: an app run here needs WEFT_STUDIO_URL=%s", m.DiscoveryFile, url)
-		p.sub("./.weft is read from the working directory: run from the directory the Studio started in")
+		p.line(warn, "discovery", "this Studio wrote %s, which this shell does not find: an app run here needs WEFTBASE_URL=%s", m.DiscoveryFile, url)
+		p.sub("./.weftbase is read from the working directory: run from the directory the Studio started in")
 	case d.Path == "":
-		p.line(warn, "discovery", "no discovery file: an app that sets no WEFT_STUDIO_URL finds no Studio (weft studio and weft dev write one; WEFT_DISCOVERY=off writes none)")
+		p.line(warn, "discovery", "no discovery file: an app that sets no WEFTBASE_URL finds no Studio (weftbase dev write one; WEFTBASE_DISCOVERY=off writes none)")
 	case strings.TrimRight(d.URL, "/") == url || m.DiscoveryFile != "" && m.DiscoveryFile == d.Path || m.PID > 0 && m.PID == d.PID:
 		// This Studio, however its host is spelled (localhost,
 		// 127.0.0.1): the file it wrote, or its pid.
 		p.line(ok, "discovery", "%s -> %s (this Studio)", d.Path, d.URL)
 	default:
-		p.line(warn, "discovery", "%s -> %s, ANOTHER Studio (pid %d, db %s): an app that sets no WEFT_STUDIO_URL sends there, not to %s", d.Path, d.URL, d.PID, orNone(d.DB), url)
+		p.line(warn, "discovery", "%s -> %s, ANOTHER Studio (pid %d, db %s): an app that sets no WEFTBASE_URL sends there, not to %s", d.Path, d.URL, d.PID, orNone(d.DB), url)
 		if dbPath != "" && d.DB != "" && filepath.Clean(d.DB) == filepath.Clean(dbPath) {
 			p.sub("two Studios serve %s: stop one (each has its own live stream; an app's live frames reach only the one it dials)", dbPath)
 		}

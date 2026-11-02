@@ -11,7 +11,7 @@ import (
 
 // ownGroup puts the app in a process group of its own: a stop signals
 // the whole group (`go run` and the binary it built), and the
-// terminal's Ctrl-C reaches weft dev only, which stops the app first.
+// terminal's Ctrl-C reaches weftbase dev only, which stops the app first.
 func ownGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	deathSignal(cmd.SysProcAttr)
@@ -19,7 +19,7 @@ func ownGroup(cmd *exec.Cmd) {
 
 // errNoGroup is a stop refused: the app has no process group of its
 // own to signal.
-var errNoGroup = errors.New("weft dev: the app has no process group of its own")
+var errNoGroup = errors.New("weftbase dev: the app has no process group of its own")
 
 // group is the process group a stop signals: the app's own (Setpgid
 // made its pid its pgid). Never a pgid ≤ 1 — kill(-0) is this
@@ -59,7 +59,7 @@ func (c *child) groupAlive() bool {
 	return ok && syscall.Kill(-g, 0) == nil
 }
 
-// devSignals are the signals that stop weft dev (the app first): the
+// devSignals are the signals that stop weftbase dev (the app first): the
 // terminal's Ctrl-C, a polite kill, and the terminal closing.
 var devSignals = []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP}
 

@@ -57,7 +57,7 @@ beforeEach(setup)
 afterEach(teardown)
 
 const claims = (scope: string) =>
-  `weft_pt.${btoa(JSON.stringify({ public_id: "pub_orders", scope, exp: "2099-01-01T00:00:00Z" })).replace(/=+$/, "")}.c2ln`
+  `wb_pt.${btoa(JSON.stringify({ public_id: "pub_orders", scope, exp: "2099-01-01T00:00:00Z" })).replace(/=+$/, "")}.c2ln`
 
 const verbIn = (el: WeftDevtools, sel: string, verb: string) =>
   $(el, `${sel} [data-weft-verb="${verb}"]`) as HTMLButtonElement | null

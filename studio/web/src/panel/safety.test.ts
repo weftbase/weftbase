@@ -769,7 +769,7 @@ describe("the token goes to data-endpoint and nowhere else (§6)", () => {
       expect(u.origin).toBe("http://studio.test")
       expect(u.searchParams.has("token")).toBe(false)
       expect(es.url).not.toContain("secret")
-      expect(u.searchParams.get("sig")).toMatch(/^weft_lg\./)
+      expect(u.searchParams.get("sig")).toMatch(/^wb_lg\./)
       expect(es.refused).toBeNull()
     }
     const links = all(el, "a").map((a) => a.getAttribute("href") ?? "")

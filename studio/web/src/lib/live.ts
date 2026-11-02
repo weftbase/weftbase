@@ -87,9 +87,9 @@ export function grantSpent(grant: LiveGrant, now = Date.now()): boolean {
  * null for anything else or claims the page cannot read. A hint, never
  * a check: Studio verifies the token. */
 export function panelTokenExp(token: string): number | null {
-  if (!token.startsWith("weft_pt.")) return null
+  if (!token.startsWith("wb_pt.")) return null
   try {
-    const body = token.slice("weft_pt.".length).split(".")[0]
+    const body = token.slice("wb_pt.".length).split(".")[0]
     const b64 = body.replace(/-/g, "+").replace(/_/g, "/")
     const claims = JSON.parse(
       atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4))
@@ -115,7 +115,7 @@ export function freshBearer(
   now = Date.now()
 ): boolean {
   if (!token || token === ended) return false
-  if (!token.startsWith("weft_pt.")) return true
+  if (!token.startsWith("wb_pt.")) return true
   const exp = panelTokenExp(token)
   return exp !== null && exp > now
 }

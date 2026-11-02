@@ -50,7 +50,7 @@ func run(t *testing.T, url, token string, getenv func(string) string) (string, e
 
 // TestNoRuntimeNamesTheEnv is B5's Done line: against a Studio with the
 // playground on and no runtime connected, the doctor's output names the
-// variables to set — WEFT_ENV and WEFT_STUDIO_URL — and a missing
+// variables to set — WEFT_ENV and WEFTBASE_URL — and a missing
 // runtime is a warning, not a failure. With the playground off
 // (UX-S5a-08) the line says so with the flag that did it, and the
 // shell's variables, which cannot help, are not named.
@@ -60,7 +60,7 @@ func TestNoRuntimeNamesTheEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("doctor: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "ok   runtimes  none: studio has no runtime link (the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off)") ||
+	if !strings.Contains(out, "ok   runtimes  none: studio has no runtime link (the playground is off: turn it on with studio.Playground(true); weftbase dev --no-playground turns it off)") ||
 		strings.Contains(out, "WEFT_ENV is") {
 		t.Errorf("playground off:\n%s", out)
 	}
@@ -72,8 +72,8 @@ func TestNoRuntimeNamesTheEnv(t *testing.T) {
 	for _, want := range []string{
 		"warn runtimes  none connected",
 		"WEFT_ENV is unset in this shell: the app opens the runtime link only with WEFT_ENV=dev",
-		"WEFT_STUDIO_URL is unset in this shell",
-		"set WEFT_STUDIO_URL=" + ts.URL,
+		"WEFTBASE_URL is unset in this shell",
+		"set WEFTBASE_URL=" + ts.URL,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
@@ -82,9 +82,9 @@ func TestNoRuntimeNamesTheEnv(t *testing.T) {
 	// With the playground on and the env set, only the app side is left
 	// to check.
 	pg := newStudio(t, studio.Playground(true))
-	out, _ = run(t, pg.URL, tok, env(map[string]string{"WEFT_ENV": "dev", "WEFT_STUDIO_URL": pg.URL}))
+	out, _ = run(t, pg.URL, tok, env(map[string]string{"WEFT_ENV": "dev", "WEFTBASE_URL": pg.URL}))
 	if strings.Contains(out, "runtime link (") || strings.Contains(out, "WEFT_ENV is") ||
-		strings.Contains(out, "WEFT_STUDIO_URL is unset") || !strings.Contains(out, "check the app's own environment") {
+		strings.Contains(out, "WEFTBASE_URL is unset") || !strings.Contains(out, "check the app's own environment") {
 		t.Errorf("playground on, env set:\n%s", out)
 	}
 }
@@ -241,13 +241,13 @@ func TestUnreachable(t *testing.T) {
 }
 
 // TestToken: no token against a Studio that wants one, and a wrong
-// one, are failed token lines naming WEFT_STUDIO_TOKEN; setup A (no
+// one, are failed token lines naming WEFTBASE_TOKEN; setup A (no
 // Token, loopback) needs none.
 func TestToken(t *testing.T) {
 	ts := newStudio(t)
 	for _, c := range []struct{ token, want string }{
-		{"", "FAIL token     studio requires one: it is in <db>.token beside the database (the start banner names the file); set WEFT_STUDIO_TOKEN or --token to it\n               - or run `weft open --with-token` from the directory the Studio started in"},
-		{"wrong", "FAIL token     refused: it is not this studio's token (WEFT_STUDIO_TOKEN / --token)"},
+		{"", "FAIL token     studio requires one: it is in <db>.token beside the database (the start banner names the file); set WEFTBASE_TOKEN or --token to it\n               - or run `weftbase open --with-token` from the directory the Studio started in"},
+		{"wrong", "FAIL token     refused: it is not this studio's token (WEFTBASE_TOKEN / --token)"},
 	} {
 		out, err := run(t, ts.URL, c.token, env(nil))
 		if !errors.Is(err, doctor.ErrUnhealthy) || !strings.Contains(out, c.want) {
@@ -456,7 +456,7 @@ func writeDiscovery(t *testing.T, info discovery.Info) string {
 // TestDiscoveryLine (UX-S5a-01, UX-S5a-08): the discovery line says
 // which Studio the file this shell reads names — this one, another
 // (and two on one database), none, or none read under
-// WEFT_DISCOVERY=off. The same Studio reached by another spelling of
+// WEFTBASE_DISCOVERY=off. The same Studio reached by another spelling of
 // its host is this Studio (its pid). The source is the command's
 // stderr line, never repeated on stdout.
 func TestDiscoveryLine(t *testing.T) {
@@ -487,7 +487,7 @@ func TestDiscoveryLine(t *testing.T) {
 	check(doctor.Discovery{Path: "/run/weft/studio.json", URL: "http://127.0.0.1:7347", DB: db, PID: 42},
 		"warn discovery /run/weft/studio.json -> http://127.0.0.1:7347, ANOTHER Studio (pid 42, db "+db+")",
 		"- two Studios serve "+db+": stop one")
-	check(doctor.Discovery{Off: true}, "ok   discovery WEFT_DISCOVERY=off in this shell")
+	check(doctor.Discovery{Off: true}, "ok   discovery WEFTBASE_DISCOVERY=off in this shell")
 	check(doctor.Discovery{}, "warn discovery no discovery file")
 
 	var out strings.Builder
@@ -507,9 +507,9 @@ func TestTokenAdviceAndNoPlaygroundWords(t *testing.T) {
 	if !strings.Contains(out, "from the directory the Studio started in (where its discovery file is found), or pass --token \"$(cat <db>.token)\"") {
 		t.Errorf("401 advice:\n%s", out)
 	}
-	ts := newStudio(t, studio.OffReason("playground", "weft studio was started with --no-playground: drop the flag to turn the playground on"))
+	ts := newStudio(t, studio.OffReason("playground", "weftbase dev was started with --no-playground: drop the flag to turn the playground on"))
 	out, _ = run(t, ts.URL, tok, env(nil))
-	if !strings.Contains(out, "ok   runtimes  none: studio has no runtime link (weft studio was started with --no-playground: drop the flag to turn the playground on)") {
+	if !strings.Contains(out, "ok   runtimes  none: studio has no runtime link (weftbase dev was started with --no-playground: drop the flag to turn the playground on)") {
 		t.Errorf("runtimes:\n%s", out)
 	}
 }

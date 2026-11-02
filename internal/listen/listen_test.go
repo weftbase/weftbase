@@ -177,7 +177,7 @@ func TestBusyAddressMovesOn(t *testing.T) {
 		}, listen.Request{DBPath: "/x/weft.db", Token: "mine"}, "a Studio with another token"},
 		{"a Studio that requires a token", func(t *testing.T, a string) {
 			serveStudio(t, a, filepath.Join(t.TempDir(), "weft.db"), "theirs")
-		}, listen.Request{DBPath: "/x/weft.db"}, "set WEFT_STUDIO_TOKEN"},
+		}, listen.Request{DBPath: "/x/weft.db"}, "set WEFTBASE_TOKEN"},
 		{"a fileless command database never matches", func(t *testing.T, a string) {
 			serveStudio(t, a, filepath.Join(t.TempDir(), "weft.db"), "tok")
 		}, listen.Request{Token: "tok"}, "a Studio on another database"},

@@ -73,7 +73,7 @@ const meta = (capabilities: string[], live_all = true) => ({
 const CAPS = ["live", "pricing", "playground", "cancel"]
 
 const panelToken = (scope: "read" | "playground") =>
-  `weft_pt.${btoa(
+  `wb_pt.${btoa(
     JSON.stringify({
       public_id: "pub_1",
       scope,

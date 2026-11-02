@@ -204,7 +204,7 @@ func TestAuthMatrix(t *testing.T) {
 		{name: "read panel token (?token=)", token: sign(serverTok, panelClaims{PublicID: "pub_a", Scope: scopeRead, Exp: hour}), query: true, kind: "bad"},
 		{name: "playground panel token", token: sign(serverTok, panelClaims{PublicID: "pub_a", Scope: scopePlayground, Exp: hour}), kind: "pg"},
 		{name: "expired panel token", token: sign(serverTok, panelClaims{PublicID: "pub_a", Scope: scopePlayground, Exp: time.Now().Add(-time.Minute)}), kind: "bad"},
-		{name: "garbage token", token: "weft_pt.not-a-token", kind: "bad"},
+		{name: "garbage token", token: "wb_pt.not-a-token", kind: "bad"},
 		{name: "wrong-signature panel token", token: sign("another-key", panelClaims{PublicID: "pub_a", Scope: scopePlayground, Exp: hour}), kind: "bad"},
 		{name: "panel token without a public id", token: sign(serverTok, panelClaims{Scope: scopePlayground, Exp: hour}), kind: "bad"},
 	}

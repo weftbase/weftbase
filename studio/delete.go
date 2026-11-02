@@ -138,7 +138,7 @@ func Retain(d time.Duration) Option {
 }
 
 // minRetention is Retain's floor; retainFloorMsg the refusal's words.
-// The weft binary's --retain check says the same (cmd/weft's
+// The weft binary's --retain check says the same (cmd/weftbase's
 // resolveRetain; its test pins the two equal).
 const (
 	minRetention   = time.Hour

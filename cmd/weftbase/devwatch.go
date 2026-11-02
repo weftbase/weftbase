@@ -90,7 +90,7 @@ func watchGo(roots []string, debounce time.Duration, out io.Writer) (<-chan stri
 				if !ok {
 					return
 				}
-				_, _ = fmt.Fprintln(out, "weft dev: watch:", err)
+				_, _ = fmt.Fprintln(out, "weftbase dev: watch:", err)
 			}
 		}
 	}()
@@ -137,14 +137,14 @@ func addTree(w *fsnotify.Watcher, dir string, root bool, out io.Writer) (goFile 
 				return err
 			}
 			if failed == 0 {
-				_, _ = fmt.Fprintf(out, "weft dev: watch %s: %v\n", path, err)
+				_, _ = fmt.Fprintf(out, "weftbase dev: watch %s: %v\n", path, err)
 			}
 			failed++
 		}
 		return nil
 	})
 	if failed > 1 {
-		_, _ = fmt.Fprintf(out, "weft dev: watch: %d more directories under %s not watched\n", failed-1, dir)
+		_, _ = fmt.Fprintf(out, "weftbase dev: watch: %d more directories under %s not watched\n", failed-1, dir)
 	}
 	return goFile, err
 }

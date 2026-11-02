@@ -290,7 +290,7 @@ function NoAgents({ reason }: { reason: string }) {
       </p>
       <p className="text-xs text-faint">
         Agents come from a <span className="font-mono">weft.json</span> (
-        <span className="font-mono">weft studio --manifest</span>) or from an
+        <span className="font-mono">weftbase dev --manifest</span>) or from an
         app&apos;s <span className="font-mono">runtime.Install(...)</span>{" "}
         registration.
       </p>

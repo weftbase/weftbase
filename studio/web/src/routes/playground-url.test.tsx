@@ -142,7 +142,7 @@ describe("the playground's URL (G2)", () => {
       ).value
     ).toBe("r_ok")
     expect(valueOf(engineSelect())).toBe("scripted")
-    expect(document.title).toBe("playground · weft studio")
+    expect(document.title).toBe("playground · weftbase")
   })
 
   it("keeps the fragment hand-off applying after its own write-back", async () => {
@@ -396,7 +396,7 @@ describe("the model field follows the agent", () => {
 // sees no run controls, and a hand-built edits= / lab= leaves the bar
 // with the page's first write-back.
 describe("the playground's hand-off edits and run controls (final web review)", () => {
-  const readToken = `weft_pt.${btoa(
+  const readToken = `wb_pt.${btoa(
     JSON.stringify({
       public_id: "pub_1",
       scope: "read",

@@ -2068,7 +2068,7 @@ export class WeftDevtools extends HTMLElement {
    * and, whatever the answer, once it came. */
   private handoff(url: string): boolean {
     // A playground panel token mints a read token; the dev token (setup
-    // B, UX-D-18) rides the fragment as weft open's does. Not a read token.
+    // B, UX-D-18) rides the fragment as weftbase open's does. Not a read token.
     if (
       !this.cfg.token ||
       tokenScope(this.cfg.token) == "read" ||
@@ -3425,7 +3425,7 @@ export class WeftDevtools extends HTMLElement {
               : `no ${noun}s yet — run your app`
             : // How to connect, to THIS Studio (UX-F-11): its URL, and
               // Studio's connect lines through the hand-off.
-              `no runs yet — run your app with WEFT_STUDIO_URL=${this.base.replace(/\/+$/, "")} go run . · `
+              `no runs yet — run your app with WEFTBASE_URL=${this.base.replace(/\/+$/, "")} go run . · `
       )
       if (!session && !this.model?.scoped)
         splash.append(
@@ -5392,7 +5392,7 @@ export class WeftDevtools extends HTMLElement {
    * can be read (a read-scoped token never asks), kept per (endpoint,
    * token); asked again after a failure (MANIFEST_RETRY_MS on), and
    * once per run manifest hash it does not list — a redeploy under
-   * weft dev registers a new one. */
+   * weftbase dev registers a new one. */
   private readManifest(
     redraw: () => void,
     hash?: string

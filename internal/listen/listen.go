@@ -5,7 +5,7 @@
 // explains why not, in one line:
 //
 //   - The address is free: it is bound.
-//   - It is busy and pinned (--addr or WEFT_STUDIO_ADDR set
+//   - It is busy and pinned (--addr or WEFTBASE_ADDR set
 //     explicitly): an error naming the address. No probe, no fallback.
 //   - It is busy and a weft Studio answers GET /api/meta there with the
 //     same database file (db.path, which B5 serves to loopback and the
@@ -31,7 +31,7 @@
 // The policy is the command's, not the library's: studio.New gains
 // nothing, and an app's embedded Studio (setup A) is the app's own
 // listener on the app's own port. The logic lives here, apart from the
-// command wiring (cmd/weft), so the commands share it.
+// command wiring (cmd/weftbase), so the commands share it.
 package listen
 
 import (
@@ -71,7 +71,7 @@ type Request struct {
 	// Addr is the wanted host:port ("" = DefaultAddr).
 	Addr string
 	// Pinned is whether Addr was set explicitly (--addr,
-	// WEFT_STUDIO_ADDR): a busy pinned address is an error, never a
+	// WEFTBASE_ADDR): a busy pinned address is an error, never a
 	// probe or another port.
 	Pinned bool
 	// Span is how many consecutive ports, Addr's first, an unpinned
@@ -81,7 +81,7 @@ type Request struct {
 	// in-memory or fileless database) never matches a running Studio's.
 	DBPath string
 	// Token is the bearer the probe sends ("" sends none and relies on
-	// the loopback rule): the command's own --token / WEFT_STUDIO_TOKEN,
+	// the loopback rule): the command's own --token / WEFTBASE_TOKEN,
 	// never a dev token it generated (nobody else holds that).
 	Token string
 	// TokenFor, when set and Token is empty, is asked for the bearer of
@@ -154,7 +154,7 @@ func Choose(ctx context.Context, r Request) (Choice, error) {
 	if r.Pinned {
 		ln, err := net.Listen("tcp", r.Addr)
 		if err != nil {
-			return Choice{}, fmt.Errorf("listen on %s (pinned by --addr / WEFT_STUDIO_ADDR, no fallback): %w", r.Addr, err)
+			return Choice{}, fmt.Errorf("listen on %s (pinned by --addr / WEFTBASE_ADDR, no fallback): %w", r.Addr, err)
 		}
 		return Choice{Listener: ln, Addr: ln.Addr().String()}, nil
 	}
@@ -256,7 +256,7 @@ func probe(ctx context.Context, addr string, r Request) verdict {
 			return verdict{why: "a Studio that requires a token, which goes to loopback only"}
 		}
 		if r.Token == "" {
-			return verdict{why: "a Studio that requires a token: set WEFT_STUDIO_TOKEN to its token to compare its database"}
+			return verdict{why: "a Studio that requires a token: set WEFTBASE_TOKEN to its token to compare its database"}
 		}
 		return verdict{why: "a Studio with another token"}
 	default:

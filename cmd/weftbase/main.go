@@ -1,69 +1,72 @@
-// Command weft is the framework's one binary (plan B1): setup B's
-// local Studio and a terminal over the Studio API, for scripts and CI.
+// Command weftbase is the platform's one binary (plan B1, D6 of the
+// repository split): setup B's local Studio and a terminal over the
+// Studio API, for scripts and CI.
 //
 //	go install github.com/weftbase/weftbase/cmd/weftbase@latest
 //
-//	weft studio [--addr] [--db] [--token] [--rotate-token] [--manifest] [--open] [--no-playground] [--retain] [--pricing] [--log-level] [--log-format]
-//	weft dev [studio's flags] [--no-watch] [--watch dir] [-- command args…]
-//	weft runs [--agent] [--since] [--failed] [--status] [--limit] [--json]
-//	weft open [run id | public id | session id | trace id] [--open] [--with-token]
-//	weft export <run id> [--wefttest dir [--fixtures-only [--test name]] [--force]] [--format json|jsonl|otlp]
-//	weft doctor
-//	weft vacuum [--db] [--retain]
-//	weft version
+//	weftbase dev [--addr] [--db] [--token] [--rotate-token] [--manifest] [--open] [--no-playground] [--retain] [--pricing] [--log-level] [--log-format]
+//	weftbase dev [dev's flags] [--no-watch] [--watch dir] -- command args…
+//	weftbase runs [--agent] [--since] [--failed] [--status] [--limit] [--json]
+//	weftbase open [run id | public id | session id | trace id] [--open] [--with-token]
+//	weftbase export <run id> [--wefttest dir [--fixtures-only [--test name]] [--force]] [--format json|jsonl|otlp]
+//	weftbase doctor
+//	weftbase mcp
+//	weftbase vacuum [--db] [--retain]
+//	weftbase version
 //
 // Every subcommand is a convenience over what an app or a script can
-// do itself: `weft studio` is studio.New with setup B's options, and
+// do itself: `weftbase dev` is studio.New with setup B's options (and,
+// given a command after "--", the app beside it), and
 // runs, open, export and doctor are thin clients of the Studio JSON API
 // (GET /api/runs, /api/runs/{id}, /api/runs/{id}/export, /api/meta). A
 // team that dislikes the CLI loses nothing.
 //
 // Every connection flag mirrors an environment variable one to one: --addr
-// WEFT_STUDIO_ADDR, --db WEFT_DB, --token WEFT_STUDIO_TOKEN, --manifest
-// WEFT_MANIFEST, --url WEFT_STUDIO_URL (the Studio the API clients talk
+// WEFTBASE_ADDR, --db WEFTBASE_DB, --token WEFTBASE_TOKEN, --manifest
+// WEFT_MANIFEST, --url WEFTBASE_URL (the Studio the API clients talk
 // to; unset, the discovery file's, else http://127.0.0.1:7331),
 // --retain WEFT_RETAIN, --pricing
-// WEFT_PRICING. On weft studio and weft dev, --log-level WEFT_LOG_LEVEL
+// WEFT_PRICING. On weftbase dev, --log-level WEFT_LOG_LEVEL
 // (debug, info, warn, error) and --log-format WEFT_LOG_FORMAT (text,
 // json) pick the server log's slog handler on stderr: the refused ingest
 // batches and the 5xx lines with their request ids.
 //
-// # weft studio
+// # weftbase dev
 //
-// Setup B (S4.6, §10.1): the UI, OTLP ingest, SQLite and a dev token on
+// Without "--" (weft's `weft studio`): setup B (S4.6, §10.1): the UI, OTLP ingest, SQLite and a dev token on
 // 127.0.0.1:7331 — the zero-infra Studio for any language's OTel app
 // (traces and runs; the playground, breakpoints and approvals need a
 // runtime link, Go only today):
 //
-//	weft studio                              # serves UI + OTLP; the token is in <db>.token
-//	WEFT_STUDIO_URL=http://127.0.0.1:7331 ./my-go-app
+//	weftbase dev                              # serves UI + OTLP; the token is in <db>.token
+//	WEFTBASE_URL=http://127.0.0.1:7331 ./my-go-app
 //	OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:7331 python app.py
 //
-// The database defaults to the otel local sink's path ($WEFT_DB or
-// ./.weft/weft.db), so the same file serves an in-process app and the
+// The database defaults to the otel local sink's path ($WEFTBASE_DB or
+// ./.weftbase/weftbase.db), so the same file serves an in-process app and the
 // binary. --db sqlite://path picks another file; --db
 // clickhouse://user:pass@host:9000/db serves the hosted backend
 // (obsdb/clickhouse). The dev token is stable per database (plan B3):
 // the first start on a SQLite file writes 32 random bytes (base64url)
 // beside it, <db>.token (0600), and every later start serves that
 // token; --rotate-token writes a new one (an action: no environment
-// mirror); --token or WEFT_STUDIO_TOKEN overrides it and leaves the
+// mirror); --token or WEFTBASE_TOKEN overrides it and leaves the
 // file alone. Like a fixed token it is the panel tokens' signing key,
 // so it is never printed — the banner names its file and, unless
-// --open handed the browser the link, ends "sign in with `weft open
+// --open handed the browser the link, ends "sign in with `weftbase open
 // --with-token`". A database with no file (":memory:", ClickHouse)
-// gets a token generated for this process, printed at start. Once bound, weft studio writes the
-// discovery file (internal/discovery: studio.json in ./.weft when that
-// exists, else $XDG_RUNTIME_DIR/weft, else the user cache directory;
+// gets a token generated for this process, printed at start. Once bound, weftbase dev writes the
+// discovery file (internal/discovery: studio.json in ./.weftbase when that
+// exists, else $XDG_RUNTIME_DIR/weftbase, else the user cache directory;
 // {url, token, db, pid, started, version}, 0600) and removes it on a
 // clean exit — SIGINT, SIGTERM and (unix) SIGHUP all stop it
 // gracefully; a second live Studio's exit puts the first's file back.
-// The writer drops a .gitignore ("*") into ./.weft when it has none.
-// exporter.Install and runtime.Install read the file when WEFT_STUDIO_URL
+// The writer drops a .gitignore ("*") into ./.weftbase when it has none.
+// exporter.Install and runtime.Install read the file when WEFTBASE_URL
 // is unset and the pipeline names no exporter.Studio or exporter.Local (the
 // README's "When weft/exporter reads the file"), trusting it only when its url
 // is loopback, it is fresh and, on unix, it is 0600 and the reader's,
-// so an app joins this Studio with no configuration (WEFT_DISCOVERY=off
+// so an app joins this Studio with no configuration (WEFTBASE_DISCOVERY=off
 // turns the read off). The playground is on (studio.Playground):
 // inert until an app's runtime (weft/runtime) dials in; --no-playground
 // turns it off. The manifest served at /api/manifest is --manifest
@@ -78,8 +81,8 @@
 // its link, and the reason the token is never printed.
 //
 // The port policy (plan B2, internal/listen): 127.0.0.1:7331 is the
-// one default. When it is busy, weft studio asks GET /api/meta there
-// (with --token / WEFT_STUDIO_TOKEN as the bearer when set, else the
+// one default. When it is busy, weftbase dev asks GET /api/meta there
+// (with --token / WEFTBASE_TOKEN as the bearer when set, else the
 // database's stable token — only to an address this user's discovery
 // file names — to loopback only). Before that, the Studio this
 // user's discovery file names, on whatever port, is asked the same
@@ -92,26 +95,26 @@
 // finds a Studio on the file anyway, is refused — "studio already
 // running at http://127.0.0.1:7347 (pid 1234) on …/weft.db" (the lock
 // file and the discovery file name the holder; else "another Studio
-// holds <db>"), exit 1, no database or listener opened (`weft dev`
+// holds <db>"), exit 1, no database or listener opened (`weftbase dev`
 // reuses it instead). A ClickHouse database is a shared server and
 // takes no lock. Anything else on the wanted port (another program, a Studio on another
 // database, a Studio whose meta this token cannot read) moves Studio to
 // the next free port in 7331–7340, said in one line before the banner,
 // which prints the real address. All ten busy is exit 1 naming the
-// range. --addr (or WEFT_STUDIO_ADDR) pins the address: busy is exit 1
+// range. --addr (or WEFTBASE_ADDR) pins the address: busy is exit 1
 // with the address in the error, never a probe or another port.
 //
-// # weft runs, weft open, weft export
+// # weftbase runs, weftbase open, weftbase export
 //
 // The API over a terminal. runs, open, export, doctor and mcp share one
-// resolver: the Studio is --url, else $WEFT_STUDIO_URL, else the
-// discovery file a running weft studio / weft dev wrote (the trust rules
-// exporter.Install uses; WEFT_DISCOVERY=off skips it), else
+// resolver: the Studio is --url, else $WEFTBASE_URL, else the
+// discovery file a running weftbase dev wrote (the trust rules
+// exporter.Install uses; WEFTBASE_DISCOVERY=off skips it), else
 // http://127.0.0.1:7331; one stderr line names it when the user did not
-// ("weft: Studio http://127.0.0.1:7347 (discovery file …)"). The token
-// is --token, else $WEFT_STUDIO_TOKEN, else the discovery file's when
+// ("weftbase: Studio http://127.0.0.1:7347 (discovery file …)"). The token
+// is --token, else $WEFTBASE_TOKEN, else the discovery file's when
 // that file names the resolved Studio.
-// `weft runs` prints one row per top-level run (id, agent, status,
+// `weftbase runs` prints one row per top-level run (id, agent, status,
 // started with its zone, steps, duration, own cost, the public id when
 // a row has one, the prompt, stopped by — what ended it, a canceled
 // run's cause in parentheses, "-" when none was recorded — and the
@@ -122,14 +125,14 @@
 // (default 50, 0 for all) caps the rows and says so on stderr when it
 // hid any, --json prints the rows as Studio serves them (stopped_by and
 // cancel_cause included when set); stderr names the next step (weft
-// open, weft export). `weft open <id>` tries the id as a run id, a
+// open, weftbase export). `weftbase open <id>` tries the id as a run id, a
 // public id, a session id and a trace id in turn (GET /api/runs/{id},
 // /api/public/{id}, /api/sessions/{id}, /api/traces/{id}) and prints
 // the first one's page — /runs, /conversations, /sessions or /traces —
 // bare; with no id it checks GET /api/meta and prints the Studio root.
-// --with-token prints the #token= fragment too (bare `weft open
+// --with-token prints the #token= fragment too (bare `weftbase open
 // --with-token` is a terminal's signed-in link to a fresh Studio),
-// --open hands the browser the link with the token. `weft export <id>`
+// --open hands the browser the link with the token. `weftbase export <id>`
 // writes GET /api/runs/<id>/export to stdout (--format json, jsonl or
 // otlp); with --wefttest <dir> it writes the run's save-as-test tree
 // into the package directory <dir> — the files of Studio's "save as
@@ -144,43 +147,45 @@
 // wefttest.Record replaces them): a stale one would answer for a
 // request the new run never made.
 //
-// # weft doctor
+// # weftbase doctor
 //
-// `weft doctor [--url URL] [--token TOK]` checks the Studio the
+// `weftbase doctor [--url URL] [--token TOK]` checks the Studio the
 // resolver names and prints one line per check, each read from its GET
 // /api/meta (internal/doctor): reachable, token accepted (a missing one
-// names <db>.token and `weft open --with-token`), the discovery file
+// names <db>.token and `weftbase open --with-token`), the discovery file
 // this shell reads against the one the Studio wrote (this Studio,
 // another, none), the database's path and size, the content it stores,
 // the newest run's age and weft version (a warning when it is not this
 // Studio's), the OTLP door (open, walled, off), connected runtimes (and,
 // when none, the --no-playground that turned the link off, or what this
-// shell's WEFT_ENV and WEFT_STUDIO_URL say about why), the panel
+// shell's WEFT_ENV and WEFTBASE_URL say about why), the panel
 // bundle's version and whether weft.json is stale against the latest
 // runs. It exits 1 when a check fails — first of all an unreachable
 // Studio, reported on the first line within a short timeout.
 //
-// # weft dev
+// # weftbase dev -- command
 //
-// `weft dev [flags] [-- command args…]` (plan B1.2) is `weft studio`
-// (in-process: the same flags, the same port policy) plus the app —
-// the command after "--", default `go run .` — run with WEFT_ENV=dev
-// (kept when already set non-empty), WEFT_STUDIO_URL, WEFT_STUDIO_TOKEN
-// and WEFT_DB (the Studio's SQLite file, absolute; unset for
+// `weftbase dev [flags] -- command args…` (plan B1.2; weft's `weft dev`)
+// is Studio alone (in-process: the same flags, the same port policy)
+// plus the app — the command after "--" (go run ., go run ./cmd/app; a
+// "--" with no command, or --watch / --no-watch without "--", is a
+// usage error) — run with WEFT_ENV=dev
+// (kept when already set non-empty), WEFTBASE_URL, WEFTBASE_TOKEN
+// and WEFTBASE_DB (the Studio's SQLite file, absolute; unset for
 // ClickHouse) added to the environment, the last three overriding the
 // shell's. Each is a plain variable the app could be given by hand:
 // the command is a convenience, never a requirement. The app runs in
 // its own process group; a .go change under the working directory
 // (--watch dir, repeatable, replaces it; .git, node_modules, vendor,
-// testdata, .weft and dist are skipped) restarts it after 300 ms of
+// testdata, .weftbase and dist are skipped) restarts it after 300 ms of
 // quiet — SIGTERM to the group, up to five seconds, SIGKILL, then the
 // command again. A build failure or an app that exits is reported with
 // its exit code and the next save retries; --no-watch turns watching
-// off, and weft dev then exits with the app's code (127 when it cannot
+// off, and weftbase dev then exits with the app's code (127 when it cannot
 // start). A directory arriving with .go files in it restarts too;
 // editor lock files (.#name.go) do not. Ctrl-C, SIGTERM and SIGHUP
 // stop the app first (the same signal; SIGHUP as SIGTERM), then
-// Studio; exit 0. A SIGKILL of weft dev cannot be caught: on Linux
+// Studio; exit 0. A SIGKILL of weftbase dev cannot be caught: on Linux
 // `go run` gets SIGTERM (Pdeathsig), but the binary it started can be
 // orphaned. Each start prints one line,
 //
@@ -198,14 +203,14 @@
 // another directory with --db on the same file the probe goes out bare
 // and a second Studio starts), so a Studio on the same database is
 // reused and the app gets its URL and token; one walled by another token is skipped for
-// the next port. A Studio weft dev starts writes the discovery file as
-// weft studio does. --watch and --no-watch have no environment mirror:
+// the next port. A Studio weftbase dev starts writes the discovery file as
+// weftbase dev does. --watch and --no-watch have no environment mirror:
 // they are the dev loop's, not connection settings.
 //
-// # Retention and weft vacuum
+// # Retention and weftbase vacuum
 //
 // Studio keeps everything by default. --retain (or WEFT_RETAIN; a Go
-// duration, 720h) on weft studio and weft dev is studio.Retain: a
+// duration, 720h) on weftbase dev is studio.Retain: a
 // sweeper deletes the runs that are not running and were last seen
 // longer ago, with their subagent children, every min(retain/10, 1h)
 // (at least a minute apart), from Studio's own tables only — a SQLite
@@ -214,29 +219,30 @@
 // 30 s reads interrupted, so a retention under 1h — which would sweep a
 // live run paused at a breakpoint — is a usage error (exit 2) on
 // studio, dev and vacuum alike.
-// `weft vacuum [--db] [--retain]` is the one-shot form: one sweep
+// `weftbase vacuum [--db] [--retain]` is the one-shot form: one sweep
 // when a retention is given, then VACUUM (SQLite: the file shrinks;
 // it waits on the busy timeout while another process writes) or
 // OPTIMIZE TABLE … FINAL on the mutated tables (ClickHouse: merges
 // every part, heavy on a large database). `make vacuum` runs it on
-// $WEFT_DB, else ./.weft/weft.db.
+// $WEFTBASE_DB, else ./.weftbase/weftbase.db.
 //
 // # Pricing
 //
 // Studio prices usage at read time (plan A5) with the table shipped in
 // the studio package (studio/pricing.json, dated). --pricing (or
-// WEFT_PRICING) on weft studio and weft dev names a file of the same
+// WEFT_PRICING) on weftbase dev names a file of the same
 // shape that replaces it whole — studio.LoadPricing; a file that does
 // not load is a start error (exit 1) naming the path and the field.
 // Nothing is fetched: prices are a plain file.
 //
-// `weft version` prints the weft version (version.Runtime: the module
-// tag this binary was built from).
+// `weftbase version` prints weftbase's version (internal/release) and
+// the weft version it embeds (version.Runtime: the weft module tag this
+// binary was built from): "weftbase v0.1.0 (weft v0.20.3)".
 //
-// Exit codes: 0 success, 1 a failure (printed as "weft: …" on stderr,
+// Exit codes: 0 success, 1 a failure (printed as "weftbase: …" on stderr,
 // except doctor, whose lines say it), 2 a usage error.
 //
-// It is a package of the framework module (ADR 0027) kept apart from
+// It is a package of the platform module (github.com/weftbase/weftbase) kept apart from
 // the studio library so the library never carries what only the
 // binary needs — it is the one place that imports the clickhouse
 // driver.
@@ -263,6 +269,7 @@ import (
 	"github.com/weftbase/weftbase/internal/dblock"
 	"github.com/weftbase/weftbase/internal/doctor"
 	"github.com/weftbase/weftbase/internal/listen"
+	"github.com/weftbase/weftbase/internal/release"
 	"github.com/weftbase/weftbase/obsdb/clickhouse"
 	"github.com/weftbase/weftbase/studio"
 )
@@ -270,7 +277,7 @@ import (
 const defaultAddr = listen.DefaultAddr
 
 // defaultURL is the Studio the API clients talk to without --url or
-// WEFT_STUDIO_URL.
+// WEFTBASE_URL.
 const defaultURL = "http://" + defaultAddr
 
 func main() {
@@ -321,30 +328,30 @@ func dashDash(s string) string {
 	return strings.Join(lines, "")
 }
 
-const usage = `weft — the weft framework's command line
+const usage = `weftbase — the weft platform's command line: Studio, its store and a terminal over its API
 
 Usage:
-  weft studio  [--addr] [--db] [--token] [--rotate-token] [--manifest] [--open] [--no-playground] [--retain] [--pricing] [--log-level] [--log-format]
-  weft dev     [studio's flags] [--no-watch] [--watch dir] [-- command args…]   (default: go run .)
-  weft runs    [--url] [--token] [--agent] [--since] [--failed] [--status] [--limit] [--json]
-  weft open    [id] [--url] [--token] [--open] [--with-token]   (a run, public, session or trace id; none: the Studio root)
-  weft export  <run id> [--url] [--token] [--format json|jsonl|otlp] [--wefttest dir [--fixtures-only [--test name]] [--force]]
-  weft doctor  [--url] [--token]
-  weft mcp     [--url] [--token]   (a read-only stdio MCP server over the Studio API; weft mcp -h lists its tools)
-  weft vacuum  [--db] [--retain]
-  weft version
+  weftbase dev     [--addr] [--db] [--token] [--rotate-token] [--manifest] [--open] [--no-playground] [--retain] [--pricing] [--log-level] [--log-format]
+  weftbase dev     [dev's flags] [--no-watch] [--watch dir] -- command args…   (Studio and your app: go run ., go run ./cmd/app)
+  weftbase runs    [--url] [--token] [--agent] [--since] [--failed] [--status] [--limit] [--json]
+  weftbase open    [id] [--url] [--token] [--open] [--with-token]   (a run, public, session or trace id; none: the Studio root)
+  weftbase export  <run id> [--url] [--token] [--format json|jsonl|otlp] [--wefttest dir [--fixtures-only [--test name]] [--force]]
+  weftbase doctor  [--url] [--token]
+  weftbase mcp     [--url] [--token]   (a read-only stdio MCP server over the Studio API; weftbase mcp -h lists its tools)
+  weftbase vacuum  [--db] [--retain]
+  weftbase version
 
-Environment (each mirrors a flag): WEFT_STUDIO_ADDR (--addr), WEFT_DB (--db),
-WEFT_STUDIO_TOKEN (--token), WEFT_MANIFEST (--manifest), WEFT_STUDIO_URL (--url;
-unset, the API commands read the discovery file a running weft studio wrote,
-WEFT_DISCOVERY=off skips it, else http://127.0.0.1:7331),
+Environment (each mirrors a flag): WEFTBASE_ADDR (--addr), WEFTBASE_DB (--db),
+WEFTBASE_TOKEN (--token), WEFT_MANIFEST (--manifest), WEFTBASE_URL (--url;
+unset, the API commands read the discovery file a running weftbase dev wrote,
+WEFTBASE_DISCOVERY=off skips it, else http://127.0.0.1:7331),
 WEFT_RETAIN (--retain; a Go duration of at least 1h, 0 = off), WEFT_PRICING (--pricing),
 WEFT_LOG_LEVEL (--log-level: debug|info|warn|error), WEFT_LOG_FORMAT (--log-format: text|json).
-Run "weft <command> -h" for a command's flags.
+Run "weftbase <command> -h" for a command's flags.
 `
 
 // run is the command line: it dispatches on the subcommand, prints a
-// failure as one "weft: …" line on stderr and returns the exit code
+// failure as one "weftbase: …" line on stderr and returns the exit code
 // (0 ok, 1 failure, 2 usage). Split from main so every subcommand is
 // testable.
 func run(args []string, stdout, stderr io.Writer) int {
@@ -353,7 +360,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case err == nil, errors.Is(err, flag.ErrHelp):
 		return 0
 	case errors.As(err, new(exitCode)):
-		// weft dev --no-watch: the app's own exit code, already said.
+		// weftbase dev --no-watch: the app's own exit code, already said.
 		var code exitCode
 		errors.As(err, &code)
 		return int(code)
@@ -361,13 +368,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 		// A failed doctor check has printed its own lines.
 		return 1
 	case errors.Is(err, errUsage):
-		_, _ = fmt.Fprintln(stderr, "weft:", strings.TrimPrefix(err.Error(), "usage: "))
+		_, _ = fmt.Fprintln(stderr, "weftbase:", strings.TrimPrefix(err.Error(), "usage: "))
 		return 2
 	case errors.Is(err, errFlag):
 		// The flag package printed the error and the command's flags.
 		return 2
 	default:
-		_, _ = fmt.Fprintln(stderr, "weft:", err)
+		_, _ = fmt.Fprintln(stderr, "weftbase:", err)
 		return 1
 	}
 }
@@ -394,8 +401,6 @@ func dispatch(args []string, stdout, stderr io.Writer) error {
 	}
 	cmd, rest := args[0], args[1:]
 	switch cmd {
-	case "studio":
-		return runStudio(rest, stdout, stderr)
 	case "runs":
 		return runRuns(rest, stdout, stderr)
 	case "open":
@@ -412,10 +417,15 @@ func dispatch(args []string, stdout, stderr io.Writer) error {
 		if len(rest) > 0 {
 			return usageError("version takes no arguments (got %s)", gotArgs(rest))
 		}
-		_, err := fmt.Fprintln(stdout, version.Runtime())
+		_, err := fmt.Fprintf(stdout, "weftbase %s (weft %s)\n", release.Version, version.Runtime())
 		return err
 	case "dev":
-		return runDev(rest, stdout, stderr)
+		// Studio alone, or Studio and the app after "--" (the dev loop,
+		// whose own flags are --watch and --no-watch).
+		if devLoopArgs(rest) {
+			return runDev(rest, stdout, stderr)
+		}
+		return runStudio(rest, stdout, stderr)
 	case "help", "-h", "--help", "-help":
 		_, _ = fmt.Fprint(stdout, usage)
 		return nil
@@ -425,27 +435,45 @@ func dispatch(args []string, stdout, stderr io.Writer) error {
 	}
 }
 
+// devLoopArgs reports whether `weftbase dev`'s arguments ask for the dev
+// loop (runDev): a "--" before the app's command, or one of the loop's
+// own flags (--watch, --no-watch). Anything else is Studio alone
+// (runStudio).
+func devLoopArgs(args []string) bool {
+	for _, a := range args {
+		if a == "--" {
+			return true
+		}
+		name, _, _ := strings.Cut(strings.TrimLeft(a, "-"), "=")
+		if strings.HasPrefix(a, "-") && (name == "watch" || name == "no-watch") {
+			return true
+		}
+	}
+	return false
+}
+
 // newFlags is a subcommand's flag set: errors and -h go to stderr.
 func newFlags(name string, stderr io.Writer) *flag.FlagSet {
-	fs := flag.NewFlagSet("weft "+name, flag.ContinueOnError)
+	fs := flag.NewFlagSet("weftbase "+name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		_, _ = fmt.Fprintf(fs.Output(), "Usage of weft %s:\n", name)
+		_, _ = fmt.Fprintf(fs.Output(), "Usage of weftbase %s:\n", name)
 		printDefaults(fs)
 	}
 	return fs
 }
 
-// runStudio is `weft studio`: setup B's server (studio.New) behind the
-// port policy, with the playground on and the manifest found.
+// runStudio is `weftbase dev` with no app (no "--"): setup B's server
+// (studio.New) behind the port policy, with the playground on and the
+// manifest found.
 func runStudio(args []string, stdout, stderr io.Writer) error {
-	fs := newFlags("studio", stderr)
+	fs := newFlags("dev", stderr)
 	db := fs.String("db", "",
-		"`sqlite://path` or `clickhouse://user:pass@host:9000/db` (default: $WEFT_DB or ./.weft/weft.db)")
+		"`sqlite://path` or `clickhouse://user:pass@host:9000/db` (default: $WEFTBASE_DB or ./.weftbase/weftbase.db)")
 	addr := fs.String("addr", "",
-		"listen `address` (default: $WEFT_STUDIO_ADDR, else "+defaultAddr+"); --addr pins; without it Studio takes the next free port in 7331–7340; a Studio already holding the same SQLite file (<db>.lock) refuses the start")
+		"listen `address` (default: $WEFTBASE_ADDR, else "+defaultAddr+"); --addr pins; without it Studio takes the next free port in 7331–7340; a Studio already holding the same SQLite file (<db>.lock) refuses the start")
 	token := fs.String("token", "",
-		"API token (default: $WEFT_STUDIO_TOKEN, else the database's stable token, <db>.token, never printed; a generated one, printed, for a database with no file)")
+		"API token (default: $WEFTBASE_TOKEN, else the database's stable token, <db>.token, never printed; a generated one, printed, for a database with no file)")
 	manifest := fs.String("manifest", "",
 		"`path` to the app's weft.json, served at /api/manifest and checked against the latest runs (default: $WEFT_MANIFEST, else the nearest weft.json from the working directory upward)")
 	open := fs.Bool("open", stdoutIsTTY(),
@@ -461,7 +489,7 @@ func runStudio(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return usageError("studio takes no arguments (got %s)", gotArgs(fs.Args()))
+		return usageError("dev takes no arguments; run an app after \"--\" (got %s)", gotArgs(fs.Args()))
 	}
 	restoreLog, err := logs.install(stderr)
 	if err != nil {
@@ -486,7 +514,7 @@ func runStudio(args []string, stdout, stderr io.Writer) error {
 	}
 	opts = append(opts, studio.Playground(!*noPlayground))
 	if *noPlayground {
-		opts = append(opts, studio.OffReason("playground", noPlaygroundReason("weft studio")))
+		opts = append(opts, studio.OffReason("playground", noPlaygroundReason("weftbase dev")))
 	}
 	opts = append(opts, retainOpts...)
 	opts = append(opts, pricingOpts...)
@@ -501,13 +529,13 @@ type want struct {
 	span   int // ports an unpinned start tries (0 = listen.DefaultSpan)
 }
 
-// wantAddr resolves the listen address: --addr, then WEFT_STUDIO_ADDR
+// wantAddr resolves the listen address: --addr, then WEFTBASE_ADDR
 // (both pin it), else def — the one default, unpinned.
 func wantAddr(flagAddr, def string) want {
 	if flagAddr != "" {
 		return want{addr: flagAddr, pinned: true}
 	}
-	if env := os.Getenv("WEFT_STUDIO_ADDR"); env != "" {
+	if env := os.Getenv("WEFTBASE_ADDR"); env != "" {
 		return want{addr: env, pinned: true}
 	}
 	return want{addr: def}
@@ -571,8 +599,8 @@ func findUpward(dir, name string) string {
 // --help must not print a token, and an unset --url is what lets the
 // discovery file name the Studio.
 func clientFlags(fs *flag.FlagSet) (base, token *string) {
-	base = fs.String("url", "", "the Studio to talk to (default: $WEFT_STUDIO_URL, else the discovery file's, else "+defaultURL+")")
-	token = fs.String("token", "", "API token (default: $WEFT_STUDIO_TOKEN, else the discovery file's when it names that Studio; never printed)")
+	base = fs.String("url", "", "the Studio to talk to (default: $WEFTBASE_URL, else the discovery file's, else "+defaultURL+")")
+	token = fs.String("token", "", "API token (default: $WEFTBASE_TOKEN, else the discovery file's when it names that Studio; never printed)")
 	return base, token
 }
 
@@ -584,8 +612,8 @@ func clientFor(urlFlag, tokenFlag string, stderr io.Writer) (*client, studioTarg
 	return newClient(t.base, t.token), t
 }
 
-// runDoctor is `weft doctor`: the flags mirror WEFT_STUDIO_URL and
-// WEFT_STUDIO_TOKEN one to one; internal/doctor does the checking.
+// runDoctor is `weftbase doctor`: the flags mirror WEFTBASE_URL and
+// WEFTBASE_TOKEN one to one; internal/doctor does the checking.
 func runDoctor(args []string, stdout, stderr io.Writer) error {
 	fs := newFlags("doctor", stderr)
 	base, token := clientFlags(fs)
@@ -604,7 +632,7 @@ func runDoctor(args []string, stdout, stderr io.Writer) error {
 	}, os.Getenv)
 }
 
-// afterBoot is what `weft studio` adds around the port policy: lines
+// afterBoot is what `weftbase dev` adds around the port policy: lines
 // printed after the banner, and whether to open the browser on the UI.
 type afterBoot struct {
 	notes  []string
@@ -618,7 +646,7 @@ type afterBoot struct {
 // the wanted address is reused: one line naming it, nil (exit 0), and
 // nothing opened. A busy address otherwise moves to the next free port
 // of the range with one line saying which and why — unless it is
-// pinned (--addr, WEFT_STUDIO_ADDR): then the busy address is the
+// pinned (--addr, WEFTBASE_ADDR): then the busy address is the
 // error. The port is chosen before the database is opened, so a reuse
 // touches nothing and the banner prints the real address.
 func serve(dbFlag string, w want, tokenFlag string, stdout io.Writer, extra ...studio.Option) error {
@@ -709,7 +737,7 @@ func noPlaygroundReason(cmd string) string {
 
 // signInLine is the banner's last line when the browser is not opened
 // and the token is not printed.
-const signInLine = "studio: sign in with `weft open --with-token` (prints this Studio's link, the token in its fragment)"
+const signInLine = "studio: sign in with `weftbase open --with-token` (prints this Studio's link, the token in its fragment)"
 
 // uiLink is the UI's address, the token in the fragment when there is
 // one: the UI adopts it, and a fragment never reaches a server.
@@ -777,7 +805,7 @@ func serveOn(httpSrv *http.Server, ln net.Listener, stdout io.Writer) error {
 }
 
 // serveUntil is serveOn's body: it serves on ln until stop delivers a
-// signal (or Serve fails), then stops gracefully. `weft dev` owns its
+// signal (or Serve fails), then stops gracefully. `weftbase dev` owns its
 // signals (the app stops first) and hands its own channel here.
 func serveUntil(httpSrv *http.Server, ln net.Listener, stdout io.Writer, stop <-chan os.Signal) error {
 	// Shutdown never cancels a request's context — it waits for the
@@ -846,7 +874,7 @@ func serveBootWith(dbFlag, addr, tokenFlag string, rotate bool, stdout io.Writer
 	case tok.source == tokenFromFlag:
 		_, _ = fmt.Fprintln(stdout, "studio: token from --token")
 	case tok.source == tokenFromEnv:
-		_, _ = fmt.Fprintln(stdout, "studio: token from WEFT_STUDIO_TOKEN")
+		_, _ = fmt.Fprintln(stdout, "studio: token from WEFTBASE_TOKEN")
 	case tok.rotated:
 		_, _ = fmt.Fprintf(stdout, "studio: token rotated: a new one in %s (panel tokens signed with the old one no longer verify)\n", tok.path)
 	case tok.created:
@@ -855,7 +883,7 @@ func serveBootWith(dbFlag, addr, tokenFlag string, rotate bool, stdout io.Writer
 		_, _ = fmt.Fprintf(stdout, "studio: token from %s (stable for this database; --rotate-token renews it)\n", tok.path)
 	default:
 		_, _ = fmt.Fprintf(stdout, "studio: http://%s/#token=%s\n", addr, tok.value)
-		_, _ = fmt.Fprintf(stdout, "studio: dev token %s (WEFT_STUDIO_TOKEN fixes it)\n", tok.value)
+		_, _ = fmt.Fprintf(stdout, "studio: dev token %s (WEFTBASE_TOKEN fixes it)\n", tok.value)
 	}
 	_, _ = fmt.Fprintf(stdout, "studio: db %s\n", dbLabel(dbFlag))
 	return srv, nil
@@ -908,17 +936,17 @@ func newServer(dbFlag, token string, extra ...studio.Option) (srv *server, err e
 }
 
 // fixedToken is the token the operator fixed: the flag, then
-// WEFT_STUDIO_TOKEN; "" when neither is set.
+// WEFTBASE_TOKEN; "" when neither is set.
 func fixedToken(tokenFlag string) string {
 	if tokenFlag != "" {
 		return tokenFlag
 	}
-	return os.Getenv("WEFT_STUDIO_TOKEN")
+	return os.Getenv("WEFTBASE_TOKEN")
 }
 
 // dbFile is the absolute database file --db names, the one the port
 // policy compares with a running Studio's db.path: the default (the
-// local sink's $WEFT_DB or ./.weft/weft.db) and sqlite://path resolve
+// local sink's $WEFTBASE_DB or ./.weftbase/weftbase.db) and sqlite://path resolve
 // as obsdb/sqlite resolves them; ":memory:" and clickhouse:// name no
 // file ("", which never matches). A malformed --db is newServer's
 // error to report, after the port is chosen.
@@ -926,9 +954,9 @@ func dbFile(dbFlag string) (string, error) {
 	var path string
 	switch {
 	case dbFlag == "":
-		path = os.Getenv("WEFT_DB")
+		path = os.Getenv("WEFTBASE_DB")
 		if path == "" {
-			path = ".weft/weft.db"
+			path = ".weftbase/weftbase.db"
 		}
 	case strings.HasPrefix(dbFlag, "sqlite://"):
 		path = strings.TrimPrefix(dbFlag, "sqlite://")
@@ -946,7 +974,7 @@ func dbFile(dbFlag string) (string, error) {
 func dbLabel(dbFlag string) string {
 	switch {
 	case dbFlag == "":
-		return "$WEFT_DB or ./.weft/weft.db (default)"
+		return "$WEFTBASE_DB or ./.weftbase/weftbase.db (default)"
 	case strings.HasPrefix(dbFlag, "sqlite://"):
 		return strings.TrimPrefix(dbFlag, "sqlite://")
 	default:

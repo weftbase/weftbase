@@ -43,19 +43,19 @@
   {
     "hole": "gap",
     "reason": "a record the run counts is missing: a destination dropped it on the way",
-    "fix": "raise the destination's queue: otel.QueueSize(n) (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev (or otel.DevMode()); the app's WARN \"weft/otel: destination queue full\" names it, weft doctor the drops (weft.records.dropped)",
+    "fix": "raise the destination's queue: otel.QueueSize(n) (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev (or otel.DevMode()); the app's WARN \"weft/otel: destination queue full\" names it, weftbase doctor the drops (weft.records.dropped)",
     "causes": {
       "events_lost": {
         "reason": "more event records were emitted than stored (weft.run.events on the root span): a destination dropped them, its queue full or an export failed",
-        "fix": "raise the destination's queue: otel.QueueSize(n) (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev (or otel.DevMode()); the app's WARN \"weft/otel: destination queue full\" names it, weft doctor the drops (weft.records.dropped)"
+        "fix": "raise the destination's queue: otel.QueueSize(n) (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev (or otel.DevMode()); the app's WARN \"weft/otel: destination queue full\" names it, weftbase doctor the drops (weft.records.dropped)"
       },
       "messages_lost": {
         "reason": "more transcript batches were emitted than stored (weft.run.messages on the root span): a destination dropped them, its queue full or an export failed — messages are missing",
-        "fix": "raise the destination's queue: otel.QueueSize(n) (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev (or otel.DevMode()); the app's WARN \"weft/otel: destination queue full\" names it, weft doctor the drops (weft.records.dropped)"
+        "fix": "raise the destination's queue: otel.QueueSize(n) (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev (or otel.DevMode()); the app's WARN \"weft/otel: destination queue full\" names it, weftbase doctor the drops (weft.records.dropped)"
       },
       "tail_lost": {
         "reason": "the run's root span ended but its run_finish record never arrived: a destination dropped the record tail, so the last steps' records are missing",
-        "fix": "raise the destination's queue: otel.QueueSize(n) (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev (or otel.DevMode()); the app's WARN \"weft/otel: destination queue full\" names it, weft doctor the drops (weft.records.dropped)"
+        "fix": "raise the destination's queue: otel.QueueSize(n) (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev (or otel.DevMode()); the app's WARN \"weft/otel: destination queue full\" names it, weftbase doctor the drops (weft.records.dropped)"
       }
     }
   },

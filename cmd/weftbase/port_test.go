@@ -213,7 +213,7 @@ func TestStudioOnAnotherDBMovesStudio(t *testing.T) {
 	}
 }
 
-// TestPinnedAddrBusyFails: --addr (and WEFT_STUDIO_ADDR) pins — a busy
+// TestPinnedAddrBusyFails: --addr (and WEFTBASE_ADDR) pins — a busy
 // pinned address is an error naming it, no probe, no fallback.
 func TestPinnedAddrBusyFails(t *testing.T) {
 	base := freeBase(t, 2)
@@ -224,15 +224,15 @@ func TestPinnedAddrBusyFails(t *testing.T) {
 	defer func() { _ = occupied.Close() }()
 	db := "sqlite://" + filepath.Join(t.TempDir(), "weft.db")
 	var out, errb strings.Builder
-	code := run([]string{"studio", "--addr", loop(base), "--db", db, "--token", "tok"}, &out, &errb)
+	code := run([]string{"dev", "--addr", loop(base), "--db", db, "--token", "tok"}, &out, &errb)
 	if code != 1 || !strings.Contains(errb.String(), loop(base)) {
 		t.Errorf("--addr on a busy port: exit %d %q, want 1 and an error naming %s", code, errb.String(), loop(base))
 	}
-	t.Setenv("WEFT_STUDIO_ADDR", loop(base))
+	t.Setenv("WEFTBASE_ADDR", loop(base))
 	errb.Reset()
-	code = run([]string{"studio", "--db", db, "--token", "tok"}, &out, &errb)
+	code = run([]string{"dev", "--db", db, "--token", "tok"}, &out, &errb)
 	if code != 1 || !strings.Contains(errb.String(), loop(base)) {
-		t.Errorf("WEFT_STUDIO_ADDR on a busy port: exit %d %q, want 1 and an error naming %s", code, errb.String(), loop(base))
+		t.Errorf("WEFTBASE_ADDR on a busy port: exit %d %q, want 1 and an error naming %s", code, errb.String(), loop(base))
 	}
 	if out.String() != "" {
 		t.Errorf("a pinned busy start printed %q, want nothing (no banner, no move)", out.String())
@@ -259,13 +259,13 @@ func TestRangeExhaustedFails(t *testing.T) {
 }
 
 // TestAddrResolution pins the flag/env mirror: --addr, then
-// WEFT_STUDIO_ADDR, both pinned; neither is the default, unpinned.
+// WEFTBASE_ADDR, both pinned; neither is the default, unpinned.
 func TestAddrResolution(t *testing.T) {
-	t.Setenv("WEFT_STUDIO_ADDR", "")
+	t.Setenv("WEFTBASE_ADDR", "")
 	if w := wantAddr("", defaultAddr); w.addr != "127.0.0.1:7331" || w.pinned {
 		t.Errorf("default = %+v, want 127.0.0.1:7331 unpinned", w)
 	}
-	t.Setenv("WEFT_STUDIO_ADDR", "127.0.0.1:9000")
+	t.Setenv("WEFTBASE_ADDR", "127.0.0.1:9000")
 	if w := wantAddr("", defaultAddr); w.addr != "127.0.0.1:9000" || !w.pinned {
 		t.Errorf("env = %+v, want 127.0.0.1:9000 pinned", w)
 	}
@@ -291,22 +291,22 @@ func TestDBFile(t *testing.T) {
 		{"relative sqlite://", "sqlite://weft.db", "", filepath.Join(wd, "weft.db")},
 		{"relative sqlite:// in a directory", "sqlite://sub/../x/weft.db", "", filepath.Join(wd, "x", "weft.db")},
 		{"absolute sqlite:///", "sqlite://" + abs, "", abs},
-		{"sqlite:// wins over $WEFT_DB", "sqlite://" + abs, "env.db", abs},
-		{"$WEFT_DB relative", "", "env.db", filepath.Join(wd, "env.db")},
-		{"$WEFT_DB absolute", "", abs, abs},
-		{"the default", "", "", filepath.Join(wd, ".weft", "weft.db")},
+		{"sqlite:// wins over $WEFTBASE_DB", "sqlite://" + abs, "env.db", abs},
+		{"$WEFTBASE_DB relative", "", "env.db", filepath.Join(wd, "env.db")},
+		{"$WEFTBASE_DB absolute", "", abs, abs},
+		{"the default", "", "", filepath.Join(wd, ".weftbase", "weftbase.db")},
 		{"sqlite://:memory:", "sqlite://:memory:", "", ""},
-		{"$WEFT_DB=:memory:", "", ":memory:", ""},
+		{"$WEFTBASE_DB=:memory:", "", ":memory:", ""},
 		{"empty sqlite://", "sqlite://", "", ""},
 		{"clickhouse://", "clickhouse://u:p@127.0.0.1:9000/db", "", ""},
 		{"a bare path (not a --db form)", "weft.db", "", ""},
 		{"malformed", "postgres://x", "", ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			t.Setenv("WEFT_DB", c.env)
+			t.Setenv("WEFTBASE_DB", c.env)
 			got, err := dbFile(c.flag)
 			if err != nil || got != c.want {
-				t.Errorf("dbFile(%q) with WEFT_DB=%q = %q, %v; want %q", c.flag, c.env, got, err, c.want)
+				t.Errorf("dbFile(%q) with WEFTBASE_DB=%q = %q, %v; want %q", c.flag, c.env, got, err, c.want)
 			}
 		})
 	}
@@ -314,7 +314,7 @@ func TestDBFile(t *testing.T) {
 
 // TestRelativeDBFormsReuse: a Studio started with a relative
 // --db sqlite://x.db is found (and the start refused) by a start in the same directory that
-// names the same file through $WEFT_DB — the two forms resolve to one
+// names the same file through $WEFTBASE_DB — the two forms resolve to one
 // absolute path.
 func TestRelativeDBFormsReuse(t *testing.T) {
 	t.Chdir(t.TempDir())
@@ -323,7 +323,7 @@ func TestRelativeDBFormsReuse(t *testing.T) {
 	stop := startStudio(t, "sqlite://x.db", base, 2, loop(base), &first)
 	defer stop()
 
-	t.Setenv("WEFT_DB", "x.db")
+	t.Setenv("WEFTBASE_DB", "x.db")
 	var second strings.Builder
 	wantRefused(t, serve("", want{addr: loop(base), span: 2}, "tok", &second), &second, loop(base))
 }

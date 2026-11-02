@@ -25,16 +25,16 @@ func testCtx(t *testing.T) context.Context {
 func sqliteOpen(path string) (obsdb.DB, error) { return sqlite.Open(path) }
 
 // isolate keeps a test from the operator's Studio: no discovery file,
-// no WEFT_STUDIO_URL; every other variable reads through (t.Setenv).
+// no WEFTBASE_URL; every other variable reads through (t.Setenv).
 func isolate(t *testing.T) {
 	t.Helper()
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	prev := envGetenv
 	envGetenv = func(k string) string {
 		switch k {
-		case "WEFT_DISCOVERY":
+		case "WEFTBASE_DISCOVERY":
 			return "off"
-		case "WEFT_STUDIO_URL", "WEFT_STUDIO_TOKEN":
+		case "WEFTBASE_URL", "WEFTBASE_TOKEN":
 			return ""
 		}
 		return os.Getenv(k)

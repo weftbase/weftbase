@@ -89,7 +89,7 @@ verbs and `studio.Retain`) is a lightweight `DELETE FROM … WHERE` on
 `otel_traces`, `otel_logs`, `weft_records`, `weft_deltas` and
 `weft_runs` (lightweight deletes, GA since ClickHouse 23.3, below the
 schema's own 25.6 floor): rows are masked at once and
-leave the parts at the next merge; `Vacuum` (`weft vacuum`) forces that
+leave the parts at the next merge; `Vacuum` (`weftbase vacuum`) forces that
 with `OPTIMIZE TABLE … FINAL` on the same tables — heavy on a large
 database. Each chunk of a deletion (400 runs, 200 span keys) issues up
 to seven synchronous (`mutations_sync = 2`) lightweight DELETE
@@ -159,7 +159,7 @@ at the port the service maps onto the runner. A service container takes
 `ulimits:` key — one makes the whole workflow file invalid), and the
 health check holds the steps until the server answers a query on the
 native port. A gated test that skips fails the job, so a DSN the tests
-cannot read never reads green; the same DSN un-gates `cmd/weft`'s
+cannot read never reads green; the same DSN un-gates `cmd/weftbase`'s
 `--db clickhouse://` test.
 
 ```yaml
@@ -194,8 +194,8 @@ clickhouse:
           echo "gated tests skipped: WEFT_CLICKHOUSE_DSN did not reach them" >&2
           exit 1
         fi
-    - name: test (cmd/weft, gated --db clickhouse:// test)
-      working-directory: cmd/weft
+    - name: test (cmd/weftbase, gated --db clickhouse:// test)
+      working-directory: cmd/weftbase
       run: |
         set -o pipefail
         go test -race -count=1 -v -run '^TestNewServerClickhouse$' ./... | tee "$RUNNER_TEMP/weft-cmd.log"

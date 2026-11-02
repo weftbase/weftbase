@@ -7,6 +7,8 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 
+import { weftPath } from "../../scripts/weft-version"
+
 import {
   CAUSES,
   HOLE_ORDER,
@@ -228,7 +230,9 @@ describe("the app turn's kinds and refusal words", () => {
     )
     expect(w.fix).toBe("")
     expect(refusalLine(w)).not.toContain(APP_RUN)
-    expect(go("../thread/turn.go")).toMatch(/"weft\.session\.parent"/)
+    expect(readFileSync(weftPath("thread/turn.go"), "utf8")).toMatch(
+      /"weft\.session\.parent"/
+    )
   })
 
   it("since U14 (O11) a pool child's turn names its caller, not a parent: still pool-child, its turn named; a Generate under it is plain", () => {

@@ -22,8 +22,8 @@ import (
 // pid), so an app restarted under the same name, whose count starts
 // again from zero, reads the earlier process's larger count until
 // Studio restarts. GET /api/meta serves it as ingest.dropped, the
-// Settings page shows it, `weft doctor` prints it. Heard on the OTLP
-// ingest path (setup B, `weft dev`): a Local destination writes its own
+// Settings page shows it, `weftbase doctor` prints it. Heard on the OTLP
+// ingest path (setup B, `weftbase dev`): a Local destination writes its own
 // heartbeats into the database directly, and never overflows (it has no
 // queue).
 

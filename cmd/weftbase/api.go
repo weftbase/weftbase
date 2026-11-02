@@ -82,7 +82,7 @@ func (c *client) get(ctx context.Context, path string, q url.Values) ([]byte, er
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("studio not reachable at %s: %w (weft studio starts one; --url or WEFT_STUDIO_URL points at another)", c.redacted(), err)
+		return nil, fmt.Errorf("studio not reachable at %s: %w (weftbase dev starts one; --url or WEFTBASE_URL points at another)", c.redacted(), err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
@@ -120,14 +120,14 @@ func apiError(path string, status int, body []byte) error {
 	}
 	var err error = &statusError{Status: status, Body: body, line: fmt.Sprintf("GET %s: %d %s", path, status, msg)}
 	if status == http.StatusUnauthorized {
-		err = fmt.Errorf("%w (--token or WEFT_STUDIO_TOKEN)", err)
+		err = fmt.Errorf("%w (--token or WEFTBASE_TOKEN)", err)
 	}
 	return err
 }
 
 // statusError is a non-2xx answer: its one line, plus the status and
 // the body Studio sent (its error, and a badge with a reason when the
-// route gave one) for a caller that passes them on — weft mcp does.
+// route gave one) for a caller that passes them on — weftbase mcp does.
 type statusError struct {
 	Status int
 	Body   []byte
@@ -141,7 +141,7 @@ func (e *statusError) Error() string { return e.line }
 func runPath(id string) string { return "/api/runs/" + url.PathEscape(id) }
 
 // parseArgs parses fs over args with the positional arguments allowed
-// anywhere — `weft export <id> --wefttest dir` — and returns them. A
+// anywhere — `weftbase export <id> --wefttest dir` — and returns them. A
 // "--" ends the flags: everything after it is positional.
 func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
 	var pos []string
@@ -160,7 +160,7 @@ func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
 	}
 }
 
-// ── weft runs ──────────────────────────────────────────────────────
+// ── weftbase runs ──────────────────────────────────────────────────────
 
 // runRow is the part of GET /api/runs' row the table prints; --json
 // prints the row as Studio serves it.
@@ -299,7 +299,7 @@ func cell(s string) string {
 // a test pages through the cursor).
 var runsPageSize = 100
 
-// runRuns is `weft runs`: the newest top-level runs, one row each,
+// runRuns is `weftbase runs`: the newest top-level runs, one row each,
 // paged through GET /api/runs's cursor.
 func runRuns(args []string, stdout, stderr io.Writer) error {
 	fs := newFlags("runs", stderr)
@@ -393,7 +393,7 @@ pages:
 			beforeID = *page.NextBeforeID
 		}
 		if seen[before+"\x00"+beforeID] {
-			_, _ = fmt.Fprintln(stderr, "weft: the runs cursor did not move; stopping")
+			_, _ = fmt.Fprintln(stderr, "weftbase: the runs cursor did not move; stopping")
 			break
 		}
 		seen[before+"\x00"+beforeID] = true
@@ -405,7 +405,7 @@ pages:
 	}
 	// Truncation is visible: the limit says so when it hid runs.
 	if cut {
-		_, _ = fmt.Fprintf(stderr, "weft: showing the newest %d; --limit 0 lists all\n", *limit)
+		_, _ = fmt.Fprintf(stderr, "weftbase: showing the newest %d; --limit 0 lists all\n", *limit)
 	}
 	if *asJSON {
 		if raws == nil {
@@ -419,11 +419,11 @@ pages:
 		return err
 	}
 	if len(rows) == 0 {
-		_, _ = fmt.Fprintln(stderr, "weft: no runs match")
+		_, _ = fmt.Fprintln(stderr, "weftbase: no runs match")
 		return nil
 	}
 	// The PUBLIC ID column appears when a row carries one (the id the
-	// app's logs and the panel show; weft open takes it).
+	// app's logs and the panel show; weftbase open takes it).
 	pub := false
 	for _, r := range rows {
 		pub = pub || r.PublicID != ""
@@ -446,7 +446,7 @@ pages:
 		return err
 	}
 	// The next step, on stderr: stdout stays the table.
-	_, _ = fmt.Fprintln(stderr, "weft: weft open <id> shows one in Studio; weft export <id> --format jsonl writes it out")
+	_, _ = fmt.Fprintln(stderr, "weftbase: weftbase open <id> shows one in Studio; weftbase export <id> --format jsonl writes it out")
 	return nil
 }
 
@@ -465,9 +465,9 @@ func parseSince(v string, now time.Time) (time.Time, error) {
 	return time.Time{}, usageError("--since %q: want a duration (2h, 30m) or an RFC 3339 time (2026-10-08T09:00:00Z)", v)
 }
 
-// ── weft open ──────────────────────────────────────────────────────
+// ── weftbase open ──────────────────────────────────────────────────────
 
-// runOpen is `weft open [id]`: the page of a run, a conversation (a
+// runOpen is `weftbase open [id]`: the page of a run, a conversation (a
 // public id), a session or a trace — the id is tried as each kind in
 // turn against the API (UX-S5a-06) — or, with no id, the Studio root
 // (UX-S5a-02: on a fresh Studio with no run, the one signed-in link a
@@ -511,7 +511,7 @@ func runOpen(args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
-// idKinds are the ids `weft open` takes, in the order it tries them:
+// idKinds are the ids `weftbase open` takes, in the order it tries them:
 // the API route that knows the id and the UI page that shows it.
 var idKinds = []struct{ noun, route, page string }{
 	{"run", "/api/runs/", "/runs/"},
@@ -556,9 +556,9 @@ func runLink(base, id, token string) string {
 	return pageLink(base, "/runs/"+url.PathEscape(id), token)
 }
 
-// ── weft export ────────────────────────────────────────────────────
+// ── weftbase export ────────────────────────────────────────────────────
 
-// runExport is `weft export <id>`: GET /api/runs/<id>/export to
+// runExport is `weftbase export <id>`: GET /api/runs/<id>/export to
 // stdout, or with --wefttest the run's save-as-test tree written into a
 // package directory — the very files Studio's "save as test" zip holds
 // (UX-S5a-07: one layout): <agent>_replay_test.go beside
@@ -618,7 +618,7 @@ func runExport(args []string, stdout, stderr io.Writer) error {
 		if err != nil {
 			return fmt.Errorf("export %s: %w", id, err)
 		}
-		_, err = fmt.Fprintf(stdout, "weft: wrote %s and %d fixtures under %s in %s; go test there replays run %s (rename the package clause to the directory's package plus _test)\n",
+		_, err = fmt.Fprintf(stdout, "weftbase: wrote %s and %d fixtures under %s in %s; go test there replays run %s (rename the package clause to the directory's package plus _test)\n",
 			tree.test, tree.fixtures, tree.testdata, *dir, id)
 		return err
 	}
@@ -648,7 +648,7 @@ func runExport(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("export %s: %w", id, err)
 	}
-	_, err = fmt.Fprintf(stdout, "weft: wrote %d fixtures to %s; a test named %s replays them with wefttest.Replay(t, %q)\n",
+	_, err = fmt.Fprintf(stdout, "weftbase: wrote %d fixtures to %s; a test named %s replays them with wefttest.Replay(t, %q)\n",
 		n, target, name, *dir)
 	return err
 }

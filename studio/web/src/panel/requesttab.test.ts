@@ -77,7 +77,7 @@ const DEMO1 = "You are the studio-local demo agent."
 const DEMO0 = `${DEMO1}\n\n${GUIDANCE}`
 
 const claims = (scope: string) =>
-  `weft_pt.${btoa(JSON.stringify({ public_id: "pub_orders", scope, exp: "2099-01-01T00:00:00Z" })).replace(/=+$/, "")}.c2ln`
+  `wb_pt.${btoa(JSON.stringify({ public_id: "pub_orders", scope, exp: "2099-01-01T00:00:00Z" })).replace(/=+$/, "")}.c2ln`
 
 const U = { input_tokens: 5, output_tokens: 2 }
 function threeSteps(id = RUN): unknown[] {

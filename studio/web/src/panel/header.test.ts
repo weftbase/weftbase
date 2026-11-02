@@ -195,7 +195,7 @@ describe("the empty states (UX-F-33)", () => {
     // How to connect, to this Studio (UX-F-11): its URL, and the
     // connect card through the hand-off.
     expect(text(el, ".weft-turns")).toContain(
-      "no runs yet — run your app with WEFT_STUDIO_URL=http://studio.test/studio go run . · how to connect ⤢"
+      "no runs yet — run your app with WEFTBASE_URL=http://studio.test/studio go run . · how to connect ⤢"
     )
     expect(
       ($(el, ".weft-splash a") as HTMLAnchorElement).getAttribute("href")

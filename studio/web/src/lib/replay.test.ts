@@ -391,7 +391,7 @@ describe("prefixLine", () => {
 
 describe("canReplay (the panel's canAct rule)", () => {
   const panelToken = (scope: string) =>
-    `weft_pt.${btoa(JSON.stringify({ public_id: "pub_1", scope }))
+    `wb_pt.${btoa(JSON.stringify({ public_id: "pub_1", scope }))
       .replace(/=+$/, "")
       .replace(/\+/g, "-")
       .replace(/\//g, "_")}.sig`
@@ -405,7 +405,7 @@ describe("canReplay (the panel's canAct rule)", () => {
   })
 
   it("an unreadable panel token is the default mint: read", () => {
-    expect(tokenScopeOf("weft_pt.!!!.sig")).toBe("read")
+    expect(tokenScopeOf("wb_pt.!!!.sig")).toBe("read")
     expect(tokenScopeOf("plain")).toBe("")
   })
 })

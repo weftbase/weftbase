@@ -33,7 +33,7 @@ const rOK = runs.runs.find((r) => r.id === "r_ok")!
 const row = (over: Partial<RunRow>): RunRow => ({ ...rOK, ...over })
 
 const panelToken = (scope: "read" | "playground") =>
-  `weft_pt.${btoa(
+  `wb_pt.${btoa(
     JSON.stringify({
       public_id: rOK.public_id || "pub_1",
       scope,
