@@ -13,7 +13,10 @@
 // weft/otel knows nothing of Studio: it emits, and reads only the
 // standard OpenTelemetry variables. This package builds on its public
 // seams — otel.Sink (Local), otel.OTLP with otel.FirstParty (Studio),
-// otel.Fallback (Install's default) — and adds what the platform reads:
+// otel.Fallback (Install's default), otel.Environment (WEFTBASE_URL's
+// Studio) and otel.Tag (so LocalDB and StudioEndpoint know any
+// pipeline's Local and Studio, a plain otel.Install's included) — and
+// adds what the platform reads:
 //
 //	WEFTBASE_URL, WEFTBASE_TOKEN → a Studio destination (content on)
 //	(neither, nor WEFTBASE_DISCOVERY=off)   → the discovery file a running `weftbase dev` wrote
