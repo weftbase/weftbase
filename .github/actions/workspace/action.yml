@@ -1,0 +1,39 @@
+# The development workspace CI builds in: weftbase imports the weft
+# framework (github.com/weftbase/weft and .../core), which has no tag
+# under that path yet, so go.mod requires it at the placeholder
+# pseudo-version. This action checks weft's main out beside this
+# repository and writes the go.work the README's "Development" section
+# describes. Once the two-phase release tags weft, drop it: go.mod then
+# requires the tag and the module proxy serves it.
+name: workspace
+description: check out weft beside weftbase and join both in a go.work
+inputs:
+  token:
+    description: a token that can read weftbase/weft (the default token reads a public repository)
+    required: false
+    default: ${{ github.token }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v7
+      with:
+        repository: weftbase/weft
+        ref: main
+        path: weft
+        token: ${{ inputs.token }}
+    - shell: sh
+      run: |
+        cat > go.work <<'WORK'
+        go 1.26.0
+
+        use (
+        	./weft
+        	./weft/core
+        	./weftbase
+        )
+
+        replace (
+        	github.com/weftbase/weft v0.0.0-00010101000000-000000000000 => ./weft
+        	github.com/weftbase/weft/core v0.0.0-00010101000000-000000000000 => ./weft/core
+        )
+        WORK

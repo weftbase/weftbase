@@ -1,0 +1,31 @@
+# Build output
+/weftbase
+/bin/
+/examples/studio-local/studio-local
+/examples/approvals/approvals
+/studio/examples/basic/basic
+/runtime/examples/local/local
+
+# Studio's web project: contributor-side build state only — the build
+# output itself (studio/dist) is committed and embedded (ADR 0018 §3).
+/studio/web/node_modules/
+/studio/web/.output/
+/studio/web/.tanstack/
+/studio/web/.vinxi/
+/studio/web/.vite/
+/studio/web/dist-tmp/
+
+# The local data a weftbase dev writes beside a project (database, dev
+# token, discovery file).
+.weftbase/
+
+# Go test artifacts
+*.test
+*.out
+coverage.*
+
+# Editor and OS noise
+.idea/
+.vscode/
+*.swp
+.DS_Store
