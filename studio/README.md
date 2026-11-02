@@ -86,8 +86,8 @@ file, 0600, never printed (`--rotate-token` renews it;
 the discovery file `studio.json` (`./.weftbase`, `$XDG_RUNTIME_DIR/weftbase`,
 the user cache directory; `WEFTBASE_URL` always wins,
 `WEFTBASE_DISCOVERY=off` ignores it, an explicit `exporter.Local` or
-`exporter.Studio` never reads it — the root README's "When weft/exporter
-reads the file"); ingest is open on loopback;
+`exporter.Studio` never reads it — [docs/cli.md, "When exporter reads the
+file"](../docs/cli.md#when-exporter-reads-the-file)); ingest is open on loopback;
 `127.0.0.1:7331` is the one default port: started again on the same
 SQLite file, the binary is refused: one Studio per database file,
 held by `<db>.lock` beside a SQLite file — an exclusive OS lock (flock; LockFileEx on Windows) held while it serves, taken before any port is probed or bound, and released by the kernel when the process ends, a crash or `kill -9` included. Two starts at the same moment, or from

@@ -63,8 +63,8 @@
 // gracefully; a second live Studio's exit puts the first's file back.
 // The writer drops a .gitignore ("*") into ./.weftbase when it has none.
 // exporter.Install and runtime.Install read the file when WEFTBASE_URL
-// is unset and the pipeline names no exporter.Studio or exporter.Local (the
-// README's "When weft/exporter reads the file"), trusting it only when its url
+// is unset and the pipeline names no exporter.Studio or exporter.Local
+// (docs/cli.md "When exporter reads the file"), trusting it only when its url
 // is loopback, it is fresh and, on unix, it is 0600 and the reader's,
 // so an app joins this Studio with no configuration (WEFTBASE_DISCOVERY=off
 // turns the read off). The playground is on (studio.Playground):

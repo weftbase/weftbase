@@ -18,8 +18,8 @@ import (
 // `weftbase dev` write studio.json once the listener is bound — the real
 // port in it — and remove it on a clean exit; exporter.Install and
 // runtime.Install read it when WEFTBASE_URL is unset and the
-// pipeline names no exporter.Studio or exporter.Local (the README's "When
-// weft/otel reads the file"), so an app joins the running Studio with
+// pipeline names no exporter.Studio or exporter.Local (docs/cli.md "When
+// exporter reads the file"), so an app joins the running Studio with
 // no configuration. A reuse writes
 // nothing: the running Studio owns the file. Under WEFTBASE_DISCOVERY=off
 // (discovery.Off) neither command writes one, and the start says so in

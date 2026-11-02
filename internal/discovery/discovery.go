@@ -36,7 +36,7 @@
 // Studio in code. weft/exporter skips the read when the pipeline names an
 // exporter.Studio or an exporter.Local, or under exporter.NoDiscovery / NoEnv;
 // weft/runtime skips it when the installed pipeline has a Local and no
-// Studio (the README's "When weft/exporter reads the file"). The core
+// Studio (docs/cli.md "When exporter reads the file"). The core
 // never imports this package.
 package discovery
 

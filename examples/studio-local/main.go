@@ -65,7 +65,7 @@
 // ingest: harmless, the sqlite writer is INSERT OR IGNORE. Run bare
 // beside a `weftbase dev` (no WEFTBASE_URL), the demo stays its own
 // setup A: exporter.Local switches the discovery file off, so nothing joins
-// that Studio (README "When weft/exporter reads the file") — only the port
+// that Studio (docs/cli.md "When exporter reads the file") — only the port
 // moves to 8080, because 7331 is taken. -addr still overrides 8080.
 package main
 

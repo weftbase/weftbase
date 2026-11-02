@@ -49,6 +49,11 @@ The other commands are thin clients of Studio's API: `weftbase runs`,
 (a read-only stdio MCP server, docs/mcp-recipe.md), `weftbase vacuum`
 and `weftbase version`. `weftbase <command> -h` lists a command's flags.
 
+The whole command line — every command and flag, the dev token, the
+discovery file and the one rule for when an app reads it (explicit >
+environment > file) — is [docs/cli.md](docs/cli.md); the rule is its
+section [When exporter reads the file](docs/cli.md#when-exporter-reads-the-file).
+
 ## Packages
 
 | Import path | What it is |
@@ -63,7 +68,7 @@ and `weftbase version`. `weftbase <command> -h` lists a command's flags.
 | `github.com/weftbase/weftbase/cmd/weftbase` | the CLI |
 | `examples/studio-local`, `examples/approvals`, `examples/devtools-vite` | runnable examples |
 
-Docs: `studio/README.md` (Studio, the panel, the API), `docs/mcp-recipe.md`
+Docs: `docs/cli.md` (the `weftbase` command, the discovery file), `studio/README.md` (Studio, the panel, the API), `docs/mcp-recipe.md`
 (`weftbase mcp`), `docs/testing.md` (the platform's gates),
 `docs/adr/0018-studio-ui-stack.md`, `docs/adr/0024-observability-data.md`.
 The record contract the store reads is weft's `docs/record-contract.md`.

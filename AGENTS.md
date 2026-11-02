@@ -47,7 +47,7 @@ store reads are weft's `docs/record-contract.md`;
 //    // this user's; else ignored at Debug. Explicit exporter.Studio(...) or exporter.Local(...) >
 //    // WEFTBASE_URL > the file: any of them switches the read off, as do
 //    // exporter.NoDiscovery() (the file alone), WEFTBASE_DISCOVERY=off and otel.NoEnv();
-//    // NoGlobal() does not. Local + a Studio: name both (README "When weft/exporter
+//    // NoGlobal() does not. Local + a Studio: name both (docs/cli.md "When exporter
 //    // reads the file"). Layering: framework packages never import exporter, obsdb,
 //    // studio, runtime or scope — `make layering` (scripts/check-layering.sh) fails if one does.
 //    weft.Metadata(map[string]string{"cwd": wd})  // run option: caller pairs on every record/span of the run
