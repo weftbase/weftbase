@@ -41,18 +41,30 @@ fmt:
 lint:
 	PATH="$$PATH:$$(go env GOPATH)/bin" golangci-lint run
 
-# go mod tidy reads no go.work: until weft is tagged under
-# github.com/weftbase/weft it cannot resolve the placeholder. This
-# target points the two weft requirements at the sibling checkout for
-# the tidy and drops the replace lines again, so go.mod never commits
-# one.
+# go mod tidy reads no go.work. While go.mod requires weft at the
+# placeholder pseudo-version (nothing tagged under
+# github.com/weftbase/weft yet), the tidy cannot resolve it: this target
+# then points the two weft requirements at the sibling checkout for the
+# tidy, drops the replace lines again (go.mod never commits one) and
+# strips the checkout's lines from go.sum (a placeholder has no
+# checksum to keep). Once weft is tagged and go.mod requires the tag
+# (the release's second phase: `go get github.com/weftbase/weft@vX.Y.Z
+# github.com/weftbase/weft/core@vX.Y.Z`), it is a plain
+# `GOWORK=off go mod tidy` and go.sum keeps the tag's checksums — the
+# placeholder branch below can then be deleted.
 WEFT_DIR ?= ../weft
+WEFT_PLACEHOLDER := v0.0.0-00010101000000-000000000000
 tidy:
-	$(GO) mod edit -replace github.com/weftbase/weft=$(WEFT_DIR) -replace github.com/weftbase/weft/core=$(WEFT_DIR)/core
+	@if ! grep -q 'github.com/weftbase/weft $(WEFT_PLACEHOLDER)' go.mod; then \
+	  echo "go.mod requires a tagged weft: GOWORK=off go mod tidy"; \
+	  GOWORK=off $(GO) mod tidy; exit $$?; \
+	fi; \
+	echo "go.mod requires weft at the placeholder: tidying against $(WEFT_DIR)"; \
+	$(GO) mod edit -replace github.com/weftbase/weft=$(WEFT_DIR) -replace github.com/weftbase/weft/core=$(WEFT_DIR)/core; \
 	GOWORK=off $(GO) mod tidy; status=$$?; \
-	  $(GO) mod edit -dropreplace github.com/weftbase/weft -dropreplace github.com/weftbase/weft/core; \
-	  sed -i.bak '/github.com\/weftbase\/weft /d;/github.com\/weftbase\/weft\/core /d' go.sum && rm -f go.sum.bak; \
-	  exit $$status
+	$(GO) mod edit -dropreplace github.com/weftbase/weft -dropreplace github.com/weftbase/weft/core; \
+	sed -i.bak '/github.com\/weftbase\/weft /d;/github.com\/weftbase\/weft\/core /d' go.sum && rm -f go.sum.bak; \
+	exit $$status
 
 # The offline gate (weft's ADR 0013 kill-switch clause): every suite
 # stays green under WEFT_MODEL_REQUESTS=deny.
