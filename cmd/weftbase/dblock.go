@@ -16,7 +16,7 @@ import (
 // `weftbase dev` take <db>.lock (internal/dblock: flock / LockFileEx,
 // released by the kernel when the process ends, however it ends)
 // before the port policy and hold it while they serve. A start that
-// cannot take it is refused — `weftbase dev` reuses the holder instead.
+// cannot take it is refused — `weftbase dev -- cmd` reuses the holder instead.
 // A SQLite file only: ":memory:" has no file, and a ClickHouse
 // database is a shared server by design (out of scope).
 
@@ -63,7 +63,7 @@ var errHeld = errors.New("held")
 // rules (0600 and this user's, a loopback IP url, a live pid — weftbase dev
 // hands it the database's token), else a trusted discovery file naming
 // that database (loopback, fresh, a live pid). ok false when neither
-// does: a refusal then names nobody, and weftbase dev reuses nothing.
+// does: a refusal then names nobody, and weftbase dev -- cmd reuses nothing.
 func dbHolder(dbPath string) (addr string, pid int, ok bool) {
 	if h, ok := dblock.ReadHolder(lockPath(dbPath)); ok {
 		if u, err := url.Parse(h.URL); err == nil && u.Host != "" {

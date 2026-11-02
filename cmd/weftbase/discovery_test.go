@@ -172,7 +172,7 @@ func TestReuseSaysMissingDiscovery(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, discovery.FileName)); err != nil {
 		t.Fatal(err)
 	}
-	// weftbase dev reuses (weftbase dev refuses): its reuse says the file
+	// weftbase dev -- cmd reuses (weftbase dev alone refuses): its reuse says the file
 	// is missing.
 	var second syncBuffer
 	if _, err := devStudio(db, want{addr: loop(base), span: 2}, "tok", true, &second); err != nil {

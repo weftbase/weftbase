@@ -1,4 +1,4 @@
-# weftbase dev — the Inspector
+# Studio — the Inspector (weftbase)
 
 The UI, the JSON API, the live stream and the OTLP receiver over one
 [obsdb](../obsdb) database: the runs list, the run page (steps, tool
@@ -94,8 +94,8 @@ held by `<db>.lock` beside a SQLite file — an exclusive OS lock (flock; LockFi
 directories whose discovery files differ, cannot both serve it; the
 refusal names the holder (`studio already running at
 http://127.0.0.1:7347 (pid n) on …/weft.db`, from the lock file or the
-discovery file, else `another Studio holds <db>`), exit 1; `weftbase dev`
-reuses it instead (`weftbase dev` takes the lock first too). The lock
+discovery file, else `another Studio holds <db>`), exit 1; `weftbase dev -- command`
+reuses it instead (and takes the lock first too). The lock
 stands for the file a symlinked path names; hard links and two
 spellings on a case-insensitive filesystem are not detected. The lock
 file names its holder only while it is yours (0600, your uid; Windows

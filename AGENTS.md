@@ -299,7 +299,7 @@ store reads are weft's `docs/record-contract.md`;
 //    //    released on process death; the symlink-resolved file; the holder named only from this user's 0600 file
 //    //    with a loopback-IP url and a live pid) taken before the port policy, weftbase dev's too; ClickHouse takes none.
 //    //    Port policy (internal/listen): a Studio on the same DB (lock held, busy 7331, or
-//    //    the discovery file's) — a weftbase dev is refused ("studio already running at … (pid n) on <db>", exit 1; weftbase dev reuses it),
+//    //    the discovery file's) — a weftbase dev is refused ("studio already running at … (pid n) on <db>", exit 1; weftbase dev -- cmd reuses it),
 //    //    the discovery file's Studio probed first whatever its port (listen.Request.Known); anything else → the
 //    //    next free port in 7331–7340, said in one line; --addr / WEFTBASE_ADDR pins
 //    //    (busy → exit 1 naming it). /api/meta's pid follows db.path's guard.
