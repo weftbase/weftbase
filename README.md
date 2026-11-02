@@ -68,7 +68,7 @@ section [When exporter reads the file](docs/cli.md#when-exporter-reads-the-file)
 | `github.com/weftbase/weftbase/cmd/weftbase` | the CLI |
 | `examples/studio-local`, `examples/approvals`, `examples/devtools-vite` | runnable examples |
 
-Docs: `docs/cli.md` (the `weftbase` command, the discovery file), `studio/README.md` (Studio, the panel, the API), `docs/mcp-recipe.md`
+Docs: `CHANGELOG.md`, `docs/cli.md` (the `weftbase` command, the discovery file), `studio/README.md` (Studio, the panel, the API), `docs/mcp-recipe.md`
 (`weftbase mcp`), `docs/testing.md` (the platform's gates),
 `docs/adr/0018-studio-ui-stack.md`, `docs/adr/0024-observability-data.md`.
 The record contract the store reads is weft's `docs/record-contract.md`.
