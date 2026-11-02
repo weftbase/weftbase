@@ -27,7 +27,6 @@ the two-phase release tags it.
 | npm package dry run | `make devtools-npm` | no | when publishing @weftgo/devtools | not timed (est. 1–2) |
 | `weftbase mcp` end to end | `make mcp-check` | no (listens on a port) | yes | < 1 |
 | Loaded stress | `make stress` | no | yes (and before pushing concurrent code) | not timed |
-| Phase gates (Playwright) | `scripts/ux-gate/gate*.sh` | no | historical (scripts/ux-gate/README.md) | not timed (est. 10–20) |
 | The arena | `make check-dev` in `../weft-arena` | no (separate repo) | by hand | not timed |
 
 ---
@@ -156,40 +155,7 @@ model calls. It sits behind the `livecheck` tag and stays out of
 a release and after touching `cmd/weftbase/mcp*.go` or a route it reads.
 **Measured:** 2 s (the test itself took 1.3 s), with `weft` already
 built in the cache.
-## 4. The phase gate scripts (`scripts/ux-gate/`)
-
-Each UX phase ends with an end-to-end gate in a real browser.
-`scripts/ux-gate/gate7.sh`, `gate8.sh` and `gate9.sh` (with their `.js`
-halves) do the following:
-
-1. Build `weft` from the tree under test.
-2. Start a fresh `weftbase dev` on `127.0.0.1:7341` with a gate token.
-3. Seed it from the arena with `run --offline --studio --no-save`, under
-   `strace -e connect` to prove nothing dials out.
-4. Walk the phase's journeys with Playwright through `pw.js`. The
-   helpers are `launch`, `signIn`, `go`, `shot`, `openPanel`,
-   `panelText`, `panelClick`, and `a11y`, which uses axe-core from
-   `$AXE_DIR` or `studio/web/node_modules`.
-5. Run `make studio-check` and the panel ledger floor.
-
-Each gate prints one `PASS` / `FAIL` / `RECORDED` line per clause to
-`$RUN/gateN.txt`, saves screenshots in `$RUN/shots`, and exits 1 when a
-clause FAILs.
-
-```sh
-ARENA=../weft-arena RUN=$HOME/.cache/gate9-run PLAYWRIGHT_DIR=<dir with node_modules/playwright> \
-  scripts/ux-gate/gate9.sh
-```
-
-Playwright is not a repo dependency. Point `PLAYWRIGHT_DIR` at a
-throwaway `npm i -D playwright@<version>` whose Chromium revision is
-already in `~/.cache/ms-playwright`. The other knobs are `REPO`,
-`GO_TEST_DIR`, `STUDIO_CHECK=0` (skip studio-check) and `PREV_TAG`
-(gate9). `h9.js` is item H9's standalone browser check.
-`scripts/ux-gate/README.md` has the clause list for each gate. Port 7341
-must be free. A run was not timed for this page. Expect roughly 10–20
-minutes, most of it the arena seed and studio-check.
-## 5. The arena (`../weft-arena`)
+## 4. The arena (`../weft-arena`)
 
 weft's own tests prove each promise in isolation. The arena is a
 separate repository and harness that checks the framework the way a

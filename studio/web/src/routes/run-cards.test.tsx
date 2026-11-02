@@ -327,8 +327,8 @@ describe("the drawer draws the run cards too (P8-gate-fix)", () => {
     )
     const grid = document.querySelector<HTMLElement>("[data-trace-grid]")!
     expect(grid.getAttribute("data-trace-grid")).toBe("auto")
-    // jsdom lays nothing out: the rule is the class (scripts/ux-gate/
-    // h9.js measures it in a browser).
+    // jsdom lays nothing out: the rule is the class (the UX phase's
+    // browser gate, h9.js, measured it; retired with scripts/ux-gate).
     expect(grid.className.split(" ")).toContain("grid-cols-[minmax(0,1fr)]")
   })
 
