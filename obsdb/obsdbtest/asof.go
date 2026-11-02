@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // messagesAsOf: ADR 0029's reader (obsdb.MessagesAsOf) answers alike on

@@ -11,12 +11,12 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/weftgo/weft/core"
+	"github.com/weftbase/weft/core"
 )
 
 // "Save as test" (plan F6): the wefttest export's zip carries, beside
 // the fixtures, a generated Go test that replays them — a drop-in file
-// against the public github.com/weftgo/weft API, nothing else. Studio
+// against the public github.com/weftbase/weft API, nothing else. Studio
 // writes nothing to your files (WEFT-DEVTOOLS §9); the download is the
 // hand-off. The zip:
 //
@@ -405,7 +405,7 @@ func (k replaySkeleton) render() ([]byte, error) {
 	if stubs {
 		p("\t\"path/filepath\"\n")
 	}
-	p("\t\"testing\"\n\n\t\"github.com/weftgo/weft\"\n\t\"github.com/weftgo/weft/wefttest\"\n)\n\n")
+	p("\t\"testing\"\n\n\t\"github.com/weftbase/weft\"\n\t\"github.com/weftbase/weft/wefttest\"\n)\n\n")
 
 	p("// %s replays run %s of agent %s from its fixtures.\n", test, commentText(k.runID, 60), commentText(k.agent, 60))
 	p("func %s(t *testing.T) {\n", test)

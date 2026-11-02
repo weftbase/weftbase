@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // statSpans is one run's spans in two batches: the root, a chat span

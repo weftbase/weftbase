@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // resumeLink pins docs/record-contract.md §6's approval link on every

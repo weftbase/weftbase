@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/internal/discovery"
-	"github.com/weftgo/weft/version"
+	"github.com/weftbase/weft/version"
+	"github.com/weftbase/weftbase/internal/discovery"
 )
 
 // Plan B3 at the command: the discovery file and the stable per-DB

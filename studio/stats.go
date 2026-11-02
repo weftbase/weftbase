@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // GET /api/stats (UX plan A4, D7; UX-E-25, UX-A-14): numbers across

@@ -10,9 +10,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/weftgo/weft/internal/discovery"
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/otel"
+	"github.com/weftbase/weft/otel"
+	"github.com/weftbase/weftbase/internal/discovery"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // envGetenv is the package's one environment seam (tests swap it).

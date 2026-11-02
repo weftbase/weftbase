@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/weftgo/weft/studio"
+	"github.com/weftbase/weftbase/studio"
 )
 
 // inProcessClient is setup A's transport: an http.Client whose

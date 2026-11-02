@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // The manifest store (U27, obsdb.ManifestStore): an agent's one-agent

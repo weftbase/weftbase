@@ -18,8 +18,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/obsdb/sqlite"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/obsdb/sqlite"
 )
 
 // The second audit pass's pins (2026-10-02): each test names the

@@ -3,8 +3,8 @@ package caps_test
 import (
 	"testing"
 
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/obsdb/internal/caps"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/obsdb/internal/caps"
 )
 
 // The released bounds: the variables obsdb and the backends apply are

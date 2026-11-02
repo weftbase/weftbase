@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // The aggregates (obsdb.Aggregator; UX plan D7, A4, A2) over the

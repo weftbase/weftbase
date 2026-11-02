@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // TestUpgradeTo0022IndexesSessionEvents (U12.2): a file at 0021 holding

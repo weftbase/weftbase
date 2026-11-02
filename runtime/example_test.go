@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/runtime"
-	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
+	"github.com/weftbase/weft"
+	"github.com/weftbase/weft/thread"
+	"github.com/weftbase/weft/wefttest"
+	"github.com/weftbase/weftbase/runtime"
 )
 
 // ExampleInstall is the whole integration: one deferred call in main.

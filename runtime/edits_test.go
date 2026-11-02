@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weftgo/weft/core"
+	"github.com/weftbase/weft/core"
 )
 
 // editMsgs is a two-step transcript: step 0 looks an order up, step 1

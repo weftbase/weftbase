@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/obsdb/sqlite"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/obsdb/sqlite"
 )
 
 // attemptSpan is one `attempt` span of run, step 0 (docs/record-contract.md

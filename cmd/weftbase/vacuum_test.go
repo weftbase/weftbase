@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/obsdb/sqlite"
-	"github.com/weftgo/weft/studio"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/obsdb/sqlite"
+	"github.com/weftbase/weftbase/studio"
 )
 
 // vacuumRun writes one finished run last seen at at.

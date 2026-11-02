@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // statusWords pins the read-time status words on every backend (I3,

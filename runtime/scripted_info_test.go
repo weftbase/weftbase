@@ -3,7 +3,7 @@ package runtime
 import (
 	"testing"
 
-	"github.com/weftgo/weft/core"
+	"github.com/weftbase/weft/core"
 )
 
 // TestScriptedModelInfo pins the scripted engine's ModelInfo: the

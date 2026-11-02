@@ -14,15 +14,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/core/wefttest"
-	"github.com/weftgo/weft/exporter"
-	"github.com/weftgo/weft/internal/discovery"
-	"github.com/weftgo/weft/internal/doctor"
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/obsdb/sqlite"
-	"github.com/weftgo/weft/otel"
-	"github.com/weftgo/weft/studio"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weft/core/wefttest"
+	"github.com/weftbase/weft/otel"
+	"github.com/weftbase/weftbase/exporter"
+	"github.com/weftbase/weftbase/internal/discovery"
+	"github.com/weftbase/weftbase/internal/doctor"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/obsdb/sqlite"
+	"github.com/weftbase/weftbase/studio"
 )
 
 const tok = "dev-token"
@@ -533,7 +533,7 @@ func TestDataOtlpAndPanelLines(t *testing.T) {
 		"warn data      newest run 2m0s ago by weft v0.15.0 (service shop), this Studio is weft v0.19.0: the versions differ",
 		"ok   otlp      open: OTLP at ",
 		"FAIL panel     /panel.js is v0.18.0, studio is v0.19.0: this weft build embeds a stale panel bundle",
-		"fix: install weft v0.19.0 again (go install github.com/weftgo/weft/cmd/weft@v0.19.0)",
+		"fix: install weft v0.19.0 again (go install github.com/weftbase/weftbase/cmd/weftbase@v0.19.0)",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/core/wefttest"
-	"github.com/weftgo/weft/internal/discovery"
+	"github.com/weftbase/weft/core/wefttest"
+	"github.com/weftbase/weftbase/internal/discovery"
 )
 
 // writeDiscoveryFile writes a discovery file naming pid (0600, as

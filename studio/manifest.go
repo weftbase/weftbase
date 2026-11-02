@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	linkruntime "github.com/weftgo/weft/studio/runtime"
+	linkruntime "github.com/weftbase/weftbase/studio/runtime"
 )
 
 // api/manifest (plan B4): the agents Studio knows, from two sources —

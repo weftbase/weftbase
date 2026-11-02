@@ -18,7 +18,7 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/weftgo/weft/version"
+	"github.com/weftbase/weft/version"
 )
 
 // `weft mcp` (plan I4.1): a stdio MCP server over the Studio read API,

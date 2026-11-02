@@ -27,10 +27,10 @@ import (
 	"time"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/core/mw"
-	"github.com/weftgo/weft/core/wefttest"
-	"github.com/weftgo/weft/mcp"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weft/core/mw"
+	"github.com/weftbase/weft/core/wefttest"
+	"github.com/weftbase/weft/mcp"
 )
 
 // cardStatusErr is a provider error carrying an HTTP status the way the

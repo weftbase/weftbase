@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/core/wefttest"
+	"github.com/weftbase/weft/core/wefttest"
 )
 
 // proposalFile is a weft.json with two agents, spaced the way a

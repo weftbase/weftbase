@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/obsdb/internal/caps"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/obsdb/internal/caps"
 )
 
 // otherLogs pins DB.OtherLogs (plan A7): a run's app log records — the

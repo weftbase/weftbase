@@ -19,7 +19,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/weftgo/weft/studio"
+	"github.com/weftbase/weftbase/studio"
 )
 
 // TestDerivedGoldensMatchAStockApp is TestGoldensMatchARealRun for the

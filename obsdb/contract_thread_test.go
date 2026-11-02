@@ -16,11 +16,12 @@ import (
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/core/wefttest"
-	"github.com/weftgo/weft/otel"
-	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/thread/pool"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weft/core/wefttest"
+	"github.com/weftbase/weft/otel"
+	"github.com/weftbase/weft/thread"
+	"github.com/weftbase/weft/thread/pool"
+	"github.com/weftbase/weftbase/internal/weftsrc"
 )
 
 // The thread record family's conformance cases (record contract §4,
@@ -645,7 +646,7 @@ func threadRecordsOf(t *testing.T, dir string) []string {
 // some case's thread_records, and every kind there is one the record
 // contract's §4 table names.
 func TestThreadRecordKindsHaveFixtures(t *testing.T) {
-	doc, err := os.ReadFile(filepath.Join("..", "docs", "record-contract.md"))
+	doc, err := os.ReadFile(weftsrc.Path(t, "docs/record-contract.md"))
 	if err != nil {
 		t.Fatal(err)
 	}

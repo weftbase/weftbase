@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // summarizerSpanIsNotRunFact (P9-pre-go-fix2; record contract §3, §6):

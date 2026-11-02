@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/internal/discovery"
+	"github.com/weftbase/weftbase/internal/discovery"
 )
 
 // `weft dev` (plan B1.2). The app is the helper process

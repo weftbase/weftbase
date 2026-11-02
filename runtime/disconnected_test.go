@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/runtime"
-	"github.com/weftgo/weft/studio"
-	"github.com/weftgo/weft/thread"
+	"github.com/weftbase/weft/thread"
+	"github.com/weftbase/weftbase/runtime"
+	"github.com/weftbase/weftbase/studio"
 )
 
 // TestStoppedAppTurnReadsDisconnected is U20.2's Done line, the

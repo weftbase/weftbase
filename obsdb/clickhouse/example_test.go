@@ -6,8 +6,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/obsdb/clickhouse"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/obsdb/clickhouse"
 )
 
 // Opening the backend: a clickhouse-go DSN — the database in the path

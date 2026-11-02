@@ -5,8 +5,8 @@ schema as ClickHouse tables that a stock OTel Collector can also feed.
 
 ```go
 import (
-    "github.com/weftgo/weft/obsdb"
-    "github.com/weftgo/weft/obsdb/clickhouse"
+    "github.com/weftbase/weftbase/obsdb"
+    "github.com/weftbase/weftbase/obsdb/clickhouse"
 )
 
 db, err := clickhouse.Open("clickhouse://default:pass@localhost:9000/weft",

@@ -20,10 +20,11 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/core/wefttest"
-	"github.com/weftgo/weft/exporter"
-	"github.com/weftgo/weft/otel"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weft/core/wefttest"
+	"github.com/weftbase/weft/otel"
+	"github.com/weftbase/weftbase/exporter"
+	"github.com/weftbase/weftbase/internal/weftsrc"
 )
 
 // recordScriptedRun drives one scripted "orders" run through the real
@@ -122,10 +123,6 @@ func TestSaveAsTestPasses(t *testing.T) {
 	if err != nil {
 		t.Skip("no go tool on PATH")
 	}
-	root, err := filepath.Abs("..")
-	if err != nil {
-		t.Fatal(err)
-	}
 	ts, _ := requestsServer(t)
 	recordStepsRun(t, ts.URL, "r_fx", nil)
 	recordRequestsRun(t, ts.URL, "r_req")
@@ -151,8 +148,8 @@ func TestSaveAsTestPasses(t *testing.T) {
 		}
 	}
 	write("go.mod", "module savetest.example\n\ngo 1.26.0\n")
-	write("go.work", "go 1.26.0\n\nuse (\n\t.\n\t"+root+"\n\t"+filepath.Join(root, "core")+"\n)\n")
-	if b, err := os.ReadFile(filepath.Join(root, "go.work.sum")); err == nil {
+	write("go.work", savetestWork(t))
+	if b, err := os.ReadFile(filepath.Join(filepath.Dir(goEnv(t, "GOWORK")), "go.work.sum")); err == nil {
 		write("go.work.sum", string(b))
 	}
 
@@ -308,10 +305,6 @@ func TestSaveAsTestCompilesWithoutTools(t *testing.T) {
 	if err != nil {
 		t.Skip("no go tool on PATH")
 	}
-	root, err := filepath.Abs("..")
-	if err != nil {
-		t.Fatal(err)
-	}
 	ts, _ := requestsServer(t)
 	// r_plain: an agent with no tools answering in one step.
 	ctx := context.Background()
@@ -342,8 +335,8 @@ func TestSaveAsTestCompilesWithoutTools(t *testing.T) {
 		}
 	}
 	write("go.mod", "module savetest.example\n\ngo 1.26.0\n")
-	write("go.work", "go 1.26.0\n\nuse (\n\t.\n\t"+root+"\n\t"+filepath.Join(root, "core")+"\n)\n")
-	if b, err := os.ReadFile(filepath.Join(root, "go.work.sum")); err == nil {
+	write("go.work", savetestWork(t))
+	if b, err := os.ReadFile(filepath.Join(filepath.Dir(goEnv(t, "GOWORK")), "go.work.sum")); err == nil {
 		write("go.work.sum", string(b))
 	}
 	_, body := exportGet(t, ts, "/api/runs/r_plain/export?format=wefttest", settledRun(1))
@@ -633,4 +626,27 @@ func TestSaveAsTestForkCycle(t *testing.T) {
 	if d, _ := getDiff(t, ts, "cyc_a", "cyc_b", ""); len(d.Steps) == 0 {
 		t.Errorf("cycle diff = %+v", d)
 	}
+}
+
+// savetestWork is the go.work a throwaway module of generated tests is
+// compiled in: the module itself and the weft framework this build
+// resolves (its root and core modules, weftsrc), each require of the
+// unreleased placeholder version pointed at them.
+func savetestWork(t *testing.T) string {
+	t.Helper()
+	root, core := weftsrc.Dir(t), weftsrc.CoreDir(t)
+	const placeholder = "v0.0.0-00010101000000-000000000000"
+	return "go 1.26.0\n\nuse (\n\t.\n\t" + root + "\n\t" + core + "\n)\n\nreplace (\n" +
+		"\t" + weftsrc.Module + " " + placeholder + " => " + root + "\n" +
+		"\t" + weftsrc.CoreModule + " " + placeholder + " => " + core + "\n)\n"
+}
+
+// goEnv is `go env name`.
+func goEnv(t *testing.T, name string) string {
+	t.Helper()
+	out, err := exec.Command("go", "env", name).Output()
+	if err != nil {
+		t.Fatalf("go env %s: %v", name, err)
+	}
+	return strings.TrimSpace(string(out))
 }

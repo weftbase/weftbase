@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	weftfw "github.com/weftgo/weft"
-	"github.com/weftgo/weft/runtime"
-	"github.com/weftgo/weft/wefttest"
+	weftfw "github.com/weftbase/weft"
+	"github.com/weftbase/weft/wefttest"
+	"github.com/weftbase/weftbase/runtime"
 )
 
 // The helper process `weft dev`'s tests run as the app: this test

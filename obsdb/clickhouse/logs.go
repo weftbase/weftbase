@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // OtherLogs reads a run's app log records from otel_logs: Write stores

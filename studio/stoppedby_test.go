@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weftgo/weft/obsdb/sqlite"
+	"github.com/weftbase/weftbase/obsdb/sqlite"
 )
 
 // TestStoppedByOnTheRunRow pins U3.2's API half: every run row (list,

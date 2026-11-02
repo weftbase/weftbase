@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/obsdb/sqlite"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/obsdb/sqlite"
 )
 
 // The arena's real failure texts (weft-arena runs, v0.18.x): two

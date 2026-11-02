@@ -19,9 +19,9 @@ import (
 
 	ch "github.com/ClickHouse/clickhouse-go/v2"
 
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/obsdb/clickhouse"
-	"github.com/weftgo/weft/obsdb/sqlite"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/obsdb/clickhouse"
+	"github.com/weftbase/weftbase/obsdb/sqlite"
 )
 
 // TestStatusFilterWords pins issue 003 (I3) on both routes and both

@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/core/wefttest"
-	"github.com/weftgo/weft/exporter"
-	"github.com/weftgo/weft/otel"
-	"github.com/weftgo/weft/thread"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weft/core/wefttest"
+	"github.com/weftbase/weft/otel"
+	"github.com/weftbase/weft/thread"
+	"github.com/weftbase/weftbase/exporter"
 )
 
 // runCompactionT is a run document's compactions[] row as a client

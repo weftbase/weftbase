@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/internal/discovery"
+	"github.com/weftbase/weftbase/internal/discovery"
 )
 
 // TestStudioStopsOnSIGHUP (review finding 5): `weft studio` stops

@@ -61,7 +61,7 @@ non-Go app gets today: its OTel traces, the runs derived from them
 link (`weft/runtime`: Go only today; non-Go clients are backlog I2):
 
 ```sh
-go install github.com/weftgo/weft/cmd/weft@latest
+go install github.com/weftbase/weftbase/cmd/weftbase@latest
 weft studio                            # UI + OTLP + SQLite + playground + dev token on 127.0.0.1:7331
 ./my-go-app                            # exporter.Install() finds it through the discovery file
 OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:7331 OTEL_METRICS_EXPORTER=none OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true opentelemetry-instrument python app.py
@@ -1627,7 +1627,7 @@ The scope header (plan C3, rung 2, the development rung) is set by the
 app's own handler, since `thread` has no HTTP layer: one line,
 `mux.Handle("POST /chat", scope.Header(chat, func(r *http.Request)
 scope.Scope { return scope.Scope{PublicID: pubOf(r)} }))` (package
-`github.com/weftgo/weft/scope`), sets `Weft-Scope: pub_…` on every
+`github.com/weftbase/weftbase/scope`), sets `Weft-Scope: pub_…` on every
 response, and a handler that knows the run once its turn starts calls
 `scope.Set(w, scope.Scope{PublicID: …, RunID: turn.RunID()})` before
 writing (`examples/studio-local`'s `/run` answers `Weft-Scope:
@@ -3574,9 +3574,9 @@ The dev loop is two terminals: `go run ./studio/examples/basic
 -serve` (API + embedded UI on :7331) and `cd studio/web && bun run
 dev -- --base /studio/` (Vite on :3000 proxying `/studio/api`).
 
-Import path: `github.com/weftgo/weft/studio`, a package of the
-framework module (`go get github.com/weftgo/weft`); it imports `core`,
+Import path: `github.com/weftbase/weftbase/studio`, a package of the
+framework module (`go get github.com/weftbase/weft`); it imports `core`,
 `obsdb` and, for its tests, `otel`. The binary is
 [cmd/weft](../cmd/weft) (`go install
-github.com/weftgo/weft/cmd/weft@latest`, `make studio-bin` in this
+github.com/weftbase/weftbase/cmd/weftbase@latest`, `make studio-bin` in this
 repo), the one place that imports the clickhouse driver.

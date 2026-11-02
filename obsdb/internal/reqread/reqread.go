@@ -3,7 +3,7 @@
 // lookups by hash and the one-per-hash catalog list.
 package reqread
 
-import "github.com/weftgo/weft/obsdb"
+import "github.com/weftbase/weftbase/obsdb"
 
 // FindPrompt returns the lowest-index prompt record with hash; ok is
 // false when none has it (and always for the empty hash).

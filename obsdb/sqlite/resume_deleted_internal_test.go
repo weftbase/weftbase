@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // TestDeletedResumeReadsParked (P9-pre-go-fix5) is SQLite's side of

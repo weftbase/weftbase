@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/studio"
+	"github.com/weftbase/weftbase/studio"
 )
 
 // The /runtimes page's facts (U20.1): three runtimes of one service

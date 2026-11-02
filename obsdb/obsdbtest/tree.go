@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/obsdb/internal/caps"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/obsdb/internal/caps"
 )
 
 // The run tree (U9.1, obsdb.TreeReader): a run's spans with every

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weftgo/weft/core"
+	"github.com/weftbase/weft/core"
 )
 
 // scriptedTranscript is one recorded turn: a lookup call, its result,

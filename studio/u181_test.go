@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/core/wefttest"
-	linkruntime "github.com/weftgo/weft/studio/runtime"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weft/core/wefttest"
+	linkruntime "github.com/weftbase/weftbase/studio/runtime"
 )
 
 // U18.1 — the target facts on the wire (A6, A7, R1, R2): a source run

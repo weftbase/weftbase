@@ -19,8 +19,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/studio/internal/reqlog"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/studio/internal/reqlog"
 )
 
 // Auth and CORS (S4.6). Three setups, one handler:

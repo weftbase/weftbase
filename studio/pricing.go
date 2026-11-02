@@ -20,8 +20,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 //go:generate go run ./internal/pricinggen -o pricing.json

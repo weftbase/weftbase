@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // threadRecordsAreNotRunFacts (P9-pre-go-fix; record contract §4, §6):

@@ -20,12 +20,12 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	otellog "go.opentelemetry.io/otel/log"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/core/mw"
-	"github.com/weftgo/weft/core/wefttest"
-	"github.com/weftgo/weft/exporter"
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/otel"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weft/core/mw"
+	"github.com/weftbase/weft/core/wefttest"
+	"github.com/weftbase/weft/otel"
+	"github.com/weftbase/weftbase/exporter"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // namedModel is a scripted model with a name of its own, so a fallback

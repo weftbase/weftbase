@@ -20,9 +20,9 @@ import (
 
 	ch "github.com/ClickHouse/clickhouse-go/v2"
 
-	"github.com/weftgo/weft/internal/doctor"
-	"github.com/weftgo/weft/studio"
-	"github.com/weftgo/weft/version"
+	"github.com/weftbase/weft/version"
+	"github.com/weftbase/weftbase/internal/doctor"
+	"github.com/weftbase/weftbase/studio"
 )
 
 // TestVersion pins `weft version` (and --version, the old studio

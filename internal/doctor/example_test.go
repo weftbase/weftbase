@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/weftgo/weft/internal/doctor"
-	"github.com/weftgo/weft/studio"
+	"github.com/weftbase/weftbase/internal/doctor"
+	"github.com/weftbase/weftbase/studio"
 )
 
 // ExampleRun checks a Studio with nothing connected to it: one line per

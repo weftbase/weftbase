@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/core/wefttest"
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/obsdb/sqlite"
+	"github.com/weftbase/weft/core/wefttest"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/obsdb/sqlite"
 )
 
 // seedAt writes one run at t: run_start, a prompt, and — when finished —

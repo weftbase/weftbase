@@ -28,8 +28,8 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/studio/internal/reqlog"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/studio/internal/reqlog"
 
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"

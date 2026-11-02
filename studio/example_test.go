@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/weftgo/weft/studio"
+	"github.com/weftbase/weftbase/studio"
 
 	// The sqlite backend — the same one exporter.Local writes.
-	"github.com/weftgo/weft/obsdb/sqlite"
+	"github.com/weftbase/weftbase/obsdb/sqlite"
 )
 
 // ExampleHandler is setup A's shape on one screen: a Studio over an

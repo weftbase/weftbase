@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // GET /api/traces (plan A7): the trace list — every trace the database

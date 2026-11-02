@@ -5,7 +5,7 @@
 import { GROUPS, TERMS } from "@/lib/glossary"
 import type { TermGroup, TermName } from "@/lib/glossary"
 
-const DOCS = "https://github.com/weftgo/weft/blob/main/"
+const DOCS = "https://github.com/weftbase/weft/blob/main/"
 
 export function ConceptsBody({ anchors = true }: { anchors?: boolean }) {
   const byGroup = new Map<TermGroup, TermName[]>()

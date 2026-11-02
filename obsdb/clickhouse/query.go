@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/obsdb/internal/caps"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/obsdb/internal/caps"
 )
 
 // The read side. Status is derived on read through obsdb.DeriveStatus —

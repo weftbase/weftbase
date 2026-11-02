@@ -121,7 +121,7 @@ printf 'go 1.26.0\n\nuse (\n\t%s\n\t%s\n\t%s/core\n)\n' "$ARENA" "$REPO" "$REPO"
   || { say "arena build FAILED:"; tail -30 "$RUN/arena-build.log" | tee -a "$OUT"; exit 3; }
 sed '/^\/\/go:build ignore$/d' "$HERE/g10bdemo.go" > "$RUN/demo/main.go"
 sdkv=$(grep -oE 'modelcontextprotocol/go-sdk v[0-9][^ ]*' "$REPO/go.mod" | awk '{print $2}')
-printf 'module g10bdemo\n\ngo 1.26.0\n\nrequire (\n\tgithub.com/weftgo/weft v0.19.0\n\tgithub.com/modelcontextprotocol/go-sdk %s\n)\n' "$sdkv" > "$RUN/demo/go.mod"
+printf 'module g10bdemo\n\ngo 1.26.0\n\nrequire (\n\tgithub.com/weftbase/weft v0.19.0\n\tgithub.com/modelcontextprotocol/go-sdk %s\n)\n' "$sdkv" > "$RUN/demo/go.mod"
 printf 'go 1.26.0\n\nuse (\n\t.\n\t%s\n\t%s/core\n)\n' "$REPO" "$REPO" > "$RUN/demo/go.work"
 ( cd "$RUN/demo" && GOPROXY=off go build -o "$RUN/g10bdemo" . ) > "$RUN/demo-build.log" 2>&1 \
   || { say "g10bdemo build FAILED: $(tail -10 "$RUN/demo-build.log")"; exit 3; }

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/weftgo/weft/otel"
+	"github.com/weftbase/weft/otel"
 )
 
 // Studio's batch defaults: records reach a live viewer within 200 ms,

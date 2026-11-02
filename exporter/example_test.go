@@ -7,13 +7,13 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/exporter"
-	"github.com/weftgo/weft/mw"
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/obsdb/sqlite"
-	"github.com/weftgo/weft/otel"
-	"github.com/weftgo/weft/wefttest"
+	"github.com/weftbase/weft"
+	"github.com/weftbase/weft/mw"
+	"github.com/weftbase/weft/otel"
+	"github.com/weftbase/weft/wefttest"
+	"github.com/weftbase/weftbase/exporter"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/obsdb/sqlite"
 )
 
 // Local is the local sink: every record written into obsdb/sqlite

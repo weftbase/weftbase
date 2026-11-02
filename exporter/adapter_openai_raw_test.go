@@ -18,12 +18,13 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/weftgo/weft/exporter"
-	"github.com/weftgo/weft/openai"
+	"github.com/weftbase/weft/openai"
+	"github.com/weftbase/weftbase/exporter"
+	"github.com/weftbase/weftbase/internal/weftsrc"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/otel"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weft/otel"
+	"github.com/weftbase/weftbase/obsdb"
 
 	oaisdk "github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
@@ -34,7 +35,7 @@ func TestOpenAIRawBodiesRoundTripLocalSink(t *testing.T) {
 	t.Setenv("WEFT_DISCOVERY", "off")
 	t.Setenv("WEFT_STUDIO_URL", "")
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
-	sse, err := os.ReadFile("../openai/testdata/text_only.sse")
+	sse, err := os.ReadFile(weftsrc.Path(t, "openai/testdata/text_only.sse"))
 	if err != nil {
 		t.Fatal(err)
 	}

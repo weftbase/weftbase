@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // dropLog counts the writer's "stopped with writes still held" and

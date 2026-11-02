@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/internal/dblock"
-	"github.com/weftgo/weft/internal/discovery"
+	"github.com/weftbase/weftbase/internal/dblock"
+	"github.com/weftbase/weftbase/internal/discovery"
 )
 
 // B7 (phase 10b): the CLI's one resolver, the token story and the

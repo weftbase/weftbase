@@ -37,14 +37,14 @@ import (
 	"time"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/exporter"
-	"github.com/weftgo/weft/mcp"
-	"github.com/weftgo/weft/mw"
-	"github.com/weftgo/weft/otel"
-	"github.com/weftgo/weft/runtime"
-	"github.com/weftgo/weft/scope"
-	"github.com/weftgo/weft/wefttest"
+	"github.com/weftbase/weft"
+	"github.com/weftbase/weft/mcp"
+	"github.com/weftbase/weft/mw"
+	"github.com/weftbase/weft/otel"
+	"github.com/weftbase/weft/wefttest"
+	"github.com/weftbase/weftbase/exporter"
+	"github.com/weftbase/weftbase/runtime"
+	"github.com/weftbase/weftbase/scope"
 )
 
 func say(mode, run, agent, flow string) {

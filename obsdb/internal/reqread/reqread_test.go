@@ -3,7 +3,7 @@ package reqread
 import (
 	"testing"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 func TestLookups(t *testing.T) {

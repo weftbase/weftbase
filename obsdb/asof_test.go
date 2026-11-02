@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/weftgo/weft/core"
+	"github.com/weftbase/weft/core"
 )
 
 // TestAssembleStep pins ADR 0029's reader over ADR 0028 §8's records:

@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/weftgo/weft/internal/discovery"
-	"github.com/weftgo/weft/internal/doctor"
+	"github.com/weftbase/weftbase/internal/discovery"
+	"github.com/weftbase/weftbase/internal/doctor"
 )
 
 // The one resolver every API client of the command line shares — runs,

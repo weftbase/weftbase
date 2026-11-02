@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // The session timeline (U12.2; UX-B-01, UX-B-02, UX-S3-01; A3, D6):

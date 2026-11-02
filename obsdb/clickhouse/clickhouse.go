@@ -9,7 +9,7 @@ import (
 
 	ch "github.com/ClickHouse/clickhouse-go/v2"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // DefaultContentTTL and DefaultMetaTTL are S3.6's retention defaults:

@@ -19,14 +19,16 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/weftgo/weft/anthropic"
-	"github.com/weftgo/weft/exporter"
+	"github.com/weftbase/weft/anthropic"
+	"github.com/weftbase/weftbase/exporter"
+	"github.com/weftbase/weftbase/internal/weftsrc"
 
 	antsdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/otel"
+
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weft/otel"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // anthropicRawEnv is the development environment RawBodies needs, with every
@@ -51,7 +53,7 @@ type anthropicWireServer struct {
 
 func anthropicNewWireServer(t *testing.T) *anthropicWireServer {
 	t.Helper()
-	sse, err := os.ReadFile("../anthropic/testdata/text_only.sse")
+	sse, err := os.ReadFile(weftsrc.Path(t, "anthropic/testdata/text_only.sse"))
 	if err != nil {
 		t.Fatal(err)
 	}

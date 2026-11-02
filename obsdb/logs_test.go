@@ -3,7 +3,7 @@ package obsdb_test
 import (
 	"testing"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // The severity names OTLP's ranges give, and the filter spellings

@@ -7,8 +7,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/obsdb/sqlite"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/obsdb/sqlite"
 )
 
 // The sessions list's states (U16; UX-B-15, UX-B-16, UX-B-28): a row

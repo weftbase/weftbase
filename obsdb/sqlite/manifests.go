@@ -7,7 +7,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // The manifests a run's manifest_hash resolves to (U27, migration

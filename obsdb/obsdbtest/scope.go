@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // emptyIdentity: an identity key carried with an empty value is no

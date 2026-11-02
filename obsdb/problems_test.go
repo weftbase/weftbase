@@ -3,7 +3,7 @@ package obsdb_test
 import (
 	"testing"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // CountProblems' fold (docs/record-contract.md §6, U4-fix): a failed

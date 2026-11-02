@@ -1,7 +1,7 @@
 // Command weft is the framework's one binary (plan B1): setup B's
 // local Studio and a terminal over the Studio API, for scripts and CI.
 //
-//	go install github.com/weftgo/weft/cmd/weft@latest
+//	go install github.com/weftbase/weftbase/cmd/weftbase@latest
 //
 //	weft studio [--addr] [--db] [--token] [--rotate-token] [--manifest] [--open] [--no-playground] [--retain] [--pricing] [--log-level] [--log-format]
 //	weft dev [studio's flags] [--no-watch] [--watch dir] [-- command args…]
@@ -259,12 +259,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/weftgo/weft/internal/dblock"
-	"github.com/weftgo/weft/internal/doctor"
-	"github.com/weftgo/weft/internal/listen"
-	"github.com/weftgo/weft/obsdb/clickhouse"
-	"github.com/weftgo/weft/studio"
-	"github.com/weftgo/weft/version"
+	"github.com/weftbase/weft/version"
+	"github.com/weftbase/weftbase/internal/dblock"
+	"github.com/weftbase/weftbase/internal/doctor"
+	"github.com/weftbase/weftbase/internal/listen"
+	"github.com/weftbase/weftbase/obsdb/clickhouse"
+	"github.com/weftbase/weftbase/studio"
 )
 
 const defaultAddr = listen.DefaultAddr

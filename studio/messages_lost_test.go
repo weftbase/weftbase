@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // TestMessagesLostFixture (R7-prep): the messages_lost contract case — a

@@ -16,10 +16,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/weftgo/weft/internal/dblock"
-	"github.com/weftgo/weft/internal/discovery"
-	"github.com/weftgo/weft/internal/listen"
-	"github.com/weftgo/weft/studio"
+	"github.com/weftbase/weftbase/internal/dblock"
+	"github.com/weftbase/weftbase/internal/discovery"
+	"github.com/weftbase/weftbase/internal/listen"
+	"github.com/weftbase/weftbase/studio"
 )
 
 // `weft dev` (plan B1.2, FEATURES D7): Studio and the app in one

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // Search (plan A7, obsdb.Searcher) without a migration: the tables a

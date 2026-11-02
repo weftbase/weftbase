@@ -32,11 +32,11 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/obsdb/sqlite"
-	"github.com/weftgo/weft/studio"
-	"github.com/weftgo/weft/wefttest"
+	"github.com/weftbase/weft"
+	"github.com/weftbase/weft/wefttest"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/obsdb/sqlite"
+	"github.com/weftbase/weftbase/studio"
 )
 
 // demoVersion mirrors weft's version const (unexported there): the

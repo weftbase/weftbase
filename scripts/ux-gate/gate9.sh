@@ -116,10 +116,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/otel"
-	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
+	"github.com/weftbase/weft"
+	"github.com/weftbase/weft/otel"
+	"github.com/weftbase/weft/thread"
+	"github.com/weftbase/weft/wefttest"
 )
 
 type wireIn struct {
@@ -193,7 +193,7 @@ func main() {
 	time.Sleep(2 * time.Second) // the exporter's last batch
 }
 GO
-printf 'module gate9cdemo\n\ngo 1.26.0\n\nrequire github.com/weftgo/weft v0.17.0\n' > "$RUN/cdemo/go.mod"
+printf 'module gate9cdemo\n\ngo 1.26.0\n\nrequire github.com/weftbase/weft v0.17.0\n' > "$RUN/cdemo/go.mod"
 printf 'go 1.26.0\n\nuse (\n\t.\n\t%s\n\t%s/core\n)\n' "$REPO" "$REPO" > "$RUN/cdemo/go.work"
 OFF_PUBS=""
 if ( cd "$RUN/cdemo" && GOPROXY=off go build -o "$RUN/cdemo-bin" . ) > "$RUN/cdemo-build.log" 2>&1; then
@@ -236,9 +236,9 @@ clause s "$sok" "make studio-check passes; the ledger's last row is $LAST_ROW an
   "Studio dist $kib KiB gzipped (≤ 700: $([ "$kib" -le 700 ] && echo yes || echo NO)); studio/dist + npm left clean by the rebuild: $([ "$dirty" = 0 ] && echo yes || echo "NO ($dirty paths)")"
 
 # ---- (k) the principle gate -------------------------------------------
-n=$(cd "$REPO" && go list -deps ./core | grep weft/ | grep -vc '^github.com/weftgo/weft/core\(/\|$\)')
+n=$(cd "$REPO" && go list -deps ./core | grep weft/ | grep -vc '^github.com/weftbase/weft/core\(/\|$\)')
 gm=$(cd "$REPO" && git diff --quiet "$PREV_TAG" -- core/go.mod core/go.sum && echo unchanged || echo changed)
-clause k1 "$([ "$n" = 0 ] && [ "$gm" = unchanged ] && echo PASS || echo FAIL)" "core imports nothing above the core module (AGENTS rule 6): packages outside github.com/weftgo/weft/core in its deps = 0, core/go.mod + go.sum unchanged since $PREV_TAG" \
+clause k1 "$([ "$n" = 0 ] && [ "$gm" = unchanged ] && echo PASS || echo FAIL)" "core imports nothing above the core module (AGENTS rule 6): packages outside github.com/weftbase/weft/core in its deps = 0, core/go.mod + go.sum unchanged since $PREV_TAG" \
   "$n outside · go.mod $gm — $(cd "$REPO" && go list -deps ./core | grep weft/ | tr '\n' ' ')"
 
 T='TestReportingHookChangesNothingModelVisible|TestRequestRecordsChangeNothingModelVisible|TestCompactionViewChangesNothingModelVisible|TestRequestFactsOffComputeNothing'

@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 type object struct {

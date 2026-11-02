@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // checkSessionEvents holds a contract case's session_events index (U12.2,

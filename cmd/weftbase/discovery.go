@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/weftgo/weft/internal/discovery"
-	"github.com/weftgo/weft/studio"
-	"github.com/weftgo/weft/version"
+	"github.com/weftbase/weft/version"
+	"github.com/weftbase/weftbase/internal/discovery"
+	"github.com/weftbase/weftbase/studio"
 )
 
 // The discovery file (plan B3, internal/discovery): `weft studio` and

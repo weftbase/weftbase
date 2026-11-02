@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // decisionsServer ingests one contract fixture into a Studio of its own

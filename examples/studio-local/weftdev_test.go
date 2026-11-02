@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/studio"
+	"github.com/weftbase/weftbase/studio"
 )
 
 // U20.2's Done line, offline: `weft dev -- go run ./examples/studio-local`

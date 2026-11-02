@@ -8,8 +8,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/weftgo/weft/internal/dblock"
-	"github.com/weftgo/weft/internal/discovery"
+	"github.com/weftbase/weftbase/internal/dblock"
+	"github.com/weftbase/weftbase/internal/discovery"
 )
 
 // One Studio per database file (B7-fix, UX-S5a-13): `weft studio` and

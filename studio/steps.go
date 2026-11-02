@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // The step route (plan A7, with A10's children and A4's attempts):

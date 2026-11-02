@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/studio/internal/reqlog"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/studio/internal/reqlog"
 )
 
 // Ingest health (U5, UX-E-38): what the apps exporting here said about

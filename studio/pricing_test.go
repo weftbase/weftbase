@@ -17,15 +17,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/core/wefttest"
-	"github.com/weftgo/weft/exporter"
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/obsdb/sqlite"
-	"github.com/weftgo/weft/otel"
-	"github.com/weftgo/weft/studio/internal/pricingdata"
-	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/thread/pool"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weft/core/wefttest"
+	"github.com/weftbase/weft/otel"
+	"github.com/weftbase/weft/thread"
+	"github.com/weftbase/weft/thread/pool"
+	"github.com/weftbase/weftbase/exporter"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/obsdb/sqlite"
+	"github.com/weftbase/weftbase/studio/internal/pricingdata"
 )
 
 // TestPricingJSONIsGenerated: the committed pricing.json is exactly the

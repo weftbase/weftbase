@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // The conversation export (UX-B-29):

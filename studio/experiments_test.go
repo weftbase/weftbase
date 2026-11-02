@@ -14,9 +14,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/obsdb/sqlite"
-	"github.com/weftgo/weft/studio"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/obsdb/sqlite"
+	"github.com/weftbase/weftbase/studio"
 )
 
 func newExperimentServer(t *testing.T) (*httptest.Server, obsdb.DB) {

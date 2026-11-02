@@ -20,7 +20,7 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/weftgo/weft/internal/discovery"
+	"github.com/weftbase/weftbase/internal/discovery"
 )
 
 // TestMCPLiveCheck is `make mcp-check` (plan I4.2): the phase 6 gate's

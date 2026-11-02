@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // queryPlan is EXPLAIN QUERY PLAN's detail column, joined.

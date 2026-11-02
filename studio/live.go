@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // The live stream (S4.5): GET /api/live, SSE. Frames carry the hub's

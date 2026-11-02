@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/studio"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/studio"
 )
 
 // TestCutConsistency (P9-pre-go-fix4) closes the retention cut's class:

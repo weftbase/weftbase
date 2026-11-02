@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
-	linkruntime "github.com/weftgo/weft/studio/runtime"
+	"github.com/weftbase/weftbase/obsdb"
+	linkruntime "github.com/weftbase/weftbase/studio/runtime"
 )
 
 // playgroundTestServer is a Studio with Playground(true) over a temp

@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
-	linkruntime "github.com/weftgo/weft/studio/runtime"
+	"github.com/weftbase/weftbase/obsdb"
+	linkruntime "github.com/weftbase/weftbase/studio/runtime"
 )
 
 // The experiments routes (WEFT-PLAYGROUND §10.4, S4.2): an experiment

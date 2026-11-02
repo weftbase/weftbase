@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weftgo/weft/obsdb/obsdbtest"
+	"github.com/weftbase/weftbase/obsdb/obsdbtest"
 )
 
 // stale0024 is migration 0024's first text, as development builds

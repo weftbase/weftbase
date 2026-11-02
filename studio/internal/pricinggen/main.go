@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/weftgo/weft/studio/internal/pricingdata"
+	"github.com/weftbase/weftbase/studio/internal/pricingdata"
 )
 
 func main() {

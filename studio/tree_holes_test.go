@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/core/wefttest"
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/obsdb/sqlite"
+	"github.com/weftbase/weft/core/wefttest"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/obsdb/sqlite"
 )
 
 // treeHoleDoc is the ?tree=1 answer's fields these tests read.

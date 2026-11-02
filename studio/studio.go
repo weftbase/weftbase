@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/obsdb/sqlite"
-	"github.com/weftgo/weft/studio/internal/reqlog"
-	"github.com/weftgo/weft/version"
+	"github.com/weftbase/weft/version"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/obsdb/sqlite"
+	"github.com/weftbase/weftbase/studio/internal/reqlog"
 )
 
 // Version is the version Studio reports as api/meta's studio_version

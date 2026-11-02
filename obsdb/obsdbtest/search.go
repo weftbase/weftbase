@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // The search table (plan A7, obsdb.Searcher): both backends hold the

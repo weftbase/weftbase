@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // The writer announces a derived row it drops (I6-fix2): an inner agent

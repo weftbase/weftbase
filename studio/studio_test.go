@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/core/wefttest"
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/obsdb/sqlite"
+	"github.com/weftbase/weft/core/wefttest"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/obsdb/sqlite"
 )
 
 // The fixtures (plan §3, rebuilt on obsdb for the step-5 interim read

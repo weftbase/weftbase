@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	linkruntime "github.com/weftgo/weft/studio/runtime"
+	linkruntime "github.com/weftbase/weftbase/studio/runtime"
 )
 
 // rebindingServer is a Playground(true) Studio over a temp database

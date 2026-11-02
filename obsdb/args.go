@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/weftgo/weft/core"
+	"github.com/weftbase/weft/core"
 )
 
 // CheckToolArgs checks a tool call's arguments against the tool's

@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/otel"
-	"github.com/weftgo/weft/wefttest"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weft/otel"
+	"github.com/weftbase/weft/wefttest"
 )
 
 // stormAgent is a run of steps steps, each streaming deltas text deltas

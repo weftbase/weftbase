@@ -22,10 +22,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/thread/jsonl"
-	"github.com/weftgo/weft/wefttest"
+	"github.com/weftbase/weft"
+	"github.com/weftbase/weft/thread"
+	"github.com/weftbase/weft/thread/jsonl"
+	"github.com/weftbase/weft/wefttest"
 )
 
 // secret is the demo key the "web UI" holds; a real deployment keeps

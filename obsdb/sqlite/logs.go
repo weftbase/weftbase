@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // OtherLogs reads a run's app log records from other_logs, where Write

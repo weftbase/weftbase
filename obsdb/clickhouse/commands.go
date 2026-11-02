@@ -10,8 +10,8 @@ import (
 
 	ch "github.com/ClickHouse/clickhouse-go/v2"
 
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/obsdb/internal/bpset"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/obsdb/internal/bpset"
 )
 
 // The playground link's records (plan I3, migration 0008): commands,

@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/core/wefttest"
-	linkruntime "github.com/weftgo/weft/studio/runtime"
+	"github.com/weftbase/weft/core/wefttest"
+	linkruntime "github.com/weftbase/weftbase/studio/runtime"
 )
 
 // TestCancelRoute pins POST /api/runs/{id}/cancel (plan H6) against

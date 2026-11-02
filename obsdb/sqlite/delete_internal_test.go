@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/core/wefttest"
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/obsdb/internal/caps"
-	"github.com/weftgo/weft/thread"
-	threadsqlite "github.com/weftgo/weft/thread/sqlite"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weft/core/wefttest"
+	"github.com/weftbase/weft/thread"
+	threadsqlite "github.com/weftbase/weft/thread/sqlite"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/obsdb/internal/caps"
 )
 
 // delFixture writes one finished run with a searchable prompt, a tool

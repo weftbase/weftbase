@@ -7,7 +7,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 func treeTestSpan(id, parentSpan string, attrs map[string]any) obsdb.Span {

@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 var stockEpoch = time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)

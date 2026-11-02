@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/weftgo/weft/core"
+	"github.com/weftbase/weft/core"
 )
 
 // registry is what a runtime exposes: the agents (found by name), the

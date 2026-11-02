@@ -87,15 +87,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/exporter"
-	"github.com/weftgo/weft/mw"
-	"github.com/weftgo/weft/otel"
-	"github.com/weftgo/weft/runtime"
-	"github.com/weftgo/weft/scope"
-	"github.com/weftgo/weft/studio"
-	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/thread/jsonl"
+	"github.com/weftbase/weft"
+	"github.com/weftbase/weft/mw"
+	"github.com/weftbase/weft/otel"
+	"github.com/weftbase/weft/thread"
+	"github.com/weftbase/weft/thread/jsonl"
+	"github.com/weftbase/weftbase/exporter"
+	"github.com/weftbase/weftbase/runtime"
+	"github.com/weftbase/weftbase/scope"
+	"github.com/weftbase/weftbase/studio"
 )
 
 // page is the host app's own landing page: a plain HTML document

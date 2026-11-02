@@ -21,14 +21,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/core/wefttest"
-	"github.com/weftgo/weft/exporter"
-	"github.com/weftgo/weft/otel"
-	"github.com/weftgo/weft/runtime"
-	"github.com/weftgo/weft/studio"
-	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/thread/jsonl"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weft/core/wefttest"
+	"github.com/weftbase/weft/otel"
+	"github.com/weftbase/weft/thread"
+	"github.com/weftbase/weft/thread/jsonl"
+	"github.com/weftbase/weftbase/exporter"
+	"github.com/weftbase/weftbase/runtime"
+	"github.com/weftbase/weftbase/studio"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 

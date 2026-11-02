@@ -19,8 +19,8 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/weftgo/weft/internal/termsafe"
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/internal/termsafe"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // The API clients: runs, open and export are thin clients of the

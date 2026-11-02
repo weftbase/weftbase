@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/core/wefttest"
-	"github.com/weftgo/weft/obsdb"
-	linkruntime "github.com/weftgo/weft/studio/runtime"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weft/core/wefttest"
+	"github.com/weftbase/weftbase/obsdb"
+	linkruntime "github.com/weftbase/weftbase/studio/runtime"
 )
 
 // recordPreviewRun records, through the real pipeline into the

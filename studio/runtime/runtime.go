@@ -61,7 +61,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // The wire vocabulary (§10.3). Mirrored — deliberately, with the JSON

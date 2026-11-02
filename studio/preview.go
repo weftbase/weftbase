@@ -9,9 +9,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/obsdb"
-	linkruntime "github.com/weftgo/weft/studio/runtime"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weftbase/obsdb"
+	linkruntime "github.com/weftbase/weftbase/studio/runtime"
 )
 
 // POST /api/playground/preview (plan F2, ADR 0029 §8): the §5.1

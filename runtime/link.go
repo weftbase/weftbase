@@ -17,10 +17,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/exporter"
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/thread"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weft/thread"
+	"github.com/weftbase/weftbase/exporter"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // The link's bounds. Everything that arrives over the stream is

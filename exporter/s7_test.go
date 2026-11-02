@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/otel"
-	"github.com/weftgo/weft/wefttest"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weft/otel"
+	"github.com/weftbase/weft/wefttest"
+	"github.com/weftbase/weftbase/obsdb"
 
 	// The kill-9 and heartbeat-row tests read the SQLite file directly.
 	_ "modernc.org/sqlite"
@@ -218,8 +218,8 @@ func TestS7Kill9ShowsInterrupted(t *testing.T) {
 	src := filepath.Join(dir, "child.go")
 	child := "package main\n\nimport (\n" +
 		"\t\"context\"\n\t\"os\"\n\t\"time\"\n\n" +
-		"\tweftotel \"github.com/weftgo/weft/otel\"\n\t\"github.com/weftgo/weft/exporter\"\n\n" +
-		"\t\"github.com/weftgo/weft\"\n\t\"github.com/weftgo/weft/wefttest\"\n)\n\n" +
+		"\tweftotel \"github.com/weftbase/weft/otel\"\n\t\"github.com/weftbase/weftbase/exporter\"\n\n" +
+		"\t\"github.com/weftbase/weft\"\n\t\"github.com/weftbase/weft/wefttest\"\n)\n\n" +
 		"func main() {\n" +
 		"\tshutdown := exporter.Install(\n" +
 		"\t\texporter.Local(" + "`" + dbPath + "`" + "),\n" +

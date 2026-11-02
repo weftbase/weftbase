@@ -14,11 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/core/wefttest"
-	"github.com/weftgo/weft/internal/discovery"
-	"github.com/weftgo/weft/obsdb/sqlite"
-	"github.com/weftgo/weft/otel"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weft/core/wefttest"
+	"github.com/weftbase/weft/otel"
+	"github.com/weftbase/weftbase/internal/discovery"
+	"github.com/weftbase/weftbase/obsdb/sqlite"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/wefttest"
+	"github.com/weftbase/weft/wefttest"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // The hole vocabulary is ADR 0028 §11's closed table, in its order:

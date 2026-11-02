@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/exporter"
-	"github.com/weftgo/weft/internal/discovery"
-	"github.com/weftgo/weft/otel"
-	"github.com/weftgo/weft/studio"
+	"github.com/weftbase/weft/otel"
+	"github.com/weftbase/weftbase/exporter"
+	"github.com/weftbase/weftbase/internal/discovery"
+	"github.com/weftbase/weftbase/studio"
 )
 
 // TestMain points the discovery rung at an empty directory of this

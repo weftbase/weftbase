@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/weftgo/weft/obsdb/internal/caps"
+	"github.com/weftbase/weftbase/obsdb/internal/caps"
 )
 
 // LogQuery selects a run's app log records for DB.OtherLogs. The zero

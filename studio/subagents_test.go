@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weftgo/weft/otel"
+	"github.com/weftbase/weft/otel"
 )
 
 // TestSubagentsOnThePage pins plan A10's share of the record over the

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // The aggregates table (obsdb.Aggregator; UX plan D7, A4, A2): both

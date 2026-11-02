@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/weftgo/weft/internal/listen"
-	"github.com/weftgo/weft/studio"
+	"github.com/weftbase/weftbase/internal/listen"
+	"github.com/weftbase/weftbase/studio"
 )
 
 // ExampleChoose starts a Studio the way the command does — Choose,

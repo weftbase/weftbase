@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // The request record's read routes (ADR 0028 §10, plan A1):

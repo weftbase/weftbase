@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // rederiveCases are stock trace shapes and whether migration 0026's

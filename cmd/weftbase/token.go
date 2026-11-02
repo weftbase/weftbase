@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/weftgo/weft/internal/discovery"
-	"github.com/weftgo/weft/studio"
+	"github.com/weftbase/weftbase/internal/discovery"
+	"github.com/weftbase/weftbase/studio"
 )
 
 // The dev token (plan B3): stable per database. On a database file's

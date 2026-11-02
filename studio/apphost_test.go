@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/internal/linkreg"
+	"github.com/weftbase/weftbase/internal/linkreg"
 )
 
 // timesRe finds a row's created/updated in an indented body.

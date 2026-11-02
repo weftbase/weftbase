@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 
 	msqlite "modernc.org/sqlite"
 

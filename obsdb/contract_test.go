@@ -36,19 +36,20 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/core/mw"
-	"github.com/weftgo/weft/core/wefttest"
-	"github.com/weftgo/weft/exporter"
-	"github.com/weftgo/weft/mcp"
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/obsdb/clickhouse"
-	"github.com/weftgo/weft/obsdb/obsdbtest"
-	"github.com/weftgo/weft/obsdb/sqlite"
-	"github.com/weftgo/weft/otel"
-	"github.com/weftgo/weft/scope"
-	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/thread/pool"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weft/core/mw"
+	"github.com/weftbase/weft/core/wefttest"
+	"github.com/weftbase/weft/mcp"
+	"github.com/weftbase/weft/otel"
+	"github.com/weftbase/weft/thread"
+	"github.com/weftbase/weft/thread/pool"
+	"github.com/weftbase/weftbase/exporter"
+	"github.com/weftbase/weftbase/internal/weftsrc"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/obsdb/clickhouse"
+	"github.com/weftbase/weftbase/obsdb/obsdbtest"
+	"github.com/weftbase/weftbase/obsdb/sqlite"
+	"github.com/weftbase/weftbase/scope"
 )
 
 // The record contract's conformance set (docs/record-contract.md):
@@ -1069,13 +1070,13 @@ func openFreshClickHouse(t *testing.T) obsdb.DB {
 // misspelt `weft.forked-from` is caught, not skipped. A `weft.x.*`
 // family needs one name under it.
 func TestRecordContractDocNames(t *testing.T) {
-	doc, err := os.ReadFile(filepath.Join("..", "docs", "record-contract.md"))
+	doc, err := os.ReadFile(weftsrc.Path(t, "docs/record-contract.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	code := map[string]bool{}
 	lit := regexp.MustCompile(`"((?:weft|gen_ai)\.[A-Za-z0-9_.-]+)"`)
-	for _, root := range []string{"../core", "../otel", "../thread", "../runtime", "../scope", "."} {
+	for _, root := range []string{weftsrc.Path(t, "core"), weftsrc.Path(t, "otel"), weftsrc.Path(t, "thread"), "../runtime", "../scope", "."} {
 		err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return err
@@ -1174,7 +1175,7 @@ var migrationOnlyNames = map[string]string{
 // and the doc mentions anyway. A prefix (a LIKE 'weft.thread.%' pattern,
 // spelt with its trailing dot) is not a name and is skipped.
 func TestRecordContractMigrationNames(t *testing.T) {
-	doc, err := os.ReadFile(filepath.Join("..", "docs", "record-contract.md"))
+	doc, err := os.ReadFile(weftsrc.Path(t, "docs/record-contract.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2922,7 +2923,7 @@ func kvInt(kvs []*commonpb.KeyValue, key string) int64 {
 // else, both ways — a case added without its row, or a row whose case
 // is gone, fails here rather than in a review.
 func TestContractTableMatchesFixtures(t *testing.T) {
-	doc, err := os.ReadFile("../docs/record-contract.md")
+	doc, err := os.ReadFile(weftsrc.Path(t, "docs/record-contract.md"))
 	if err != nil {
 		t.Fatal(err)
 	}

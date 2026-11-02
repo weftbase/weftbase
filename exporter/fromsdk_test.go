@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 	"go.opentelemetry.io/otel/attribute"
 	otelcodes "go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/log"
@@ -94,7 +94,7 @@ func TestFromSDKRecordsMatchesOTLPFixture(t *testing.T) {
 		sdklog.WithProcessor(sdklog.NewSimpleProcessor(capture)),
 	)
 	defer func() { _ = provider.Shutdown(context.Background()) }()
-	lg := provider.Logger("github.com/weftgo/weft/core")
+	lg := provider.Logger("github.com/weftbase/weft/core")
 
 	emit := func(ts, observed time.Time, severity int, eventName, body string, attrs []attribute.KeyValue, withSpan bool) {
 		var r log.Record

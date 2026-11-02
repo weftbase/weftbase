@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weftgo/weft/version"
+	"github.com/weftbase/weft/version"
 )
 
 // The devtools panel's Go side (WEFT-DEVTOOLS.md §5.1, S4.2): the

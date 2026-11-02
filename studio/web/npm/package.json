@@ -13,14 +13,14 @@
     "vue",
     "svelte"
   ],
-  "homepage": "https://github.com/weftgo/weft/tree/main/studio#readme",
+  "homepage": "https://github.com/weftbase/weftbase/tree/main/studio#readme",
   "bugs": {
-    "url": "https://github.com/weftgo/weft/issues"
+    "url": "https://github.com/weftbase/weft/issues"
   },
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/weftgo/weft.git",
+    "url": "git+https://github.com/weftbase/weft.git",
     "directory": "studio/web/npm"
   },
   "type": "module",

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	linkruntime "github.com/weftgo/weft/studio/runtime"
+	linkruntime "github.com/weftbase/weftbase/studio/runtime"
 )
 
 // Proposed prompts (plan F6): "keep as prompt" stays a clipboard copy

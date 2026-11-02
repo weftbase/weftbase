@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // sessionsOldDated (U31.1): a session whose turns are years old — the

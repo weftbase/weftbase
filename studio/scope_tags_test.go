@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/obsdb/sqlite"
-	"github.com/weftgo/weft/scope"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/obsdb/sqlite"
+	"github.com/weftbase/weftbase/scope"
 )
 
 // The tag scope (U22: UX-D-05, UX-E-27, A5, user decision 2): tag.<k>=<v>

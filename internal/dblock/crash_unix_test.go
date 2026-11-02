@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/internal/dblock"
+	"github.com/weftbase/weftbase/internal/dblock"
 )
 
 func TestMain(m *testing.M) {

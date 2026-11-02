@@ -16,8 +16,8 @@ import (
 	"net/http"
 	"regexp"
 
-	"github.com/weftgo/weft/obsdb"
-	linkruntime "github.com/weftgo/weft/studio/runtime"
+	"github.com/weftbase/weftbase/obsdb"
+	linkruntime "github.com/weftbase/weftbase/studio/runtime"
 )
 
 // breakpointsRequest is PUT /api/runtimes/{id}/breakpoints: the tools

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb/sqlite"
+	"github.com/weftbase/weftbase/obsdb/sqlite"
 )
 
 // usageLimitRuns is the U24.2 fixture: seven researcher runs that hit

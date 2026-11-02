@@ -15,9 +15,9 @@ import (
 
 	ch "github.com/ClickHouse/clickhouse-go/v2"
 
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/obsdb/clickhouse"
-	"github.com/weftgo/weft/obsdb/obsdbtest"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/obsdb/clickhouse"
+	"github.com/weftbase/weftbase/obsdb/obsdbtest"
 )
 
 // The conformance table (S3.5) runs against a live server, gated on

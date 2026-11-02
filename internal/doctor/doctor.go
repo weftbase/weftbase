@@ -23,7 +23,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/weftgo/weft/internal/termsafe"
+	"github.com/weftbase/weftbase/internal/termsafe"
 )
 
 // Timeout bounds the one request the doctor makes: an unreachable or
@@ -411,7 +411,7 @@ func (p *printer) panel(m meta) {
 		p.line(fail, "panel", "/panel.js carries no version stamp: this studio's build lacks the panel bundle")
 	case m.PanelVersion != m.StudioVersion:
 		p.line(fail, "panel", "/panel.js is %s, studio is %s: this weft build embeds a stale panel bundle", m.PanelVersion, m.StudioVersion)
-		p.sub("fix: install weft %s again (go install github.com/weftgo/weft/cmd/weft@%s); in a weft checkout, make studio-build; then reload the page", m.StudioVersion, m.StudioVersion)
+		p.sub("fix: install weft %s again (go install github.com/weftbase/weftbase/cmd/weftbase@%s); in a weft checkout, make studio-build; then reload the page", m.StudioVersion, m.StudioVersion)
 	default:
 		p.line(ok, "panel", "/panel.js matches studio %s", m.StudioVersion)
 	}

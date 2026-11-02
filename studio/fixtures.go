@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // "Save as fixture" (WEFT-PLAYGROUND §7 P4, D4) and the wefttest

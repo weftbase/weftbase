@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // The manifest store's route (U27; UX-E-16): GET /api/manifests/{hash}

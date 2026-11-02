@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/weftgo/weft/internal/dblock"
+	"github.com/weftbase/weftbase/internal/dblock"
 )
 
 // TestExclusive: one holder at a time — a second Acquire (another

@@ -10,8 +10,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // The step-aligned diff (plan E3, E3.1):

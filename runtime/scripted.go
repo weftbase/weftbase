@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/weftgo/weft/core"
+	"github.com/weftbase/weft/core"
 )
 
 // The scripted engine (WEFT-PLAYGROUND §5.5, D1/C6): engine "scripted"

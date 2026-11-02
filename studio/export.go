@@ -17,7 +17,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
@@ -949,7 +949,7 @@ func (x *runExport) jsonl() ([]byte, error) {
 
 // otlpScope is the instrumentation scope the export's records and
 // spans name: the records are rebuilt, not the producer's own.
-const otlpScope = "github.com/weftgo/weft/studio/export"
+const otlpScope = "github.com/weftbase/weftbase/studio/export"
 
 // marshalOTLP is protojson, compacted: protojson's whitespace is
 // deliberately unstable, and an export is the same bytes every time.

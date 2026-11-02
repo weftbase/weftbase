@@ -237,7 +237,7 @@ One lookup walks the chain — public id → session → runs ordered by turn
 columns, never by parsing a run id prefix.
 
 The records themselves are OTel log records (logger name
-`github.com/weftgo/weft`; `EventName` `weft.event`, `weft.delta`,
+`github.com/weftbase/weft`; `EventName` `weft.event`, `weft.delta`,
 `weft.messages`, and `weft.heartbeat` from `weft/otel`), body = the
 core's wire JSON (ADR 0004; the sinks add no codec of their own for
 anything the core already encodes — ADR 0010 §2's rule, kept), timestamp

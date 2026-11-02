@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // searchIDs reads GET path's run ids, total and next_offset.

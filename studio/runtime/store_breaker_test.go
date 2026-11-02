@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // blipStore wraps a real store: armed, its next write fails once (a

@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 
-	"github.com/weftgo/weft/studio/runtime"
+	"github.com/weftbase/weftbase/studio/runtime"
 )
 
 // ExampleRuntimeServer mounts the runtime link's three routes — the

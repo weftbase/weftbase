@@ -3,9 +3,9 @@ package studio
 import (
 	"net/http"
 
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/studio/ingest"
-	linkrt "github.com/weftgo/weft/studio/runtime"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/studio/ingest"
+	linkrt "github.com/weftbase/weftbase/studio/runtime"
 )
 
 // The route registry (S4.2): Studio's surface is a list of route

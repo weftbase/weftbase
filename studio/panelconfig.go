@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/weftgo/weft/version"
+	"github.com/weftbase/weft/version"
 )
 
 // GET <base>/panel-config.json (plan B3): what the devtools panel needs

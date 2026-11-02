@@ -2237,7 +2237,7 @@ export class WeftDevtools extends HTMLElement {
     }
     box.append(
       el("a", "", "all rungs ⤢", {
-        href: "https://github.com/weftgo/weft/tree/main/studio#the-devtools-panel",
+        href: "https://github.com/weftbase/weftbase/tree/main/studio#the-devtools-panel",
         ...NEW_TAB,
       })
     )

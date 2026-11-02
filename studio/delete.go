@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // Deletion and retention (plan A7, §13.13): DELETE /api/runs/{id},

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // TestErrorClass pins the normaliser on the arena's real error texts

@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/runtime"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weftbase/runtime"
 )
 
 // holdModel calls lookup_order on its first call and holds every later

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // TestRunsTTLFailedReadIsHeld (P9-pre-go-fix3): a failed system.tables

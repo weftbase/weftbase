@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 func seedRawRun(t *testing.T, db obsdb.DB) {

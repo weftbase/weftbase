@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weftgo/weft/obsdb/sqlite"
+	"github.com/weftbase/weftbase/obsdb/sqlite"
 )
 
 // twoPublicIDSession serves a session whose turns carry two public ids

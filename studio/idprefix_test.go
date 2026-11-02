@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb/sqlite"
+	"github.com/weftbase/weftbase/obsdb/sqlite"
 )
 
 // TestRunsIDPrefix (U26; UX-A-13): GET /api/runs?id_prefix= finds a

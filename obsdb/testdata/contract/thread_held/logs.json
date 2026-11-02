@@ -116,7 +116,7 @@
             }
           ],
           "scope": {
-            "name": "github.com/weftgo/weft/thread"
+            "name": "github.com/weftbase/weft/thread"
           }
         }
       ]

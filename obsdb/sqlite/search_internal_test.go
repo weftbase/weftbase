@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // A transport's re-delivery of a batch changes nothing the search index

@@ -16,12 +16,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/obsdb/sqlite"
-	weftruntime "github.com/weftgo/weft/runtime"
-	"github.com/weftgo/weft/studio"
-	linkruntime "github.com/weftgo/weft/studio/runtime"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/obsdb/sqlite"
+	weftruntime "github.com/weftbase/weftbase/runtime"
+	"github.com/weftbase/weftbase/studio"
+	linkruntime "github.com/weftbase/weftbase/studio/runtime"
 )
 
 // countingModel counts its calls per prompt and holds each until gate

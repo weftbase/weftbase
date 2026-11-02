@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // ParseSearch's grammar: whitespace separates terms, a quoted span is

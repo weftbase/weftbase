@@ -3,7 +3,7 @@ package runtime
 import (
 	"encoding/json"
 
-	"github.com/weftgo/weft/core"
+	"github.com/weftbase/weft/core"
 )
 
 // The runtime link's wire protocol (WEFT-PLAYGROUND.md §10.3): all

@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/core/wefttest"
-	"github.com/weftgo/weft/runtime"
-	"github.com/weftgo/weft/studio"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weft/core/wefttest"
+	"github.com/weftbase/weftbase/runtime"
+	"github.com/weftbase/weftbase/studio"
 )
 
 // TestRuntimesGoldenMatchesARealRuntime: testdata/api/runtimes.golden.json

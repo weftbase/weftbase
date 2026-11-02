@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/weftgo/weft/obsdb/internal/caps"
+	"github.com/weftbase/weftbase/obsdb/internal/caps"
 )
 
 // TreeReader is the run tree's reads (U9.1), an optional capability of

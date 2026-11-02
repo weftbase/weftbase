@@ -8,7 +8,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/weftgo/weft/version"
+	"github.com/weftbase/weft/version"
 )
 
 // TestPanelConfig pins GET <base>/panel-config.json (plan B3): the

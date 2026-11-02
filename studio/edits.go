@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/obsdb"
-	linkruntime "github.com/weftgo/weft/studio/runtime"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weftbase/obsdb"
+	linkruntime "github.com/weftbase/weftbase/studio/runtime"
 )
 
 // Transcript-edit validation (WEFT-PLAYGROUND §1's Transcript knob,

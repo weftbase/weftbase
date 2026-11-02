@@ -119,10 +119,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/mw"
-	"github.com/weftgo/weft/otel"
-	"github.com/weftgo/weft/wefttest"
+	"github.com/weftbase/weft"
+	"github.com/weftbase/weft/mw"
+	"github.com/weftbase/weft/otel"
+	"github.com/weftbase/weft/wefttest"
 )
 
 type slowIn struct {
@@ -165,7 +165,7 @@ func main() {
 	time.Sleep(2 * time.Second) // the exporter's last batch
 }
 GO
-printf 'module gate8demo\n\ngo 1.26.0\n\nrequire github.com/weftgo/weft v0.16.0\n' > "$RUN/demo/go.mod"
+printf 'module gate8demo\n\ngo 1.26.0\n\nrequire github.com/weftbase/weft v0.16.0\n' > "$RUN/demo/go.mod"
 printf 'go 1.26.0\n\nuse (\n\t.\n\t%s\n\t%s/core\n)\n' "$REPO" "$REPO" > "$RUN/demo/go.work"
 if ( cd "$RUN/demo" && GOPROXY=off go build -o "$RUN/h9demo" . ) > "$RUN/h9demo-build.log" 2>&1; then
   # h9.js's runs-tree clause reads the newest 50 rows of "with child
@@ -201,9 +201,9 @@ clause d "$dok" "make studio-check passes; every panel delta in the ledger (tota
   "Studio dist $kib KiB gzipped (≤ 700: $([ "$kib" -le 700 ] && echo yes || echo NO)); studio/dist + npm left clean by the rebuild: $([ "$dirty" = 0 ] && echo yes || echo "NO ($dirty paths)")"
 
 # ---- (k) the principle gate -------------------------------------------
-n=$(cd "$REPO" && go list -deps ./core | grep weft/ | grep -vc '^github.com/weftgo/weft/core\(/\|$\)')
+n=$(cd "$REPO" && go list -deps ./core | grep weft/ | grep -vc '^github.com/weftbase/weft/core\(/\|$\)')
 gm=$(cd "$REPO" && git diff --quiet v0.16.0 -- core/go.mod core/go.sum && echo unchanged || echo changed)
-clause k1 "$([ "$n" = 0 ] && [ "$gm" = unchanged ] && echo PASS || echo FAIL)" "core imports nothing above the core module (AGENTS rule 6): packages outside github.com/weftgo/weft/core in its deps = 0, core/go.mod + go.sum unchanged since v0.16.0" \
+clause k1 "$([ "$n" = 0 ] && [ "$gm" = unchanged ] && echo PASS || echo FAIL)" "core imports nothing above the core module (AGENTS rule 6): packages outside github.com/weftbase/weft/core in its deps = 0, core/go.mod + go.sum unchanged since v0.16.0" \
   "$n outside · go.mod $gm — $(cd "$REPO" && go list -deps ./core | grep weft/ | tr '\n' ' ')"
 
 T='TestReportingHookChangesNothingModelVisible|TestRequestRecordsChangeNothingModelVisible|TestCompactionViewChangesNothingModelVisible|TestRequestFactsOffComputeNothing'

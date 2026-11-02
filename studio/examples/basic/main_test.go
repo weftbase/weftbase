@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weftgo/weft/obsdb/sqlite"
+	"github.com/weftbase/weftbase/obsdb/sqlite"
 )
 
 // The example's acceptance shape (plan §7): record the demo runs into

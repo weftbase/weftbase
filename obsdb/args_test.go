@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // TestCheckToolArgs pins the tool_args edit check (ADR 0029 §8): the

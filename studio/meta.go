@@ -11,10 +11,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/weftgo/weft/internal/discovery"
-	"github.com/weftgo/weft/internal/linkreg"
-	"github.com/weftgo/weft/obsdb"
-	linkruntime "github.com/weftgo/weft/studio/runtime"
+	"github.com/weftbase/weftbase/internal/discovery"
+	"github.com/weftbase/weftbase/internal/linkreg"
+	"github.com/weftbase/weftbase/obsdb"
+	linkruntime "github.com/weftbase/weftbase/studio/runtime"
 )
 
 // api/meta (S4.3, plan B5): what this Studio is and how it is wired,

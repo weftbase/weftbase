@@ -7,8 +7,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // Transcript edits (WEFT-PLAYGROUND §1's Transcript knob, D2/D3): a

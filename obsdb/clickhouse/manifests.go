@@ -6,7 +6,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // The manifests a run's ManifestHash resolves to (U27, migration 0016):

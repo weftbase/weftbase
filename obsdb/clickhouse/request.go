@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/obsdb/internal/reqread"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/obsdb/internal/reqread"
 )
 
 // The request record's readers (ADR 0028). The three kinds live in

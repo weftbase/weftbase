@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/exporter"
-	"github.com/weftgo/weft/otel"
-	"github.com/weftgo/weft/wefttest"
+	"github.com/weftbase/weft"
+	"github.com/weftbase/weft/otel"
+	"github.com/weftbase/weft/wefttest"
+	"github.com/weftbase/weftbase/exporter"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 

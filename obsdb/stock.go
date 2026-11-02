@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/weftgo/weft/core"
+	"github.com/weftbase/weft/core"
 )
 
 // Deriving a run from stock spans (docs/record-contract.md §9): an

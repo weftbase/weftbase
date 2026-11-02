@@ -6,7 +6,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/weftgo/weft/studio"
+	"github.com/weftbase/weftbase/studio"
 )
 
 // pricingFlag adds --pricing to a flag set: a pricing table file

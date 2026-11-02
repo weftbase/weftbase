@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // A file written before ADR 0028 — migrations 0001 and 0002 applied by

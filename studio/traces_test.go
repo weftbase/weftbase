@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // The trace-list fixture (plan A7's Done line): four traces on one
@@ -89,7 +89,7 @@ func seedTraces(t *testing.T, db obsdb.DB, h http.Handler, prefix string) {
 		"name":"POST /chat","kind":"SPAN_KIND_SERVER","startTimeUnixNano":"` + ns(10*s) + `","endTimeUnixNano":"` + ns(13*s) + `",
 		"attributes":[{"key":"http.request.method","value":{"stringValue":"POST"}}],"status":{}}]}]},
 		{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"studio-test"}}]},
-		"scopeSpans":[{"scope":{"name":"github.com/weftgo/weft"},"spans":[{"traceId":"` + b64(t, tlWeb) + `","spanId":"` + b64(t, "2b00000000000002") + `",
+		"scopeSpans":[{"scope":{"name":"github.com/weftbase/weft"},"spans":[{"traceId":"` + b64(t, tlWeb) + `","spanId":"` + b64(t, "2b00000000000002") + `",
 		"parentSpanId":"` + b64(t, "2b00000000000001") + `","name":"invoke_agent orders","kind":"SPAN_KIND_INTERNAL",
 		"startTimeUnixNano":"` + ns(10*s+s/2) + `","endTimeUnixNano":"` + ns(12*s) + `",
 		"attributes":[{"key":"gen_ai.operation.name","value":{"stringValue":"invoke_agent"}},{"key":"weft.run.id","value":{"stringValue":"tl_web"}},

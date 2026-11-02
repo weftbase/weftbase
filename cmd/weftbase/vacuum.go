@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/obsdb/clickhouse"
-	"github.com/weftgo/weft/obsdb/sqlite"
-	"github.com/weftgo/weft/studio"
+	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/obsdb/clickhouse"
+	"github.com/weftbase/weftbase/obsdb/sqlite"
+	"github.com/weftbase/weftbase/studio"
 )
 
 // retainFlag adds --retain to a flag set: studio.Retain's duration,

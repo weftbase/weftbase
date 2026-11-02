@@ -57,7 +57,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/weftgo/weft/core"
+	"github.com/weftbase/weft/core"
 )
 
 // HeaderName is the response header the app's handler sets and the

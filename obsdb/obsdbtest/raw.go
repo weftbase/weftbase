@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // The raw record fixture (ADR 0028 §12): a two-step run whose step 1

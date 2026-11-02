@@ -7,12 +7,12 @@ import (
 	"net/url"
 	"os"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/exporter"
-	"github.com/weftgo/weft/internal/discovery"
-	"github.com/weftgo/weft/studio"
-	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/version"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weft/thread"
+	"github.com/weftbase/weft/version"
+	"github.com/weftbase/weftbase/exporter"
+	"github.com/weftbase/weftbase/internal/discovery"
+	"github.com/weftbase/weftbase/studio"
 )
 
 // Option configures Install.

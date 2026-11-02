@@ -6,8 +6,8 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/weftgo/weft/core"
-	"github.com/weftgo/weft/internal/linkreg"
+	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weftbase/internal/linkreg"
 )
 
 // Breakpoints makes the debugger's breakpoints (§8.3) park tools on the

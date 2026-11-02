@@ -7124,7 +7124,7 @@
             }
           ],
           "scope": {
-            "name": "github.com/weftgo/weft/core",
+            "name": "github.com/weftbase/weft/core",
             "version": "v0.0.0-contract"
           }
         },
@@ -7944,7 +7944,7 @@
             }
           ],
           "scope": {
-            "name": "github.com/weftgo/weft/thread"
+            "name": "github.com/weftbase/weft/thread"
           }
         }
       ]

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/weftgo/weft/obsdb"
+	"github.com/weftbase/weftbase/obsdb"
 )
 
 // Persistence (plan I3): a RuntimeServer built WithStore writes every

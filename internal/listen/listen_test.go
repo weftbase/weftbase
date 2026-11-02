@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft/internal/listen"
-	"github.com/weftgo/weft/studio"
+	"github.com/weftbase/weftbase/internal/listen"
+	"github.com/weftbase/weftbase/studio"
 )
 
 // freeBase returns a loopback address whose port and the n-1 ports

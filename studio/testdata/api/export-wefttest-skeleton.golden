@@ -31,8 +31,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/wefttest"
+	"github.com/weftbase/weft"
+	"github.com/weftbase/weft/wefttest"
 )
 
 // TestReplay_r_fx replays run "r_fx" of agent "orders" from its fixtures.
