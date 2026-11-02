@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
-	"strings"
 	"sync"
 
 	"github.com/weftbase/weft/otel"
@@ -26,50 +25,42 @@ const (
 	kindNoDiscovery
 )
 
-// marker is what this package knows of an option it handed out
-// (otel.Options values are comparable): Install and Start recognise
-// their Local, Studio and NoDiscovery options among the ones they are
-// given.
+// marker is what this package knows of an option it handed out: each
+// Local, Studio and NoDiscovery option is an otel.Tag carrying its
+// marker, so Install and Start recognise them among the options they
+// are given (otel.TagOf), and any pipeline that built one of their
+// destinations lists it (Pipeline.Tags) — a plain otel.Install
+// included. Nothing is registered: a marker lives as long as its
+// option.
 type marker struct {
-	opt        otel.Option
 	kind       markerKind
 	url, token string       // Studio
-	handle     *localHandle // Local: its open database, under regMu
+	handle     *localHandle // Local: its open database, under handleMu
 }
 
-// The registry. markers grows by one per Local/Studio/NoDiscovery call
-// — options are built a handful of times per process.
-var (
-	regMu      sync.Mutex
-	markers    []*marker
-	openLocals []*localHandle // every open Local database, oldest first
-	started    = map[*otel.Pipeline]*startInfo{}
-)
+// handleMu guards every marker's handle.
+var handleMu sync.Mutex
 
-// startInfo is what Install or Start configured for one pipeline.
-type startInfo struct {
-	locals     []*marker
-	url, token string
-}
-
-func register(m *marker) {
-	regMu.Lock()
-	markers = append(markers, m)
-	regMu.Unlock()
-}
-
-// find returns the marker of an option this package handed out. The
-// comparison never panics: every marker's option is a pointer, and an
-// interface comparison across dynamic types is false.
+// find returns the marker of an option this package handed out, else
+// nil.
 func find(o otel.Option) *marker {
-	regMu.Lock()
-	defer regMu.Unlock()
-	for _, m := range markers {
-		if m.opt == o {
-			return m
+	m, _ := otel.TagOf(o).(*marker)
+	return m
+}
+
+// markersOf returns the markers of the destinations p built, in
+// destination order.
+func markersOf(p *otel.Pipeline) []*marker {
+	if p == nil {
+		return nil
+	}
+	var out []*marker
+	for _, t := range p.Tags() {
+		if m, ok := t.(*marker); ok {
+			out = append(out, m)
 		}
 	}
-	return nil
+	return out
 }
 
 // NoDiscovery makes Install and Start skip the discovery file a running
@@ -79,9 +70,7 @@ func find(o otel.Option) *marker {
 // WEFTBASE_DISCOVERY=off. A pipeline that names a Studio or a Local needs
 // no NoDiscovery: either turns the read off on its own.
 func NoDiscovery() otel.Option {
-	m := &marker{kind: kindNoDiscovery, opt: otel.Options()}
-	register(m)
-	return m.opt
+	return otel.Tag(&marker{kind: kindNoDiscovery})
 }
 
 // Start is otel.Start with the platform's environment: WEFTBASE_URL
@@ -92,12 +81,12 @@ func NoDiscovery() otel.Option {
 // adds no fallback: with nothing configured it returns
 // otel.ErrNoDestinations.
 func Start(ctx context.Context, opts ...otel.Option) (*otel.Pipeline, error) {
-	all, info, joined := plan(opts, false)
+	all, joined := plan(opts, false)
 	p, err := otel.Start(ctx, all...)
 	if err != nil {
 		return nil, err
 	}
-	remember(p, info, joined)
+	joined.log(p)
 	return p, nil
 }
 
@@ -109,26 +98,24 @@ func Start(ctx context.Context, opts ...otel.Option) (*otel.Pipeline, error) {
 // could be built. Like otel.Install it never fails the program; the
 // returned function flushes and shuts everything down.
 func Install(opts ...otel.Option) func() {
-	all, info, joined := plan(opts, true)
+	all, joined := plan(opts, true)
 	stop := otel.Install(all...)
-	if p := otel.Installed(); p != nil {
-		remember(p, info, joined)
-		return func() {
-			stop()
-			regMu.Lock()
-			delete(started, p)
-			regMu.Unlock()
-		}
-	}
+	// The INFO line only for the pipeline this call built: the
+	// environment Studio's marker is this call's own, so a previous
+	// pipeline otel.Installed still reports (this Install recorded
+	// nothing) never carries it.
+	joined.log(otel.Installed())
 	return stop
 }
 
 // plan adds the platform's environment destinations (and, for Install,
-// the Local fallback) to opts.
-func plan(opts []otel.Option, fallback bool) (all []otel.Option, info *startInfo, joined *discovered) {
-	info = &startInfo{}
+// the Local fallback) to opts. The environment's Studio goes in through
+// otel.Environment: otel drops it when a destination named in code
+// exports to the same URL (an exporter.Studio or a plain otel.OTLP —
+// the explicit one wins), and it never counts as named in code, so
+// Install's fallback still takes over when it fails to build.
+func plan(opts []otel.Option, fallback bool) (all []otel.Option, joined *discovered) {
 	noEnv, noDisc, named := false, false, false
-	var explicit []string // the explicit Studios' URLs, for de-duplication
 	for _, o := range opts {
 		if o == otel.NoEnv() {
 			noEnv = true
@@ -138,12 +125,7 @@ func plan(opts []otel.Option, fallback bool) (all []otel.Option, info *startInfo
 			continue
 		}
 		switch m.kind {
-		case kindLocal:
-			info.locals = append(info.locals, m)
-			named = true
-		case kindStudio:
-			info.url, info.token = m.url, m.token
-			explicit = append(explicit, dedupURL(m.url))
+		case kindLocal, kindStudio:
 			named = true
 		case kindNoDiscovery:
 			noDisc = true
@@ -162,78 +144,53 @@ func plan(opts []otel.Option, fallback bool) (all []otel.Option, info *startInfo
 		}
 		if u := getenv("WEFTBASE_URL"); u != "" {
 			u = normalizeEndpoint(u)
-			dup := false
-			for _, e := range explicit {
-				dup = dup || e == dedupURL(u)
-			}
 			if err := envStudioURL(u); err != nil {
-				// Refused here rather than by otel: an environment
-				// destination that cannot be built leaves Install its
-				// Local fallback (otel falls back only when no
-				// destination was named in code).
+				// Refused here rather than by otel: the WARN names the
+				// variable, and Install keeps its Local fallback.
 				slog.Warn("weft/exporter: WEFTBASE_URL skipped", "err", err.Error())
-			} else if !dup {
-				tok := getenv("WEFTBASE_TOKEN")
-				all = append(all, Studio(u, tok, otel.Name("studio(env)")))
-				info.url, info.token = u, tok
+				joined = nil
+			} else {
+				s := Studio(u, getenv("WEFTBASE_TOKEN"), otel.Name("studio(env)"))
+				all = append(all, otel.Environment(s))
+				if joined != nil {
+					joined.m = find(s)
+				}
 			}
+		} else {
+			joined = nil
 		}
 	}
 	if fallback {
-		l := Local("")
-		info.locals = append(info.locals, find(l))
-		all = append(all, otel.Fallback(l))
+		all = append(all, otel.Fallback(Local("")))
 	}
-	return all, info, joined
-}
-
-func remember(p *otel.Pipeline, info *startInfo, joined *discovered) {
-	regMu.Lock()
-	started[p] = info
-	regMu.Unlock()
-	if joined != nil && info.url == normalizeEndpoint(joined.info.URL) {
-		// The one INFO line: which Studio this process joined, and how
-		// to stop it doing so.
-		slog.Info("weft/exporter: joined the running Studio", "url", joined.info.URL,
-			"pid", joined.info.PID, "file", joined.path,
-			"hint", "WEFTBASE_URL names another; exporter.NoDiscovery() or WEFTBASE_DISCOVERY=off ignores the file")
-	}
+	return all, joined
 }
 
 // LocalDB returns the installed pipeline's Local database — for
-// studio.DB(exporter.LocalDB()), the handle setup A shares with Studio.
-// For a pipeline Install or Start built, it is that pipeline's Local
-// (the last one configured); for one otel.Install built from a Local
-// option, the most recently opened Local database still open. nil
-// before an install, after its shutdown, or without a Local.
+// studio.DB(exporter.LocalDB()), the handle setup A shares with Studio:
+// LocalDBOf(otel.Installed()). nil before an install, after its
+// shutdown, or without a Local.
 func LocalDB() obsdb.DB {
 	p := otel.Installed()
 	if p == nil {
 		return nil
 	}
-	if db := LocalDBOf(p); db != nil {
-		return db
-	}
-	regMu.Lock()
-	defer regMu.Unlock()
-	if _, ok := started[p]; ok || len(openLocals) == 0 {
-		return nil
-	}
-	return openLocals[len(openLocals)-1].db
+	return LocalDBOf(p)
 }
 
-// LocalDBOf returns the Local database of a pipeline Install or Start
-// built (the last Local configured that is open), else nil — a
-// pipeline started under otel.NoGlobal included.
+// LocalDBOf returns the database of p's Local destination (the last one
+// configured that is open), else nil — for any pipeline: Install,
+// Start (otel.NoGlobal included) or a plain otel.Install/otel.Start
+// given an exporter.Local.
 func LocalDBOf(p *otel.Pipeline) obsdb.DB {
-	regMu.Lock()
-	defer regMu.Unlock()
-	info := started[p]
-	if info == nil {
-		return nil
-	}
-	for i := len(info.locals) - 1; i >= 0; i-- {
-		if h := info.locals[i].handle; h != nil && h.isOpen() {
+	ms := markersOf(p)
+	handleMu.Lock()
+	defer handleMu.Unlock()
+	for i := len(ms) - 1; i >= 0; i-- {
+		if ms[i].kind != kindLocal {
+			continue
+		}
+		if h := ms[i].handle; h != nil && h.isOpen() {
 			return h.db
 		}
 	}
@@ -241,10 +198,9 @@ func LocalDBOf(p *otel.Pipeline) obsdb.DB {
 }
 
 // StudioEndpoint returns the installed pipeline's Studio destination
-// (url and token), which weft/runtime dials by default: the
-// environment's (WEFTBASE_URL or the discovery file) when it added
-// one, else the last Studio option. Known for a pipeline Install or
-// Start built; "" otherwise, before an install and after its shutdown.
+// (url and token), which weftbase/runtime dials by default:
+// StudioEndpointOf(otel.Installed()). "" before an install, after its
+// shutdown, and for a pipeline without a Studio.
 func StudioEndpoint() (string, string) {
 	p := otel.Installed()
 	if p == nil {
@@ -253,21 +209,44 @@ func StudioEndpoint() (string, string) {
 	return StudioEndpointOf(p)
 }
 
-// StudioEndpointOf is StudioEndpoint for a pipeline Install or Start
-// built, installed or not.
+// StudioEndpointOf returns the Studio destination p built, installed or
+// not: the environment's (WEFTBASE_URL or the discovery file) when it
+// added one, else the last exporter.Studio configured. Any pipeline
+// with an exporter.Studio destination counts — one a plain otel.Install
+// built included; a Studio Install skipped (it failed to build) or the
+// environment's dropped as a duplicate does not.
 func StudioEndpointOf(p *otel.Pipeline) (string, string) {
-	regMu.Lock()
-	defer regMu.Unlock()
-	if info := started[p]; info != nil {
-		return info.url, info.token
+	ms := markersOf(p)
+	for i := len(ms) - 1; i >= 0; i-- {
+		if ms[i].kind == kindStudio {
+			return ms[i].url, ms[i].token
+		}
 	}
 	return "", ""
 }
 
-// discovered is the running Studio the discovery file named.
+// discovered is the running Studio the discovery file named, and the
+// marker of the environment Studio built from it.
 type discovered struct {
 	info discovery.Info
 	path string
+	m    *marker
+}
+
+// log is the one INFO line — which Studio this process joined, and how
+// to stop it doing so — when p built the Studio the file named.
+func (d *discovered) log(p *otel.Pipeline) {
+	if d == nil || d.m == nil {
+		return
+	}
+	for _, m := range markersOf(p) {
+		if m == d.m {
+			slog.Info("weft/exporter: joined the running Studio", "url", d.info.URL,
+				"pid", d.info.PID, "file", d.path,
+				"hint", "WEFTBASE_URL names another; exporter.NoDiscovery() or WEFTBASE_DISCOVERY=off ignores the file")
+			return
+		}
+	}
 }
 
 // discoverStudio is the discovery rung: when WEFTBASE_URL is unset
@@ -292,16 +271,6 @@ func discoverStudio(getenv func(string) string) (func(string) string, *discovere
 		}
 		return getenv(k)
 	}, &discovered{info: info, path: path}
-}
-
-// dedupURL is the URL two Studios are compared by: scheme, host and
-// path.
-func dedupURL(raw string) string {
-	u, err := url.Parse(normalizeEndpoint(raw))
-	if err != nil || u.Host == "" {
-		return raw
-	}
-	return u.Scheme + "://" + u.Host + strings.TrimSuffix(u.Path, "/")
 }
 
 // envStudioURL is the check otel applies to an OTLP endpoint, for the

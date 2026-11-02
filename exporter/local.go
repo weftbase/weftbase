@@ -24,7 +24,7 @@ import (
 // it found on disk — add Studio(url, token) to write to one as well.
 func Local(path string, opts ...otel.DestOption) otel.Option {
 	m := &marker{kind: kindLocal}
-	m.opt = otel.Options(otel.Sink("local", func(context.Context) (sdktrace.SpanExporter, sdklog.Exporter, error) {
+	return otel.Tag(m, otel.Sink("local", func(context.Context) (sdktrace.SpanExporter, sdklog.Exporter, error) {
 		p := path
 		if p == "" {
 			p = defaultLocalPath(envGetenv)
@@ -36,8 +36,6 @@ func Local(path string, opts ...otel.DestOption) otel.Option {
 		h := openHandle(db, m)
 		return &localSpanExporter{h: h}, &localLogExporter{h: h}, nil
 	}, opts...))
-	register(m)
-	return m.opt
 }
 
 // defaultLocalPath is where Local writes when no path is given: $WEFTBASE_DB
@@ -63,10 +61,9 @@ type localHandle struct {
 
 func openHandle(db obsdb.DB, m *marker) *localHandle {
 	h := &localHandle{db: db, m: m, refs: 2}
-	regMu.Lock()
-	openLocals = append(openLocals, h)
+	handleMu.Lock()
 	m.handle = h
-	regMu.Unlock()
+	handleMu.Unlock()
 	return h
 }
 
@@ -81,17 +78,11 @@ func (h *localHandle) release() error {
 	if !last {
 		return nil
 	}
-	regMu.Lock()
-	for i, o := range openLocals {
-		if o == h {
-			openLocals = append(openLocals[:i], openLocals[i+1:]...)
-			break
-		}
-	}
+	handleMu.Lock()
 	if h.m.handle == h {
 		h.m.handle = nil
 	}
-	regMu.Unlock()
+	handleMu.Unlock()
 	return h.db.Close()
 }
 

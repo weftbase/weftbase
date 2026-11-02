@@ -22,8 +22,9 @@ const (
 // 1 s) and a 16,384-record queue; opts override any of them. http:// to
 // a non-loopback host needs otel.Insecure(). Naming a Studio switches
 // the discovery file off in Install and Start (as naming a Local does),
-// and makes it the endpoint StudioEndpoint reports for that pipeline
-// (WEFTBASE_URL still adds its own, de-duplicated by URL).
+// and makes it the endpoint StudioEndpoint reports for any pipeline
+// that built it, a plain otel.Install's included (WEFTBASE_URL still
+// adds its own under Install and Start, de-duplicated by URL).
 func Studio(url, token string, opts ...otel.DestOption) otel.Option {
 	m := &marker{kind: kindStudio, url: normalizeEndpoint(url), token: token}
 	base := []otel.DestOption{
@@ -33,9 +34,7 @@ func Studio(url, token string, opts ...otel.DestOption) otel.Option {
 	if token != "" {
 		base = append(base, otel.Headers(map[string]string{"Authorization": "Bearer " + token}))
 	}
-	m.opt = otel.Options(otel.OTLP(url, append(base, opts...)...))
-	register(m)
-	return m.opt
+	return otel.Tag(m, otel.OTLP(url, append(base, opts...)...))
 }
 
 // normalizeEndpoint applies the OTLP endpoint convention otel applies:

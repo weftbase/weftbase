@@ -45,11 +45,12 @@ type config struct {
 // exporter.StudioEndpoint() empty) skips the file: the link would register
 // with a Studio its runs never reach, so Install opens nothing and
 // WARNs once, naming Local(srv) and Studio(url, token). The rule reads
-// the *installed* pipeline only (exporter.LocalDB(), set by
-// exporter.Install / exporter.Start without otel.NoGlobal; the Studio
-// endpoint is known only for a pipeline those built): an app that builds
-// its pipeline with exporter.Start(exporter.Local(p), otel.NoGlobal())
-// leaves it unset, so
+// the *installed* pipeline only (exporter.LocalDB() and
+// exporter.StudioEndpoint() read any installed pipeline with an
+// exporter.Local or exporter.Studio destination — exporter.Install's,
+// exporter.Start's without otel.NoGlobal, or a plain otel.Install's):
+// an app that builds its pipeline with
+// exporter.Start(exporter.Local(p), otel.NoGlobal()) leaves them unset, so
 // Install without Studio or Local still joins a discovered Studio —
 // one whose spans never arrive, since the pipeline sends them nowhere
 // but p. Such an app names its Studio itself: Local(srv) for the

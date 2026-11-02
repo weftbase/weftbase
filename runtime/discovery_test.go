@@ -216,3 +216,66 @@ func TestInstallLocalPipelineSkipsDiscovery(t *testing.T) {
 		t.Errorf("runtime WARN lines %q, want exactly one saying the pipeline records only into a Local store (exporter.Local, or exporter.Install's default), naming runtime.Local(srv) and runtime.Studio(url, token)", warns)
 	}
 }
+
+// TestInstallDialsAPlainOtelInstallsStudio (the 0.21 migration's
+// otel.Install(exporter.Local(p), exporter.Studio(url, tok))): the
+// pipeline was built by otel.Install, not exporter.Install, and
+// runtime.Install still dials its Studio destination — before the
+// exporter's options were tagged, exporter.StudioEndpoint() read ""
+// for such a pipeline and the link went local-only (one WARN, nothing
+// registered).
+func TestInstallDialsAPlainOtelInstallsStudio(t *testing.T) {
+	t.Setenv("WEFT_ENV", "dev")
+	t.Setenv("WEFTBASE_URL", "")
+	t.Setenv("WEFTBASE_TOKEN", "")
+	t.Setenv("WEFTBASE_DISCOVERY", "off")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+	const tok = "plain-token"
+	srv := studio.New(studio.Open(filepath.Join(t.TempDir(), "studio.db")), studio.Playground(true),
+		studio.Token(tok), studio.Base("/"))
+	defer func() { _ = srv.Close() }()
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	var logs lockedBuf
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	stopOtel := otel.Install(otel.Heartbeat(0),
+		exporter.Local(filepath.Join(t.TempDir(), "app.db")), exporter.Studio(ts.URL, tok))
+	defer stopOtel()
+	if u, got := exporter.StudioEndpoint(); u != ts.URL || got != tok {
+		t.Fatalf("exporter.StudioEndpoint() = %q, %q after otel.Install(Local, Studio); want %q, %q", u, got, ts.URL, tok)
+	}
+	if exporter.LocalDB() == nil {
+		t.Fatal("exporter.LocalDB() = nil after otel.Install(Local, Studio)")
+	}
+	stop := Install(Agents(testAgent("plain-agent")))
+	defer stop()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/runtimes", nil)
+		req.Header.Set("Authorization", "Bearer "+tok)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out struct {
+			Runtimes []json.RawMessage `json:"runtimes"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		_ = resp.Body.Close()
+		if len(out.Runtimes) > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no runtime registered with the pipeline's Studio\nlogs:\n%s", logs.String())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if strings.Contains(logs.String(), "records only into a Local store") {
+		t.Errorf("the link was refused as local-only: %s", logs.String())
+	}
+}
