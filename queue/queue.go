@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -104,9 +105,10 @@ func parseTS(s string) time.Time {
 
 // Queue is the queue service.
 type Queue struct {
-	db   store.Runner
-	now  func() time.Time
-	wake chan struct{}
+	db        store.Runner
+	now       func() time.Time
+	wake      chan struct{}
+	timerWake chan struct{}
 }
 
 // Option configures a Queue.
@@ -117,7 +119,7 @@ func Clock(now func() time.Time) Option { return func(q *Queue) { q.now = now } 
 
 // New returns the queue over db.
 func New(db store.Runner, opts ...Option) *Queue {
-	q := &Queue{db: db, now: time.Now, wake: make(chan struct{}, 1)}
+	q := &Queue{db: db, now: time.Now, wake: make(chan struct{}, 1), timerWake: make(chan struct{}, 1)}
 	for _, o := range opts {
 		o(q)
 	}
@@ -331,6 +333,21 @@ func (q *Queue) Release(ctx context.Context, l Lease, delay time.Duration) error
 	})
 }
 
+// Cancel completes a ready item in tx without running it (the work it
+// stood for ended another way: a canceled run, a run whose queue time
+// ran out). A leased item is left to its holder; an item already done
+// is left alone. It reports whether it completed the item.
+func (q *Queue) Cancel(tx store.Tx, s tenant.Scope, id, why string) (bool, error) {
+	res, err := store.Exec(tx, `UPDATE queue_items SET status = ?, last_error = ?, updated_at = ?
+		WHERE id = ? AND project_id = ? AND env = ? AND tenant_id = ? AND status = ?`,
+		StatusDone, why, ts(q.now()), id, s.Project(), s.Env(), s.Tenant(), StatusReady)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
+}
+
 // Get reads one item in s.
 func (q *Queue) Get(ctx context.Context, s tenant.Scope, id string) (Item, error) {
 	var it Item
@@ -376,14 +393,75 @@ func (q *Queue) At(tx store.Tx, s tenant.Scope, t Timer) (string, error) {
 		t.Payload = json.RawMessage(`{}`)
 	}
 	t.ID = "tmr_" + ulid.New()
+	tx.AfterCommit(q.pokeTimers)
 	_, err := store.Exec(tx, `INSERT INTO timers (id, project_id, env, tenant_id, kind, ref, due_at, payload, fired_at, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
 		t.ID, s.Project(), s.Env(), s.Tenant(), t.Kind, t.Ref, ts(t.DueAt), string(t.Payload), ts(q.now()))
 	if err != nil {
 		return "", fmt.Errorf("queue: timer: %w", err)
 	}
-	tx.AfterCommit(q.Poke)
 	return t.ID, nil
+}
+
+func (q *Queue) pokeTimers() {
+	select {
+	case q.timerWake <- struct{}{}:
+	default:
+	}
+}
+
+// FireFunc fires one due timer, in the transaction that marks it fired.
+type FireFunc func(tx store.Tx, t Timer) error
+
+// RunTimers fires due timers until ctx ends: overdue ones at once (boot
+// recovery), the rest as they fall due, looking every poll and after
+// every commit that scheduled one. Each timer fires in one transaction
+// with its fired mark, so it fires once (another node, a replay: Fire
+// reports false and nothing runs). A fire that fails is logged and the
+// timer is marked fired anyway: a timer that cannot fire must not
+// spin.
+func (q *Queue) RunTimers(ctx context.Context, poll time.Duration, fire FireFunc, log *slog.Logger) {
+	if poll <= 0 {
+		poll = time.Second
+	}
+	if log == nil {
+		log = slog.Default()
+	}
+	t := time.NewTicker(poll)
+	defer t.Stop()
+	for {
+		for {
+			due, err := q.Due(ctx, 64)
+			if err != nil {
+				if ctx.Err() == nil {
+					log.Warn("queue: reading due timers failed", "err", err)
+				}
+				break
+			}
+			for _, tm := range due {
+				err := q.db.InTx(ctx, func(tx store.Tx) error {
+					ok, err := q.Fire(tx, tm.ID)
+					if err != nil || !ok {
+						return err
+					}
+					return fire(tx, tm)
+				})
+				if err != nil && ctx.Err() == nil {
+					log.Warn("queue: a timer failed to fire", "timer", tm.ID, "kind", tm.Kind, "ref", tm.Ref, "err", err)
+					_ = q.db.InTx(ctx, func(tx store.Tx) error { _, err := q.Fire(tx, tm.ID); return err })
+				}
+			}
+			if len(due) < 64 {
+				break
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		case <-q.timerWake:
+		}
+	}
 }
 
 // Due reads up to limit unfired timers due by now, earliest first.

@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/weftbase/weftbase/client/wire"
+	"github.com/weftbase/weftbase/tenant"
 )
 
 // Worker is one attached executor and the AgentVersions it serves.
@@ -14,6 +15,8 @@ type Worker struct {
 	Registration wire.Registration
 	// Versions are the agv_… ids its registration resolved to.
 	Versions []string
+	// Scope is the scope it registered in.
+	Scope tenant.Scope
 
 	inflight int
 }

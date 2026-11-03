@@ -30,6 +30,8 @@ const (
 	RunFinished        = "run.finished"
 	RunFailed          = "run.failed"
 	RunCanceled        = "run.canceled"
+	RunSteered         = "run.steered"
+	RunMigrated        = "run.migrated"
 	SessionCreated     = "session.created"
 	SessionDeleted     = "session.deleted"
 	ApprovalRequested  = "approval.requested"

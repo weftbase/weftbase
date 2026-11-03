@@ -9,6 +9,13 @@
 // the methods a worker.RunSink needs (Prepare, Started, Finished,
 // Rejected, Lost), each in the transaction that also completes the
 // queue item; every status change writes its event in that transaction.
+//
+// The ledger's timers (OnTimer, fired by the scheduler role from the
+// queue's timer table) enforce its Policy: a run still queued with no
+// worker after QueueTTL fails worker_lost; a parked run whose approval
+// expiry passes is resumed with its pending calls denied; a parked run
+// past MaxPinAge is migrated to the agent's prod version (or canceled
+// version_retired when there is none).
 package sessions
 
 import (
@@ -16,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/weftbase/weftbase/client/ulid"
@@ -55,7 +63,54 @@ var (
 	ErrNotSupported = errors.New("sessions: not supported yet")
 	// ErrInvalid: a malformed request (400).
 	ErrInvalid = errors.New("sessions: invalid request")
+	// ErrInvalidSteer: a steer that is not user messages (400
+	// invalid_steer).
+	ErrInvalidSteer = errors.New("sessions: invalid steer")
 )
+
+// Timer kinds the ledger schedules (queue.Timer.Kind; Ref is the run).
+const (
+	TimerQueueTTL       = "run.queue_ttl"
+	TimerApprovalExpiry = "run.approval_expiry"
+	TimerMaxPinAge      = "run.max_pin_age"
+)
+
+// ViaMigrate is the resolved_via of a resume that runs on the version a
+// parked run was migrated to (its maximum pin age passed).
+const ViaMigrate = "migrate"
+
+// Policy is the ledger's time limits.
+type Policy struct {
+	// QueueTTL: a run still queued, never dispatched, this long after
+	// admission fails worker_lost (P§6.3 rule 3). 0: DefaultQueueTTL;
+	// negative: never.
+	QueueTTL time.Duration
+	// ApprovalExpiry: a parked run not resumed this long after it
+	// parked is resumed with every pending call denied ("approval
+	// expired"). 0: never.
+	ApprovalExpiry time.Duration
+	// MaxPinAge: a parked run not resumed this long after it parked is
+	// migrated to the agent's prod version (prod, else the newest), or
+	// canceled version_retired when it has none (P§5.6). 0:
+	// DefaultMaxPinAge; negative: never.
+	MaxPinAge time.Duration
+}
+
+// Policy defaults.
+const (
+	DefaultQueueTTL  = 24 * time.Hour
+	DefaultMaxPinAge = 30 * 24 * time.Hour
+)
+
+func (p Policy) withDefaults() Policy {
+	if p.QueueTTL == 0 {
+		p.QueueTTL = DefaultQueueTTL
+	}
+	if p.MaxPinAge == 0 {
+		p.MaxPinAge = DefaultMaxPinAge
+	}
+	return p
+}
 
 // ErrWorkerLost is the error a run gets when its worker stopped
 // answering before it finished.
@@ -79,6 +134,7 @@ type Run struct {
 	Metadata        map[string]string  `json:"metadata,omitempty"`
 	ResumeOf        string             `json:"resume_of,omitempty"`
 	ResumedBy       string             `json:"resumed_by,omitempty"`
+	MigratedTo      string             `json:"migrated_to,omitempty"`
 	Pending         []wire.PendingCall `json:"pending,omitempty"`
 	Error           string             `json:"error,omitempty"`
 	CancelCause     string             `json:"cancel_cause,omitempty"`
@@ -86,8 +142,11 @@ type Run struct {
 	Usage           Usage              `json:"usage"`
 	CreatedAt       time.Time          `json:"created_at"`
 	StartedAt       *time.Time         `json:"started_at,omitempty"`
+	ParkedAt        *time.Time         `json:"parked_at,omitempty"`
+	PinExpiredAt    *time.Time         `json:"pin_expired_at,omitempty"`
 	FinishedAt      *time.Time         `json:"finished_at,omitempty"`
 
+	queueItem  string
 	commandID  string
 	worker     string
 	checkpoint json.RawMessage
@@ -100,6 +159,12 @@ type Canceler interface {
 	CancelRun(ctx context.Context, s tenant.Scope, runID, cause string) error
 }
 
+// Steerer delivers a steer to whoever holds a running run (the worker
+// hub; the kernel wires it).
+type Steerer interface {
+	SteerRun(ctx context.Context, s tenant.Scope, runID string, messages []json.RawMessage) error
+}
+
 // Ledger is the run ledger.
 type Ledger struct {
 	db       store.Runner
@@ -107,7 +172,9 @@ type Ledger struct {
 	reg      *registry.Registry
 	q        *queue.Queue
 	now      func() time.Time
+	policy   Policy
 	canceler Canceler
+	steerer  Steerer
 }
 
 // Option configures a Ledger.
@@ -116,17 +183,27 @@ type Option func(*Ledger)
 // Clock sets the time source (tests).
 func Clock(now func() time.Time) Option { return func(l *Ledger) { l.now = now } }
 
+// WithPolicy sets the ledger's time limits.
+func WithPolicy(p Policy) Option { return func(l *Ledger) { l.policy = p } }
+
 // New returns the ledger.
 func New(db store.Runner, log *events.Log, reg *registry.Registry, q *queue.Queue, opts ...Option) *Ledger {
 	l := &Ledger{db: db, log: log, reg: reg, q: q, now: time.Now}
 	for _, o := range opts {
 		o(l)
 	}
+	l.policy = l.policy.withDefaults()
 	return l
 }
 
 // SetCanceler wires the cancel path to running runs (before serving).
 func (l *Ledger) SetCanceler(c Canceler) { l.canceler = c }
+
+// SetSteerer wires the steer path to running runs (before serving).
+func (l *Ledger) SetSteerer(st Steerer) { l.steerer = st }
+
+// Policy is the ledger's time limits, defaults applied.
+func (l *Ledger) Policy() Policy { return l.policy }
 
 const tsFormat = "2006-01-02T15:04:05.000000000Z"
 
@@ -186,18 +263,25 @@ func (l *Ledger) insert(tx store.Tx, s tenant.Scope, actor events.Actor, run *Ru
 	input, _ := json.Marshal(run.Input)
 	meta, _ := json.Marshal(run.Metadata)
 	dec, _ := json.Marshal(run.decisions)
-	_, err := store.Exec(tx, `INSERT INTO runs (id, project_id, env, tenant_id, agent, agent_version, resolved_via, status, input, metadata,
+	payload, _ := json.Marshal(itemPayload{RunID: run.ID})
+	item, err := l.q.Enqueue(tx, s, queue.Item{Kind: kind, Route: run.AgentVersion, Priority: priority, Payload: payload, MaxAttempts: 1})
+	if err != nil {
+		return err
+	}
+	run.queueItem = item
+	_, err = store.Exec(tx, `INSERT INTO runs (id, project_id, env, tenant_id, agent, agent_version, resolved_via, status, input, metadata,
 		resume_of, resumed_by, decisions, checkpoint, pending, command_id, worker, error, cancel_cause, cancel_requested,
-		input_tokens, output_tokens, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, '', '', '', '', '', '', 0, 0, 0, ?, ?)`,
+		input_tokens, output_tokens, created_at, updated_at, queue_item)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, '', '', '', '', '', '', 0, 0, 0, ?, ?, ?)`,
 		run.ID, s.Project(), s.Env(), s.Tenant(), run.Agent, run.AgentVersion, run.ResolvedVia, run.Status,
-		string(input), string(meta), run.ResumeOf, string(dec), now, now)
+		string(input), string(meta), run.ResumeOf, string(dec), now, now, item)
 	if err != nil {
 		return fmt.Errorf("sessions: insert run: %w", err)
 	}
-	payload, _ := json.Marshal(itemPayload{RunID: run.ID})
-	if _, err := l.q.Enqueue(tx, s, queue.Item{Kind: kind, Route: run.AgentVersion, Priority: priority, Payload: payload, MaxAttempts: 1}); err != nil {
-		return err
+	if l.policy.QueueTTL > 0 {
+		if _, err := l.q.At(tx, s, queue.Timer{Kind: TimerQueueTTL, Ref: run.ID, DueAt: l.now().Add(l.policy.QueueTTL)}); err != nil {
+			return err
+		}
 	}
 	return l.emit(tx, s, actor, events.RunQueued, *run, nil)
 }
@@ -226,15 +310,16 @@ func ItemRunID(payload json.RawMessage) (string, error) {
 
 const selectRun = `SELECT id, tenant_id, agent, agent_version, resolved_via, status, input, metadata, resume_of, resumed_by,
 	decisions, checkpoint, pending, command_id, worker, error, cancel_cause, cancel_requested, input_tokens, output_tokens,
-	created_at, started_at, finished_at FROM runs`
+	created_at, started_at, finished_at, queue_item, parked_at, migrated_to, pin_expired_at FROM runs`
 
 func scanRun(r interface{ Scan(...any) error }) (Run, error) {
 	var run Run
 	var input, meta, dec, checkpoint, pending, created string
-	var started, finished *string
+	var started, finished, parked, pinExpired *string
 	err := r.Scan(&run.ID, &run.TenantID, &run.Agent, &run.AgentVersion, &run.ResolvedVia, &run.Status, &input, &meta,
 		&run.ResumeOf, &run.ResumedBy, &dec, &checkpoint, &pending, &run.commandID, &run.worker, &run.Error, &run.CancelCause,
-		&run.CancelRequested, &run.Usage.InputTokens, &run.Usage.OutputTokens, &created, &started, &finished)
+		&run.CancelRequested, &run.Usage.InputTokens, &run.Usage.OutputTokens, &created, &started, &finished,
+		&run.queueItem, &parked, &run.MigratedTo, &pinExpired)
 	if err != nil {
 		return Run{}, store.NotFound(err)
 	}
@@ -246,15 +331,16 @@ func scanRun(r interface{ Scan(...any) error }) (Run, error) {
 		run.checkpoint = json.RawMessage(checkpoint)
 	}
 	run.CreatedAt = parseTS(created)
-	if started != nil {
-		t := parseTS(*started)
-		run.StartedAt = &t
-	}
-	if finished != nil {
-		t := parseTS(*finished)
-		run.FinishedAt = &t
-	}
+	run.StartedAt, run.FinishedAt, run.ParkedAt, run.PinExpiredAt = tsPtr(started), tsPtr(finished), tsPtr(parked), tsPtr(pinExpired)
 	return run, nil
+}
+
+func tsPtr(s *string) *time.Time {
+	if s == nil {
+		return nil
+	}
+	t := parseTS(*s)
+	return &t
 }
 
 func (l *Ledger) get(tx store.Tx, s tenant.Scope, id string) (Run, error) {
@@ -327,17 +413,28 @@ func (l *Ledger) Resume(ctx context.Context, s tenant.Scope, actor events.Actor,
 		if err != nil {
 			return err
 		}
-		if parked.Status != StatusParked || parked.ResumedBy != "" {
-			return fmt.Errorf("%w: run %s is %s", ErrNotParked, runID, parked.Status)
-		}
-		run = Run{ID: "run_" + ulid.New(), TenantID: s.Tenant(), Agent: parked.Agent, AgentVersion: parked.AgentVersion,
-			ResolvedVia: registry.ViaPin, Status: StatusQueued, Metadata: parked.Metadata, ResumeOf: parked.ID, decisions: decisions}
-		if _, err := store.Exec(tx, `UPDATE runs SET resumed_by = ?, updated_at = ? WHERE id = ?`, run.ID, l.ts(), parked.ID); err != nil {
-			return err
-		}
-		return l.insert(tx, s, actor, &run, queue.KindResume, 0)
+		run, err = l.resume(tx, s, actor, parked, decisions)
+		return err
 	})
 	return run, err
+}
+
+// resume admits the run that continues parked: on its pin, or on the
+// version it was migrated to.
+func (l *Ledger) resume(tx store.Tx, s tenant.Scope, actor events.Actor, parked Run, decisions []wire.Decision) (Run, error) {
+	if parked.Status != StatusParked || parked.ResumedBy != "" {
+		return Run{}, fmt.Errorf("%w: run %s is %s", ErrNotParked, parked.ID, parked.Status)
+	}
+	version, via := parked.AgentVersion, registry.ViaPin
+	if parked.MigratedTo != "" {
+		version, via = parked.MigratedTo, ViaMigrate
+	}
+	run := Run{ID: "run_" + ulid.New(), TenantID: s.Tenant(), Agent: parked.Agent, AgentVersion: version,
+		ResolvedVia: via, Status: StatusQueued, Metadata: parked.Metadata, ResumeOf: parked.ID, decisions: decisions}
+	if _, err := store.Exec(tx, `UPDATE runs SET resumed_by = ?, updated_at = ? WHERE id = ?`, run.ID, l.ts(), parked.ID); err != nil {
+		return Run{}, err
+	}
+	return run, l.insert(tx, s, actor, &run, queue.KindResume, 0)
 }
 
 // Cancel cancels a run with cause "user". A queued or parked run ends
@@ -373,6 +470,11 @@ func (l *Ledger) Cancel(ctx context.Context, s tenant.Scope, actor events.Actor,
 		// A queued run already handed to a worker (accepted, not yet
 		// started) is ended here and the cancel still goes to it.
 		deliver = run.Status == StatusQueued && run.commandID != ""
+		if run.Status == StatusQueued && run.queueItem != "" {
+			if _, err := l.q.Cancel(tx, s, run.queueItem, "canceled"); err != nil {
+				return err
+			}
+		}
 		return l.end(tx, s, actor, &run, wire.Ack{Status: wire.StatusCanceled, Cause: wire.CauseUser, Error: reason})
 	})
 	if err == nil && deliver && l.canceler != nil {
@@ -383,9 +485,34 @@ func (l *Ledger) Cancel(ctx context.Context, s tenant.Scope, actor events.Actor,
 	return run, err
 }
 
-// Steer is not built yet: the worker steer verb lands after cancel.
-func (l *Ledger) Steer(ctx context.Context, s tenant.Scope, runID string, messages []json.RawMessage) error {
-	return ErrNotSupported
+// Steer delivers user messages into a running run (P§7.5): they are
+// drained at its next drain point. Messages that are not user messages
+// are ErrInvalidSteer; a run that is not running (queued, parked,
+// finished, or no longer in its worker's hands) is ErrNotRunning. A
+// delivered steer writes run.steered.
+func (l *Ledger) Steer(ctx context.Context, s tenant.Scope, actor events.Actor, runID string, messages []json.RawMessage) error {
+	if s.IsZero() {
+		return tenant.ErrZeroScope
+	}
+	if err := (wire.Steer{CommandID: wire.NewCommandID(), RunID: runID, Messages: messages}).Validate(); err != nil {
+		return fmt.Errorf("%w: %s", ErrInvalidSteer, strings.TrimPrefix(err.Error(), "wire: "))
+	}
+	run, err := l.Get(ctx, s, runID)
+	if err != nil {
+		return err
+	}
+	if run.Status != StatusRunning || run.CancelRequested {
+		return fmt.Errorf("%w: run %s is %s", ErrNotRunning, runID, run.Status)
+	}
+	if l.steerer == nil {
+		return ErrNotSupported
+	}
+	if err := l.steerer.SteerRun(ctx, s, runID, messages); err != nil {
+		return fmt.Errorf("%w: %v", ErrNotRunning, err)
+	}
+	return l.db.InTx(ctx, func(tx store.Tx) error {
+		return l.emit(tx, s, actor, events.RunSteered, run, map[string]any{"messages": len(messages)})
+	})
 }
 
 // Prepare is the hub's first step for a claimed item (its payload), in the
@@ -507,14 +634,19 @@ func (l *Ledger) end(tx store.Tx, s tenant.Scope, actor events.Actor, run *Run, 
 		u = Usage{InputTokens: ack.Usage.InputTokens, OutputTokens: ack.Usage.OutputTokens}
 	}
 	now := l.ts()
-	var finished any = now
+	var finished, parked any = now, nil
 	if status == StatusParked {
-		finished = nil
+		finished, parked = nil, now
 	}
 	if _, err := store.Exec(tx, `UPDATE runs SET status = ?, error = ?, cancel_cause = ?, pending = ?, checkpoint = ?,
-		input_tokens = ?, output_tokens = ?, finished_at = ?, updated_at = ? WHERE id = ?`,
-		status, ack.Error, cause, string(pending), string(ack.Checkpoint), u.InputTokens, u.OutputTokens, finished, now, run.ID); err != nil {
+		input_tokens = ?, output_tokens = ?, finished_at = ?, parked_at = ?, updated_at = ? WHERE id = ?`,
+		status, ack.Error, cause, string(pending), string(ack.Checkpoint), u.InputTokens, u.OutputTokens, finished, parked, now, run.ID); err != nil {
 		return err
+	}
+	if status == StatusParked {
+		if err := l.parkTimers(tx, s, run.ID); err != nil {
+			return err
+		}
 	}
 	run.Status, run.Error, run.CancelCause, run.Pending, run.Usage = status, ack.Error, cause, ack.Pending, u
 	extra := map[string]any{}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/weftbase/weftbase/client/wire"
 	"github.com/weftbase/weftbase/events"
@@ -34,7 +35,12 @@ func (c *canceler) CancelRun(_ context.Context, _ tenant.Scope, runID, cause str
 	return nil
 }
 
-func setup(t *testing.T) *fixture {
+func setup(t *testing.T, opts ...sessions.Option) *fixture {
+	t.Helper()
+	return setupClock(t, nil, opts...)
+}
+
+func setupClock(t *testing.T, now func() time.Time, opts ...sessions.Option) *fixture {
 	t.Helper()
 	ctx := context.Background()
 	db, err := sqlite.Open(ctx, ":memory:")
@@ -44,8 +50,13 @@ func setup(t *testing.T) *fixture {
 	t.Cleanup(func() { _ = db.Close() })
 	f := &fixture{db: db, log: events.New(db), s: tenant.Default()}
 	f.reg = registry.New(db, f.log)
-	f.q = queue.New(db)
-	f.l = sessions.New(db, f.log, f.reg, f.q)
+	var qopts []queue.Option
+	if now != nil {
+		qopts = append(qopts, queue.Clock(now))
+		opts = append(opts, sessions.Clock(now))
+	}
+	f.q = queue.New(db, qopts...)
+	f.l = sessions.New(db, f.log, f.reg, f.q, opts...)
 	body := []byte(`{"weft":1,"agents":[{"name":"support"}]}`)
 	vs, err := f.reg.RegisterIn(ctx, f.s, "sha256:aaa", "embedded",
 		[]registry.AgentSpec{{Name: "support", Manifest: body, ManifestHash: registry.ManifestHash(body)}})
@@ -164,8 +175,8 @@ func TestCancelRules(t *testing.T) {
 	if err != nil || r.Status != sessions.StatusCanceled || r.CancelCause != wire.CauseUser {
 		t.Fatalf("cancel queued = %+v, %v", r, err)
 	}
-	if _, _, ok := f.claim(t); ok {
-		t.Error("a canceled run was dispatched")
+	if _, err := f.q.Claim(ctx, queue.ClaimFilter{Owner: "x"}); !errors.Is(err, queue.ErrEmpty) {
+		t.Errorf("a canceled run's item is still claimable: %v", err)
 	}
 
 	// Running: marked, delivered to the canceler, ended by the worker.
@@ -241,7 +252,7 @@ func TestParkResumeAndLost(t *testing.T) {
 	if got.Status != sessions.StatusFailed || !strings.HasPrefix(got.Error, sessions.ErrWorkerLost) {
 		t.Errorf("re-prepared run = %+v", got)
 	}
-	if err := f.l.Steer(ctx, f.s, res.ID, nil); !errors.Is(err, sessions.ErrNotSupported) {
-		t.Errorf("steer = %v", err)
+	if err := f.l.Steer(ctx, f.s, events.System, res.ID, nil); !errors.Is(err, sessions.ErrInvalidSteer) {
+		t.Errorf("steer without messages = %v", err)
 	}
 }

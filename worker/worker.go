@@ -22,14 +22,17 @@ import (
 // reconnect). Dispatch hands a command over at most once: the answer
 // is accepted (it will run), rejected or busy (it will not); nothing
 // runs on an unconfirmed ack. Cancel asks the worker to cancel a run
-// it holds. Events yields the worker's later acks (run_started,
-// heartbeat, finished) as frames until ctx ends or the worker goes
-// away. Drain finishes what the worker holds by deadline, cancelling
-// the rest, and takes nothing more.
+// it holds. Steer queues user messages for a run it holds (accepted,
+// or rejected when the run is not there). Events yields the worker's
+// later acks (run_started, heartbeat, finished) as frames, and a
+// disconnected frame (wire.Disconnected) when the worker's link ended,
+// until ctx ends. Drain finishes what the worker holds by deadline,
+// cancelling the rest, and takes nothing more.
 type Executor interface {
 	Register(ctx context.Context) (wire.Registration, error)
 	Dispatch(ctx context.Context, cmd wire.Command) (wire.Ack, error)
 	Cancel(ctx context.Context, c wire.Cancel) error
+	Steer(ctx context.Context, s wire.Steer) (wire.Ack, error)
 	Events(ctx context.Context) iter.Seq2[wire.Frame, error]
 	Drain(ctx context.Context, deadline time.Time) error
 }

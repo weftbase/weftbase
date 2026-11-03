@@ -151,12 +151,13 @@ func New(opts ...Option) (_ *App, err error) {
 	a.sessions = authz.NewSessions(a.control)
 	a.registry = registry.New(a.control, a.events)
 	a.queue = queue.New(a.control)
-	a.ledger = sessions.New(a.control, a.events, a.registry, a.queue)
+	a.ledger = sessions.New(a.control, a.events, a.registry, a.queue, sessions.WithPolicy(c.policy))
 	a.hub = hub.New(hub.Config{
 		DB: a.control, Events: a.events, Queue: a.queue, Registry: a.registry, Sink: a.ledger,
-		LeaseTTL: c.leaseTTL, Logger: a.log,
+		LeaseTTL: c.leaseTTL, Silence: c.silence, Logger: a.log,
 	})
 	a.ledger.SetCanceler(a.hub)
+	a.ledger.SetSteerer(a.hub)
 	var authOpts []authz.Option
 	if c.open {
 		authOpts = append(authOpts, authz.Open())
@@ -303,7 +304,9 @@ func (a *App) Routes() []httpapi.Route { return a.router.Routes() }
 // Run runs the node's background work until ctx ends or Shutdown: the
 // outbox hub's pump (api: the /v1/events subscribers); the worker hub's
 // claim loop, which dispatches queued runs to the attached executors,
-// and the retention sweeper (scheduler). It returns nil when stopped.
+// the timer loop (overdue timers first: the queue time-to-live, approval
+// expiry, maximum pin age) and the retention sweeper (scheduler). It
+// returns nil when stopped.
 func (a *App) Run(ctx context.Context) error {
 	a.mu.Lock()
 	if a.shutdown {
@@ -338,6 +341,13 @@ func (a *App) Run(ctx context.Context) error {
 			if err := a.hub.Run(ctx); err != nil && ctx.Err() == nil {
 				a.log.Error("weftbase: the worker hub stopped", "err", err)
 			}
+		}()
+	}
+	if a.roles.has(RoleScheduler) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			a.queue.RunTimers(ctx, a.cfg.timerPoll, a.ledger.OnTimer, a.log)
 		}()
 	}
 	if a.roles.has(RoleScheduler) && a.cfg.retain > 0 {

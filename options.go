@@ -8,6 +8,7 @@ import (
 
 	"github.com/weftbase/weftbase/obsdb"
 	"github.com/weftbase/weftbase/observe/cost"
+	"github.com/weftbase/weftbase/sessions"
 )
 
 // Option configures New.
@@ -33,6 +34,9 @@ type config struct {
 	buildDigest  string
 	leaseTTL     time.Duration
 	drain        time.Duration
+	policy       sessions.Policy
+	timerPoll    time.Duration
+	silence      time.Duration
 }
 
 // defaultDrain is how long Shutdown lets running runs finish.
@@ -142,3 +146,22 @@ func Drain(d time.Duration) Option { return func(c *config) { c.drain = d } }
 
 // leaseTTL overrides the queue lease of a dispatched run (tests).
 func leaseTTL(d time.Duration) Option { return func(c *config) { c.leaseTTL = d } }
+
+// QueueTTL is how long a run may wait queued with no worker serving its
+// version before it fails worker_lost (default 24 h; negative: never).
+func QueueTTL(d time.Duration) Option { return func(c *config) { c.policy.QueueTTL = d } }
+
+// ApprovalExpiry denies the pending calls of a run parked this long
+// with no decision, resuming it (default: never).
+func ApprovalExpiry(d time.Duration) Option { return func(c *config) { c.policy.ApprovalExpiry = d } }
+
+// MaxPinAge migrates a run parked this long to its agent's prod
+// version, or cancels it (cause version_retired) when there is none
+// (default 30 days; negative: never).
+func MaxPinAge(d time.Duration) Option { return func(c *config) { c.policy.MaxPinAge = d } }
+
+// timerPoll overrides how often the timer loop looks (tests).
+func timerPoll(d time.Duration) Option { return func(c *config) { c.timerPoll = d } }
+
+// silence overrides how long a held run may go unacked (tests).
+func silence(d time.Duration) Option { return func(c *config) { c.silence = d } }

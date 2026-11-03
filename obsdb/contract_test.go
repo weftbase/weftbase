@@ -1060,8 +1060,9 @@ func openFreshClickHouse(t *testing.T) obsdb.DB {
 
 // TestRecordContractDocNames pins docs/record-contract.md to the code
 // both ways: every weft.* and gen_ai.* name the doc spells in
-// backticks is a string the emitters or obsdb spell (core, otel,
-// thread, obsdb and every package under them —
+// backticks is a string the emitters or the readers spell (core, otel,
+// thread, obsdb, and the read server api/http/v1, where the step 3 move
+// left read logic such as weft.replay.view's; every package under them —
 // non-test sources), and every attribute name obsdb/model.go spells is
 // in the doc. Names are matched in any case and with hyphens, so a
 // misspelt `weft.forked-from` is caught, not skipped. A `weft.x.*`
@@ -1073,7 +1074,7 @@ func TestRecordContractDocNames(t *testing.T) {
 	}
 	code := map[string]bool{}
 	lit := regexp.MustCompile(`"((?:weft|gen_ai)\.[A-Za-z0-9_.-]+)"`)
-	for _, root := range []string{weftsrc.Path(t, "core"), weftsrc.Path(t, "otel"), weftsrc.Path(t, "thread"), "."} {
+	for _, root := range []string{weftsrc.Path(t, "core"), weftsrc.Path(t, "otel"), weftsrc.Path(t, "thread"), ".", "../api/http/v1"} {
 		err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return err

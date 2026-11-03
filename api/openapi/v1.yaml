@@ -417,6 +417,48 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "501": { $ref: "#/components/responses/Error" }
+  /v1/runs/{id}/steer:
+    post:
+      operationId: steerRun
+      summary: Steer a running run with user messages
+      description: |
+        The messages go to the worker holding the run and are drained at
+        its next drain point: after a step's tool batch, or at a final
+        step, which then takes one more step. They are never drained when
+        the run parks or a StopWhen ends it. Writes run.steered. A run
+        that is not running is 409; a message that is not role user is
+        400 invalid_steer.
+      x-weftbase-action: runs.steer
+      parameters:
+        - $ref: "#/components/parameters/RunID"
+        - $ref: "#/components/parameters/CSRF"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [messages]
+              properties:
+                messages:
+                  type: array
+                  minItems: 1
+                  items: { $ref: "#/components/schemas/Loose" }
+      responses:
+        "202":
+          description: Delivered to the run's worker.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [run_id, steered]
+                properties:
+                  run_id: { type: string }
+                  steered: { type: integer }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/Error" }
   /v1/runs/{id}/resume:
     post:
       operationId: resumeRun
@@ -935,12 +977,13 @@ components:
         tenant_id: { type: string }
         agent: { type: string }
         agent_version: { type: string }
-        resolved_via: { type: string, description: "label:<name> | latest | pin" }
+        resolved_via: { type: string, description: "label:<name> | latest | pin | migrate" }
         status: { type: string, enum: [queued, running, parked, succeeded, failed, canceled] }
         input: { type: object, additionalProperties: true }
         metadata: { type: object, additionalProperties: { type: string } }
         resume_of: { type: string }
         resumed_by: { type: string }
+        migrated_to: { type: string, description: "the version a parked run past its maximum pin age resumes on" }
         pending:
           type: array
           items:
@@ -959,6 +1002,8 @@ components:
             output_tokens: { type: integer }
         created_at: { type: string, format: date-time }
         started_at: { type: string, format: date-time }
+        parked_at: { type: string, format: date-time }
+        pin_expired_at: { type: string, format: date-time }
         finished_at: { type: string, format: date-time }
     Loose:
       type: object

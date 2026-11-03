@@ -12,10 +12,17 @@
 // this node) is rebuilt by expiry: after a restart an in-flight item's
 // lease runs out, the next claim finds its run dispatched, and the run
 // is marked lost — never sent twice.
+//
+// A run is also lost, at once, when its worker's link ends with the
+// worker (an executor's disconnected frame with lost set: a local child
+// exited), and when its worker stops acking it for longer than
+// max(Silence, three of the worker's heartbeats). Every link that ends
+// writes worker.disconnected to the outbox.
 package hub
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -45,9 +52,20 @@ type Config struct {
 	LeaseTTL time.Duration
 	// Poll is how often the claim loop looks without a wake (default
 	// 250 ms).
-	Poll   time.Duration
-	Logger *slog.Logger
+	Poll time.Duration
+	// Silence is how long a run in a worker's hands may go without an
+	// ack (run_started, heartbeat) before it is lost: the longer of it
+	// and three of the worker's heartbeats (default 10 min, P§6.3).
+	Silence time.Duration
+	Logger  *slog.Logger
 }
+
+// DefaultSilence is Config.Silence's default.
+const DefaultSilence = 10 * time.Minute
+
+// ErrNotHeld is SteerRun's error for a run no worker attached to this
+// node holds, or whose worker refused the steer.
+var ErrNotHeld = errors.New("hub: the run is not in a worker's hands")
 
 // Hub dispatches queued runs to attached executors.
 type Hub struct {
@@ -65,9 +83,13 @@ type Hub struct {
 }
 
 type flight struct {
-	lease  queue.Lease
+	lease queue.Lease // guarded by Hub.mu (extend moves it)
+	// scope is the lease's scope, fixed: read without the lock.
+	scope  tenant.Scope
 	runID  string
 	worker *worker.Worker
+	// heard is when the worker last acked the run.
+	heard time.Time
 }
 
 // New returns a hub. Close stops it.
@@ -80,6 +102,9 @@ func New(c Config) *Hub {
 	}
 	if c.Poll <= 0 {
 		c.Poll = 250 * time.Millisecond
+	}
+	if c.Silence <= 0 {
+		c.Silence = DefaultSilence
 	}
 	h := &Hub{c: c, log: c.Logger, flight: map[string]*flight{}, byRun: map[string]string{}}
 	if h.log == nil {
@@ -107,7 +132,7 @@ func (h *Hub) Attach(ctx context.Context, s tenant.Scope, ex worker.Executor) (*
 	for i, a := range reg.Agents {
 		specs[i] = registry.AgentSpec{Name: a.Name, Manifest: a.Manifest, ManifestHash: a.ManifestHash}
 	}
-	w := &worker.Worker{ID: reg.WorkerID, Exec: ex, Registration: reg}
+	w := &worker.Worker{ID: reg.WorkerID, Exec: ex, Registration: reg, Scope: s}
 	if w.ID == "" {
 		w.ID = "wk_" + ulid.New()
 	}
@@ -221,7 +246,7 @@ func (h *Hub) dispatch(ctx context.Context, l queue.Lease) {
 	if cmd.CommandID == "" {
 		return // nothing to send: done above
 	}
-	f := &flight{lease: l, runID: cmd.RunID, worker: w}
+	f := &flight{lease: l, scope: l.Scope, runID: cmd.RunID, worker: w, heard: time.Now()}
 	h.mu.Lock()
 	h.flight[cmdID], h.byRun[cmd.RunID] = f, cmdID
 	h.mu.Unlock()
@@ -260,31 +285,45 @@ func (h *Hub) fail(ctx context.Context, l queue.Lease, why string) {
 	})
 }
 
-func (h *Hub) forget(f *flight) {
+// forget drops f from the flights; false when it was gone already (an
+// end raced another: the first one wins).
+func (h *Hub) forget(f *flight) bool {
 	h.mu.Lock()
+	found := false
 	for id, x := range h.flight {
 		if x == f {
 			delete(h.flight, id)
+			found = true
 		}
 	}
 	if h.byRun[f.runID] != "" && h.flight[h.byRun[f.runID]] == nil {
 		delete(h.byRun, f.runID)
 	}
 	h.mu.Unlock()
-	h.router.Hold(f.worker, -1)
+	if found {
+		h.router.Hold(f.worker, -1)
+	}
+	return found
 }
 
 // end records a run's end (change) and completes its item, in one
 // transaction, and forgets the flight. When the lease was lost (the
 // item was claimed again elsewhere) the end is still recorded.
 func (h *Hub) end(f *flight, change func(tx store.Tx) error) {
-	h.forget(f)
+	if !h.forget(f) {
+		return
+	}
+	// Forgotten, f is extended no more; an extension already under way
+	// may still move the fence, which the retry below absorbs.
+	h.mu.Lock()
+	lease := f.lease
+	h.mu.Unlock()
 	ctx := context.Background()
 	err := h.c.DB.InTx(ctx, func(tx store.Tx) error {
 		if err := change(tx); err != nil {
 			return err
 		}
-		return h.c.Queue.Done(tx, f.lease)
+		return h.c.Queue.Done(tx, lease)
 	})
 	if errors.Is(err, queue.ErrLeaseLost) {
 		err = h.c.DB.InTx(ctx, change)
@@ -294,7 +333,10 @@ func (h *Hub) end(f *flight, change func(tx store.Tx) error) {
 	}
 }
 
-// consume reads a worker's acks until the hub closes.
+// consume reads a worker's acks until the hub closes. A disconnected
+// frame records worker.disconnected (and, when the runs went with the
+// worker, loses them); an event stream that ends before the hub stops
+// is a worker gone for good: it is detached and its runs are lost.
 func (h *Hub) consume(w *worker.Worker) {
 	defer h.wg.Done()
 	for fr, err := range w.Exec.Events(h.base) {
@@ -302,15 +344,52 @@ func (h *Hub) consume(w *worker.Worker) {
 			h.log.Warn("hub: worker stream", "worker", w.ID, "err", err)
 			continue
 		}
-		if fr.Event != wire.EventAck {
-			continue
+		switch fr.Event {
+		case wire.EventAck:
+			var ack wire.Ack
+			if err := fr.Decode(&ack); err != nil {
+				h.log.Warn("hub: malformed ack", "worker", w.ID, "err", err)
+				continue
+			}
+			h.onAck(ack)
+		case wire.EventDisconnected:
+			var d wire.Disconnected
+			_ = fr.Decode(&d)
+			h.disconnected(w, d)
 		}
-		var ack wire.Ack
-		if err := fr.Decode(&ack); err != nil {
-			h.log.Warn("hub: malformed ack", "worker", w.ID, "err", err)
-			continue
+	}
+	if h.base.Err() == nil {
+		h.router.Remove(w.ID)
+		h.disconnected(w, wire.Disconnected{Reason: "the worker's event stream ended", Lost: true})
+	}
+}
+
+// disconnected records that w's link ended (worker.disconnected) and,
+// when its runs ended with it, loses them.
+func (h *Hub) disconnected(w *worker.Worker, d wire.Disconnected) {
+	var lost []string
+	if d.Lost {
+		h.mu.Lock()
+		var fs []*flight
+		for _, f := range h.flight {
+			if f.worker == w {
+				fs = append(fs, f)
+				lost = append(lost, f.runID)
+			}
 		}
-		h.onAck(ack)
+		h.mu.Unlock()
+		for _, f := range fs {
+			s := f.scope
+			h.end(f, func(tx store.Tx) error { return h.c.Sink.Lost(tx, s, f.runID, "the worker disconnected: "+d.Reason) })
+		}
+	}
+	err := h.c.DB.InTx(context.Background(), func(tx store.Tx) error {
+		_, err := h.c.Events.Emit(tx, w.Scope, events.Event{Type: events.WorkerDisconnected, ResourceKind: "worker", ResourceID: w.ID},
+			map[string]any{"worker": w.ID, "build_digest": w.Registration.Build.Digest, "reason": d.Reason, "lost_runs": lost})
+		return err
+	})
+	if err != nil {
+		h.log.Warn("hub: recording a disconnect failed", "worker", w.ID, "err", err)
 	}
 }
 
@@ -321,7 +400,12 @@ func (h *Hub) onAck(ack wire.Ack) {
 	if f == nil {
 		return // not ours (any more): a late ack after an end or a restart
 	}
-	s := f.lease.Scope
+	s := f.scope
+	if ack.State == wire.AckRunStarted || ack.State == wire.AckHeartbeat || ack.State == wire.AckAccepted {
+		h.mu.Lock()
+		f.heard = time.Now()
+		h.mu.Unlock()
+	}
 	switch ack.State {
 	case wire.AckRunStarted:
 		if err := h.c.DB.InTx(context.Background(), func(tx store.Tx) error { return h.c.Sink.Started(tx, s, f.runID) }); err != nil {
@@ -352,8 +436,14 @@ func (h *Hub) extend(f *flight) {
 	}
 }
 
+// silence is how long f may go unheard before its run is lost.
+func (h *Hub) silence(f *flight) time.Duration {
+	return max(h.c.Silence, 3*time.Duration(f.worker.Registration.HeartbeatMS)*time.Millisecond)
+}
+
 // extendLoop keeps the leases of in-flight runs alive between
-// heartbeats: a lease outlives this node by at most one TTL.
+// heartbeats (a lease outlives this node by at most one TTL), and loses
+// a run whose worker went silent on it.
 func (h *Hub) extendLoop(ctx context.Context) {
 	t := time.NewTicker(max(h.c.LeaseTTL/3, 10*time.Millisecond))
 	defer t.Stop()
@@ -365,12 +455,21 @@ func (h *Hub) extendLoop(ctx context.Context) {
 		}
 		h.mu.Lock()
 		fs := make([]*flight, 0, len(h.flight))
+		var silent []*flight
 		for _, f := range h.flight {
+			if time.Since(f.heard) > h.silence(f) {
+				silent = append(silent, f)
+				continue
+			}
 			fs = append(fs, f)
 		}
 		h.mu.Unlock()
 		for _, f := range fs {
 			h.extend(f)
+		}
+		for _, f := range silent {
+			s, why := f.scope, fmt.Sprintf("no ack from the worker in %s", h.silence(f))
+			h.end(f, func(tx store.Tx) error { return h.c.Sink.Lost(tx, s, f.runID, why) })
 		}
 	}
 }
@@ -385,6 +484,26 @@ func (h *Hub) CancelRun(ctx context.Context, _ tenant.Scope, runID, cause string
 		return nil
 	}
 	return f.worker.Exec.Cancel(ctx, wire.Cancel{CommandID: wire.NewCommandID(), RunID: runID, Cause: cause})
+}
+
+// SteerRun delivers user messages to the worker holding runID
+// (sessions' Steerer). A run not in a worker's hands on this node, or
+// whose worker refused the steer, is ErrNotHeld.
+func (h *Hub) SteerRun(ctx context.Context, _ tenant.Scope, runID string, messages []json.RawMessage) error {
+	h.mu.Lock()
+	f := h.flight[h.byRun[runID]]
+	h.mu.Unlock()
+	if f == nil {
+		return fmt.Errorf("%w: %s", ErrNotHeld, runID)
+	}
+	ack, err := f.worker.Exec.Steer(ctx, wire.Steer{CommandID: wire.NewCommandID(), RunID: runID, Messages: messages})
+	if err != nil {
+		return err
+	}
+	if ack.State != wire.AckAccepted {
+		return fmt.Errorf("%w: the worker refused the steer: %s", ErrNotHeld, ack.Error)
+	}
+	return nil
 }
 
 // InFlight is the number of runs in workers' hands on this node.

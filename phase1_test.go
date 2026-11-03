@@ -350,6 +350,9 @@ func (s *stubExec) Cancel(context.Context, wire.Cancel) error { return nil }
 func (s *stubExec) Events(ctx context.Context) iter.Seq2[wire.Frame, error] {
 	return func(func(wire.Frame, error) bool) { <-ctx.Done() }
 }
+func (s *stubExec) Steer(_ context.Context, st wire.Steer) (wire.Ack, error) {
+	return wire.Ack{CommandID: st.CommandID, State: wire.AckRejected, Error: "stub"}, nil
+}
 func (s *stubExec) Drain(context.Context, time.Time) error { return nil }
 
 // TestRestartClaimsAgain: close and reopen the kernel over one data

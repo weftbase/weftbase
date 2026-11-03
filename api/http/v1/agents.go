@@ -37,6 +37,7 @@ func (s *Server) controlRoutes() []Route {
 		{"POST", "/v1/runs", authz.RunsCreate, s.serveAdmit},
 		{"GET", "/v1/runs/{id}/status", authz.RunsRead, withID("id", s.serveRunStatus)},
 		{"POST", "/v1/runs/{id}/cancel", authz.RunsCancel, withID("id", s.serveCancel)},
+		{"POST", "/v1/runs/{id}/steer", authz.RunsSteer, withID("id", s.serveSteer)},
 		{"POST", "/v1/runs/{id}/resume", authz.RunsCreate, withID("id", s.serveResume)},
 	}
 }
@@ -71,6 +72,8 @@ func controlError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, store.ErrConflict), errors.Is(err, sessions.ErrFinished), errors.Is(err, sessions.ErrNotParked),
 		errors.Is(err, sessions.ErrNotRunning):
 		writeError(w, r, http.StatusConflict, "conflict", err.Error())
+	case errors.Is(err, sessions.ErrInvalidSteer):
+		writeError(w, r, http.StatusBadRequest, "invalid_steer", err.Error())
 	case errors.Is(err, sessions.ErrInvalid), errors.Is(err, registry.ErrInvalid):
 		badRequest(w, r, err.Error())
 	case errors.Is(err, sessions.ErrNotSupported):
@@ -208,6 +211,28 @@ func (s *Server) serveCancel(w http.ResponseWriter, r *http.Request, id string) 
 		return
 	}
 	writeJSON(w, r, http.StatusAccepted, run)
+}
+
+// serveSteer is POST /v1/runs/{id}/steer (P§7.5): user messages for a
+// running run, delivered at its next drain point. 202; 409 when the run
+// is not running; 400 invalid_steer for a message that is not a user
+// message.
+func (s *Server) serveSteer(w http.ResponseWriter, r *http.Request, id string) {
+	if !s.needLedger(w, r) {
+		return
+	}
+	var body struct {
+		Messages []json.RawMessage `json:"messages"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	_, sc, _ := authz.From(r.Context())
+	if err := s.ledger.Steer(r.Context(), sc, actor(r), id, body.Messages); err != nil {
+		controlError(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusAccepted, map[string]any{"run_id": id, "steered": len(body.Messages)})
 }
 
 // serveResume is POST /v1/runs/{id}/resume (P§7.6, explicit): a new

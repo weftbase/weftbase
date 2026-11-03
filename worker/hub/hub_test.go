@@ -27,6 +27,7 @@ type fake struct {
 	answers []func(wire.Command) (wire.Ack, error)
 	got     []wire.Command
 	cancels []wire.Cancel
+	steers  []wire.Steer
 	events  chan wire.Frame
 }
 
@@ -71,6 +72,12 @@ func (f *fake) Events(ctx context.Context) iter.Seq2[wire.Frame, error] {
 		}
 	}
 }
+func (f *fake) Steer(_ context.Context, s wire.Steer) (wire.Ack, error) {
+	f.mu.Lock()
+	f.steers = append(f.steers, s)
+	f.mu.Unlock()
+	return wire.Ack{CommandID: s.CommandID, State: wire.AckAccepted, RunID: s.RunID}, nil
+}
 func (f *fake) Drain(context.Context, time.Time) error { return nil }
 func (f *fake) send(a wire.Ack)                        { f.events <- wire.AckFrame(a) }
 func (f *fake) commands() []wire.Command {
@@ -80,14 +87,15 @@ func (f *fake) commands() []wire.Command {
 }
 
 type env struct {
-	h  *hub.Hub
-	l  *sessions.Ledger
-	f  *fake
-	s  tenant.Scope
-	db *sqlite.DB
+	h   *hub.Hub
+	log *events.Log
+	l   *sessions.Ledger
+	f   *fake
+	s   tenant.Scope
+	db  *sqlite.DB
 }
 
-func setup(t *testing.T, ttl time.Duration, f *fake) *env {
+func setup(t *testing.T, ttl time.Duration, f *fake, cfg ...func(*hub.Config)) *env {
 	t.Helper()
 	ctx := context.Background()
 	db, err := sqlite.Open(ctx, ":memory:")
@@ -98,7 +106,11 @@ func setup(t *testing.T, ttl time.Duration, f *fake) *env {
 	reg := registry.New(db, log)
 	q := queue.New(db)
 	l := sessions.New(db, log, reg, q)
-	h := hub.New(hub.Config{DB: db, Events: log, Queue: q, Registry: reg, Sink: l, LeaseTTL: ttl, Poll: 10 * time.Millisecond})
+	c := hub.Config{DB: db, Events: log, Queue: q, Registry: reg, Sink: l, LeaseTTL: ttl, Poll: 10 * time.Millisecond}
+	for _, fn := range cfg {
+		fn(&c)
+	}
+	h := hub.New(c)
 	l.SetCanceler(h)
 	runCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
@@ -112,7 +124,7 @@ func setup(t *testing.T, ttl time.Duration, f *fake) *env {
 	if _, _, err := h.Attach(ctx, tenant.Default(), f); err != nil {
 		t.Fatal(err)
 	}
-	return &env{h: h, l: l, f: f, s: tenant.Default(), db: db}
+	return &env{h: h, log: log, l: l, f: f, s: tenant.Default(), db: db}
 }
 
 func (e *env) admit(t *testing.T) string {
