@@ -21,9 +21,8 @@ func emptyIdentity(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		empty := map[string]any{
 			"weft.session.id": "s_noid", "weft.public_id": "",
 			"weft.session.parent": "", "weft.session.parent_call": "", "weft.session.forked_from": "",
-			// On the span too: ClickHouse's run meta is one contributing
-			// row's map (max(Meta)), not a merge, so the span carries
-			// the caller's pair the record does.
+			// On the span too, as the core stamps it (a run's meta is
+			// the union of its rows' on every backend: MetaUnion).
 			"tenant": "conftest",
 		}
 		recs := []obsdb.Record{

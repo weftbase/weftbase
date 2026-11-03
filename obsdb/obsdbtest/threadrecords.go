@@ -14,8 +14,9 @@ import (
 // session's state log, never the run's own facts, on both backends:
 //
 //   - its meta is the run's own: a later thread record carrying fewer
-//     pairs than the turn's Send-level ones never wins it (ClickHouse's
-//     max over Meta), so RunQuery.Meta and the sessions' tag filter
+//     pairs than the turn's Send-level ones never narrows it (a run's
+//     meta is its rows' union: MetaUnion), so RunQuery.Meta and the
+//     sessions' tag filter
 //     still match the run;
 //   - its last_seen does not move: an ended run stays succeeded, an
 //     interrupted one interrupted, whatever late record lands;
