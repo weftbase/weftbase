@@ -304,10 +304,9 @@ func (s *Server) decisionsOf(ctx context.Context, parked, resume obsdb.RunRow) d
 		if reason == "" && hasRes {
 			reason = strings.TrimPrefix(res.Content, deniedPrefix)
 		}
-		switch {
-		case reason == "":
+		if reason == "" {
 			c.ReasonBadge = string(obsdb.HoleNotRecorded)
-		default:
+		} else {
 			c.Reason = reason
 		}
 	}

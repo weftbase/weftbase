@@ -435,7 +435,7 @@ func CheckVocab(rootDir string, c *Config) ([]Violation, error) {
 				vs = append(vs, Violation{rel, "path holds the retired word " + strconv.Quote(re.FindString(d.Name()))})
 			}
 		}
-		if d.IsDir() || !(c.VocabExts[filepath.Ext(path)] || d.Name() == "Makefile") {
+		if d.IsDir() || !c.VocabExts[filepath.Ext(path)] && d.Name() != "Makefile" {
 			return nil
 		}
 		b, err := os.ReadFile(path)

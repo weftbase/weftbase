@@ -407,62 +407,6 @@ func TestRunsInnerFiltersAfterGrouping(t *testing.T) {
 	}
 }
 
-// The migrations' mapFilter tuples must be exactly obsdb.MetaOf's
-// exclusion set — the SQL copy of contractKeys. The latest restatement
-// of both run views (0004) carries the whole set; 0001's two views and
-// 0003's restated traces view carry the set as it was before ADR 0028,
-// contractKeys without its last adr0028Keys entries (ADR 0028's twelve,
-// plan A4's four, the attempt span's retry-after and the ten
-// weft.override.* fields, all added by 0004). 0005 restates the logs
-// view alone with the raw record's weft.raw.index (rawKeys) appended;
-// 0010 the traces view with 0004's tuple. 0011 restates both with the
-// whole set: stopped_by's two keys (stoppedByKeys) appended, the traces
-// tuple gaining weft.raw.index on the way; 0012 the traces view again
-// with the same set; 0013 (U5) the traces view again with the two
-// emitted counts — span attributes, so the logs view keeps 0011's; 0014
-// (U5U7-fix) the logs view with the set through weft.records.dropped
-// (droppedKeys) — a record attribute, so the traces view keeps 0013's;
-// 0015 (U4) both views with the set through the four problem keys
-// (problemKeys); 0017 (U4-fix) the traces view with the whole set, the
-// fallback layer's key (layerKeys) appended — a span attribute, so the
-// logs view keeps 0015's; 0018 (U32.1) both views with the whole set,
-// the retry count, its budget and the tap panics (u32Keys) appended —
-// the logs view gaining weft.attempt.layer on the way; 0019 (U13.1) both
-// views with the whole set, the approval link's four keys (u13Keys)
-// appended; 0021 (U11.1) both views with the whole set, the slog
-// bridge's weft.logs.bridged (u11Keys) appended; 0022 (U25) both views
-// with the whole set, the run cards' seven span facts (u25Keys)
-// appended; 0023 (U14) both views with the whole set, the caller link's
-// two keys (u14Keys) appended; 0024 (U12.1) the traces view with the
-// whole set, the summarizer span's weft.chat.role and an approval's
-// weft.tool.approved_by / weft.grant.id (u12Keys) appended — a
-// span attributes, so the logs view keeps 0023's; 0027 restates 0024;
-// 0029 (U23.1) the traces view with the whole set, the onion's six span
-// keys (u23Keys) appended; 0030 (U23.2) the traces view with the whole
-// set, weft.tool.origin (u232Keys) appended; 0032 (U33.1-fix) both
-// views with the whole set, weft.caller.remote (u331Keys) appended — the
-// logs view catching up from 0023's; 0033 (U30.3) both views with the
-// whole set, the attempt's give-up and the output's type (u303Keys)
-// appended.
-const (
-	rawKeys       = 1
-	stoppedByKeys = 2
-	emittedKeys   = 2
-	droppedKeys   = 1
-	problemKeys   = 4
-	layerKeys     = 1
-	u32Keys       = 3
-	u13Keys       = 4
-	u11Keys       = 1
-	u25Keys       = 7
-	u14Keys       = 2
-	u12Keys       = 3
-	u23Keys       = 6
-	u232Keys      = 1
-	u331Keys      = 1
-	u303Keys      = 2
-)
-
 // TestContractKeysCoverNonMeta is TestContractKeysMatchMetaOf's reverse
 // (U5U7-fix 6): every key obsdb.MetaOf excludes is in contractKeys, so
 // the SQL filters keep no contract key in stored Meta — or it is

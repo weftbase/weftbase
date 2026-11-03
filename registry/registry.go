@@ -266,7 +266,7 @@ func ValidLabel(l string) bool {
 		return false
 	}
 	for _, c := range l {
-		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '.' || c == '_' || c == '-') {
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '.' && c != '_' && c != '-' {
 			return false
 		}
 	}

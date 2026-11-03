@@ -306,8 +306,12 @@ func TestDevServer(t *testing.T) {
 	// A restart keeps the key and says so.
 	var again syncBuffer
 	stop = startCmd(t, []string{"dev", "--addr", addr, "--data", data}, addr, &again)
-	if !strings.Contains(again.String(), "weftbase: bootstrap key in "+keyPath+"\n") {
-		t.Errorf("restart banner:\n%s", again.String())
+	// the banner prints once the node is up, which can trail /healthz
+	for deadline := time.Now().Add(5 * time.Second); !strings.Contains(again.String(), "weftbase: bootstrap key in "+keyPath+"\n"); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Errorf("restart banner:\n%s", again.String())
+			break
+		}
 	}
 	if code, _ := get(t, "http://"+addr+"/v1/meta", key); code != http.StatusOK {
 		t.Errorf("the kept key after a restart = %d", code)

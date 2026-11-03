@@ -28,9 +28,15 @@ export default [
       // Requests go through the API client layer only (§7.6).
       "no-restricted-globals": [
         "error",
-        { name: "fetch", message: "Call the API through src/lib/api (the client layer)." },
+        {
+          name: "fetch",
+          message: "Call the API through src/lib/api (the client layer).",
+        },
         { name: "EventSource", message: "Streams go through src/lib/api." },
-        { name: "XMLHttpRequest", message: "Call the API through src/lib/api." },
+        {
+          name: "XMLHttpRequest",
+          message: "Call the API through src/lib/api.",
+        },
       ],
       // SPA only: no server functions.
       "no-restricted-imports": [
@@ -49,7 +55,8 @@ export default [
         "error",
         {
           selector: `Literal[value=${COLOUR}]`,
-          message: "No colour literals: use a Weftbase token (bg-muted, text-success-foreground…).",
+          message:
+            "No colour literals: use a Weftbase token (bg-muted, text-success-foreground…).",
         },
         {
           selector: `TemplateElement[value.raw=${COLOUR}]`,
@@ -64,6 +71,11 @@ export default [
     rules: { "no-restricted-globals": "off" },
   },
   {
-    ignores: ["eslint.config.js", ".prettierrc", "src/routeTree.gen.ts", "dist/**"],
+    ignores: [
+      "eslint.config.js",
+      ".prettierrc",
+      "src/routeTree.gen.ts",
+      "dist/**",
+    ],
   },
 ]
