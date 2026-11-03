@@ -1,0 +1,35 @@
+{
+  "instance": "host-a/1234",
+  "host": "host-a",
+  "pid": 1234,
+  "placement": "local",
+  "build": {
+    "digest": "sha256:abc",
+    "kind": "binary",
+    "vcs": {
+      "revision": "deadbeef",
+      "modified": false
+    },
+    "weft_version": "0.21.0"
+  },
+  "agents": [
+    {
+      "name": "support",
+      "manifest": {
+        "weft": 1,
+        "agents": [
+          {
+            "name": "support"
+          }
+        ]
+      },
+      "manifest_hash": "f00d",
+      "concurrency": 4
+    }
+  ],
+  "capabilities": [
+    "run",
+    "cancel"
+  ],
+  "heartbeat_ms": 60000
+}

@@ -1,0 +1,21 @@
+[
+  {
+    "event": "run",
+    "id": "cmd_01JB0000000000000000000000",
+    "data": {
+      "command_id": "cmd_01JB0000000000000000000000",
+      "run_id": "run_1",
+      "cause": "user"
+    }
+  },
+  {
+    "event": "ack",
+    "data": {
+      "command_id": "cmd_01JB0000000000000000000000",
+      "state": "accepted"
+    }
+  },
+  {
+    "event": "ping"
+  }
+]

@@ -252,9 +252,9 @@ func TestConsoleFallthrough(t *testing.T) {
 			t.Errorf("%s: %d %s, want the JSON 404", p, resp.StatusCode, body)
 		}
 	}
-	resp, body := s.do(t, req{method: "POST", path: "/v1/runs", key: s.key})
-	if resp.StatusCode != http.StatusMethodNotAllowed || resp.Header.Get("Allow") != "GET, HEAD" || !strings.Contains(body, `"error"`) {
-		t.Errorf("POST /v1/runs: %d Allow %q %s", resp.StatusCode, resp.Header.Get("Allow"), body)
+	resp, body := s.do(t, req{method: "PUT", path: "/v1/runs", key: s.key})
+	if resp.StatusCode != http.StatusMethodNotAllowed || resp.Header.Get("Allow") != "GET, HEAD, POST" || !strings.Contains(body, `"error"`) {
+		t.Errorf("PUT /v1/runs: %d Allow %q %s", resp.StatusCode, resp.Header.Get("Allow"), body)
 	}
 	resp, _ = s.do(t, req{method: "GET", path: "/otlp/v1/traces", key: s.key})
 	if resp.StatusCode != http.StatusMethodNotAllowed || resp.Header.Get("Allow") != "POST" {

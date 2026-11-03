@@ -35,15 +35,19 @@ func TestOpenMigratesAndReopens(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	// A second open applies nothing and keeps one schema row.
+	// A second open applies nothing: one schema row per migration.
+	ms, err := store.LoadMigrations(migrations, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
 	db, err = Open(ctx, path)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer func() { _ = db.Close() }()
 	var n int
-	if err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&n); err != nil || n != 1 {
-		t.Errorf("schema_migrations rows = %d (%v), want 1", n, err)
+	if err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&n); err != nil || n != len(ms) {
+		t.Errorf("schema_migrations rows = %d (%v), want %d", n, err, len(ms))
 	}
 }
 

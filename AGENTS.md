@@ -17,7 +17,7 @@ weft's own `AGENTS.md` maps the framework.
 
 | Package | Layer | Role |
 |---|---|---|
-| `client/ulid`, `client/discovery`, `client/exporter`, `client/rest` | L0 | ids, the dev discovery file, the OTLP destination (`Remote`, `Install`), the `/v1` client |
+| `client/ulid`, `client/discovery`, `client/exporter`, `client/rest`, `client/wire` | L0 | ids, the dev discovery file, the OTLP destination (`Remote`, `Install`), the `/v1` client, the worker protocol's types |
 | `store` | L1 | `Tx`, `Runner`, error kinds, the migration runner |
 | `store/sqlite` | L3 | the control store on one SQLite file (`BEGIN IMMEDIATE`, `AfterCommit`, migrations) |
 | `tenant`, `tenant/keys` | L1 | the `Scope` (project, env, tenant); `NewScope` only from `authz` and `tenant/...`; API keys (`wb_<sk\|rk\|pk\|wk>_<env>_…`, hashed, audited) |
@@ -26,7 +26,11 @@ weft's own `AGENTS.md` maps the framework.
 | `internal/...` | L1 | dblock, listen, doctor, reqlog, httpx, release, termsafe, weftsrc |
 | `observe/ingest`, `observe/cost`, `observe/local` | L2 | OTLP ingest at `/otlp/v1/*`, pricing, the in-process sink |
 | `authz` | L2 | credential → `Principal` + `Scope` (bearer key, then the `wb_session` cookie, then `Open`), `Can(principal, action)`, Console sign-in links and sessions |
-| `registry`, `queue`, `sessions`, `approvals`, `audit`, `budgets`, `webhooks`, `worker` | L2 | domains (landing per `REBUILD-TODO.md`) |
+| `registry` | L2 | agents, builds, AgentVersions, labels (`Promote`, `Resolve`), registered manifests |
+| `queue` | L2 | durable items with leases and fencing, timers; the only package besides authz and tenant that rebuilds a `Scope` (from its rows) |
+| `sessions` | L2 | the run ledger: `Admit`, `Cancel`, `Resume`, and the hub's `RunSink` side |
+| `worker`, `worker/hub`, `worker/executor` | L2 | the `Executor` interface and the router; the hub (claim, dispatch, acks); the embedded executor |
+| `approvals`, `audit`, `budgets`, `webhooks` | L2 | domains (landing per `REBUILD-TODO.md`) |
 | `store/postgres` | L3 | the Stage 1 control-store backend (later) |
 | `api/http` (package `httpapi`) | L4 | the router: request ids, CORS, guards, authentication, `authz.Can` per route from one table, `/healthz` `/readyz` `/metrics`, Console sign-in, the Console at `/` |
 | `api/http/v1` | L4 | the `/v1` read handlers, streams and `/otlp/v1/*` ingest, each route with its action (`Routes`, `IngestRoutes`) |

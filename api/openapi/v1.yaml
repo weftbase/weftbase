@@ -150,6 +150,73 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Loose" }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/agents:
+    get:
+      operationId: listAgents
+      summary: The project's agents with their labels
+      x-weftbase-action: agents.read
+      responses:
+        "200":
+          description: The agents, by name.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agents]
+                properties:
+                  agents: { type: array, items: { $ref: "#/components/schemas/Agent" } }
+        "501": { $ref: "#/components/responses/Error" }
+  /v1/agents/{name}/versions:
+    parameters:
+      - $ref: "#/components/parameters/AgentName"
+    get:
+      operationId: listAgentVersions
+      summary: An agent's versions, newest first
+      x-weftbase-action: agents.read
+      responses:
+        "200":
+          description: The versions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agent, versions]
+                properties:
+                  agent: { type: string }
+                  versions: { type: array, items: { $ref: "#/components/schemas/AgentVersion" } }
+        "404": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/Error" }
+  /v1/agents/{name}/labels/{label}:
+    parameters:
+      - $ref: "#/components/parameters/AgentName"
+      - { name: label, in: path, required: true, schema: { type: string, pattern: "^[a-z0-9._-]{1,64}$" } }
+    post:
+      operationId: promote
+      summary: Move a label to a version (promote, rollback); audited as label.moved
+      x-weftbase-action: agents.write
+      parameters:
+        - $ref: "#/components/parameters/CSRF"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: string, description: The agv_… id. }
+                expected: { type: string, description: What the label holds now ("" for a new label); a mismatch is 409. }
+                reason: { type: string }
+      responses:
+        "200":
+          description: The version the label now points at.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentVersion" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/Error" }
   /v1/manifests/{hash}:
     get:
       operationId: getStoredManifest
@@ -235,6 +302,32 @@ paths:
                   - $ref: "#/components/schemas/SearchPage"
         "400": { $ref: "#/components/responses/Error" }
         "501": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: admitRun
+      summary: Start a run (queued on the version its selector resolves)
+      description: |
+        Resolves `version` (label:<name>, agv_…, or omitted: the prod
+        label, else the newest version), writes the run to the ledger
+        with its agent_version and resolved_via, enqueues it and emits
+        run.queued, in one transaction. The run then goes to a worker
+        serving that version.
+      x-weftbase-action: runs.create
+      parameters:
+        - $ref: "#/components/parameters/CSRF"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdmitRequest" }
+      responses:
+        "202":
+          description: Admitted, queued.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LedgerRun" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/Error" }
   /v1/runs/stream:
     get:
       operationId: streamRuns
@@ -281,6 +374,83 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/DeleteResult" }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/runs/{id}/status:
+    get:
+      operationId: getRunStatus
+      summary: A run's ledger row (status, agent_version, resolved_via)
+      x-weftbase-action: runs.read
+      parameters:
+        - $ref: "#/components/parameters/RunID"
+      responses:
+        "200":
+          description: The ledger row.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LedgerRun" }
+        "404": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/Error" }
+  /v1/runs/{id}/cancel:
+    post:
+      operationId: cancelRun
+      summary: Cancel a run (cause user)
+      description: |
+        A queued or parked run ends canceled at once; a running run is
+        marked and the cancel goes to its worker, which reports the end.
+        A finished run, or a parked run that was resumed, is 409.
+      x-weftbase-action: runs.cancel
+      parameters:
+        - $ref: "#/components/parameters/RunID"
+        - $ref: "#/components/parameters/CSRF"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        "202":
+          description: Canceled, or the cancel is on its way.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LedgerRun" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/Error" }
+  /v1/runs/{id}/resume:
+    post:
+      operationId: resumeRun
+      summary: Resume a parked run on its pinned version, with decisions
+      x-weftbase-action: runs.create
+      parameters:
+        - $ref: "#/components/parameters/RunID"
+        - $ref: "#/components/parameters/CSRF"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                decisions:
+                  type: array
+                  items:
+                    type: object
+                    required: [call_id, decision]
+                    properties:
+                      call_id: { type: string }
+                      decision: { type: string, enum: [approve, deny, resolve] }
+                      reason: { type: string }
+                      content: { type: string }
+      responses:
+        "202":
+          description: The new run (resume_of the parked one), queued.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LedgerRun" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/Error" }
   /v1/runs/{id}/events:
     get:
       operationId: listRunEvents
@@ -652,6 +822,11 @@ components:
         `Weftbase-CSRF: 1` and must come from the server's own origin.
 
   parameters:
+    AgentName:
+      name: name
+      in: path
+      required: true
+      schema: { type: string }
     RunID:
       name: id
       in: path
@@ -717,6 +892,74 @@ components:
           schema: { $ref: "#/components/schemas/Loose" }
 
   schemas:
+    Agent:
+      type: object
+      required: [id, name, labels, versions, created_at]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        labels: { type: object, additionalProperties: { type: string }, description: label → agv_… }
+        versions: { type: integer }
+        created_at: { type: string, format: date-time }
+    AgentVersion:
+      type: object
+      required: [id, agent, number, build, build_digest, manifest_hash, content_hash, created_at]
+      properties:
+        id: { type: string, description: agv_… }
+        agent: { type: string }
+        number: { type: integer }
+        build: { type: string, description: bld_… }
+        build_digest: { type: string }
+        manifest_hash: { type: string }
+        content_hash: { type: string }
+        labels: { type: [array, "null"], items: { type: string } }
+        created_at: { type: string, format: date-time }
+    AdmitRequest:
+      type: object
+      required: [agent, input]
+      properties:
+        agent: { type: string }
+        version: { type: string, description: "label:<name>, agv_…, or omitted" }
+        input:
+          type: object
+          properties:
+            prompt: { type: string }
+            messages: { type: array, items: { type: object, additionalProperties: true } }
+        metadata: { type: object, additionalProperties: { type: string } }
+        priority: { type: integer }
+    LedgerRun:
+      type: object
+      required: [id, tenant_id, agent, agent_version, resolved_via, status, usage, created_at]
+      properties:
+        id: { type: string }
+        tenant_id: { type: string }
+        agent: { type: string }
+        agent_version: { type: string }
+        resolved_via: { type: string, description: "label:<name> | latest | pin" }
+        status: { type: string, enum: [queued, running, parked, succeeded, failed, canceled] }
+        input: { type: object, additionalProperties: true }
+        metadata: { type: object, additionalProperties: { type: string } }
+        resume_of: { type: string }
+        resumed_by: { type: string }
+        pending:
+          type: array
+          items:
+            type: object
+            properties:
+              call_id: { type: string }
+              tool: { type: string }
+              args: {}
+        error: { type: string }
+        cancel_cause: { type: string }
+        cancel_requested: { type: boolean }
+        usage:
+          type: object
+          properties:
+            input_tokens: { type: integer }
+            output_tokens: { type: integer }
+        created_at: { type: string, format: date-time }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
     Loose:
       type: object
       additionalProperties: true

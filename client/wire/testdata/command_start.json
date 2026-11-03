@@ -1,0 +1,20 @@
+{
+  "command_id": "cmd_01JB0000000000000000000000",
+  "kind": "start",
+  "run_id": "run_1",
+  "agent": "support",
+  "agent_version": "agv_1",
+  "build_digest": "sha256:abc",
+  "manifest_hash": "f00d",
+  "tenant_id": "ten_project",
+  "input": {
+    "prompt": "where is order 42?"
+  },
+  "metadata": {
+    "ticket": "T-1"
+  },
+  "deadline": "2026-11-03T12:00:00Z",
+  "trace": {
+    "traceparent": "00-1-2-01"
+  }
+}

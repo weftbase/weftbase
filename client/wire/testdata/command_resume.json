@@ -1,0 +1,27 @@
+{
+  "command_id": "cmd_01JB0000000000000000000000",
+  "kind": "resume",
+  "run_id": "run_2",
+  "agent": "support",
+  "agent_version": "agv_1",
+  "build_digest": "sha256:abc",
+  "manifest_hash": "f00d",
+  "tenant_id": "ten_project",
+  "resume": {
+    "resume_of": "run_1",
+    "checkpoint": {
+      "messages": []
+    },
+    "decisions": [
+      {
+        "call_id": "call_1",
+        "decision": "approve"
+      },
+      {
+        "call_id": "call_2",
+        "decision": "deny",
+        "reason": "no"
+      }
+    ]
+  }
+}

@@ -98,7 +98,23 @@ diff, holes), `observe/export`, `sessions` (timeline, export, delete),
 `observe/retention.go` (the sweeper now in the kernel). Push
 `tenant.Scope` into the obsdb queries (step 7).
 
-## Step 6. Phase 1 domains: todo
+## Step 6. Phase 1 domains: in progress
+
+| Item | Status | Notes |
+|---|---|---|
+| `client/wire` (registration, command start/resume with AgentVersion pin, ack states accepted/rejected/busy/run_started/heartbeat/finished, cancel with an id, goldens) | done | |
+| `registry` (agents, builds, AgentVersions `agv_`, labels, audited `label.moved` promote, Resolve, manifests by hash) | done | rows are project-level (`ten_project`); no selector → `prod`, else newest (`resolved_via latest`) |
+| `queue` (items, leases + fencing, Extend/Done/Fail/Release, timers table) | done | `queue` may call `tenant.NewScope` to rebuild a stored row's scope (declared in `layers.txt`) |
+| `sessions` run ledger (`agent_version`, `resolved_via`, tenant on every row; Admit, Resume, Cancel) | done | resume is a new run pinned to the parked run's version; cancel wins over a park |
+| steer | todo | `Steer` returns `ErrNotSupported` |
+| `worker` (Executor incl. `Cancel`, RunSink, Router), `worker/hub`, `worker/executor/embedded.go` | done | the Executor interface lives in `worker` (avoids a hub ↔ executor cycle) |
+| `client/worker` (Serve, FromEnv, dial loop, ack-before-run, seen set, heartbeat, idle watchdog, backoff) | todo | |
+| `worker/executor/local` (child process over a Unix socket) | todo | |
+| kernel wiring (`App.Agent`, `App.Executor`, scheduler runs the hub; Shutdown drains) and `/v1` routes: agents, versions, labels, `POST /v1/runs`, status, cancel, resume | done | migration `0002_phase1.sql` |
+| gate: every run carries an AgentVersion; embedded runs end to end through the Executor; a parked run survives a new build and resumes on its pin; restart reclaims after lease expiry | done | `phase1_test.go` |
+| gate: the legacy SSE/link tests ported | todo | wait for `client/worker` |
+| timers fired (expiry, pin age), queue TTL → `worker_lost`, `worker.disconnected` events | todo | |
+| `storetest` repository conformance suite | todo | |
 
 ## Commits
 

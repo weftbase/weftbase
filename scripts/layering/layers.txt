@@ -50,8 +50,9 @@ peer examples/... .
 # console embeds and serves; it imports the standard library only.
 stdlib-only console
 
-# Who may build a tenant.Scope (test files are exempt).
-newscope authz/... tenant/...
+# Who may build a tenant.Scope (test files are exempt). queue rebuilds
+# the Scope a claimed item or a due timer was written under.
+newscope authz/... tenant/... queue
 
 # Modules the client module may depend on (with their own transitive
 # dependencies): weft, OpenTelemetry and what they pull in.

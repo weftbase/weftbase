@@ -1,0 +1,60 @@
+[
+  {
+    "command_id": "cmd_01JB0000000000000000000000",
+    "state": "accepted"
+  },
+  {
+    "command_id": "cmd_01JB0000000000000000000000",
+    "state": "rejected",
+    "error": "agent_version agv_9 is not served here"
+  },
+  {
+    "command_id": "cmd_01JB0000000000000000000000",
+    "state": "busy"
+  },
+  {
+    "command_id": "cmd_01JB0000000000000000000000",
+    "state": "run_started",
+    "run_id": "run_1"
+  },
+  {
+    "command_id": "cmd_01JB0000000000000000000000",
+    "state": "heartbeat",
+    "run_id": "run_1"
+  },
+  {
+    "command_id": "cmd_01JB0000000000000000000000",
+    "state": "finished",
+    "run_id": "run_1",
+    "status": "succeeded",
+    "usage": {
+      "input_tokens": 10,
+      "output_tokens": 5
+    }
+  },
+  {
+    "command_id": "cmd_01JB0000000000000000000000",
+    "state": "finished",
+    "run_id": "run_1",
+    "status": "canceled",
+    "cause": "user"
+  },
+  {
+    "command_id": "cmd_01JB0000000000000000000000",
+    "state": "finished",
+    "run_id": "run_1",
+    "status": "parked",
+    "pending": [
+      {
+        "call_id": "call_1",
+        "tool": "refund",
+        "args": {
+          "order": 42
+        }
+      }
+    ],
+    "checkpoint": {
+      "messages": []
+    }
+  }
+]

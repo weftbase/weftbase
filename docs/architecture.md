@@ -80,8 +80,9 @@ and `<data>/traces.db` under `DataDir` (`./.weftbase`), each SQLite file
 under its OS lock (`internal/dblock`) — wires the services and returns
 an `App`. `App.Handler()` serves the node's roles and mounts under a
 prefix (`http.StripPrefix` plus `Base`); `App.Run(ctx)` runs the
-background work (the outbox hub's pump on `api`, the retention sweeper
-on `scheduler`); `App.Shutdown` stops it and closes what `New` opened.
+background work (the outbox hub's pump on `api`; the worker hub's claim
+loop and the retention sweeper on `scheduler`); `App.Shutdown` stops
+it, drains the executors and closes what `New` opened.
 
 `api/http` is the one router. Every route is a row of one table —
 method, pattern, `authz` action, handler — and the middleware runs in
@@ -98,3 +99,36 @@ percent-encoded (a child run id carries `/`) and decoded once.
 `api/openapi/v1.yaml` is the contract. A test (`make api-check`) holds
 it and the route table to the same operations and actions; code
 generation from it lands later.
+
+## Agents, versions and runs (Phase 1)
+
+- `registry`: agents, builds (by digest), AgentVersions (`agv_…`,
+  numbered per agent; `(agent, build digest, manifest hash)` unique;
+  content hash = sha256 of digest and manifest hash), labels and the
+  manifests builds registered. `Promote` moves a label and writes an
+  audited `label.moved`. `Resolve`: `label:<l>`, `agv_…` (pin), or none
+  (the `prod` label, else the newest version, `latest`).
+- `queue`: durable items (kind, route = the AgentVersion, priority,
+  `run_at`, concurrency key, payload) claimed under a lease with a
+  fencing token, and the timer table. The store is authoritative.
+- `sessions`: the run ledger. `Admit` resolves the version, writes the
+  run (`agent_version`, `resolved_via`, `tenant_id`), enqueues it and
+  emits `run.queued` in one transaction; `Cancel` (409 once finished),
+  `Resume` (a new run pinned to the parked run's version).
+- `client/wire`: the worker protocol's types (registration, commands,
+  acks split into accepted, rejected, busy, run_started, heartbeat,
+  finished; cancel with its own id; frames).
+- `worker`: the `Executor` interface every placement implements, the
+  `RunSink` the ledger implements for the hub, and the router
+  (by AgentVersion, then lease holder). `worker/hub` attaches executors
+  (registering their builds creates the versions), claims queue items
+  for the versions they serve, dispatches at most once and records the
+  acks; a run whose worker vanished is marked lost once its lease
+  expires, never sent twice. `worker/executor` holds the embedded
+  placement (`App.Agent(...)`: weft agents in-process, the build digest
+  is the executable's sha256 or `BuildDigest`).
+
+`/v1`: `GET /v1/agents`, `GET /v1/agents/{name}/versions`,
+`POST /v1/agents/{name}/labels/{label}`, `POST /v1/runs`,
+`GET /v1/runs/{id}/status`, `POST /v1/runs/{id}/cancel`,
+`POST /v1/runs/{id}/resume`.

@@ -34,9 +34,13 @@ import (
 	"github.com/weftbase/weftbase/obsdb"
 	"github.com/weftbase/weftbase/obsdb/clickhouse"
 	obsqlite "github.com/weftbase/weftbase/obsdb/sqlite"
+	"github.com/weftbase/weftbase/queue"
+	"github.com/weftbase/weftbase/registry"
+	"github.com/weftbase/weftbase/sessions"
 	"github.com/weftbase/weftbase/store/sqlite"
 	"github.com/weftbase/weftbase/tenant"
 	"github.com/weftbase/weftbase/tenant/keys"
+	"github.com/weftbase/weftbase/worker/hub"
 )
 
 // DefaultDataDir is the data directory when DataDir is not given.
@@ -67,6 +71,10 @@ type App struct {
 	auth     *authz.Authenticator
 	api      *v1.Server
 	router   *httpapi.Router
+	registry *registry.Registry
+	queue    *queue.Queue
+	ledger   *sessions.Ledger
+	hub      *hub.Hub
 
 	mu       sync.Mutex
 	cancel   context.CancelFunc
@@ -141,6 +149,14 @@ func New(opts ...Option) (_ *App, err error) {
 	a.events = events.New(a.control)
 	a.keys = keys.New(a.control, a.events)
 	a.sessions = authz.NewSessions(a.control)
+	a.registry = registry.New(a.control, a.events)
+	a.queue = queue.New(a.control)
+	a.ledger = sessions.New(a.control, a.events, a.registry, a.queue)
+	a.hub = hub.New(hub.Config{
+		DB: a.control, Events: a.events, Queue: a.queue, Registry: a.registry, Sink: a.ledger,
+		LeaseTTL: c.leaseTTL, Logger: a.log,
+	})
+	a.ledger.SetCanceler(a.hub)
 	var authOpts []authz.Option
 	if c.open {
 		authOpts = append(authOpts, authz.Open())
@@ -163,6 +179,7 @@ func New(opts ...Option) (_ *App, err error) {
 	v1opts := []v1.Option{
 		v1.DB(a.traces), v1.Events(a.events), v1.Capabilities(caps...),
 		v1.Retain(c.retain), v1.IngestCounts(reqs.Ingest),
+		v1.Registry(a.registry), v1.Ledger(a.ledger),
 	}
 	if c.pricing != nil {
 		v1opts = append(v1opts, v1.Pricing(*c.pricing))
@@ -284,8 +301,9 @@ func (a *App) Handler() http.Handler { return a.router }
 func (a *App) Routes() []httpapi.Route { return a.router.Routes() }
 
 // Run runs the node's background work until ctx ends or Shutdown: the
-// outbox hub's pump (api: the /v1/events subscribers), and the
-// retention sweeper (scheduler). It returns nil when stopped.
+// outbox hub's pump (api: the /v1/events subscribers); the worker hub's
+// claim loop, which dispatches queued runs to the attached executors,
+// and the retention sweeper (scheduler). It returns nil when stopped.
 func (a *App) Run(ctx context.Context) error {
 	a.mu.Lock()
 	if a.shutdown {
@@ -310,6 +328,15 @@ func (a *App) Run(ctx context.Context) error {
 			defer wg.Done()
 			if err := a.events.Hub().Run(ctx); err != nil && ctx.Err() == nil {
 				a.log.Error("weftbase: the outbox hub stopped", "err", err)
+			}
+		}()
+	}
+	if a.roles.has(RoleScheduler) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := a.hub.Run(ctx); err != nil && ctx.Err() == nil {
+				a.log.Error("weftbase: the worker hub stopped", "err", err)
 			}
 		}()
 	}
@@ -404,7 +431,11 @@ func (a *App) Shutdown(ctx context.Context) error {
 			return ctx.Err()
 		}
 	}
-	return a.closeStores()
+	// Drain the executors: running runs get drainTimeout to finish,
+	// then end canceled (cause shutdown); their ends are recorded
+	// before the stores close.
+	herr := a.hub.Close(ctx, time.Now().Add(a.cfg.drainTimeout()))
+	return errors.Join(herr, a.closeStores())
 }
 
 func (a *App) closeStores() error {

@@ -19,6 +19,8 @@ import (
 	"github.com/weftbase/weftbase/obsdb"
 	pricing "github.com/weftbase/weftbase/observe/cost"
 	"github.com/weftbase/weftbase/observe/ingest"
+	"github.com/weftbase/weftbase/registry"
+	"github.com/weftbase/weftbase/sessions"
 )
 
 // Option configures New.
@@ -33,6 +35,8 @@ type config struct {
 	retain       time.Duration
 	pricing      *pricing.Table
 	ingestCounts func() reqlog.IngestCounts
+	registry     *registry.Registry
+	ledger       *sessions.Ledger
 }
 
 // DB serves over db: the trace store.

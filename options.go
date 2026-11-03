@@ -30,6 +30,19 @@ type config struct {
 	retain       time.Duration
 	sweepEvery   time.Duration
 	manifest     []byte
+	buildDigest  string
+	leaseTTL     time.Duration
+	drain        time.Duration
+}
+
+// defaultDrain is how long Shutdown lets running runs finish.
+const defaultDrain = 5 * time.Second
+
+func (c *config) drainTimeout() time.Duration {
+	if c.drain > 0 {
+		return c.drain
+	}
+	return defaultDrain
 }
 
 // DataDir is the directory the SQLite stores live in by default:
@@ -117,3 +130,15 @@ func Manifest(json []byte) Option { return func(c *config) { c.manifest = slices
 
 // sweepEvery overrides the sweeper's interval (tests).
 func sweepEvery(d time.Duration) Option { return func(c *config) { c.sweepEvery = d } }
+
+// BuildDigest names the embedded build's digest ("sha256:<hex>")
+// instead of the running executable's sha256: what App.Agent registers
+// the agents under.
+func BuildDigest(d string) Option { return func(c *config) { c.buildDigest = d } }
+
+// Drain is how long Shutdown lets running runs finish before it
+// cancels them (cause shutdown); default 5 s.
+func Drain(d time.Duration) Option { return func(c *config) { c.drain = d } }
+
+// leaseTTL overrides the queue lease of a dispatched run (tests).
+func leaseTTL(d time.Duration) Option { return func(c *config) { c.leaseTTL = d } }

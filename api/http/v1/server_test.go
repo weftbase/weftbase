@@ -786,13 +786,13 @@ func TestAPIErrors(t *testing.T) {
 	// api/http's tests pin the header).
 	srv := httptest.NewServer(mounted(h))
 	t.Cleanup(srv.Close)
-	resp, err := http.Post(srv.URL+"/weftbase/v1/runs", "application/json", nil)
+	resp, err := http.Post(srv.URL+"/weftbase/v1/traces", "application/json", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusMethodNotAllowed {
-		t.Errorf("POST /v1/runs: %d", resp.StatusCode)
+		t.Errorf("POST /v1/traces: %d", resp.StatusCode)
 	}
 
 	// A database that fails reads answers 500 internal naming the op —

@@ -24,10 +24,11 @@ func withID(name string, h func(http.ResponseWriter, *http.Request, string)) htt
 	return func(w http.ResponseWriter, r *http.Request) { h(w, r, r.PathValue(name)) }
 }
 
-// Routes is the read surface, the streams and deletion.
+// Routes is the read surface, the streams, deletion, and the agent and
+// run-admission operations (agents.go).
 func (s *Server) Routes() []Route {
 	run := func(h func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc { return withID("id", h) }
-	return []Route{
+	return append([]Route{
 		{"GET", "/v1/meta", authz.MetaRead, s.serveMeta},
 		{"GET", "/v1/manifest", authz.AgentsRead, s.serveManifest},
 		{"GET", "/v1/manifests/{hash}", authz.AgentsRead, s.serveStoredManifest},
@@ -65,7 +66,7 @@ func (s *Server) Routes() []Route {
 		{"GET", "/v1/diff", authz.RunsContent, s.serveDiff},
 
 		{"GET", "/v1/events", authz.EventsRead, s.serveEvents},
-	}
+	}, s.controlRoutes()...)
 }
 
 // IngestRoutes is the OTLP/HTTP receiver (observe/ingest) at
