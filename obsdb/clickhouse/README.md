@@ -86,7 +86,9 @@ a key two rows carry with different values the greater value wins
 run, so only an app's own attributes can disagree. Before 0034 a run's
 `meta` was one row's map (`max(Meta)`, the greatest JSON string), and a
 row with fewer pairs could drop the caller's tag; a run whose rows were
-merged before the upgrade keeps the one map that merge kept.
+merged before the upgrade keeps the one map that merge kept. The
+column reads `toValidUTF8(Meta)` (migration 0035): a byte that is not
+UTF-8 reads as U+FFFD, as on SQLite, and the rest of the map is kept.
 
 The tag filters (`SessionQuery.Meta`, `RunQuery.Meta`) narrow their
 row scan on `idx_meta_kv` (migration 0034; 0026's `idx_meta` over

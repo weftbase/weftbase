@@ -127,7 +127,11 @@ The `@weftgo/devtools` npm package keeps its name.
   `MetaKV` (`maxMap`, filled from each row's `Meta`) and replaces the
   tag index `idx_meta` with `idx_meta_kv`; on a key two rows carry with
   different values the greater value wins. Runs merged before the
-  upgrade keep the one map that merge kept.
+  upgrade keep the one map that merge kept. Migration 0035 fills
+  `MetaKV` from `toValidUTF8(Meta)`: a row whose metadata held a byte
+  that is not UTF-8 read no metadata at all under 0034 (JSONExtract
+  refuses the document); the byte now reads as U+FFFD, as on SQLite,
+  and the rows 0034 stored empty are repaired in the background.
 - `studio`, `runtime`: `POST /api/runs/{id}/approvals` takes optional
   `request_id` and `args_sha256` — the parked request occurrence and
   the hash of the arguments the deciding UI showed — and the runtime

@@ -74,3 +74,32 @@ func TestReadsUseTheMetaUnion(t *testing.T) {
 		t.Errorf("runFinalColumns is not runColumns with Meta read from MetaKV:\n%s", runFinalColumns)
 	}
 }
+
+// TestMigration0035ReadsMetaAsValidUTF8: 0034's DEFAULT handed Meta to
+// JSONExtract as stored, and JSONExtract refuses a document holding a
+// byte that is not UTF-8 (the views copy an attribute's bytes with
+// toJSONString), so such a row's MetaKV was empty and the run read no
+// metadata (conformance row Strings). 0035 restates the DEFAULT over
+// toValidUTF8(Meta) and repairs exactly the rows whose Meta is invalid,
+// keeping the pairs their MetaKV already holds.
+func TestMigration0035ReadsMetaAsValidUTF8(t *testing.T) {
+	b, err := migrationsFS.ReadFile("migrations/" + migrations[35])
+	if err != nil {
+		t.Fatal(err)
+	}
+	stmts := splitStatements(string(b))
+	parsed := "JSONExtract(toValidUTF8(Meta), 'Map(String, String)')"
+	merged := "mapUpdate(" + parsed + ", " + rowMetaMap("") + ")"
+	want := []string{
+		"ALTER TABLE weft_runs MODIFY COLUMN MetaKV DEFAULT (mapKeys(" + parsed + "), mapValues(" + parsed + "))",
+		"ALTER TABLE weft_runs UPDATE MetaKV = (mapKeys(" + merged + "), mapValues(" + merged + "))\nWHERE NOT isValidUTF8(Meta)",
+	}
+	if len(stmts) != len(want) {
+		t.Fatalf("0035 has %d statements, want %d:\n%s", len(stmts), len(want), strings.Join(stmts, "\n"))
+	}
+	for i := range want {
+		if stmts[i] != want[i] {
+			t.Errorf("0035 statement %d:\n got  %s\n want %s", i, stmts[i], want[i])
+		}
+	}
+}
