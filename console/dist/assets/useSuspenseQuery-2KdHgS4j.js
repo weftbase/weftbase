@@ -1,0 +1,1 @@
+import{a as e,o as t,s as n}from"./queries-9276YH0Q.js";function r(r,i){return e({...r,enabled:!0,suspense:!0,throwOnError:t,placeholderData:void 0},n,i)}export{r as t};
