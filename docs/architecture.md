@@ -155,3 +155,60 @@ generation from it lands later.
 `POST /v1/agents/{name}/labels/{label}`, `POST /v1/runs`,
 `GET /v1/runs/{id}/status`, `POST /v1/runs/{id}/cancel`,
 `POST /v1/runs/{id}/steer`, `POST /v1/runs/{id}/resume`.
+
+## Known limits (Phase 1)
+
+Two gaps in the local placement are deliberate for now. Each one fails
+safe: no run is lost silently and nothing runs twice.
+
+### A restored build runs with the node's environment
+
+`App.Local(path, LocalEnv(...))` and `serve --build` start a build's
+child with the environment given at that moment. The build binary is
+stored by digest in `<data>/builds/<sha256>` and re-attached when the
+node starts again, but the per-build environment is not stored with it.
+So after a restart the child runs with the node's own environment only.
+
+Why: an environment is deployment configuration, and secrets in it
+must not be written to the control database in clear. Where it belongs
+is the deployment object of Phase 3 (a build plus its config and
+secret references, versioned with the AgentVersion), not the build
+store.
+
+What it means today: a build that needs its own variables (an API key,
+a feature flag) must get them from the node's environment, or be
+registered again after a restart. Parked runs still resume on their
+pinned build; only the variables differ.
+
+Fixed by: the Phase 3 deployment object, which stores per-build
+config and secret references and replays them on every start.
+
+### A crashed node does not re-adopt its children
+
+The supervisor talks to each child over a Unix socket it creates fresh
+for every executor. If the node process crashes (not a clean stop),
+its children keep running, but the socket they dialled is gone. The new
+node starts its own children and does not take over the old ones.
+
+An orphaned child keeps redialling, then exits once it has been
+unreachable for `MaxDisconnected` (`client/worker`, default 2 minutes)
+with no run in hand. The runs it held are marked lost (`worker_lost`)
+once their lease expires and are never sent twice, and every ended
+link writes `worker.disconnected`.
+
+Why: re-adoption needs a stable socket path per build and a handshake
+that proves the old child is the same build at the same version, plus
+fencing so two nodes never drive one child. That is real work for a
+rare event (a node crash, not a deploy), so Phase 1 keeps the simple,
+safe rule.
+
+What it means today: after a node crash, work a child had in flight
+ends `worker_lost` instead of continuing, and old children linger for up
+to 2 minutes. A clean stop (SIGTERM) drains children first, so deploys
+are not affected.
+
+Fixed by: a lost durable run getting a `resume` command instead of
+failing, once weft's recovery-stable idempotency keys and
+interrupted-turn resume land (weft work items #1, #2, #5). With those,
+re-adopting a child is no longer needed for correctness, only to save a
+restart.

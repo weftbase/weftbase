@@ -130,8 +130,8 @@ diff, holes), `observe/export`, `sessions` (timeline, export, delete),
 ### Known limits (Phase 1)
 
 - Sessions over weft `thread` are not built: a "turn" is a run; every run carries its AgentVersion in the ledger.
-- A stored build restored at boot runs with the node's environment (per-build env waits for the deployment object, Phase 3).
-- Sockets are fresh per executor: an orphaned child of a crashed node is not re-adopted; it exits after 2 min unreachable.
+- A stored build restored at boot runs with the node's environment (per-build env waits for the deployment object, Phase 3). Explained in `docs/architecture.md`, Known limits.
+- Sockets are fresh per executor: an orphaned child of a crashed node is not re-adopted; it exits after 2 min unreachable. Explained in `docs/architecture.md`, Known limits; the fix is resume-on-lost after weft #1, #2, #5.
 - The record-contract doc test now scans `api/http/v1` (weft `cc7b4032` dropped the retired-package excuse for `weft.replay.view`, whose reader lives there).
 
 ### Before step 7
