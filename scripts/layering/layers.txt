@@ -11,13 +11,14 @@ client-module client
 layer 0 client/...
 
 # L1: store root, tenant, events, the trace store, internal helpers.
-layer 1 store store/storetest tenant/... events/... obsdb/... internal/...
+layer 1 store tenant/... events/... obsdb/... internal/...
 
 # L2: the domains and authz.
 layer 2 registry/... queue/... sessions/... approvals/... audit/... budgets/... webhooks/... observe/... worker/... authz/...
 
-# L3: the control-store backends (implement the domain repositories).
-layer 3 store/sqlite/... store/postgres/...
+# L3: the control-store backends (implement the domain repositories)
+# and their conformance suite, which drives the domains over a backend.
+layer 3 store/sqlite/... store/postgres/... store/storetest
 
 # L4: the API surfaces and the Console.
 layer 4 api/... console/...
@@ -36,6 +37,8 @@ dag worker registry queue
 dag webhooks audit queue
 
 # Same-layer edges outside the domains.
+peer store/sqlite/... store/storetest
+peer store/postgres/... store/storetest
 peer events/... store
 peer events/... tenant
 peer tenant/... store
@@ -51,8 +54,9 @@ peer examples/... .
 stdlib-only console
 
 # Who may build a tenant.Scope (test files are exempt). queue rebuilds
-# the Scope a claimed item or a due timer was written under.
-newscope authz/... tenant/... queue
+# the Scope a claimed item or a due timer was written under; storetest
+# builds the scopes of its cross-tenant group.
+newscope authz/... tenant/... queue store/storetest
 
 # Modules the client module may depend on (with their own transitive
 # dependencies): weft, OpenTelemetry and what they pull in.
