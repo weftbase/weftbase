@@ -385,6 +385,13 @@ type ApprovalDecision struct {
 	// Actor names who decided (§6 rule 4's spirit); carried for the
 	// record, the runtime logs it.
 	Actor string `json:"actor,omitempty"`
+	// RequestID and ArgsSHA256 bind a decision to what its decider was
+	// shown: the parked request's occurrence id and the hex SHA-256 of
+	// its arguments (thread.Request's ID and ArgsSHA256). Either set
+	// and not the pending request's, the decision is refused and
+	// nothing is recorded. Empty binds nothing.
+	RequestID  string `json:"request_id,omitempty"`
+	ArgsSHA256 string `json:"args_sha256,omitempty"`
 	// PublicID is the public id the decided run is scoped to — the
 	// server's bookkeeping, never on the wire. The approval's command
 	// row carries it (a panel token polls its own decision) and so does
@@ -495,6 +502,13 @@ type SessionCommand struct {
 	Content   string `json:"content,omitempty"`
 	Message   string `json:"message,omitempty"`
 	Actor     string `json:"actor,omitempty"`
+	// RequestID and ArgsSHA256 bind a decision to what its decider was
+	// shown: the parked request's occurrence id and the hex SHA-256 of
+	// its arguments (thread.Request's ID and ArgsSHA256). Either set
+	// and not the pending request's, the decision is refused and
+	// nothing is recorded. Empty binds nothing.
+	RequestID  string `json:"request_id,omitempty"`
+	ArgsSHA256 string `json:"args_sha256,omitempty"`
 }
 
 // The session frame's verbs.

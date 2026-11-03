@@ -1140,3 +1140,60 @@ func TestSessionClaimTimeout(t *testing.T) {
 		t.Errorf("ack = %+v, want rejected %q", a, "session claim timed out")
 	}
 }
+
+// TestSessionDecideBindsWhatWasShown: a decision names the request
+// occurrence and the args hash its decider was shown (Studio's body
+// request_id / args_sha256, thread.Decision's binding). A stale page —
+// another occurrence, or other arguments — is refused before the ack
+// and writes nothing; the matching one is recorded with the hash it saw.
+func TestSessionDecideBindsWhatWasShown(t *testing.T) {
+	ctx := context.Background()
+	st := thread.Memory()
+	s, turn, callID := parkedSession(t, st)
+	defer func() { _ = s.Close(ctx) }()
+	req := s.Pending()[0]
+	f := newFakeStudio(t)
+	ts := httptest.NewServer(f.handler())
+	t.Cleanup(ts.Close)
+	newSessionsLink(t, ts.URL, func(context.Context, string) (*thread.Session, func(), error) { return s, nil, nil })
+	frame := func(id, requestID, argsHash string) string {
+		return sessionFrame(sessionCommand{CommandID: id, Verb: verbDecide, PublicID: "pub_park", SessionID: s.ID(),
+			RunID: turn.RunID(), CallID: callID, Decision: "approve", RequestID: requestID, ArgsSHA256: argsHash})
+	}
+	before := storedEntries(t, st, s.ID())
+	f.frames <- frame("cmd_args", req.ID, strings.Repeat("0", 64))
+	f.waitAck(t, 1)
+	f.frames <- frame("cmd_occ", "e_other", req.ArgsSHA256)
+	f.waitAck(t, 2)
+	time.Sleep(20 * time.Millisecond)
+	f.mu.Lock()
+	acks := append([]ack(nil), f.acks...)
+	f.mu.Unlock()
+	if len(acks) != 2 || acks[0].State != "rejected" || !strings.Contains(acks[0].Error, "arguments changed") ||
+		acks[1].State != "rejected" || !strings.Contains(acks[1].Error, "not the pending occurrence") {
+		t.Fatalf("acks = %+v, want both rejected (arguments changed; another occurrence)", acks)
+	}
+	if after := storedEntries(t, st, s.ID()); after != before || len(s.Pending()) != 1 {
+		t.Fatalf("a refused decision wrote: %d entries (had %d), pending %d", after, before, len(s.Pending()))
+	}
+	f.frames <- frame("cmd_ok", req.ID, req.ArgsSHA256)
+	f.waitAck(t, 4)
+	if next := turn.Next(); next == nil {
+		t.Fatal("the bound decision did not resume the turn")
+	} else if _, err := next.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	_, entries, _, err := st.Load(ctx, s.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range entries {
+		if d, ok := e.(thread.ApprovalDecisionEntry); ok && d.CallID == callID {
+			found = d.ArgsSHA256 == req.ArgsSHA256 && d.RequestID == req.ID
+		}
+	}
+	if !found {
+		t.Error("the decision entry does not record the request and args hash its decider saw")
+	}
+}

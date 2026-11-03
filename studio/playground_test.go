@@ -28,7 +28,10 @@ type playgroundTestServer struct {
 	// cancels carries the command ids of the cancel frames the fake
 	// runtime receives (POST /api/runs/{id}/cancel).
 	cancels chan string
-	token   string
+	// approvals carries the approve frames it receives (POST
+	// /api/runs/{id}/approvals on a runtime-started run).
+	approvals chan linkruntime.ApprovalDecision
+	token     string
 }
 
 // newPlaygroundTestServer starts the Studio and connects one runtime
@@ -50,7 +53,8 @@ func newPlaygroundServer(t *testing.T, token string) *playgroundTestServer {
 	srv := New(opts...)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	pt := &playgroundTestServer{Server: srv, ts: ts, cmd: make(chan linkruntime.Command, 16), cancels: make(chan string, 16), token: token}
+	pt := &playgroundTestServer{Server: srv, ts: ts, cmd: make(chan linkruntime.Command, 16), cancels: make(chan string, 16),
+		approvals: make(chan linkruntime.ApprovalDecision, 16), token: token}
 
 	// The link server the routes built is exposed by the Server
 	// (Runtime() returns it under Playground(true)); the fake runtime
@@ -119,6 +123,14 @@ func newPlaygroundServer(t *testing.T, token string) *playgroundTestServer {
 					var cmd linkruntime.Command
 					if json.Unmarshal([]byte(cur.data), &cmd) == nil {
 						pt.cmd <- cmd
+					}
+				case "approve":
+					var d linkruntime.ApprovalDecision
+					if json.Unmarshal([]byte(cur.data), &d) == nil {
+						select {
+						case pt.approvals <- d:
+						default:
+						}
 					}
 				case "cancel":
 					var c struct {

@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1225,6 +1227,18 @@ func (pr *parkedRun) isPending(callID string) bool {
 	return false
 }
 
+// argsHash is the hex SHA-256 of a parked call's arguments — thread's
+// Request.ArgsSHA256 of the same call — "" when it is not parked.
+func (pr *parkedRun) argsHash(callID string) string {
+	for _, c := range pr.pending {
+		if c.ID == callID {
+			sum := sha256.Sum256(c.Args)
+			return hex.EncodeToString(sum[:])
+		}
+	}
+	return ""
+}
+
 // pendingIDs lists the parked call ids, for an error a human reads.
 func (pr *parkedRun) pendingIDs() string {
 	ids := make([]string, 0, len(pr.pending))
@@ -1283,6 +1297,7 @@ func (l *link) resume(ctx context.Context, pr *parkedRun, parkedRunID, runID, co
 			// the caller writes), so none is set here: the channel rides
 			// the approval class below.
 			td.Who = d.Actor
+			td.RequestID, td.ArgsSHA256 = d.RequestID, d.ArgsSHA256
 			ds = append(ds, td)
 		}
 		// The fork's approvals name the playground as their provenance,

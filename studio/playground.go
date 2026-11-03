@@ -1063,6 +1063,13 @@ type approvalRequest struct {
 	Decision string `json:"decision"` // approve | deny | resolve
 	Reason   string `json:"reason"`
 	Content  string `json:"content"`
+	// RequestID and ArgsSHA256 (optional) bind the decision to what the
+	// deciding UI showed: the parked request's occurrence id and the hex
+	// SHA-256 of its arguments. When either is not the pending
+	// request's, the runtime refuses the decision ("stale decision", the
+	// command row's error) and records nothing.
+	RequestID  string `json:"request_id"`
+	ArgsSHA256 string `json:"args_sha256"`
 }
 
 // servePlaygroundApproval forwards one decision on one parked call of
@@ -1157,6 +1164,7 @@ func (s *Server) servePlaygroundApproval(rs *linkruntime.RuntimeServer) http.Han
 		if appTarget != "" {
 			sc := appSessionCommand(r, linkruntime.VerbDecide, row.RunRow)
 			sc.CallID, sc.Decision, sc.Reason, sc.Content = req.CallID, req.Decision, req.Reason, req.Content
+			sc.RequestID, sc.ArgsSHA256 = req.RequestID, req.ArgsSHA256
 			enqueueAppTurn(w, r, rs, appTarget, sc)
 			return
 		}
@@ -1172,7 +1180,11 @@ func (s *Server) servePlaygroundApproval(rs *linkruntime.RuntimeServer) http.Han
 			Reason:   req.Reason,
 			Content:  req.Content,
 			Actor:    actorOf(r),
-			PublicID: publicID,
+			// The ephemeral run has no request entry: only the args
+			// hash binds there; a fork's session takes both.
+			RequestID:  req.RequestID,
+			ArgsSHA256: req.ArgsSHA256,
+			PublicID:   publicID,
 		})
 		if err != nil {
 			switch {

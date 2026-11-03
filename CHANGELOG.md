@@ -128,3 +128,12 @@ The `@weftgo/devtools` npm package keeps its name.
   tag index `idx_meta` with `idx_meta_kv`; on a key two rows carry with
   different values the greater value wins. Runs merged before the
   upgrade keep the one map that merge kept.
+- `studio`, `runtime`: `POST /api/runs/{id}/approvals` takes optional
+  `request_id` and `args_sha256` — the parked request occurrence and
+  the hash of the arguments the deciding UI showed — and the runtime
+  passes them to `thread.Decision` (app turns, fork sessions) or checks
+  the hash itself (ephemeral playground runs). A decision from a page
+  that showed another occurrence or other arguments is refused
+  (`stale decision: …` on the command row) and nothing is recorded;
+  before, nothing bound a decision to what its decider had seen. The
+  recorded decision keeps the hash (`ApprovalDecisionEntry.ArgsSHA256`).

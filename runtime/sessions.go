@@ -35,6 +35,7 @@ const (
 	refusedCancel    = "cancel is not supported on an app turn"
 	refusedNoOption  = "this runtime does not act on the app's sessions: runtime.Sessions(...) is not set"
 	refusedSigned    = "this session requires signed decisions: decide it in the app (thread.DecideSigned)"
+	refusedStale     = "stale decision"
 )
 
 // skippedReason is the deny reason a decision without one carries — the
@@ -146,6 +147,10 @@ func (l *link) dispatchSession(ctx context.Context, sc sessionCommand) {
 			// in between): nothing was written — T1 — and the words are
 			// the refusal's.
 			text = refusedLocked
+		case errors.Is(err, thread.ErrArgsChanged), errors.Is(err, thread.ErrNotPending) && sc.RequestID != "":
+			// The binding checkShown read before the ack, lost since (a
+			// re-park between): thread recorded nothing.
+			text = refusedStale + ": " + err.Error()
 		case errors.Is(err, thread.ErrNotRunning):
 			// thread's words name the session and, for a newer turn, both
 			// runs: "session S is running <t2>, not <t1>".
@@ -188,6 +193,24 @@ func checkSessionCommand(sc sessionCommand) string {
 	return ""
 }
 
+// checkShown is the refusal of a decision bound to what its decider
+// was shown (request_id, args_sha256) when the pending request is
+// another occurrence or carries other arguments — the page was stale —
+// "" when it binds nothing or matches. thread refuses the same
+// (ErrNotPending, ErrArgsChanged) under its lock; this says so before
+// the ack, as the other checks do.
+func checkShown(reqID, reqArgs, callID, shownID, shownArgs string) string {
+	switch {
+	case shownID != "" && shownID != reqID:
+		return fmt.Sprintf("%s: call %q was decided as request %s, not the pending occurrence %s; reload it",
+			refusedStale, callID, shownID, reqID)
+	case shownArgs != "" && shownArgs != reqArgs:
+		return fmt.Sprintf("%s: call %q's arguments changed since they were shown (args_sha256 %s, pending %s); reload it",
+			refusedStale, callID, shownArgs, reqArgs)
+	}
+	return ""
+}
+
 // decisionOf turns the frame's decision into thread's.
 func decisionOf(sc sessionCommand) thread.Decision {
 	var d thread.Decision
@@ -200,6 +223,7 @@ func decisionOf(sc sessionCommand) thread.Decision {
 		d = thread.Resolve(sc.CallID, sc.Content)
 	}
 	d.Who = sc.Actor
+	d.RequestID, d.ArgsSHA256 = sc.RequestID, sc.ArgsSHA256
 	return d
 }
 
@@ -315,7 +339,7 @@ func checkPending(s *thread.Session, sc sessionCommand) string {
 			if r.RunID != "" && r.RunID != sc.RunID {
 				return fmt.Sprintf("call %q was parked by run %s, not %s", sc.CallID, r.RunID, sc.RunID)
 			}
-			return ""
+			return checkShown(r.ID, r.ArgsSHA256, sc.CallID, sc.RequestID, sc.ArgsSHA256)
 		}
 		ids = append(ids, r.CallID)
 	}

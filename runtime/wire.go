@@ -257,6 +257,13 @@ type approvalDecision struct {
 	Reason    string `json:"reason,omitempty"`
 	Content   string `json:"content,omitempty"`
 	Actor     string `json:"actor,omitempty"`
+	// RequestID and ArgsSHA256 bind a decision to what its decider was
+	// shown: the parked request's occurrence id and the hex SHA-256 of
+	// its arguments (thread.Request's ID and ArgsSHA256). Either set
+	// and not the pending request's, the decision is refused and
+	// nothing is recorded. Empty binds nothing.
+	RequestID  string `json:"request_id,omitempty"`
+	ArgsSHA256 string `json:"args_sha256,omitempty"`
 }
 
 // breakpointsFrame is an `event: breakpoints` frame's data (§8.3):
@@ -295,6 +302,13 @@ type sessionCommand struct {
 	Content   string `json:"content,omitempty"`
 	Message   string `json:"message,omitempty"`
 	Actor     string `json:"actor,omitempty"`
+	// RequestID and ArgsSHA256 bind a decision to what its decider was
+	// shown: the parked request's occurrence id and the hex SHA-256 of
+	// its arguments (thread.Request's ID and ArgsSHA256). Either set
+	// and not the pending request's, the decision is refused and
+	// nothing is recorded. Empty binds nothing.
+	RequestID  string `json:"request_id,omitempty"`
+	ArgsSHA256 string `json:"args_sha256,omitempty"`
 }
 
 // ack is the POST /api/runtime/acks body, sent before execution

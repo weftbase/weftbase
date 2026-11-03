@@ -1374,3 +1374,29 @@ func TestValidatePastTheDeadlineIsRefused(t *testing.T) {
 		t.Errorf("late: %v %q, want %q", ok, reason, want)
 	}
 }
+
+// TestDecisionBoundToShownArgs: a playground decision that names the
+// args hash its decider was shown is refused when the parked call's
+// arguments are not those — nothing is held — and held when they are.
+func TestDecisionBoundToShownArgs(t *testing.T) {
+	l, f, pr := decisionLink(t, "c1", "c2")
+	decide(t, l, nil, approvalDecision{CommandID: "cmd_stale", RunID: "pg_parked", CallID: "c1", Decision: "approve",
+		ArgsSHA256: strings.Repeat("0", 64)})
+	if a := f.ackOf(t, "cmd_stale", "rejected"); !strings.Contains(a.Error, "arguments changed") {
+		t.Errorf("a decision on other arguments = %q, want it refused as stale", a.Error)
+	}
+	l.mu.Lock()
+	_, held := pr.decisions["c1"]
+	l.mu.Unlock()
+	if held {
+		t.Fatal("a stale decision is held")
+	}
+	decide(t, l, nil, approvalDecision{CommandID: "cmd_fresh", RunID: "pg_parked", CallID: "c1", Decision: "approve",
+		ArgsSHA256: pr.argsHash("c1")})
+	l.mu.Lock()
+	got := pr.decisions["c1"].Decision
+	l.mu.Unlock()
+	if got != "approve" {
+		t.Errorf("the decision on the shown arguments is not held: %q", got)
+	}
+}

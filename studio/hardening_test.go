@@ -1333,3 +1333,25 @@ func TestSteerReachesForkRuns(t *testing.T) {
 		t.Errorf("steer into an ephemeral run = %d %s, want 202", code, out)
 	}
 }
+
+// TestApprovalCarriesWhatWasShown: the decide body's request_id and
+// args_sha256 — what the deciding UI showed — reach the runtime on the
+// decision frame, which refuses a stale one (runtime's
+// TestDecisionBoundToShownArgs, TestSessionDecideBindsWhatWasShown).
+func TestApprovalCarriesWhatWasShown(t *testing.T) {
+	pt := newPlaygroundServer(t, "srv-token")
+	pt.startRun(t, "cmd_shown", "pub_mine", "run_shown")
+	hash := strings.Repeat("ab", 32)
+	body := `{"call_id":"call_1","decision":"approve","request_id":"e_req","args_sha256":"` + hash + `"}`
+	if code, out := pt.authed(t, http.MethodPost, "/api/runs/run_shown/approvals", pt.token, body); code != http.StatusAccepted {
+		t.Fatalf("approval = %d %s", code, out)
+	}
+	select {
+	case d := <-pt.approvals:
+		if d.RequestID != "e_req" || d.ArgsSHA256 != hash {
+			t.Errorf("the decision frame = %+v, want request_id e_req and the args hash", d)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no decision frame reached the runtime")
+	}
+}

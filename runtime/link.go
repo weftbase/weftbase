@@ -712,6 +712,10 @@ func (l *link) dispatchDecision(ctx context.Context, d approvalDecision) {
 		reason = fmt.Sprintf("no parked run %q on this runtime (it may already have been resumed)", d.RunID)
 	case !ps.isPending(d.CallID):
 		reason = fmt.Sprintf("call %q is not parked on run %s (parked: %s)", d.CallID, d.RunID, ps.pendingIDs())
+	case d.ArgsSHA256 != "" && d.ArgsSHA256 != ps.argsHash(d.CallID):
+		// Bound to the arguments its decider was shown, and these are
+		// not them (a fork's session refuses the same, ErrArgsChanged).
+		reason = checkShown("", ps.argsHash(d.CallID), d.CallID, "", d.ArgsSHA256)
 	case ps.decisions[d.CallID].Decision != "":
 		// The held decision stands: a second one — a double click, two
 		// people deciding at once — must not silently replace a verdict
