@@ -534,7 +534,7 @@ func TestMetaGolden(t *testing.T) {
 // TestIngestAuth pins S4.4's ingest auth through the server: the
 // configured token as a bearer, or — with none — loopback peers only.
 func TestIngestAuth(t *testing.T) {
-	pb, err := os.ReadFile(filepath.Join("testdata", "otlp", "logs.pb"))
+	pb, err := os.ReadFile(filepath.Join("..", "obsdb", "testdata", "logs.pb"))
 	if err != nil {
 		t.Fatal(err)
 	}

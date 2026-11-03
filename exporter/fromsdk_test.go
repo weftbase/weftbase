@@ -25,13 +25,12 @@ import (
 
 // The golden test (S3.3): the SDK path and the OTLP path produce the
 // same rows for the same data, against obsdb's checked-in fixtures.
-// The fixtures are obsdb/testdata's, copied to testdata/otlp so the
-// test runs from the module cache; TestOTLPFixturesMatchObsdb keeps the
-// copies identical, so studio's ingest and this module pin the same bytes.
+// studio's ingest reads the same fixtures, so both paths pin the same
+// bytes.
 
 func loadLogsFixture(t *testing.T) []obsdb.Record {
 	t.Helper()
-	b, err := os.ReadFile("testdata/otlp/logs.pb")
+	b, err := os.ReadFile("../obsdb/testdata/logs.pb")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +43,7 @@ func loadLogsFixture(t *testing.T) []obsdb.Record {
 
 func loadTracesFixture(t *testing.T) []obsdb.Span {
 	t.Helper()
-	b, err := os.ReadFile("testdata/otlp/traces.pb")
+	b, err := os.ReadFile("../obsdb/testdata/traces.pb")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +332,7 @@ func mustSpanID(t *testing.T, s string) trace.SpanID {
 // form stays pinned from this module too.
 func TestFixturesJSONMatchesPB(t *testing.T) {
 	var lj collogspb.ExportLogsServiceRequest
-	lb, err := os.ReadFile("testdata/otlp/logs.json")
+	lb, err := os.ReadFile("../obsdb/testdata/logs.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -344,7 +343,7 @@ func TestFixturesJSONMatchesPB(t *testing.T) {
 		t.Errorf("logs JSON != pb:\n got %+v\nwant %+v", got, want)
 	}
 	var tj coltracepb.ExportTraceServiceRequest
-	tb, err := os.ReadFile("testdata/otlp/traces.json")
+	tb, err := os.ReadFile("../obsdb/testdata/traces.json")
 	if err != nil {
 		t.Fatal(err)
 	}

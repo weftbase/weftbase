@@ -20,14 +20,14 @@ import (
 	"github.com/weftbase/weftbase/obsdb/sqlite"
 )
 
-// The step-4 OTLP fixtures (obsdb/testdata, copied to testdata/otlp) are the round-trip gate's
+// The step-4 OTLP fixtures (obsdb/testdata) are the round-trip gate's
 // input: the same data as protobuf and as JSON must land in identical
 // rows, because obsdb.FromOTLP… is the one mapping both the local sink
 // and this receiver go through (S3.3, S4.4).
 
 func fixture(t *testing.T, name string) []byte {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join("testdata", "otlp", name))
+	b, err := os.ReadFile(filepath.Join("..", "..", "obsdb", "testdata", name))
 	if err != nil {
 		t.Fatal(err)
 	}
