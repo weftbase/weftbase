@@ -508,7 +508,7 @@ export const HOW_TO_SCOPE: readonly string[] = [
   'data-scope="pub_…" on the panel\'s <script> tag (or <weft-devtools>)',
   'scope("pub_…") from @weftgo/devtools',
   'data-weft-scope="pub_…" on the chat\'s element',
-  "scope.Header(h, …) on the app's handler (Go, package weft/scope)",
+  "scope.Header(h, …) on the app's handler (Go, package weftbase/scope)",
 ]
 
 /** The one console line (UX-S5b-10): an auto dock whose tag names no
