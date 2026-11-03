@@ -167,6 +167,16 @@ func (h *Hub) Attach(ctx context.Context, s tenant.Scope, ex worker.Executor) (*
 	return w, versions, nil
 }
 
+// Detach removes ex's workers from the router: they take no more runs.
+// The runs they hold report as before.
+func (h *Hub) Detach(ex worker.Executor) {
+	for _, w := range h.router.Workers() {
+		if w.Exec == ex {
+			h.router.Remove(w.ID)
+		}
+	}
+}
+
 // Run claims and dispatches until ctx ends, and extends the leases of
 // the runs in flight.
 func (h *Hub) Run(ctx context.Context) error {

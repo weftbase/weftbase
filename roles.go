@@ -16,10 +16,11 @@ const (
 	RoleAPI Role = "api"
 	// RoleIngest serves OTLP at /otlp/v1/{traces,logs}.
 	RoleIngest Role = "ingest"
-	// RoleScheduler runs the background work: the retention sweeper
-	// now; queue claims, timers and relays as they land.
+	// RoleScheduler runs the background work: queue claims and
+	// dispatch, the timers, the retention sweeper.
 	RoleScheduler Role = "scheduler"
-	// RoleSupervisor runs local agent builds (Phase 3; nothing yet).
+	// RoleSupervisor runs local agent builds (App.Local, serve
+	// --build): one supervised child per build.
 	RoleSupervisor Role = "supervisor"
 )
 

@@ -542,3 +542,37 @@ func (r *Registry) Manifest(ctx context.Context, s tenant.Scope, hash string) (M
 	})
 	return m, err
 }
+
+// BuildAgents reads what a build registered: its kind and every agent
+// version it serves, with the manifests (store.ErrNotFound for a digest
+// never registered). The local placement rebuilds a stored build's
+// registration from it, so the build can be served without starting.
+func (r *Registry) BuildAgents(ctx context.Context, s tenant.Scope, digest string) (kind string, agents []AgentSpec, err error) {
+	if err := checkScope(s); err != nil {
+		return "", nil, err
+	}
+	err = r.db.Read(ctx, func(tx store.Tx) error {
+		if err := store.QueryRow(tx, `SELECT kind FROM builds WHERE project_id = ? AND env = ? AND digest = ?`,
+			s.Project(), s.Env(), digest).Scan(&kind); err != nil {
+			return fmt.Errorf("build %s: %w", digest, store.NotFound(err))
+		}
+		rows, err := store.Query(tx, `SELECT v.agent, v.manifest_hash, m.body FROM agent_versions v
+			JOIN manifests m ON m.project_id = v.project_id AND m.env = v.env AND m.hash = v.manifest_hash
+			WHERE v.project_id = ? AND v.env = ? AND v.build_digest = ? ORDER BY v.agent`, s.Project(), s.Env(), digest)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var a AgentSpec
+			var body string
+			if err := rows.Scan(&a.Name, &a.ManifestHash, &body); err != nil {
+				return err
+			}
+			a.Manifest = []byte(body)
+			agents = append(agents, a)
+		}
+		return rows.Err()
+	})
+	return kind, agents, err
+}

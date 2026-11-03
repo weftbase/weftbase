@@ -37,7 +37,7 @@ enforces it in CI.
 | L0 | weft, `client/...`, the standard library, third-party drivers |
 | L1 | `store` (Tx, errors, migration runner), `tenant` (the `Scope` type), `events` (outbox, relay, hub), `obsdb` and its backends, `internal/...` |
 | L2 | domains: `registry`, `queue`, `sessions`, `approvals`, `audit`, `budgets`, `webhooks`, `observe/...`, `worker/...`; and `authz` |
-| L3 | `store/sqlite`, `store/postgres` (implement the domain repositories) |
+| L3 | `store/sqlite`, `store/postgres` (implement the domain repositories), `store/storetest` (their conformance suite) |
 | L4 | `api/http`, `api/mcp`, `console` (`console` imports only the standard library) |
 | L5 | `weftbase` (the kernel), `cmd/weftbase` |
 
@@ -116,7 +116,14 @@ generation from it lands later.
   `Resume` (a new run pinned to the parked run's version).
 - `client/wire`: the worker protocol's types (registration, commands,
   acks split into accepted, rejected, busy, run_started, heartbeat,
-  finished; cancel with its own id; frames).
+  finished; cancel and steer with their own ids; the socket handshake;
+  newline-delimited frames).
+- `client/worker`: the build's side. `Runner` is the command engine
+  every placement drives (the seen set, ack before run, per-agent
+  capacity, cancel, steer, heartbeats, drain); `Serve(FromEnv(),
+  Agent(a))` runs a build under a supervisor: dial `WEFTBASE_SOCKET`,
+  register on every connect, the idle watchdog, backoff, drain on a
+  drain frame or SIGTERM.
 - `worker`: the `Executor` interface every placement implements, the
   `RunSink` the ledger implements for the hub, and the router
   (by AgentVersion, then lease holder). `worker/hub` attaches executors
@@ -125,9 +132,26 @@ generation from it lands later.
   acks; a run whose worker vanished is marked lost once its lease
   expires, never sent twice. `worker/executor` holds the embedded
   placement (`App.Agent(...)`: weft agents in-process, the build digest
-  is the executable's sha256 or `BuildDigest`).
+  is the executable's sha256 or `BuildDigest`) and `executor/local`,
+  the default placement (`App.Local(path)`, `serve --build`): the build
+  is copied into `<data>/builds/<sha256>` and run as a supervised child
+  over a Unix socket, restarted with backoff when it crashes, retired
+  (drained, started again on demand) when a newer build of the same
+  agents arrives; at boot every stored build is attached lazily, so a
+  parked run resumes on its pinned build. A child that exits loses the
+  runs it held (`worker_lost`); every ended link writes
+  `worker.disconnected`; a held run unheard for max(10 min, three
+  heartbeats) is lost.
+- Timers (the scheduler role): the queue time-to-live (default 24 h)
+  fails a run no worker served; approval expiry (off by default)
+  resumes a parked run with its calls denied; maximum pin age (default
+  30 days) migrates a parked run to the agent's prod version
+  (`resolved_via migrate`) or cancels it `version_retired`.
+- `store/storetest`: the control store's conformance suite (the
+  transaction contract, the outbox, registry, queue, timers, ledger, and
+  a cross-tenant group), run by every backend.
 
 `/v1`: `GET /v1/agents`, `GET /v1/agents/{name}/versions`,
 `POST /v1/agents/{name}/labels/{label}`, `POST /v1/runs`,
 `GET /v1/runs/{id}/status`, `POST /v1/runs/{id}/cancel`,
-`POST /v1/runs/{id}/resume`.
+`POST /v1/runs/{id}/steer`, `POST /v1/runs/{id}/resume`.

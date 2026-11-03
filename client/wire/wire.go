@@ -11,6 +11,9 @@
 package wire
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -84,6 +87,32 @@ type AgentRegistration struct {
 	// Concurrency is how many runs of the agent the worker takes at
 	// once (0: no bound of its own).
 	Concurrency int `json:"concurrency,omitempty"`
+}
+
+// RestoreManifest gives back the manifest bytes hash was computed
+// over. A JSON transport compacts a json.RawMessage, while weft's
+// manifest bytes are indented with a trailing newline
+// (weft.manifest.hash covers those): the indented form is rebuilt when
+// the bytes as received do not match. m is returned as is when neither
+// form matches (the registry then refuses it).
+func RestoreManifest(m json.RawMessage, hash string) json.RawMessage {
+	if sha256Hex(m) == hash {
+		return m
+	}
+	var b bytes.Buffer
+	if err := json.Indent(&b, m, "", "  "); err != nil {
+		return m
+	}
+	b.WriteByte('\n')
+	if sha256Hex(b.Bytes()) == hash {
+		return b.Bytes()
+	}
+	return m
+}
+
+func sha256Hex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }
 
 // Validate reports what is missing from a registration.

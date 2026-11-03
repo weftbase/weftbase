@@ -75,6 +75,7 @@ type App struct {
 	queue    *queue.Queue
 	ledger   *sessions.Ledger
 	hub      *hub.Hub
+	locals   map[string]*localBuild // by digest
 
 	mu       sync.Mutex
 	cancel   context.CancelFunc
@@ -158,6 +159,12 @@ func New(opts ...Option) (_ *App, err error) {
 	})
 	a.ledger.SetCanceler(a.hub)
 	a.ledger.SetSteerer(a.hub)
+	a.locals = map[string]*localBuild{}
+	if a.roles.has(RoleSupervisor) {
+		if err := a.restoreBuilds(); err != nil {
+			return nil, err
+		}
+	}
 	var authOpts []authz.Option
 	if c.open {
 		authOpts = append(authOpts, authz.Open())
@@ -445,6 +452,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 	// then end canceled (cause shutdown); their ends are recorded
 	// before the stores close.
 	herr := a.hub.Close(ctx, time.Now().Add(a.cfg.drainTimeout()))
+	a.closeLocals()
 	return errors.Join(herr, a.closeStores())
 }
 

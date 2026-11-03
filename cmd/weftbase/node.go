@@ -24,6 +24,7 @@ import (
 	"github.com/weftbase/weftbase/client/discovery"
 	"github.com/weftbase/weftbase/internal/dblock"
 	"github.com/weftbase/weftbase/internal/listen"
+	"github.com/weftbase/weftbase/registry"
 	"github.com/weftbase/weftbase/tenant"
 	"github.com/weftbase/weftbase/tenant/keys"
 )
@@ -38,6 +39,7 @@ import (
 type nodeFlags struct {
 	addr, data, controlDB, traceDB, manifest, retain, pricing *string
 	origins                                                   []string
+	builds                                                    []string
 	logs                                                      logFlags
 }
 
@@ -58,6 +60,8 @@ func addNodeFlags(fs *flag.FlagSet) *nodeFlags {
 	f.pricing = pricingFlag(fs)
 	fs.Func("allow-origin", "an `origin` (scheme://host:port) allowed by CORS, repeatable (default: localhost and 127.0.0.1 on any port)",
 		func(s string) error { f.origins = append(f.origins, s); return nil })
+	fs.Func("build", "a build's executable `path` to run as a local child (the supervisor role), repeatable: it serves its agents with client/worker (worker.Serve(worker.FromEnv(), …)); a newer build of the same agents retires the older one",
+		func(s string) error { f.builds = append(f.builds, s); return nil })
 	f.logs = addLogFlags(fs)
 	return f
 }
@@ -101,6 +105,7 @@ type resolved struct {
 	traceLabel  string
 	opts        []weftbase.Option
 	notes       []string
+	builds      []string // --build paths
 }
 
 // resolve reads the flags into kernel options and the banner's notes.
@@ -113,6 +118,7 @@ func (f *nodeFlags) resolve() (resolved, error) {
 		r.traceLabel = maskDSN(*f.traceDB)
 	}
 	r.opts = []weftbase.Option{weftbase.DataDir(r.data)}
+	r.builds = f.builds
 	if *f.controlDB != "" {
 		r.opts = append(r.opts, weftbase.ControlDB(*f.controlDB))
 	}
@@ -258,6 +264,20 @@ func startNode(cfg nodeConfig) (*node, error) {
 	dial := loopbackAddr(choice.Addr)
 	n := &node{addr: dial, url: "http://" + dial, key: cfg.key}
 	app.SetHolder(n.url)
+	var buildNotes []string
+	for _, b := range cfg.res.builds {
+		vs, err := app.Local(b)
+		if err != nil {
+			_ = choice.Listener.Close()
+			_ = app.Shutdown(context.Background())
+			return nil, fmt.Errorf("--build %s: %w", b, err)
+		}
+		var names []string
+		for _, v := range vs {
+			names = append(names, fmt.Sprintf("%s %s (#%d)", v.Agent, v.ID, v.Number))
+		}
+		buildNotes = append(buildNotes, fmt.Sprintf("weftbase: build %s (%s): %s", b, shortDigest(vs), strings.Join(names, ", ")))
+	}
 	runCtx, cancelRun := context.WithCancel(context.Background())
 	runDone := make(chan struct{})
 	go func() {
@@ -276,6 +296,9 @@ func startNode(cfg nodeConfig) (*node, error) {
 		var b strings.Builder
 		disc = announce(&b, n.url, cfg.key, cfg.res.tracePath)
 		n.notes = strings.TrimSuffix(b.String(), "\n")
+	}
+	if len(buildNotes) > 0 {
+		n.notes = strings.TrimPrefix(n.notes+"\n"+strings.Join(buildNotes, "\n"), "\n")
 	}
 	stopFresh := keepFresh(disc)
 	stopCh := make(chan os.Signal, 1)
@@ -449,3 +472,15 @@ func findUpward(dir, name string) string {
 // nodeLogger is the kernel's logger: slog's default, which the log
 // flags installed.
 func nodeLogger() weftbase.Option { return weftbase.Logger(slog.Default()) }
+
+// shortDigest is a build's digest, shortened for a banner line.
+func shortDigest(vs []registry.Version) string {
+	if len(vs) == 0 {
+		return "no agents"
+	}
+	d := vs[0].BuildDigest
+	if len(d) > len("sha256:")+12 {
+		d = d[:len("sha256:")+12]
+	}
+	return d
+}

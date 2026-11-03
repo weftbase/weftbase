@@ -173,3 +173,29 @@ func TestValidate(t *testing.T) {
 		t.Error("Final")
 	}
 }
+
+func TestRestoreManifest(t *testing.T) {
+	indented := []byte("{\n  \"weft\": 1,\n  \"agents\": [\n    {\n      \"name\": \"a\\u003cb\"\n    }\n  ]\n}\n")
+	hash := sha256Hex(indented)
+	reg := Registration{Agents: []AgentRegistration{{Name: "a", Manifest: indented, ManifestHash: hash}}}
+	b, err := json.Marshal(reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back Registration
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
+	}
+	if sha256Hex(back.Agents[0].Manifest) == hash {
+		t.Fatal("the transport kept the indentation: this test no longer pins anything")
+	}
+	if got := RestoreManifest(back.Agents[0].Manifest, hash); !bytes.Equal(got, indented) {
+		t.Errorf("restored = %q", got)
+	}
+	if got := RestoreManifest(indented, hash); !bytes.Equal(got, indented) {
+		t.Error("bytes that match were changed")
+	}
+	if got := RestoreManifest(json.RawMessage(`{"x":1}`), hash); string(got) != `{"x":1}` {
+		t.Error("a manifest that matches in no form was changed")
+	}
+}

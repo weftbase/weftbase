@@ -21,7 +21,7 @@ imports weft; weft never imports weftbase.
 | Module | What |
 |---|---|
 | `github.com/weftbase/weftbase` | the server: kernel, domains, stores, `/v1`, Console, CLI |
-| `github.com/weftbase/weftbase/client` | what your app imports: `exporter` (send traces), `rest` (call `/v1`), `discovery`, `ulid`; later `worker` and `wire` |
+| `github.com/weftbase/weftbase/client` | what your app imports: `exporter` (send traces), `rest` (call `/v1`), `worker` (serve agents as a build), `wire` (the worker protocol), `discovery`, `ulid` |
 
 The client module imports weft, the standard library and OpenTelemetry
 only, so an agent build never compiles the server.
@@ -48,18 +48,51 @@ defer exporter.Install()() // WEFTBASE_URL + WEFTBASE_TOKEN, else the discovery 
 Recording into an in-process SQLite file instead (no server):
 `observe/local.Install()`.
 
+## Running agents
+
+An agent build is a Go binary that serves weft agents with
+`client/worker`:
+
+```go
+func main() {
+	support := weft.New(model, weft.Name("support"), lookup, refund)
+	if err := worker.Serve(worker.FromEnv(), worker.Agent(support)); err != nil {
+		log.Fatal(err)
+	}
+}
+```
+
+```sh
+weftbase serve --build ./bin/support   # the local placement: a supervised child per build
+```
+
+The supervisor copies the build into `<data>/builds/<sha256>`, starts
+it with `WEFTBASE_SOCKET`, `WEFTBASE_TOKEN`, `WEFTBASE_BUILD_DIGEST` and
+`WEFTBASE_PLACEMENT=local`, and records the build and an AgentVersion
+per agent. A newer build of the same agents retires the older one;
+runs parked on it still resume there (it is started again on demand).
+`./bin/support --manifest` prints the build's manifests. In-process
+agents use the embedded placement instead: `app.Agent(support)`.
+
+Then `POST /v1/runs {"agent": "support", "input": {"prompt": "…"}}`
+(the `prod` label, else the newest version), `POST
+/v1/agents/support/labels/prod {"version": "agv_…"}` to promote,
+`POST /v1/runs/{id}/cancel`, `/steer` and `/resume`.
+
 ## Layout
 
 See [`docs/architecture.md`](docs/architecture.md) for the layers and
 rules; `make layering` enforces them.
 
 ```
-api/http/v1   the read API (being re-mounted from /api to /v1)
+api/http/v1   the /v1 API: reads, agents, runs (admit, cancel, steer, resume)
 api/mcp       the MCP tool set behind `weftbase mcp`
 console       the embedded Console build (console/app is the Bun project)
 observe/      ingest (OTLP), cost (pricing), local (in-process sink)
 obsdb/        the trace store: sqlite, clickhouse, conformance suite
 store, tenant the control store contract and the tenant Scope
+registry, queue, sessions   agents and versions, the durable queue and timers, the run ledger
+worker/       the worker hub, the router, the executors (embedded, local)
 internal/     dblock, listen, doctor, reqlog, httpx, release, termsafe, weftsrc
 cmd/weftbase  the CLI
 client/       the client module
