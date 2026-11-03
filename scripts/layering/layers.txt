@@ -1,0 +1,61 @@
+# The layering table scripts/layering checks (docs/architecture.md).
+# A package may import its own layer's allowed peers and anything
+# below; the longest matching pattern gives a package its layer.
+# Patterns are relative to the module: "x" is exactly x, "x/..." is x
+# and every package below it, "." the module root.
+
+module github.com/weftbase/weftbase
+client-module client
+
+# L0: the client module (its own go.mod), weft, stdlib, drivers.
+layer 0 client/...
+
+# L1: store root, tenant, events, the trace store, internal helpers.
+layer 1 store store/storetest tenant/... events/... obsdb/... internal/...
+
+# L2: the domains and authz.
+layer 2 registry/... queue/... sessions/... approvals/... audit/... budgets/... webhooks/... observe/... worker/... authz/...
+
+# L3: the control-store backends (implement the domain repositories).
+layer 3 store/sqlite/... store/postgres/...
+
+# L4: the API surfaces and the Console.
+layer 4 api/... console/...
+
+# L5: the kernel, the CLI, examples and tooling.
+layer 5 . cmd/... examples/... scripts/...
+
+# L4 never reaches a store backend: the kernel wires them.
+forbid 4 3
+
+# The domain DAG: "dag a b c" means a may import b and c.
+domain registry queue sessions approvals audit budgets webhooks observe worker authz
+dag approvals sessions audit registry
+dag sessions registry queue budgets observe
+dag worker registry queue
+dag webhooks audit queue
+
+# Same-layer edges outside the domains.
+peer events/... store
+peer events/... tenant
+peer tenant/... store
+peer tenant/... events/...
+peer api/... console
+peer api/mcp/... api/http/...
+peer obsdb/... internal/...
+
+# console embeds and serves; it imports the standard library only.
+stdlib-only console
+
+# Who may build a tenant.Scope (test files are exempt).
+newscope authz/... tenant/...
+
+# Modules the client module may depend on (with their own transitive
+# dependencies): weft, OpenTelemetry and what they pull in.
+client-allow github.com/weftbase/weft go.opentelemetry.io google.golang.org/protobuf google.golang.org/grpc google.golang.org/genproto github.com/grpc-ecosystem github.com/go-logr github.com/cenkalti github.com/google/uuid golang.org/x github.com/felixge/httpsnoop github.com/cespare/xxhash
+
+# The retired product words: in no path and no text file of the tree.
+# The Console app runs its own audit (console/app/scripts).
+vocab (?i)studio (?i)playground (?i)devtools (?i)\bpanel
+vocab-ext .go .sql .md .yml .yaml .json .txt .html .mod
+vocab-skip .git scripts/layering CHANGELOG.md docs/adr console/app console/dist REBUILD-TODO.md

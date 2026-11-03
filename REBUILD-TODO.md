@@ -54,7 +54,18 @@ it is re-pinned (§9.1).
 | no `studio` package; vocabulary clean in Go | done | `studio_version` → `server_version`; CLI prefix `weftbase:` |
 | gate: build/vet/test -race in both modules; client deps exclude the server | done | |
 
-## Step 4. Layering check: todo
+## Step 4. Layering check: done
+
+| Item | Status | Notes |
+|---|---|---|
+| `scripts/layering` + `layers.txt` + seeded-violation tests | done | up-layer, DAG, forbidden layer (L4→L3), stdlib-only `console`, `tenant.NewScope` outside `authz`/`tenant`, unclassified package, retired word in text and path |
+| `make layering`, `make client-deps`, `make vocab`, CI job `layering` | done | |
+| client-module dependency check (no server package; module allow-list) | done | |
+| Go vocabulary audit | done | scans .go/.md/.sql/.json/.yml/.txt/.html/.mod and paths; skips `CHANGELOG.md`, `docs/adr`, `REBUILD-TODO.md`, `console/app`, `console/dist` |
+| gate: fails on the seeded violation, passes on the tree | done | also checked by hand with an `observe → api/mcp` import |
+| README.md, AGENTS.md rewritten for the new layout | done | |
+
+DAG deviations from the plan's §1.4 (in `layers.txt`): `sessions → observe` (timeline and export need cost and holes); `webhooks → queue` (§4.3 says webhooks depends on queue, the DAG omitted it).
 
 ## Step 5. Kernel and read baseline: todo
 
