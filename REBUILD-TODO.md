@@ -75,7 +75,7 @@ DAG deviations from the plan's §1.4 (in `layers.txt`): `sessions → observe` (
 |---|---|---|
 | kernel `weftbase.go`/`options.go`/`roles.go`: `New`, `Handler`, `Run`, `Shutdown`, `Ready`, roles | done | data dir `<data>/control.db` + `<data>/traces.db` under `internal/dblock`; `postgres://` refused "not supported yet" |
 | `store` + `store/sqlite` (migrations, refuse pre-rebuild file) | done | repositories write portable `?` SQL over `store.Tx` in the domain package; backends own connections, dialect, migrations |
-| `storetest` (repository conformance suite) | todo | lands with the first repositories of step 6 |
+| `storetest` (repository conformance suite) | done | step 6, `4ad3ade1` |
 | `events`: outbox `Emit` in the caller's tx, relay with cursors, hub (replay then live, overflow) | done | hub pump runs under the `api` role (subscribers live there); sweeper under `scheduler` |
 | `tenant` (Scope, `ten_project`) + `tenant/keys` (`wb_sk_`/`rk`/`pk`/`wk`, hashed, audited mint/revoke) | done | bootstrap `wb_sk_test_` key in `<data>/bootstrap.key` |
 | `authz`: keys, Console sessions (one-time link → `wb_session` cookie), `Open`, `Can` | done | restricted keys have no scopes yet |
@@ -100,7 +100,7 @@ diff, holes), `observe/export`, `sessions` (timeline, export, delete),
 `observe/retention.go` (the sweeper now in the kernel). Push
 `tenant.Scope` into the obsdb queries (step 7).
 
-## Step 6. Phase 1 domains: in progress
+## Step 6. Phase 1 domains: done
 
 | Item | Status | Notes |
 |---|---|---|
@@ -108,15 +108,38 @@ diff, holes), `observe/export`, `sessions` (timeline, export, delete),
 | `registry` (agents, builds, AgentVersions `agv_`, labels, audited `label.moved` promote, Resolve, manifests by hash) | done | rows are project-level (`ten_project`); no selector → `prod`, else newest (`resolved_via latest`) |
 | `queue` (items, leases + fencing, Extend/Done/Fail/Release, timers table) | done | `queue` may call `tenant.NewScope` to rebuild a stored row's scope (declared in `layers.txt`) |
 | `sessions` run ledger (`agent_version`, `resolved_via`, tenant on every row; Admit, Resume, Cancel) | done | resume is a new run pinned to the parked run's version; cancel wins over a park |
-| steer | todo | `Steer` returns `ErrNotSupported` |
+| steer | done | `POST /v1/runs/{id}/steer` → ledger → hub → `Executor.Steer` → the build's Runner (weft `Steering`), embedded and local; `run.steered`; 409 not running, 400 `invalid_steer` |
 | `worker` (Executor incl. `Cancel`, RunSink, Router), `worker/hub`, `worker/executor/embedded.go` | done | the Executor interface lives in `worker` (avoids a hub ↔ executor cycle) |
-| `client/worker` (Serve, FromEnv, dial loop, ack-before-run, seen set, heartbeat, idle watchdog, backoff) | todo | |
-| `worker/executor/local` (child process over a Unix socket) | todo | |
+| `client/worker` (Serve, FromEnv, dial loop, ack-before-run, seen set, heartbeat, idle watchdog, backoff) | done | `Runner` is the engine both placements drive (embedded is now a thin transport over it); `--manifest`; orphaned builds exit after 2 min |
+| `worker/executor/local` (child process over a Unix socket) | done | crash restart with backoff, `Retire` on a newer build (lazy restart), `Known` registrations; kernel `App.Local`, build store `<data>/builds/<sha256>`, boot reattach of stored builds; CLI `serve`/`dev --build` |
 | kernel wiring (`App.Agent`, `App.Executor`, scheduler runs the hub; Shutdown drains) and `/v1` routes: agents, versions, labels, `POST /v1/runs`, status, cancel, resume | done | migration `0002_phase1.sql` |
 | gate: every run carries an AgentVersion; embedded runs end to end through the Executor; a parked run survives a new build and resumes on its pin; restart reclaims after lease expiry | done | `phase1_test.go` |
-| gate: the legacy SSE/link tests ported | todo | wait for `client/worker` |
-| timers fired (expiry, pin age), queue TTL → `worker_lost`, `worker.disconnected` events | todo | |
-| `storetest` repository conformance suite | todo | |
+| gate: the legacy SSE/link tests ported | done | `runtime/link_test.go` → `client/worker/worker_test.go` (register + ack before run, at most once, reconnect re-registers, idle watchdog, ping/cancel, stop drains, seen bounded, panic, undelivered accepted ack, busy, heartbeats, backoff); hardening → `worker/hub/link_test.go` (stalled worker lost, duplicate/unknown ack, late ack, disconnect, steer to the holder); restart → `TestRestartClaimsAgain`, `TestParkedLocalRunSurvivesANewBuild`. Not ported (no counterpart): breakpoints, HEAD on the SSE feed, playground budgets/scripted replay |
+| gate: local placement with a real child | done | `phase1_local_test.go`: fixture `worker/executor/local/testdata/refunds` (wefttest scripted), builds A and B; parked on A survives B + restart, resumes on A's child; api-only node's work reclaimed; embedded + local through one hub; cancel/steer/crash on the child |
+| timers fired (expiry, pin age), queue TTL → `worker_lost`, `worker.disconnected` events | done | `sessions/timers.go`, queue `RunTimers` under scheduler; migration `0003_timers.sql`; kernel options `QueueTTL`, `ApprovalExpiry`, `MaxPinAge`; hub silence bound (10 min / 3 beats) |
+| `storetest` repository conformance suite | done | `store/storetest`, run by `store/sqlite` (L3; may build scopes) |
+
+### weft integration points (TODO markers in code)
+
+| Marker | Where | Now | Switch to |
+|---|---|---|---|
+| `TODO(weft#13)` | `client/worker/runner.go` (`MetaAgentVersion`) | every run gets `weftbase.agent_version` run metadata (spans, records) | weft's `agent_version` option on session entries (prompt entry, `TurnEntry`, `ApprovalRequestEntry`, `PoolReceiptEntry`, pool child header) once on weft `weftbase-gaps` |
+| `TODO(weft#14)` | same file (`MetaBuildDigest`) | `weftbase.build_digest` run metadata | `weft.build.digest` on the OTel resource (weft `f057032b`, `version.Current()`); drop the metadata key |
+| weft #3, #1, #2/#5 | not wired | the ledger resumes from the opaque checkpoint a parked run's ack carried; a lost run is never re-sent | scheduler seam (`thread.WithScheduler`) when sessions move onto weft `thread`; recovery-stable idempotency keys and interrupted-turn resume let a lost durable run get a `resume` command instead of `worker_lost` |
+
+### Known limits (Phase 1)
+
+- Sessions over weft `thread` are not built: a "turn" is a run; every run carries its AgentVersion in the ledger.
+- A stored build restored at boot runs with the node's environment (per-build env waits for the deployment object, Phase 3).
+- Sockets are fresh per executor: an orphaned child of a crashed node is not re-adopted; it exits after 2 min unreachable.
+- The record-contract doc test now scans `api/http/v1` (weft `cc7b4032` dropped the retired-package excuse for `weft.replay.view`, whose reader lives there).
+
+### Before step 7
+
+- Step 5b (peel the read logic out of `api/http/v1`) and code generation from `v1.yaml` are still open.
+- Drain verbs (`wait`, `migrate`, `cancel`) as API, queue depth per version (`GET /v1/agents/{name}/versions/{agv}/queue`), session `pin` and sessions over weft `thread`.
+- The weft integration points above, when weft's `weftbase-gaps` lands.
+- weft-arena is still unpinned (step 1).
 
 ## Commits
 
@@ -127,3 +150,7 @@ diff, holes), `observe/export`, `sessions` (timeline, export, delete),
 | 0a54548c | 4 | the layering check |
 | 744f3519 | 5 | kernel, control store, outbox, keys, authz and /v1 |
 | a7ec3c35 | 6 (part) | wire, registry, queue, run ledger, hub, embedded executor |
+| 842840ad | 6 | client/worker: the build side of the worker link; embedded on the shared Runner |
+| d55e6acb | 6 | steer, the ledger's timers, lost workers, worker.disconnected |
+| 7de34779 | 6 | the local placement, App.Local, --build, the Phase 1 gate with a real child |
+| 4ad3ade1 | 6 | store/storetest conformance suite |
