@@ -163,7 +163,8 @@ their metadata (I4, capability `panel_token_tags`): `POST
 "1h"}` — `public_id`, `tags`, or both; at most 16 pairs, each key and
 value non-empty and at most 256 bytes, and no `weft.*` key but
 `weft.flow` (the others are the record contract's attributes: a 400
-says which) — signs the
+says which), nor any other key a run row's metadata never holds
+(`user.id`, `session.id`, `gen_ai.*`: 400) — signs the
 tags into the token like the public id, and every read it makes is held
 to them the way a public id token's is held to its public id: the runs
 list, search, stats and traces carry the tags as a filter (traces:

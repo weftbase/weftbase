@@ -679,8 +679,9 @@ func TestTagTokenCommands(t *testing.T) {
 	}
 }
 
-// TestTagTokenMintBounds (I4-fix 5): no weft.* key but weft.flow, at
-// most 16 pairs, 256 bytes a key or value — a 400 naming why.
+// TestTagTokenMintBounds (I4-fix 5): no weft.* key but weft.flow, no
+// other key a run row's metadata never holds (obsdb.MetaOf's contract
+// set), at most 16 pairs, 256 bytes a key or value — a 400 naming why.
 func TestTagTokenMintBounds(t *testing.T) {
 	ts, _ := tagTokenStudio(t)
 	many := map[string]string{}
@@ -694,6 +695,12 @@ func TestTagTokenMintBounds(t *testing.T) {
 	}{
 		{`{"tags":{"weft.public_id":"pub_1"}}`, "weft record attribute"},
 		{`{"tags":{"weft.session.id":"s_1"}}`, "weft record attribute"},
+		// Contract keys outside weft.*: never a run row's metadata, so a
+		// token scoped to one would read no run while its traces and
+		// live records matched by span attribute.
+		{`{"tags":{"user.id":"u_42"}}`, "not run metadata"},
+		{`{"tags":{"gen_ai.conversation.id":"c_1"}}`, "not run metadata"},
+		{`{"tags":{"session.id":"s_1"}}`, "not run metadata"},
 		{string(manyJSON), "at most 16 pairs"},
 		{`{"tags":{"k":"` + long + `"}}`, "at most 256 bytes"},
 		{`{"tags":{"` + long + `":"v"}}`, "at most 256 bytes"},

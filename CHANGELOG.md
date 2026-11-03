@@ -113,3 +113,8 @@ The `@weftgo/devtools` npm package keeps its name.
   always, so during a rolling deploy a turn parked on the old version
   resumed on the new one. `RuntimeServer.SessionsRuntime` takes the
   run's agent and manifest hash.
+- `studio`: `POST /api/panel-tokens` refuses a tag whose key a run
+  row's metadata never holds (a record contract key outside `weft.*`:
+  `user.id`, `session.id`, `gen_ai.*` — 400). Such a token read no run,
+  while the traces list and the live stream, which match span
+  attributes, served it that key's spans and records.

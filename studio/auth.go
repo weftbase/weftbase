@@ -712,7 +712,10 @@ const (
 // maxMintTagBytes, at most maxMintTags pairs, and no weft.* key but
 // weft.flow — the others are the record contract's own attributes
 // (weft.public_id, weft.session.id, …), whose scope is the public id's
-// or none: a tag token never stands in for one.
+// or none: a tag token never stands in for one — nor any other key a
+// run row's metadata never holds (obsdb.MetaOf's set: user.id,
+// session.id, gen_ai.*), which reads and the live stream would scope
+// differently.
 func checkMintTags(tags map[string]string) string {
 	if len(tags) > maxMintTags {
 		return fmt.Sprintf("tags: at most %d pairs (%d given)", maxMintTags, len(tags))
@@ -726,6 +729,12 @@ func checkMintTags(tags map[string]string) string {
 			return fmt.Sprintf("tags: %q: a key or value is at most %d bytes", k, maxMintTagBytes)
 		case strings.HasPrefix(k, "weft.") && k != flowKey:
 			return fmt.Sprintf("tags: %q is a weft record attribute, not run metadata: of the weft.* keys a tag token takes weft.flow alone (scope a token to a public id with \"public_id\")", k)
+		case len(obsdb.MetaOf(map[string]any{k: v})) == 0:
+			// A record contract key outside weft.* (user.id, session.id,
+			// gen_ai.*): a run row's metadata never holds it, so the
+			// token would read no run while its traces and live records
+			// matched by span attribute.
+			return fmt.Sprintf("tags: %q is a record contract attribute, not run metadata: a tag token takes the app's own metadata keys (core.Metadata)", k)
 		}
 	}
 	return ""
