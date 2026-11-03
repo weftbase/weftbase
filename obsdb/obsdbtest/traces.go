@@ -73,8 +73,8 @@ func traceFixture() []obsdb.Span {
 // retried batch repeated; the runs a trace holds (a subagent child
 // beside its parent); a missing root is nil with the earliest span's
 // service; error from any span; the since/until/service/public-id
-// filters, the run metadata filter (Meta), the tag scope (ScopeMeta:
-// every span carries each pair) and the (Before, BeforeID) cursor.
+// filters, the run metadata filter (Meta) and the (Before, BeforeID)
+// cursor.
 func traces(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	return func(t *testing.T) {
 		db := open(t)
@@ -140,7 +140,7 @@ func traces(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			{"service is exact", obsdb.TraceQuery{Service: "conf"}, []string{}, 0},
 			{"service and since", obsdb.TraceQuery{Service: "conf-svc", Since: at(5 * s)}, []string{trD, trB}, 2},
 			// Every span carries the public id: trB's non-weft root does
-			// not, so trB is out (its detail would refuse a panel token).
+			// not, so trB is out.
 			{"public id", obsdb.TraceQuery{PublicID: "pub_conf"}, []string{trA}, 1},
 			{"another public id", obsdb.TraceQuery{PublicID: "pub_other"}, []string{trD}, 1},
 			{"an unknown public id", obsdb.TraceQuery{PublicID: "pub_nobody"}, []string{}, 0},
@@ -152,12 +152,6 @@ func traces(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			{"a tag and a public id", obsdb.TraceQuery{Meta: map[string]string{"arena.batch": "b1"}, PublicID: "pub_other"}, []string{trD}, 1},
 			{"a tag and since", obsdb.TraceQuery{Meta: map[string]string{"arena.batch": "b1"}, Since: at(15 * s)}, []string{trD}, 1},
 			{"a tag's value is exact", obsdb.TraceQuery{Meta: map[string]string{"arena.batch": "b"}}, []string{}, 0},
-			// ScopeMeta (I4, a tag-scoped panel token): every span carries
-			// each pair — trD's one span does; trB's non-weft root does not.
-			{"a scope tag", obsdb.TraceQuery{ScopeMeta: map[string]string{"arena.batch": "b1"}}, []string{trD}, 1},
-			{"a scope tag and a public id", obsdb.TraceQuery{ScopeMeta: map[string]string{"arena.batch": "b1"}, PublicID: "pub_conf"}, []string{}, 0},
-			{"two scope pairs", obsdb.TraceQuery{ScopeMeta: map[string]string{"arena.batch": "b1", "weft.flow": "f_checkout"}}, []string{trD}, 1},
-			{"a scope tag no span carries", obsdb.TraceQuery{ScopeMeta: map[string]string{"arena.batch": "b2"}}, []string{}, 0},
 			// IDPrefix (UX-A-13, the ⌘K palette): bytes, no wildcard, no
 			// case folding.
 			{"an id prefix", obsdb.TraceQuery{IDPrefix: trB[:6]}, []string{trB}, 1},
@@ -292,35 +286,6 @@ func tracesBigTie(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		}
 		if len(p.Traces) != 1 || p.Traces[0].TraceID != spans[1].TraceID {
 			t.Errorf("Before alone at the tie = %d rows, want the older trace only", len(p.Traces))
-		}
-	}
-}
-
-// tracesScopedPaging: the public-id filter under the cursor — every
-// page holds only traces every span of which carries the id, Total
-// counts that match on every page, and the walk lists each once.
-func tracesScopedPaging(open func(t *testing.T) obsdb.DB) func(*testing.T) {
-	return func(t *testing.T) {
-		db := open(t)
-		const s = time.Second
-		spans := traceFixture()
-		for i, tr := range []string{"f6000000000000000000000000000006", "f7000000000000000000000000000007", "f8000000000000000000000000000008"} {
-			start := time.Duration(40+10*i) * s
-			spans = append(spans, traceSpan(tr, fmt.Sprintf("f%d00000000000001", 6+i), "", "invoke_agent conf", "conf-svc", start, start+s, 1,
-				weftAttrs(fmt.Sprintf("tr_scoped_%d", i), "pub_conf", "invoke_agent")))
-		}
-		// A mixed trace at 45s: a pub_conf run beside a pub_other span.
-		const mixed = "f9000000000000000000000000000009"
-		spans = append(spans,
-			traceSpan(mixed, "f900000000000001", "", "invoke_agent conf", "conf-svc", 45*s, 46*s, 1, weftAttrs("tr_mixed", "pub_conf", "invoke_agent")),
-			traceSpan(mixed, "f900000000000002", "f900000000000001", "invoke_agent other", "conf-svc", 45*s+s/2, 46*s, 1, weftAttrs("tr_mixed_kid", "pub_other", "invoke_agent")))
-		if err := db.Write(ctx(), obsdb.Batch{Spans: spans}); err != nil {
-			t.Fatal(err)
-		}
-		ids, pages := walkTraces(t, db, obsdb.TraceQuery{PublicID: "pub_conf", Limit: 2}, 4)
-		want := []string{"f8000000000000000000000000000008", "f7000000000000000000000000000007", "f6000000000000000000000000000006", trA}
-		if !reflect.DeepEqual(ids, want) || pages[0] != 2 {
-			t.Errorf("scoped walk = %v (pages %v), want %v two at a time (no %s, no %s)", ids, pages, want, trB, mixed)
 		}
 	}
 }

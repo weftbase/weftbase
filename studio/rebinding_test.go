@@ -9,68 +9,36 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	linkruntime "github.com/weftbase/weftbase/studio/runtime"
 )
 
-// rebindingServer is a Playground(true) Studio over a temp database
-// with one connected runtime (registered and holding its command
-// stream, so a valid run answers 202), AllowOrigins naming one real
-// hostname, and token as the server token ("" is setup A).
+// rebindingServer is a server over a temp database, AllowOrigins
+// naming one real hostname, and token as the server token ("" is the
+// open API).
 func rebindingServer(t *testing.T, token string) *httptest.Server {
 	t.Helper()
 	opts := []Option{
-		Open(t.TempDir() + "/rebind.db"), Playground(true),
+		Open(t.TempDir() + "/rebind.db"),
 		AllowOrigins("http://myapp.internal:8080"),
 	}
 	if token != "" {
 		opts = append(opts, Token(token))
 	}
-	ts := httptest.NewServer(New(opts...).Handler())
+	srv := New(opts...)
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-
-	bearer := func(req *http.Request) {
-		if token != "" {
-			req.Header.Set("Authorization", "Bearer "+token)
-		}
-	}
-	b, _ := json.Marshal(linkruntime.Registration{
-		RuntimeID: "rt_rb",
-		Agents: []linkruntime.AgentRegistration{{
-			Name:     "a",
-			Manifest: `{"weft":1,"agents":[{"name":"a","model":{"provider":"p","name":"m"},"policy":{},"tools":[]}]}`,
-		}},
-	})
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/runtime/register", strings.NewReader(string(b)))
-	req.Header.Set("Content-Type", "application/json")
-	bearer(req)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		t.Fatalf("register: %v %v", err, resp)
-	}
-	_ = resp.Body.Close()
-
-	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/runtime/commands?runtime=rt_rb", nil)
-	bearer(req)
-	stream, err := http.DefaultClient.Do(req)
-	if err != nil || stream.StatusCode != http.StatusOK {
-		t.Fatalf("commands: %v %v", err, stream)
-	}
-	t.Cleanup(func() { _ = stream.Body.Close() })
-	go func() { _, _ = io.Copy(io.Discard, stream.Body) }()
 	return ts
 }
 
-// TestDNSRebindingGuard pins the Host rule for setup A (no Token): a
-// DNS-rebound page (http://evil.example:7331 resolving to 127.0.0.1)
-// is same-origin to the browser, so without the rule it could start
-// playground runs, read transcripts and hold the live stream. The
-// whole /api tree answers only a loopback Host or one AllowOrigins
-// names; the UI shell and panel.js carry no data and stay open. With
-// a Token the bearer is the defence and the Host does not matter.
+// TestDNSRebindingGuard pins the Host rule for the open API (no Token):
+// a DNS-rebound page (http://evil.example:7331 resolving to 127.0.0.1)
+// is same-origin to the browser, so without the rule it could read
+// transcripts, delete runs and hold the live stream. The whole /api
+// tree answers only a loopback Host or one AllowOrigins names; the
+// Console carries no data and stays open. With a Token the bearer is
+// the defence and the Host does not matter.
 func TestDNSRebindingGuard(t *testing.T) {
 	const tok = "tok_rebind"
-	const run = `{"runtime":"rt_rb","agent":"a","input":"hi","engine":"live","thread":"ephemeral"}`
 	hosts := []string{"127.0.0.1:7331", "localhost:3000", "[::1]:7331", "studio.localhost", "evil.example:7331", "myapp.internal:8080"}
 	routes := []struct {
 		name, method, path, body string
@@ -79,10 +47,7 @@ func TestDNSRebindingGuard(t *testing.T) {
 		{"runs", http.MethodGet, "/api/runs", "", http.StatusOK},
 		{"search", http.MethodGet, "/api/search?q=hi", "", http.StatusOK},
 		{"traces", http.MethodGet, "/api/traces", "", http.StatusOK},
-		{"playground run", http.MethodPost, "/api/playground/runs", run, http.StatusAccepted},
 		{"live", http.MethodGet, "/api/live?session=s_1", "", http.StatusOK},
-		{"live grant", http.MethodPost, "/api/live-grant?session=s_1", "", http.StatusOK},
-		{"panel.js", http.MethodGet, "/panel.js", "", http.StatusOK},
 		{"shell", http.MethodGet, "/", "", http.StatusOK},
 	}
 	for _, token := range []string{"", tok} {
@@ -163,8 +128,7 @@ func TestDNSRebindingForwardedHost(t *testing.T) {
 
 // TestDNSRebindingInProcess: a request that never crossed a socket (no
 // RemoteAddr, as an adapter may hand one over) gets no exemption — only
-// its Host decides. weftbase/runtime's runtime.Local transport says
-// localhost and passes; any other Host is refused.
+// its Host decides: localhost passes; any other Host is refused.
 func TestDNSRebindingInProcess(t *testing.T) {
 	h := New(Open(t.TempDir() + "/inproc.db")).Handler()
 	for _, tc := range []struct {

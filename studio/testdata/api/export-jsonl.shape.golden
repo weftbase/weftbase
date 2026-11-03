@@ -147,7 +147,6 @@
 <run>.run.children[].err=string
 <run>.run.children[].event_count=float64
 <run>.run.children[].events_emitted=float64
-<run>.run.children[].experiment_id=string
 <run>.run.children[].finished=string
 <run>.run.children[].forked_from=string
 <run>.run.children[].id=string
@@ -163,7 +162,6 @@
 <run>.run.children[].parent_call_id=string
 <run>.run.children[].parent_run_id=string
 <run>.run.children[].pending=float64
-<run>.run.children[].playground=bool
 <run>.run.children[].prompt_preview=string
 <run>.run.children[].public_id=string
 <run>.run.children[].request_count=float64
@@ -195,7 +193,6 @@
 <run>.run.err=string
 <run>.run.event_count=float64
 <run>.run.events_emitted=float64
-<run>.run.experiment_id=string
 <run>.run.fallbacks=float64
 <run>.run.finished=string
 <run>.run.forked_from=string
@@ -216,7 +213,6 @@
 <run>.run.parent_call_id=string
 <run>.run.parent_run_id=string
 <run>.run.pending=float64
-<run>.run.playground=bool
 <run>.run.prompt_preview=string
 <run>.run.public_id=string
 <run>.run.request_count=float64

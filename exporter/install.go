@@ -138,7 +138,7 @@ func plan(opts []otel.Option, fallback bool) (all []otel.Option, joined *discove
 		// code switches the discovery read off, as WEFTBASE_URL and
 		// NoDiscovery do — the file never adds a second Studio, never
 		// writes runs into a store the caller did not name, and never
-		// becomes the one StudioEndpoint (and runtime.Install) reports.
+		// becomes the one StudioEndpoint reports.
 		if !noDisc && !named {
 			getenv, joined = discoverStudio(getenv)
 		}

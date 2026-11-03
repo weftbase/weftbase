@@ -164,15 +164,6 @@ func TestRunsTurnMarksPastTheCaps(t *testing.T) {
 	if c := wide.Capped; c == nil || c.Hole != "truncated" || c.Cause != "response_cap" || c.Count != many-turnMarksSessions || c.Reason == "" {
 		t.Errorf("pub_many's turn_marks_capped = %+v; want truncated · response_cap · count %d", c, many-turnMarksSessions)
 	}
-	// A panel token's scope sets the public id on every page: its plain
-	// list is not a conversation's page and reads no marks.
-	pt := mintPanel(t, ts.URL, serverTok, "pub_many")
-	if p := read(pt, "/api/runs?limit=5"); len(p.Runs) == 0 || p.Capped != nil || p.Runs[0].SessionCompactions != 0 {
-		t.Errorf("a panel token's unnarrowed page = %+v, capped %+v; want rows and no marks", p.Runs, p.Capped)
-	}
-	if p := read(pt, "/api/runs?public_id=pub_many&limit=5"); len(p.Runs) == 0 || p.Runs[0].SessionCompactions != 1 {
-		t.Errorf("a panel token's narrowed page = %+v; want its marks", p.Runs)
-	}
 }
 
 // failEvents fails every SessionEvents read: the turn marks' first page.

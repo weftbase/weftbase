@@ -17,7 +17,7 @@ import (
 // GET /api/runs/{id} serves, on a parked run a resume names
 // (resumed_by), `decided` — each parked call's outcome as that resume
 // applied it — and, on the resume itself (resumed_from), `resumes`: the
-// same calls, the card the run page and the panel draw before step 0.
+// same calls, the card the run page draws before step 0.
 // Read time, never stored, from records already on the wire:
 //
 //   - the calls and their decision kinds: the resume's weft.resume.calls
@@ -41,20 +41,17 @@ import (
 //     weft.grant.id; a denied call's zero-length span's start);
 //   - a resolved call's result: the resume's pre-step result (core runs
 //     no handler for a resolve — no tool event, no span), under the
-//     content policy (result_badge hidden / not_recorded);
+//     content policy (result_badge not_recorded);
 //   - the reason of a denial: thread's content.reason, else the resume's
 //     DENIED result text after "DENIED: " (both under the content
 //     policy: absent content-off, reason_badge not_recorded);
 //   - the resume's weft.approval.actor: metadata — an opaque id the app
-//     chose — so every identity reads it;
+//     chose;
 //   - expired: a deny thread decided via expiry, or a DENIED result
 //     reading "expired: …".
 //
-// A read-scoped panel token gets no who, no reason and no resolved
-// result (reason_badge / result_badge hidden; who_hidden unless one
-// actor names the decider — several comma-joined, or a split verdict's
-// two sides, name no one call's: readsThreadContent's rule). A read that fails is said (error, or a note when the
-// block still stands), never an empty list.
+// A read that fails is said (error, or a note when the block still
+// stands), never an empty list.
 
 // approvalActorKey is the run metadata naming who decided a resume's
 // calls (weft.approval.actor): an opaque id, metadata every identity
@@ -93,9 +90,8 @@ type decisionDoc struct {
 // approver, quorum, expiry, …), else the span's approved_by. Who is
 // thread's content.who — every approver of a quorum, " + "-joined, as
 // KeyID their keys; a split verdict's Who its denier, ApprovedBy the
-// approvers it overruled; WhoHidden says a who in content the reader
-// may not read and no single actor names. Reason is a denial's reason,
-// ReasonBadge why a denial has none (hidden, not_recorded); Result a
+// approvers it overruled. Reason is a denial's reason, ReasonBadge why
+// a denial has none (not_recorded); Result a
 // resolved call's result (the resume's pre-step result: core runs no
 // handler, so no tool event or span carries it), ResultBadge why it has
 // none. At is the decision's own time when a record names one.
@@ -108,7 +104,6 @@ type decidedCall struct {
 	KeyID       string     `json:"key_id,omitempty"`
 	GrantID     string     `json:"grant_id,omitempty"`
 	Who         string     `json:"who,omitempty"`
-	WhoHidden   bool       `json:"who_hidden,omitempty"`
 	ApprovedBy  string     `json:"approved_by,omitempty"`
 	Reason      string     `json:"reason,omitempty"`
 	ReasonBadge string     `json:"reason_badge,omitempty"`
@@ -132,12 +127,11 @@ const deniedPrefix = "DENIED: "
 // runDecisions fills the run page's decided / resumes blocks.
 func (s *Server) runDecisions(r *http.Request, rec obsdb.RunRow, page *runPage) {
 	ctx := r.Context()
-	pub := panelScope(r)
 	if rec.ResumedBy != "" && rec.Pending > 0 {
 		if det, err := s.db.Run(ctx, rec.ResumedBy); err != nil {
 			page.Decided = &decisionDoc{Run: rec.ResumedBy, Calls: []decidedCall{}, Error: "the resume: " + err.Error()}
-		} else if inScope(pub, det.RunRow) {
-			d := s.decisionsOf(ctx, r, rec, det.RunRow)
+		} else {
+			d := s.decisionsOf(ctx, rec, det.RunRow)
 			d.Run = det.ID
 			page.Decided = &d
 		}
@@ -146,9 +140,6 @@ func (s *Server) runDecisions(r *http.Request, rec obsdb.RunRow, page *runPage) 
 		parked := obsdb.RunRow{ID: rec.ResumedFrom}
 		var note string
 		if det, err := s.db.Run(ctx, rec.ResumedFrom); err == nil {
-			if !inScope(pub, det.RunRow) {
-				return
-			}
 			parked = det.RunRow
 		} else {
 			// The calls are the resume's own records; the parked run
@@ -156,7 +147,7 @@ func (s *Server) runDecisions(r *http.Request, rec obsdb.RunRow, page *runPage) 
 			// session stands in for it, said.
 			note = "the parked run could not be read: " + err.Error()
 		}
-		d := s.decisionsOf(ctx, r, parked, rec)
+		d := s.decisionsOf(ctx, parked, rec)
 		d.Run = rec.ResumedFrom
 		if note != "" {
 			d.Notes = append([]string{note}, d.Notes...)
@@ -166,9 +157,8 @@ func (s *Server) runDecisions(r *http.Request, rec obsdb.RunRow, page *runPage) 
 }
 
 // decisionsOf composes what resume applied to parked's calls.
-func (s *Server) decisionsOf(ctx context.Context, r *http.Request, parked, resume obsdb.RunRow) decisionDoc {
+func (s *Server) decisionsOf(ctx context.Context, parked, resume obsdb.RunRow) decisionDoc {
 	out := decisionDoc{At: resume.Started, Actor: resume.Meta[approvalActorKey], Calls: []decidedCall{}}
-	reads := readsThreadContent(r)
 	spans, err := s.db.RunSpans(ctx, resume.ID)
 	if err != nil {
 		out.Error = "the resume's spans: " + err.Error()
@@ -292,17 +282,8 @@ func (s *Server) decisionsOf(ctx context.Context, r *http.Request, parked, resum
 				c.Outcome = outcomeExpired
 			}
 			if len(rec.who)+len(rec.approvers) > 0 {
-				switch {
-				case reads:
-					c.Who = strings.Join(rec.who, " + ")
-					c.ApprovedBy = strings.Join(rec.approvers, " + ")
-				case out.Actor == "" || strings.Contains(out.Actor, ",") || len(rec.approvers) > 0:
-					// The actor is metadata and names the decider when it
-					// is one; several (thread comma-joins them) or a split
-					// verdict's sides are no one call's — a who in content
-					// alone is then hidden from this token.
-					c.WhoHidden = true
-				}
+				c.Who = strings.Join(rec.who, " + ")
+				c.ApprovedBy = strings.Join(rec.approvers, " + ")
 			}
 			reason = rec.reason // a split verdict's is the transcript's (below)
 		}
@@ -310,8 +291,6 @@ func (s *Server) decisionsOf(ctx context.Context, r *http.Request, parked, resum
 			switch {
 			case !hasRes || res.Content == "":
 				c.ResultBadge = string(obsdb.HoleNotRecorded)
-			case !reads:
-				c.ResultBadge = string(obsdb.HoleHidden)
 			default:
 				c.Result = res.Content
 			}
@@ -328,8 +307,6 @@ func (s *Server) decisionsOf(ctx context.Context, r *http.Request, parked, resum
 		switch {
 		case reason == "":
 			c.ReasonBadge = string(obsdb.HoleNotRecorded)
-		case !reads:
-			c.ReasonBadge = string(obsdb.HoleHidden)
 		default:
 			c.Reason = reason
 		}

@@ -29,8 +29,8 @@ import (
 // runColumns is weft_runs' column list, the names a run row is read by
 // (a FINAL read selects runFinalColumns).
 const runColumns = `RunId, ParentRunID, ParentCallID, TraceID, Agent, Provider, Model,
-	ManifestHash, WeftVersion, Service, SessionID, PublicID, Turn, Playground,
-	ExperimentID, ForkedFrom, Meta, Started, Finished, LastSeen, FinishedOK,
+	ManifestHash, WeftVersion, Service, SessionID, PublicID, Turn,
+	ForkedFrom, Meta, Started, Finished, LastSeen, FinishedOK,
 	Failed, Err, Steps, Pending, StopReason, InputTokens, OutputTokens,
 	CachedInputTokens, CacheWriteTokens, ReasoningTokens, DeltaCount,
 	InstructionsHash, CatalogHash, RequestCount, Derived, RootEnded,
@@ -76,7 +76,7 @@ const runAggregates = `RunId, max(ParentRunID) AS ParentRunID, max(ParentCallID)
 	max(TraceID) AS TraceID, max(Agent) AS Agent, max(Provider) AS Provider, max(Model) AS Model,
 	max(ManifestHash) AS ManifestHash, max(WeftVersion) AS WeftVersion, max(Service) AS Service,
 	max(SessionID) AS SessionID, max(PublicID) AS PublicID, max(Turn) AS Turn,
-	max(Playground) AS Playground, max(ExperimentID) AS ExperimentID, max(ForkedFrom) AS ForkedFrom,
+	max(ForkedFrom) AS ForkedFrom,
 	` + metaUnion + ` AS Meta, min(Started) AS Started, max(Finished) AS Finished, max(LastSeen) AS LastSeen,
 	max(FinishedOK) AS FinishedOK, max(Failed) AS Failed, max(Err) AS Err,
 	max(Steps) AS Steps, max(Pending) AS Pending, max(StopReason) AS StopReason,
@@ -218,8 +218,8 @@ func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (_ obsdb.RunPage, err e
 //
 // An equality on an identity column additionally narrows the scan to
 // the runs that have a row with that value (a superset of the answer:
-// max returns a value some row holds), so a session's or an
-// experiment's list reads those runs by primary key instead of
+// max returns a value some row holds), so a session's or a public
+// id's list reads those runs by primary key instead of
 // aggregating the table. The narrowing subquery names its columns
 // through a table alias: ClickHouse aliases are query-global, and a
 // bare `Agent` beside `max(Agent) AS Agent` would resolve to the
@@ -282,13 +282,6 @@ func runsInner(q obsdb.RunQuery, cut runsCut) (string, []any) {
 	if !q.LastSeenAfter.IsZero() {
 		conds = append(conds, "toUnixTimestamp64Nano(LastSeen) >= ?")
 		args = append(args, q.LastSeenAfter.UnixNano())
-	}
-	if q.Playground != nil {
-		conds = append(conds, "Playground = ?")
-		args = append(args, *q.Playground)
-	}
-	if q.ExperimentID != "" {
-		eq("ExperimentID", q.ExperimentID)
 	}
 	if q.ErrorType != "" {
 		eq("ErrorType", q.ErrorType)
@@ -437,7 +430,7 @@ func (d *DB) queryRunRows(ctx context.Context, now time.Time, sql string, args .
 		var s runScan
 		if err := rs.Scan(&s.ID, &s.ParentRunID, &s.ParentCallID, &s.TraceID, &s.Agent,
 			&s.Provider, &s.Model, &s.ManifestHash, &s.WeftVersion, &s.Service,
-			&s.SessionID, &s.PublicID, &s.Turn, &s.Playground, &s.ExperimentID, &s.ForkedFrom,
+			&s.SessionID, &s.PublicID, &s.Turn, &s.ForkedFrom,
 			&s.Meta, &s.Started, &s.Finished, &s.LastSeen, &s.FinishedOK, &s.Failed, &s.Err,
 			&s.Steps, &s.Pending, &s.StopReason,
 			&s.InTok, &s.OutTok, &s.CachedTok, &s.CacheWriteTok, &s.ReasonTok, &s.DeltaCount,
@@ -461,8 +454,8 @@ type runScan struct {
 	ManifestHash, WeftVersion, Service                 string
 	SessionID, PublicID                                string
 	Turn                                               int32
-	Playground, FinishedOK, Failed                     bool
-	ExperimentID, ForkedFrom, Meta                     string
+	FinishedOK, Failed                                 bool
+	ForkedFrom, Meta                                   string
 	Started, LastSeen                                  time.Time
 	Finished                                           *time.Time
 	Err, StopReason                                    string
@@ -489,7 +482,7 @@ func (s *runScan) row(now time.Time) (obsdb.RunRow, error) {
 		Agent: s.Agent, Provider: s.Provider, Model: s.Model,
 		ManifestHash: s.ManifestHash, WeftVersion: s.WeftVersion, Service: s.Service,
 		SessionID: s.SessionID, PublicID: s.PublicID, Turn: int(s.Turn),
-		Playground: s.Playground, ExperimentID: s.ExperimentID, ForkedFrom: s.ForkedFrom,
+		ForkedFrom:  s.ForkedFrom,
 		ResumedFrom: s.ResumedFrom, CallerRunID: s.CallerRunID, CallerCallID: s.CallerCallID,
 		Started: s.Started.UTC(), LastSeen: s.LastSeen.UTC(),
 		Err: s.Err, Steps: int(s.Steps), Pending: int(s.Pending), StopReason: s.StopReason,
@@ -1422,9 +1415,6 @@ func (d *DB) Traces(ctx context.Context, q obsdb.TraceQuery) (_ obsdb.TracePage,
 	if q.PublicID != "" {
 		conds = append(conds, "Foreign = 0")
 	}
-	if len(q.ScopeMeta) > 0 {
-		conds = append(conds, "ForeignMeta = 0")
-	}
 	if q.NotRun {
 		conds = append(conds, "GenAIHits > 0", "WeftHits = 0",
 			"TraceId NOT IN ("+notRunDerivedTraces+")")
@@ -1628,16 +1618,6 @@ func traceInner(q obsdb.TraceQuery) (string, []any) {
 		args = append(args, q.PublicID)
 		narrowBy("t.PublicId = ?", q.PublicID)
 	}
-	if len(q.ScopeMeta) > 0 {
-		// Every span carries each pair: the group's count of spans
-		// lacking one is 0 (Foreign's rule for the tags, ForeignMeta).
-		var lack []string
-		for _, k := range slices.Sorted(maps.Keys(q.ScopeMeta)) {
-			lack = append(lack, "NOT (mapContains(SpanAttributes, ?) AND SpanAttributes[?] = ?)")
-			args = append(args, k, k, q.ScopeMeta[k])
-		}
-		cols = append(cols, "countIf("+strings.Join(lack, " OR ")+") AS ForeignMeta")
-	}
 	if !q.Since.IsZero() {
 		narrow = append(narrow, "TraceId IN (SELECT t.TraceId FROM otel_traces AS t WHERE t.Timestamp >= fromUnixTimestamp64Nano(toInt64(?)))")
 		narrowArgs = append(narrowArgs, q.Since.UnixNano())
@@ -1777,8 +1757,8 @@ func (d *DB) runExists(ctx context.Context, runID string) error {
 	return nil
 }
 
-// Sessions is a GROUP BY SessionId over weft_runs' top-level,
-// non-playground runs (S3.6): turns, first/last seen, summed usage, and
+// Sessions is a GROUP BY SessionId over weft_runs' top-level
+// runs (S3.6): turns, first/last seen, summed usage, and
 // the newest turn's derived status — argMax on (Turn, Started) picks
 // the same row SQLite's ORDER BY ... LIMIT 1 does.
 //
@@ -2297,8 +2277,8 @@ func (t turnScope) cond() (string, []any) {
 }
 
 // sessionRuns builds the per-run subquery both Sessions and Session
-// group over: each run collapsed to its aggregates first, then scoped
-// to the non-playground own turns of a session (D3, U14; ownTurnCH). The scope
+// group over: each run collapsed to its aggregates first, then kept to
+// the own turns of a session (D3, U14; ownTurnCH). The filter
 // reads the collapsed row for the reason runsInner's filters do — a
 // subagent run inherits its parent's session metadata and names its
 // parent on run_start only, so a row-level top-level filter counted
@@ -2317,7 +2297,6 @@ func sessionRuns(narrow, cond string, cut runsCut, meta bool) string {
 	}
 	return `(SELECT * FROM (SELECT RunId, ` + runMeta + `max(SessionID) AS SessionID, max(PublicID) AS PublicID,
 				max(Agent) AS Agent, max(ParentRunID) AS ParentRunID, max(CallerRunID) AS CallerRunID,
-				max(Playground) AS Playground,
 				max(Turn) AS Turn, min(Started) AS Started, max(LastSeen) AS LastSeen,
 				max(FinishedOK) AS FinishedOK, max(Failed) AS Failed, max(RootEnded) AS RootEnded,
 				max(InputTokens) AS InputTokens, max(OutputTokens) AS OutputTokens,
@@ -2331,7 +2310,7 @@ func sessionRuns(narrow, cond string, cut runsCut, meta bool) string {
 				` + metaUnionMap + `['` + obsdb.SessionForkedFromKey + `'] AS ForkedSession
 			FROM weft_runs` + narrow + `
 			GROUP BY RunId)
-		WHERE ` + ownTurnCH + ` AND Playground = 0 AND SessionID != ''` + cond + cut.where() + `)`
+		WHERE ` + ownTurnCH + ` AND SessionID != ''` + cond + cut.where() + `)`
 }
 
 // ownTurnCH is the own-turn rule over a collapsed run row (D3; the
@@ -2403,7 +2382,7 @@ func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err
 	runs, err := d.queryRunRows(ctx, now,
 		`SELECT `+runFinalColumns+` FROM weft_runs FINAL
 		WHERE RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.SessionID = ?)
-			AND SessionID = ? AND `+ownTurnCH+` AND Playground = 0`+cut.where()+`
+			AND SessionID = ? AND `+ownTurnCH+cut.where()+`
 		ORDER BY Turn, Started, RunId`, id, id)
 	if err != nil {
 		return obsdb.SessionDetail{}, err
@@ -2457,7 +2436,7 @@ var contractKeys = []string{
 	"weft.session.id", "weft.public_id", "weft.turn", "gen_ai.agent.name",
 	"weft.record", "weft.event.type", "weft.event.pos", "weft.delta.pos",
 	"weft.messages.index", "weft.step.index", "weft.tool.seq",
-	"weft.playground", "weft.experiment.id", "weft.forked_from",
+	"weft.forked_from",
 	"weft.messages.count", "weft.messages.input", "weft.content",
 	"weft.content.truncated_bytes", "weft.version", "weft.manifest.hash",
 	"weft.run.steps", "weft.run.pending", "weft.run.stop_reason",

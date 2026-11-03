@@ -29,7 +29,7 @@ func (d *DB) PutManifest(ctx context.Context, m obsdb.StoredManifest) (err error
 		m.FirstSeen = time.Now().UTC()
 	}
 	_, err = d.writer.ExecContext(ctx, `INSERT INTO manifests (hash, body, source, first_ns)
-		VALUES (?, ?, ?, ?) ON CONFLICT(hash) DO NOTHING`,
+		VALUES (?, ?, ?, ?) ON CONFLICT (project_id, env, tenant_id, hash) DO NOTHING`,
 		m.Hash, string(m.Body), m.Source, unixNS(m.FirstSeen))
 	return err
 }

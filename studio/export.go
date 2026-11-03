@@ -1,7 +1,6 @@
 package studio
 
 import (
-	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -29,11 +28,11 @@ import (
 
 // The run export (plan A7):
 //
-//	GET /api/runs/{id}/export?format=json|jsonl|otlp|wefttest
+//	GET /api/runs/{id}/export?format=json|jsonl|otlp
 //
 // The whole run as one download, read from obsdb's tables and nothing
-// else (decision 13: the export reads, never writes, and Studio never
-// runs your agent — an export is data). Four formats:
+// else (decision 13: the export reads, never writes, and the server
+// never runs your agent — an export is data). Three formats:
 //
 //   - json: one document — the run as /api/runs/{id} serves it, every
 //     event, the transcript batches, the compactions, the request
@@ -49,47 +48,29 @@ import (
 //   - otlp: the run's records and spans re-serialised as OTLP/JSON, the
 //     two export requests side by side — {"logs":
 //     ExportLogsServiceRequest, "traces": ExportTraceServiceRequest} —
-//     each of which POST /v1/logs and /v1/traces (studio/ingest) read
+//     each of which POST /v1/logs and /v1/traces (the ingest receiver) read
 //     back into the same run. The records are rebuilt from what obsdb
 //     reads (it keeps no raw log record): every record carries the
 //     run's identity chain and metadata, a messages record the run's
 //     start time (obsdb keeps none of its own), and one heartbeat at
 //     the run's last-seen keeps the derived status.
-//   - wefttest: the run's model calls as wefttest replay fixtures (the
-//     builder POST /api/playground/fixtures uses, fixtures.go) under
-//     testdata/TestReplay_<run>/, beside a generated
-//     <agent>_replay_test.go that replays them (plan F6, savetest.go):
-//     unzip into a package directory and `go test` passes against the
-//     recorded run. A step whose request carried a compaction view keys
-//     on the view and says so in its compacted_at header, and the
-//     skeleton's header repeats it.
 //
 // With &tree=1 (UX-A-31) json, jsonl and otlp export the delegation
 // whole: the run, then every subagent run under it (breadth first, at
 // most exportTreeCap), each its own export — json a "subagents" list
 // beside "subagent_holes", jsonl each run's lines after its "run"
 // record then "subagent_hole" lines, otlp every run in the same two
-// requests — and the file is named <run id>.tree.<ext>. wefttest with
-// tree is a 400: its replay substitutes the subagents' recorded answers.
-//
-// The read-scope rule is the requests route's: a read-scoped panel
-// token never reads system prompts or tool catalogs. json and jsonl
-// export everything else, the request block replaced by the hidden
-// badge; otlp and wefttest are refused (403, badge hidden) — an OTLP
-// copy without its request records would re-ingest as a run that made
-// no model call, and fixtures carry prompts.
+// requests — and the file is named <run id>.tree.<ext>.
 
 // exportFormat is one ?format= value: its file extension and media type.
 type exportFormat struct {
 	ext, contentType string
-	prompts          bool // needs the identity to read prompts (else 403 hidden)
 }
 
 var exportFormats = map[string]exportFormat{
-	"json":     {ext: "json", contentType: "application/json; charset=utf-8"},
-	"jsonl":    {ext: "jsonl", contentType: "application/x-ndjson"},
-	"otlp":     {ext: "otlp.json", contentType: "application/json; charset=utf-8", prompts: true},
-	"wefttest": {ext: "zip", contentType: "application/zip", prompts: true},
+	"json":  {ext: "json", contentType: "application/json; charset=utf-8"},
+	"jsonl": {ext: "jsonl", contentType: "application/x-ndjson"},
+	"otlp":  {ext: "otlp.json", contentType: "application/json; charset=utf-8"},
 }
 
 // exportVersion names the json and jsonl document shape.
@@ -100,14 +81,7 @@ func (s *Server) serveRunExport(w http.ResponseWriter, r *http.Request, id strin
 	name := r.URL.Query().Get("format")
 	f, ok := exportFormats[name]
 	if !ok {
-		badRequest(w, r, "format must be json, jsonl, otlp or wefttest")
-		return
-	}
-	if f.prompts && !readsPrompts(r) {
-		refuseHidden(w, r, "a "+name+" export carries the run's request records, system prompts and tool catalogs: a read-scoped panel token does not read them")
-		return
-	}
-	if !s.scopeRunID(w, r, id) {
+		badRequest(w, r, "format must be json, jsonl or otlp")
 		return
 	}
 	tree := false
@@ -120,20 +94,11 @@ func (s *Server) serveRunExport(w http.ResponseWriter, r *http.Request, id strin
 		tree = b
 	}
 	ctx := r.Context()
-	if name == "wefttest" {
-		if tree {
-			badRequest(w, r, "tree applies to json, jsonl and otlp: a wefttest replay replays this run's own model calls, and its subagents' answers are the recorded tool results it substitutes")
-			return
-		}
-		s.exportFixtures(w, r, id, f)
-		return
-	}
-	x, err := s.collectExport(ctx, id, !readsPrompts(r))
+	x, err := s.collectExport(ctx, id)
 	if err != nil {
 		dbError(w, r, "run", id, err)
 		return
 	}
-	x.spans = spansFor(r, x.spans)
 	var sub []*runExport
 	var holes []treeHole
 	if tree {
@@ -170,16 +135,13 @@ const exportTreeCap = 200
 // breadth first by the run documents' children — each child's whole
 // export, its own children queued after it — at most exportTreeCap of
 // them, with the tree's holes: truncated (cause response_cap) past the
-// cap, hidden for the runs a panel token's public id does not reach
-// (left out with their subtrees). A child deleted between the reads is
-// skipped. Never nil holes: [] when the tree is whole.
+// cap. A child deleted between the reads is skipped. Never nil holes:
+// [] when the tree is whole.
 func (s *Server) collectSubtree(r *http.Request, x *runExport) ([]*runExport, []treeHole, error) {
 	ctx := r.Context()
-	// run.Children are in scope already (collectExport: inScope); each
-	// block counts the children it left out.
 	queue := append([]obsdb.RunRow(nil), x.run.Children...)
 	var out []*runExport
-	hidden, truncated := x.hiddenKids, false
+	truncated := false
 	for len(queue) > 0 {
 		kid := queue[0]
 		queue = queue[1:]
@@ -187,15 +149,13 @@ func (s *Server) collectSubtree(r *http.Request, x *runExport) ([]*runExport, []
 			truncated = true
 			break
 		}
-		c, err := s.collectExport(ctx, kid.ID, x.hidden)
+		c, err := s.collectExport(ctx, kid.ID)
 		if errors.Is(err, obsdb.ErrNotFound) {
 			continue
 		}
 		if err != nil {
 			return nil, nil, err
 		}
-		c.spans = spansFor(r, c.spans)
-		hidden += c.hiddenKids
 		out = append(out, c)
 		queue = append(queue, c.run.Children...)
 	}
@@ -205,14 +165,6 @@ func (s *Server) collectSubtree(r *http.Request, x *runExport) ([]*runExport, []
 			Hole: string(obsdb.HoleTruncated), Cause: string(obsdb.CauseResponseCap),
 			Reason: fmt.Sprintf("this export reads at most %d subagent runs and the tree holds more: the later ones were not exported, nothing was lost", exportTreeCap),
 			Fix:    "export a subagent run's own tree (runs/{id}/export?tree=1 on the child)",
-		})
-	}
-	if hidden > 0 {
-		holes = append(holes, treeHole{
-			Hole:   string(obsdb.HoleHidden),
-			Reason: hiddenSubagentsReason(hidden, scopeOf(ctx)),
-			Fix:    "export the tree with the server (dev) token",
-			Count:  hidden,
 		})
 	}
 	return out, holes, nil
@@ -320,92 +272,6 @@ func rfc5987(s string) string {
 	return b.String()
 }
 
-// refuseHidden is mayReadPrompts' refusal with the route's own words:
-// 403 in the error shape, the hidden badge beside it.
-func refuseHidden(w http.ResponseWriter, r *http.Request, msg string) {
-	refuseHiddenFor(w, r, msg, obsdb.CauseDefault)
-}
-
-// refuseHiddenFor is refuseHidden with the cause the route knows
-// (obsdb.HoleNoteFor's reason and fix).
-func refuseHiddenFor(w http.ResponseWriter, r *http.Request, msg string, cause obsdb.HoleCause) {
-	type errBody struct {
-		Code    string `json:"code"`
-		Message string `json:"message"`
-	}
-	writeJSON(w, r, http.StatusForbidden, struct {
-		Error errBody `json:"error"`
-		badgeFields
-	}{Error: errBody{"forbidden", msg}, badgeFields: badgeFor(obsdb.HoleHidden, cause)})
-}
-
-// exportFixtures answers format=wefttest: the replay skeleton at the
-// zip's root, then the run's fixtures under testdata/<test name>/,
-// each file named the way wefttest.Replay loads it. A run with no
-// transcript (content capture off) or no recorded answer is 409,
-// badged when there is a reason.
-func (s *Server) exportFixtures(w http.ResponseWriter, r *http.Request, id string, f exportFormat) {
-	ctx := r.Context()
-	det, err := s.db.Run(ctx, id)
-	if err != nil {
-		dbError(w, r, "run", id, err)
-		return
-	}
-	src, err := s.loadFixtureSource(ctx, id, nil)
-	if err != nil {
-		dbError(w, r, "run", id, err)
-		return
-	}
-	set, kept, ok := s.runFixtureSet(w, r, det, src)
-	if !ok {
-		return
-	}
-	model := det.Model
-	if det.Provider != "" && model != "" {
-		model = det.Provider + "/" + model
-	}
-	if kept != nil {
-		// The composed set (UX-C-30): the header names it, and a scripted
-		// replay's skeleton names the model its fixtures are stamped with.
-		w.Header().Set(keptPrefixHeader, kept.header())
-		if m := set.steps[kept.steps-1].model; det.Provider == scriptedEngineModel.Provider && det.Model == scriptedEngineModel.Name && m.Name != "" {
-			model = m.Name
-			if m.Provider != "" {
-				model = m.Provider + "/" + m.Name
-			}
-		}
-	}
-	skeleton, err := replaySkeleton{runID: id, agent: det.Agent, model: model, recorded: det.Started, set: set, kept: kept}.render()
-	if err != nil {
-		writeError(w, r, http.StatusInternalServerError, "internal", "replay test of run "+id+": "+err.Error())
-		return
-	}
-	dir := "testdata/" + replayTestName(id) + "/"
-	files := []fixtureFile{{Name: replayFileName(det.Agent), Body: string(skeleton)}}
-	for _, f := range set.files {
-		files = append(files, fixtureFile{Name: dir + f.Name, Body: f.Body})
-	}
-	var buf bytes.Buffer
-	zw := zip.NewWriter(&buf)
-	for _, file := range files {
-		// The run's start, not the clock: the same run zips to the same
-		// bytes.
-		fw, err := zw.CreateHeader(&zip.FileHeader{Name: file.Name, Method: zip.Deflate, Modified: det.Started.UTC()})
-		if err == nil {
-			_, err = fw.Write([]byte(file.Body))
-		}
-		if err != nil {
-			writeError(w, r, http.StatusInternalServerError, "internal", "zip fixtures of run "+id+": "+err.Error())
-			return
-		}
-	}
-	if err := zw.Close(); err != nil {
-		writeError(w, r, http.StatusInternalServerError, "internal", "zip fixtures of run "+id+": "+err.Error())
-		return
-	}
-	writeDownload(w, r, id, f, buf.Bytes())
-}
-
 // conflict is a 409 in the error shape, with a badge when there is one.
 func conflict(w http.ResponseWriter, r *http.Request, msg string, b badgeFields) {
 	type errBody struct {
@@ -434,7 +300,7 @@ type runExport struct {
 	gaps        []int64
 	batches     []obsdb.TranscriptBatch
 	compactions []obsdb.Compaction
-	reqHole     obsdb.Hole // not_recorded, hidden, or ""
+	reqHole     obsdb.Hole // not_recorded, or ""
 	requests    []obsdb.RequestRecord
 	prompts     []exportRef // in the order the requests first name them
 	catalogs    []exportRef
@@ -442,15 +308,8 @@ type runExport struct {
 	runHoles    []stepHole // the run's own (runHoles), as /api/runs/{id} serves them
 	children    []runRow   // the run's children with their holes (childRows), as /api/runs/{id} serves them
 	row         runRow     // the run's own row with its cost, as /api/runs/{id} serves it
-	// hidden: the identity is a read-scoped panel token — the request
-	// block and the compaction views' bodies are not its.
-	hidden bool
-	// hiddenKids counts the run's children a panel token's scope left
-	// out of run.Children (coster.visibleKids).
-	hiddenKids int
 	// stripped is whether any request record came through a content-off
-	// chain — read even when the request block is hidden, so a read
-	// token's transcript badge says stripped, not gap.
+	// chain.
 	stripped bool
 }
 
@@ -474,34 +333,26 @@ func (x exportRef) doc() any {
 	return holeRef{Hash: x.hash, Badge: string(x.hole)}
 }
 
-// collectExport reads the run's every block. hidden leaves the request
-// block out (a read-scoped token).
-func (s *Server) collectExport(ctx context.Context, id string, hidden bool) (*runExport, error) {
+// collectExport reads the run's every block.
+func (s *Server) collectExport(ctx context.Context, id string) (*runExport, error) {
 	det, err := s.db.Run(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	return s.collectExportOf(ctx, s.coster(ctx), det, hidden)
+	return s.collectExportOf(ctx, s.coster(ctx), det)
 }
 
 // collectExportOf is collectExport over a run already read — its row
 // and its children — priced on c: the session export reads its turns'
 // rows and children in batches and shares one coster across them.
-func (s *Server) collectExportOf(ctx context.Context, c *coster, det obsdb.RunDetail, hidden bool) (_ *runExport, err error) {
+func (s *Server) collectExportOf(ctx context.Context, c *coster, det obsdb.RunDetail) (_ *runExport, err error) {
 	id := det.ID
 	c.prime(det.ID, det.Children)
-	c.primeTrees(c.kids[det.ID]) // the scope's children (prime)
-	// A panel token's export lists its public id's children only
-	// (inScope, the run document's rule): the rest are one counted
-	// hidden hole, and the tree walk (collectSubtree) never reaches them.
-	kids, nHidden := c.visibleKids(det.ID)
-	det.Children = kids
-	x := &runExport{run: det, hidden: hidden, hiddenKids: nHidden, row: c.row(det.RunRow), children: s.childRows(ctx, c, det.Children)}
+	c.primeTrees(c.kids[det.ID])
+	det.Children = c.kids[det.ID]
+	x := &runExport{run: det, row: c.row(det.RunRow), children: s.childRows(ctx, c, det.Children)}
 	if x.runHoles, err = s.runHoles(ctx, det.RunRow); err != nil {
 		return nil, err
-	}
-	if x.hiddenKids > 0 {
-		x.runHoles = append(x.runHoles, hiddenChildrenHole(x.hiddenKids, scopeOf(ctx)))
 	}
 	if x.events, x.gaps, err = allEvents(ctx, s.db, id); err != nil {
 		return nil, err
@@ -521,11 +372,6 @@ func (s *Server) collectExportOf(ctx context.Context, c *coster, det obsdb.RunDe
 			return nil, err
 		}
 		x.stripped = requestsStripped(x.requests)
-	}
-	if hidden {
-		// The marks are read; the rows, prompts and catalogs are not
-		// the read-scoped token's — whatever else the block lacks.
-		x.reqHole, x.requests = obsdb.HoleHidden, nil
 	}
 	if x.reqHole != "" {
 		return x, nil
@@ -621,8 +467,6 @@ type exportTranscript struct {
 // exportCompaction is one obsdb.Compaction: a run-scope view (index,
 // step, the replaced range and the messages that stood in) or a
 // session marker (reason, counts, token estimates; index and step -1).
-// A view's messages are the request's content: for a read-scoped
-// panel token they are null under the hidden badge.
 type exportCompaction struct {
 	Scope        string          `json:"scope"`
 	Hash         string          `json:"hash"`
@@ -720,8 +564,6 @@ func (x *runExport) compactionsBlock() []exportCompaction {
 		var badge badgeFields
 		if len(msgs) == 0 {
 			msgs = json.RawMessage("null")
-		} else if x.hidden {
-			msgs, badge = json.RawMessage("null"), badgeOf(obsdb.HoleHidden)
 		}
 		out = append(out, exportCompaction{
 			Scope: c.Scope, Hash: c.Hash, Index: c.Index, Step: c.Step, FromSeq: c.FromSeq, ToSeq: c.ToSeq,
@@ -982,14 +824,10 @@ func (x *runExport) identityAttrs() map[string]any {
 	set("gen_ai.agent.name", r.Agent)
 	set("weft.session.id", r.SessionID)
 	set("weft.public_id", r.PublicID)
-	set("weft.experiment.id", r.ExperimentID)
 	set("weft.forked_from", r.ForkedFrom)
 	set("weft.resumed_from", r.ResumedFrom)
 	if r.Turn != 0 {
 		m["weft.turn"] = strconv.Itoa(r.Turn)
-	}
-	if r.Playground {
-		m["weft.playground"] = true
 	}
 	return m
 }
@@ -1299,14 +1137,4 @@ func anyValueOf(v any) *commonpb.AnyValue {
 		return &commonpb.AnyValue{}
 	}
 	return &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: fmt.Sprint(v)}}
-}
-
-// hiddenSubagentsReason is the tree export's hidden hole's reason: the
-// subagent runs (and their subtrees) the scope left out — another
-// public id's, or, under a token with tags (I4-fix), those without them.
-func hiddenSubagentsReason(n int, sc readScope) string {
-	if len(sc.Tags) > 0 {
-		return fmt.Sprintf("%d subagent runs are without your token's tags (or of another public id): your token's access does not reach them, so they and their subtrees are left out", n)
-	}
-	return fmt.Sprintf("%d subagent runs carry another public id, or none: a panel token reads its own public id's runs, so they and their subtrees are left out", n)
 }

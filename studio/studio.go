@@ -8,15 +8,16 @@ import (
 	"time"
 
 	"github.com/weftbase/weft/version"
+	"github.com/weftbase/weftbase/console"
 	"github.com/weftbase/weftbase/obsdb"
 	"github.com/weftbase/weftbase/obsdb/sqlite"
 	"github.com/weftbase/weftbase/studio/internal/reqlog"
 )
 
-// Version is the version Studio reports as api/meta's studio_version
-// and the devtools panel is built against: the framework module's tag,
-// [version.Version] — one version for every layer. It moves with the
-// module's release, nothing else.
+// Version is the version the server reports as api/meta's
+// studio_version: the framework module's tag, [version.Version] — one
+// version for every layer. It moves with the module's release, nothing
+// else.
 const Version = version.Version
 
 const defaultTitle = "weftbase"
@@ -37,7 +38,6 @@ type config struct {
 	title        string
 	manifest     []byte
 	capabilities []string
-	playground   bool
 	retain       time.Duration     // Retain: 0 = off
 	sweepEvery   time.Duration     // the sweeper's interval in tests; 0 = sweepInterval(retain)
 	pricing      *PricingTable     // Pricing; New resolves it (resolvePricing), never nil after
@@ -45,34 +45,33 @@ type config struct {
 	offReasons   map[string]string // OffReason: capability → the host's own words
 }
 
-// DB serves Studio over db (setup A: DB(exporter.LocalDB()) — the same
-// handle weft/otel's Local destination writes, so the UI reads what
+// DB serves over db (embedded: DB(exporter.LocalDB()) — the same
+// handle weft/otel's Local destination writes, so the reads see what
 // the run wrote, live, through the handle's own hub). Without DB or
 // Open, New opens the history database at $WEFTBASE_DB or ./.weftbase/weftbase.db
 // (history only: a second handle on the file, no live lane — passing
-// the pipeline's handle is what makes setup A live). A nil db panics
-// at New time — a Studio with nothing to read is a construction
-// error.
+// the pipeline's handle is what makes it live). A nil db panics at New
+// time — a server with nothing to read is a construction error.
 func DB(db obsdb.DB) Option {
 	return func(c *config) { c.db, c.dbSet, c.dbPath = db, true, "" }
 }
 
-// Open is shorthand for DB(sqlite.Open(path)): Studio over an obsdb
-// sqlite file, created when missing. Opening happens at New time and
-// panics on failure — a Studio that cannot reach its database is a
+// Open is shorthand for DB(sqlite.Open(path)): the server over an
+// obsdb sqlite file, created when missing. Opening happens at New time
+// and panics on failure — a server that cannot reach its database is a
 // construction error, not a serving one.
 func Open(path string) Option {
 	return func(c *config) { c.dbPath = path }
 }
 
 // Live serves the live stream from h (S4.1). The default is the DB's
-// own hub when it implements Hub() — setup A's sub-100 ms lane — else
+// own hub when it implements Hub() — the embedded sub-100 ms lane — else
 // an in-process obsdb.NewHub() fed by ingest.
 func Live(h obsdb.Hub) Option {
 	return func(c *config) { c.live = h }
 }
 
-// NoIngest turns the OTLP ingest routes off: a read-only Studio. The
+// NoIngest turns the OTLP ingest routes off: a read-only server. The
 // ingest capability disappears from api/meta with them.
 func NoIngest() Option {
 	return func(c *config) { c.noIngest = true }
@@ -80,25 +79,23 @@ func NoIngest() Option {
 
 // IngestToken requires `Authorization: Bearer <tok>` on the OTLP
 // ingest routes. Without one, ingest answers loopback peers only
-// (setup B's dev mode) — a Studio bound wide without a token refuses
-// remote exporters (S4.4).
+// (dev mode) — a server bound wide without a token refuses remote
+// exporters.
 func IngestToken(tok string) Option {
 	return func(c *config) { c.ingestToken = tok }
 }
 
-// Token protects the JSON API and the panel-token mint with a bearer
-// token, and keys the panel tokens' HMAC signatures (setup C's signing
-// key). Without it the API is open to a loopback Host or one
-// AllowOrigins names (setup A: embedded, same origin; any other Host
-// is refused, the DNS-rebinding guard).
+// Token protects the JSON API with a bearer token. Without it the API
+// is open to a loopback Host or one AllowOrigins names (embedded, same
+// origin; any other Host is refused, the DNS-rebinding guard).
 func Token(tok string) Option {
 	return func(c *config) { c.token = tok }
 }
 
 // AllowOrigins permits these origins on the API and ingest routes
-// (CORS for a panel served from another origin). The default, when a
-// Token is configured, is localhost and 127.0.0.1 on any port; setup
-// A (same origin, no token) sends no CORS headers unless origins are
+// (CORS for a client served from another origin). The default, when a
+// Token is configured, is localhost and 127.0.0.1 on any port; with no
+// token (same origin) no CORS headers are sent unless origins are
 // listed. Without a Token each origin's host:port is also a Host the
 // API answers besides the loopback names (an app served at
 // http://myapp.internal:8080 lists exactly that); "*" admits every
@@ -107,10 +104,10 @@ func AllowOrigins(origins ...string) Option {
 	return func(c *config) { c.origins = append(c.origins, origins...) }
 }
 
-// Base is the URL path Studio is mounted at, with leading and trailing
-// slash. Default "/studio/". It is written into the shell's
+// Base is the URL path the server is mounted at, with leading and
+// trailing slash. Default "/". It is written into the Console shell's
 // <base href> per request and becomes the router's basepath, so the
-// same bundle mounts anywhere (ADR 0018 §6).
+// same bundle mounts anywhere.
 func Base(path string) Option {
 	return func(c *config) {
 		p := path
@@ -128,11 +125,7 @@ func Base(path string) Option {
 }
 
 // Manifest supplies core.Manifest bytes (weft.json) for the agent and
-// tool cards. It wins over the manifests runtimes register with
-// (Playground(true)), which api/manifest lists beside it in sources;
-// without either api/manifest answers 404 and the UI hides the Agents
-// nav. Registered manifests live in memory: a Studio restart forgets
-// them until the runtimes register again.
+// tool cards; without it api/manifest answers 404.
 func Manifest(json []byte) Option {
 	return func(c *config) { c.manifest = json }
 }
@@ -153,31 +146,22 @@ func Capabilities(names ...string) Option {
 	}
 }
 
-// Playground turns the runtime link server and the playground routes
-// on (studio/playground.go registers its group, which this option
-// enables); without it meta.capabilities does not list the playground.
-func Playground(on bool) Option {
-	return func(c *config) { c.playground = on }
-}
-
 // DiscoveryFile names the discovery file the command hosting this
-// server writes for it (`weftbase dev`, plan B3: the
-// studio.json apps find a running Studio through). api/meta serves it
-// as discovery_file, under db.path's rule, while the file at path names
-// this process — a file never written, removed, or since taken over by
-// another Studio is not served. An embedded Studio (setup A) writes no
-// such file and leaves it unset.
+// server writes for it (`weftbase dev`: the file apps find a running
+// server through). api/meta serves it as discovery_file, under
+// db.path's rule, while the file at path names this process — a file
+// never written, removed, or since taken over by another server is not
+// served. An embedded server writes no such file and leaves it unset.
 func DiscoveryFile(path string) Option {
 	return func(c *config) { c.discovery = path }
 }
 
 // OffReason replaces why meta.capabilities_off says capability is off
-// — and every capability off for the same cause (the playground's
-// eight) — with the host's own words: `weftbase dev --no-playground`
-// says "weftbase dev was started with --no-playground", not the Go
-// option an embedding app would set. It changes words only, never
-// which capabilities are on. A capability that is no optional one
-// panics at New (a construction error, as Retain's floor is).
+// — and every capability off for the same cause — with the host's own
+// words: a command can name its flag, not the Go option an embedding
+// app would set. It changes words only, never which capabilities are
+// on. A capability that is no optional one panics at New (a
+// construction error, as Retain's floor is).
 func OffReason(capability, why string) Option {
 	return func(c *config) {
 		if c.offReasons == nil {
@@ -187,7 +171,7 @@ func OffReason(capability, why string) Option {
 	}
 }
 
-// Server is one Studio: the embedded UI, the JSON API, the live
+// Server is one weftbase server: the Console, the JSON API, the live
 // stream and — unless disabled — OTLP ingest, over one obsdb.DB.
 // Build it with New; serve it with Handler.
 type Server struct {
@@ -203,67 +187,52 @@ type Server struct {
 	reqs *reqlog.Logger
 
 	// live (config.live, set by New from the Live default) is the hub
-	// /api/live streams from (S4.1).
+	// /api/live streams from.
 	now func() time.Time
+
+	// ui serves every path outside the API and ingest trees: the
+	// Console.
+	ui http.Handler
 
 	// ownsDB: New opened the database itself (Open or the default
 	// path), so Close closes it. A DB handed in through DB(...) stays
-	// the caller's — otel owns it in setup A.
+	// the caller's — otel owns it when embedded.
 	ownsDB bool
-
-	// runtimeSrv is the runtime link server Playground(true) builds
-	// (registerPlayground, one per Server); Runtime() returns it. Nil
-	// without the option, and the playground and runtime-link routes
-	// do not exist.
-	runtimeSrv *RuntimeServer
 
 	// ingestHealth is what the exporting apps reported losing
 	// (weft.records.dropped on their heartbeats and run brackets;
 	// ingesthealth.go).
 	ingestHealth ingestHealth
 
-	shell []byte
-	csp   string
-
-	// grantKey signs the live stream's grants (livegrant.go): derived
-	// from the Token, else random per process.
-	grantKey []byte
-
 	// stopSweep stops Retain's sweeper (delete.go); nil without one.
 	// sweepMu guards it: Close may race another Close.
 	sweepMu   sync.Mutex
 	stopSweep func()
-
-	// proposals are the agents' proposed instructions (proposals.go,
-	// plan F6): in memory, bounded, forgotten on restart.
-	proposals proposals
 }
 
-// New builds a Studio server over one obsdb.DB (S4.1). Handler()
-// serves the UI, the panel, the JSON API, the live stream and —
-// unless disabled — OTLP ingest. Runtime() is the runtime link
-// server's in-process side, which weftbase/runtime takes in setup A; nil
-// unless Playground(true) built it.
+// New builds a server over one obsdb.DB. Handler() serves the
+// Console, the JSON API, the live stream and — unless disabled — OTLP
+// ingest.
 func New(opts ...Option) *Server {
-	c := config{base: "/studio/", title: defaultTitle}
+	c := config{base: "/", title: defaultTitle}
 	for _, o := range opts {
 		if o != nil {
 			o(&c)
 		}
 	}
 	if c.dbSet && c.db == nil {
-		panic("studio: New called with a nil DB")
+		panic("weftbase: New called with a nil DB")
 	}
 	if c.retain > 0 && c.retain < minRetention {
-		panic("studio: " + retainFloorMsg)
+		panic("weftbase: " + retainFloorMsg)
 	}
 	for name := range c.offReasons {
 		if _, ok := optionalCapabilities[name]; !ok {
-			panic("studio: OffReason names " + name + ", which is no optional capability")
+			panic("weftbase: OffReason names " + name + ", which is no optional capability")
 		}
 	}
 	resolvePricing(&c)
-	s := &Server{config: c, now: time.Now, mux: http.NewServeMux(), grantKey: liveGrantKey(c.token), reqs: reqlog.New()}
+	s := &Server{config: c, now: time.Now, mux: http.NewServeMux(), reqs: reqlog.New()}
 	if c.db == nil {
 		path := c.dbPath
 		if path == "" {
@@ -271,7 +240,7 @@ func New(opts ...Option) *Server {
 		}
 		db, err := sqlite.Open(path)
 		if err != nil {
-			panic("studio: open " + path + ": " + err.Error())
+			panic("weftbase: open " + path + ": " + err.Error())
 		}
 		s.db, s.ownsDB = db, true
 	}
@@ -282,7 +251,7 @@ func New(opts ...Option) *Server {
 			s.live = obsdb.NewHub()
 		}
 	}
-	s.prepareShell()
+	s.ui = console.Handler(console.Options{Base: s.base, Title: s.title})
 	s.registerGroups()
 	s.storeFileManifest()
 	s.mux.HandleFunc("/", s.serveUI)
@@ -290,40 +259,28 @@ func New(opts ...Option) *Server {
 	return s
 }
 
-// Handler serves Studio. Mount it under a prefix with
-// http.StripPrefix, or at the root of its own mux:
+// Handler serves the server. Mount it under a prefix with
+// http.StripPrefix (and Base), or at the root of its own mux:
 //
-//	mux.Handle("/studio/", http.StripPrefix("/studio",
-//		studio.Handler(studio.DB(db))))
+//	mux.Handle("/weftbase/", http.StripPrefix("/weftbase",
+//		studio.Handler(studio.DB(db), studio.Base("/weftbase/"))))
 //
 // The handler does not bind a port — the caller chooses the address.
 // Bind loopback, or configure Token, before exposing it wider.
 func (s *Server) Handler() http.Handler { return s }
 
-// Handler is New(opts...).Handler(): the one-liner for setups A and B
-// when the playground is not in play. Nothing can Close the server it
-// builds, so a Studio with Retain is built with New and closed: under
-// Handler the sweeper stops only when the DB is closed. A playground's
-// command store writer (plan I3) is stopped by Server.Close alone —
-// closing the DB does not stop it: under Handler it stays, one
-// goroutine blocked on its queue for the life of the process (harmless),
-// and a write it takes after the DB closed fails, logs one WARN and
-// holds the queue. A Studio with Playground(true) that is ever shut down
-// is built with New and closed, so Close drains the writer and stops it.
+// Handler is New(opts...).Handler(): the one-liner for an embedded
+// server. Nothing can Close the server it builds, so a server with
+// Retain is built with New and closed: under Handler the sweeper stops
+// only when the DB is closed.
 func Handler(opts ...Option) http.Handler {
 	return New(opts...).Handler()
 }
 
-// Runtime returns the runtime link server's in-process side (what
-// weftbase/runtime's runtime.Local takes): the server Playground(true)
-// built, nil without the option — and without it the playground
-// routes do not exist either.
-func (s *Server) Runtime() *RuntimeServer { return s.runtimeSrv }
-
 // Close releases what the server owns: Retain's sweeper, and the
-// database when New opened it (Open or the default path). A DB passed through DB(...) stays
-// its owner's — closing otel's handle out from under the pipeline is
-// not Studio's call.
+// database when New opened it (Open or the default path). A DB passed
+// through DB(...) stays its owner's — closing otel's handle out from
+// under the pipeline is not the server's call.
 func (s *Server) Close() error {
 	s.sweepMu.Lock()
 	stop := s.stopSweep
@@ -332,22 +289,15 @@ func (s *Server) Close() error {
 	if stop != nil {
 		stop()
 	}
-	if s.runtimeSrv != nil {
-		// The link server's timers and write-through stop before the
-		// database closes: a Studio opened next over the same file
-		// decides from what this one stored, not from its stale timers.
-		s.runtimeSrv.Close()
-	}
 	if s.ownsDB {
 		return s.db.Close()
 	}
 	return nil
 }
 
-// ingestAuthorized is S4.4's ingest auth: the configured ingest token
-// as a bearer, or — with none configured — loopback peers only
-// (setup B's dev mode; a Studio bound wide without a token refuses
-// remote exporters).
+// ingestAuthorized is the ingest auth: the configured ingest token as
+// a bearer, or — with none configured — loopback peers only (dev mode;
+// a server bound wide without a token refuses remote exporters).
 //
 // "Loopback" is the socket's peer, and two kinds of remote caller
 // arrive from it too, so the open rule refuses both:
@@ -389,16 +339,14 @@ func remoteIsLoopback(r *http.Request) bool {
 }
 
 // ServeHTTP routes one request: the registered route groups (the API,
-// the live stream, ingest) on the mux, then the UI — embedded files
-// first, the SPA shell for every other path (deep links survive
-// reload). Every request carries an X-Request-Id (the client's, else
-// one generated) and a refused ingest batch or a 5xx is one line on
-// slog.Default naming it (studio/internal/reqlog, UX-E-37).
+// the live stream, ingest) on the mux, then the Console for every
+// other path. Every request carries an X-Request-Id (the client's,
+// else one generated) and a refused ingest batch or a 5xx is one line
+// on slog.Default naming it (studio/internal/reqlog, UX-E-37).
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h := w.Header()
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Referrer-Policy", "no-referrer")
-	h.Set("Content-Security-Policy", s.csp)
 	if s.reqs == nil {
 		s.routed().ServeHTTP(w, r)
 		return
@@ -406,9 +354,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.reqs.Wrap(s.routed()).ServeHTTP(w, r)
 }
 
-// routed wraps the mux with the cross-cutting concerns in order
-// (S4.6): CORS on the API and ingest trees, token auth on the API
-// tree only — ingest carries its own token (S4.4).
+// routed wraps the mux with the cross-cutting concerns in order: CORS
+// on the API and ingest trees, token auth on the API tree only —
+// ingest carries its own token.
 func (s *Server) routed() http.Handler {
 	return s.cors(prefixRouter{
 		prefixes: []prefixRoute{
@@ -426,7 +374,7 @@ type prefixRoute struct {
 }
 
 // prefixRouter sends each request to the first prefix that fits, else
-// to the default (the UI).
+// to the default (the Console).
 type prefixRouter struct {
 	prefixes []prefixRoute
 	def      http.Handler
@@ -442,41 +390,20 @@ func (p prefixRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p.def.ServeHTTP(w, r)
 }
 
-// serveUI answers with the embedded UI: a build file when the path
-// names one, else the shell (the SPA fallback). GET only — the UI is
-// static.
+// serveUI answers every path the groups do not: unknown API and ingest
+// paths are 404s in the error shape, never the Console's shell — a
+// mis-routed API call must fail loudly, not hydrate. (Registered routes
+// never reach here; a wrong-method request got ServeMux's 405 with
+// Allow instead.) Every other path is the Console's.
 func (s *Server) serveUI(w http.ResponseWriter, r *http.Request) {
-	// Unknown API and ingest paths are 404s in the error shape, never
-	// the SPA shell: a mis-routed API call must fail loudly, not
-	// hydrate. (Registered routes never reach here; a wrong-method
-	// request got ServeMux's 405 with Allow instead.)
-	path := r.URL.Path
-	if path == "" {
-		path = "/"
-	}
-	if strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/v1/") {
+	if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/v1/") {
 		s.serveAPINotFound(w, r)
 		return
 	}
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		writeError(w, r, http.StatusMethodNotAllowed, "method_not_allowed",
-			"the studio UI is static: GET only")
-		return
-	}
-	if s.serveFile(w, r, path) {
-		return
-	}
-	if strings.HasPrefix(path, "/assets/") {
-		// A missing hashed asset (a stale tab after an upgrade) is a
-		// 404, never the HTML shell under a script's name.
-		writeError(w, r, http.StatusNotFound, "not_found", "no asset "+path)
-		return
-	}
-	s.serveShell(w, r)
+	s.ui.ServeHTTP(w, r)
 }
 
-// defaultDBPath is S4.1's default history database: $WEFTBASE_DB, else
+// defaultDBPath is the default history database: $WEFTBASE_DB, else
 // ./.weftbase/weftbase.db.
 func defaultDBPath() string {
 	if p := os.Getenv("WEFTBASE_DB"); p != "" {

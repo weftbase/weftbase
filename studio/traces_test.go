@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
@@ -249,72 +248,6 @@ func TestTracesRoute(t *testing.T) {
 	// The bare path, never a redirect to the /api/traces/ subtree.
 	if code, _, _ := get(t, h, "/studio/api/traces/"); code != http.StatusNotFound {
 		t.Errorf("/api/traces/ = %d, want 404 (no trace id)", code)
-	}
-}
-
-// TestTracesPanelScope: a panel token lists only the traces of its
-// public id — every span its, the rule /api/traces/{id} checks, so
-// each listed trace opens and no other public id's run id is listed —
-// and its read scope has nothing to redact: a row carries no span
-// attribute (the override tool names spansFor drops are not there to
-// begin with).
-func TestTracesPanelScope(t *testing.T) {
-	const tok = "srv-traces"
-	srv := New(Open(t.TempDir()+"/traces.db"), Token(tok), IngestToken("ing"))
-	t.Cleanup(func() { _ = srv.Close() })
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-	ingest := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.Header.Set("Authorization", "Bearer ing")
-		srv.Handler().ServeHTTP(w, r)
-	})
-	seedTraces(t, srv.db, ingest, "/studio")
-	read := func(path, bearer string) (int, string) {
-		t.Helper()
-		req, _ := http.NewRequest(http.MethodGet, ts.URL+path, nil)
-		req.Header.Set("Authorization", "Bearer "+bearer)
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer func() { _ = resp.Body.Close() }()
-		return resp.StatusCode, readAll(t, resp)
-	}
-	for _, scope := range []string{scopeRead, scopePlayground} {
-		pt, err := signPanelToken([]byte(tok), panelClaims{PublicID: "pub_a", Scope: scope, Exp: time.Now().Add(time.Hour)})
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, path := range []string{"/api/traces", "/api/traces?service=studio-test", "/api/traces?public_id=pub_a"} {
-			code, body := read(path, pt)
-			var doc traceListDoc
-			decode(t, body, &doc)
-			if code != http.StatusOK || !reflect.DeepEqual(doc.ids(), []string{tlParent}) {
-				t.Errorf("%s as %s = %d %v, want [%s]", path, scope, code, doc.ids(), tlParent)
-			}
-			for _, leak := range []string{"tl_other", tlOther, "tl_web", "pub_b", "secret_only_tool", "attrs"} {
-				if strings.Contains(body, leak) {
-					t.Errorf("%s as %s carries %q: %s", path, scope, leak, body)
-				}
-			}
-			// Each listed trace opens for the same token.
-			for _, id := range doc.ids() {
-				if code, body := read("/api/traces/"+id, pt); code != http.StatusOK {
-					t.Errorf("listed trace %s as %s: detail %d %s", id, scope, code, body)
-				}
-			}
-		}
-		if code, _ := read("/api/traces?public_id=pub_b", pt); code != http.StatusForbidden {
-			t.Errorf("foreign public_id as %s = %d, want 403", scope, code)
-		}
-		// The scope's 403 wins over a bad parameter.
-		if code, _ := read("/api/traces?public_id=pub_b&since=x", pt); code != http.StatusForbidden {
-			t.Errorf("foreign public_id with a bad since as %s = %d, want 403", scope, code)
-		}
-	}
-	// The server token lists them all.
-	if code, body := read("/api/traces", tok); code != http.StatusOK || !strings.Contains(body, `"total":4`) {
-		t.Errorf("server token: %d %s", code, body)
 	}
 }
 

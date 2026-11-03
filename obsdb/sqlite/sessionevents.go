@@ -2,7 +2,6 @@ package sqlite
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"strings"
 	"time"
@@ -72,54 +71,4 @@ func (d *DB) SessionEvents(ctx context.Context, q obsdb.SessionEventQuery) (_ ob
 		page.Events = append(page.Events, e)
 	}
 	return page, rs.Err()
-}
-
-// backfillRunlessSessionEvents is migration 0022's Go step: a thread
-// record or compaction marker an older writer stored with no run id
-// went to other_logs, where it would read as an app log line. Each one
-// carrying a session id moves to session_events — indexed as the
-// writer indexes it now (obsdb.DeriveRecord's position, so a retried
-// batch after the upgrade is a no-op) — and leaves other_logs.
-func backfillRunlessSessionEvents(tx *sql.Tx) error {
-	ctx := context.Background()
-	rows, err := tx.QueryContext(ctx, `SELECT id, time_ns, COALESCE(event_name, ''), COALESCE(body, ''), attrs FROM other_logs
-		WHERE json_valid(attrs)
-		  AND json_extract(attrs, '$."weft.record"') IN ('thread', 'compaction')
-		  AND COALESCE(json_extract(attrs, '$."weft.session.id"'), '') <> ''
-		  AND COALESCE(json_extract(attrs, '$."weft.run.id"'), '') = ''`)
-	if err != nil {
-		return err
-	}
-	type moved struct {
-		id int64
-		r  obsdb.Record
-	}
-	var all []moved
-	for rows.Next() {
-		var m moved
-		var ns int64
-		var attrs string
-		if err := rows.Scan(&m.id, &ns, &m.r.EventName, &m.r.Body, &attrs); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		if err := json.Unmarshal([]byte(attrs), &m.r.Attrs); err != nil {
-			continue // json_valid said it parses; a map it is not
-		}
-		m.r.Time = time.Unix(0, ns).UTC()
-		all = append(all, m)
-	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	for _, m := range all {
-		if err := insertSessionEvent(ctx, tx, m.r, obsdb.DeriveRecord(m.r)); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM other_logs WHERE id = ?`, m.id); err != nil {
-			return err
-		}
-	}
-	return nil
 }

@@ -121,7 +121,7 @@ func TestWrapLogsAPanic(t *testing.T) {
 		h.ServeHTTP(httptest.NewRecorder(), req)
 	}()
 	l := logged.String()
-	for _, want := range []string{"level=ERROR", `msg="studio: handler panicked"`, "request_id=rid-1", "panic=boom"} {
+	for _, want := range []string{"level=ERROR", `msg="weftbase: handler panicked"`, "request_id=rid-1", "panic=boom"} {
 		if !strings.Contains(l, want) {
 			t.Errorf("the line %q lacks %q", l, want)
 		}

@@ -68,7 +68,7 @@ func KeepDeltas() Option {
 // classes at their defaults alters nothing: the tables keep whatever
 // windows they already have — the migration's defaults on a fresh
 // database, or an earlier Open's override — so a process that opens
-// the database without TTL (the studio binary) never undoes the
+// the database without TTL (a reader) never undoes the
 // windows the writer set. Windows are whole seconds, rounded up.
 func TTL(content, meta time.Duration) Option {
 	return openOption(func(c *openConfig) {

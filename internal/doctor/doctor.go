@@ -1,11 +1,10 @@
 // Package doctor is `weftbase doctor` (plan B5): it asks a running
-// Studio what it is and how it is wired, and prints one line per
+// server what it is and how it is wired, and prints one line per
 // check. Every line reads one field of GET /api/meta (Lines is the
-// table) — beside it, for the runtime check, the two environment
-// variables the doctor's own shell can see (WEFT_ENV, WEFTBASE_URL),
-// and for the discovery check the discovery file this shell reads
-// (Target.Discovery, the command's resolver's). The doctor computes
-// nothing Studio does not serve: a second source of truth would drift.
+// table) — beside it, for the discovery check, the discovery file this
+// shell reads (Target.Discovery, the command's resolver's). The doctor
+// computes nothing the server does not serve: a second source of truth
+// would drift.
 //
 // The logic lives here, apart from the command wiring (cmd/weftbase), so
 // the command stays a thin client of it.
@@ -31,8 +30,7 @@ import (
 const Timeout = 5 * time.Second
 
 // Line is one check the doctor prints: its label and the /api/meta
-// fields (or "env:NAME" for a variable of the doctor's own shell,
-// "local:discovery" for the discovery file it reads, or "status" for
+// fields (or "local:discovery" for the discovery file it reads, or "status" for
 // the meta response itself) it reads.
 type Line struct {
 	Label  string
@@ -49,8 +47,6 @@ var Lines = []Line{
 	{"data", []string{"content.latest.started", "content.latest.weft_version", "content.latest.service", "weft_version"}},
 	{"otlp", []string{"ingest_open", "capabilities"}},
 	{"ingest", []string{"ingest.dropped", "ingest.accepted", "ingest.refused", "ingest.last_error", "ingest.last_at"}},
-	{"runtimes", []string{"runtimes", "capabilities", "capabilities_off", "env:WEFT_ENV", "env:WEFTBASE_URL"}},
-	{"panel", []string{"panel_version", "studio_version"}},
 	{"manifest", []string{"has_manifest", "manifest_check.source", "manifest_check.agents", "manifest_check.checked", "manifest_check.stale", "manifest_check.error"}},
 }
 
@@ -58,12 +54,11 @@ var Lines = []Line{
 type meta struct {
 	WeftVersion   string          `json:"weft_version"`
 	StudioVersion string          `json:"studio_version"`
-	PanelVersion  string          `json:"panel_version"`
 	DB            json.RawMessage `json:"db"`
 	HasManifest   bool            `json:"has_manifest"`
 	Capabilities  []string        `json:"capabilities"`
 	// CapabilitiesOff names why each capability is off, the flag that
-	// did included (plan B4): the runtimes and otlp lines say it.
+	// did included (plan B4): the otlp line says it.
 	CapabilitiesOff map[string]string `json:"capabilities_off"`
 	IngestOpen      bool              `json:"ingest_open"`
 	AuthRequired    bool              `json:"auth_required"`
@@ -87,8 +82,8 @@ type meta struct {
 			Service     string    `json:"service"`
 		} `json:"latest"`
 	} `json:"content"`
-	// Ingest is the ingest health (U5): absent from a Studio older
-	// than it, and for a panel token (the dev token's alone).
+	// Ingest is the ingest health (U5): absent from a server older
+	// than it.
 	Ingest *struct {
 		Dropped []struct {
 			Service   string    `json:"service"`
@@ -103,9 +98,8 @@ type meta struct {
 		LastError string     `json:"last_error"`
 		LastAt    *time.Time `json:"last_at"`
 	} `json:"ingest"`
-	Runtimes      int `json:"runtimes"`
 	ManifestCheck *struct {
-		Source  string   `json:"source"` // file | runtime (registered, no weft.json)
+		Source  string   `json:"source"` // file
 		Agents  int      `json:"agents"`
 		Checked int      `json:"checked"`
 		Stale   []string `json:"stale"`
@@ -144,13 +138,11 @@ type Discovery struct {
 var ErrUnhealthy = errors.New("doctor: a check failed")
 
 // Run checks the Studio t names (t.Token "" sends none) and prints one
-// line per check to w. getenv reads the doctor's own environment (the
-// runtime check reports WEFT_ENV and WEFTBASE_URL as this shell sees
-// them). It returns ErrUnhealthy when a check failed — Studio not
-// reachable, the token refused, a stale panel bundle — and nil
-// otherwise; warnings (no runtime connected, content stripped, a stale
-// weft.json, a discovery file naming another Studio) do not fail it.
-func Run(ctx context.Context, w io.Writer, t Target, getenv func(string) string) error {
+// line per check to w. It returns ErrUnhealthy when a check failed —
+// the server not reachable, the token refused — and nil otherwise;
+// warnings (content stripped, a stale weft.json, a discovery file
+// naming another server) do not fail it.
+func Run(ctx context.Context, w io.Writer, t Target) error {
 	url, token := strings.TrimRight(t.URL, "/"), t.Token
 	p := printer{w: w}
 	where := url
@@ -221,8 +213,6 @@ func Run(ctx context.Context, w io.Writer, t Target, getenv func(string) string)
 	p.data(m)
 	p.otlp(m, url)
 	p.ingest(m)
-	p.runtimes(m, url, getenv)
-	p.panel(m)
 	p.manifest(m)
 	if p.failed {
 		return ErrUnhealthy
@@ -325,7 +315,7 @@ const refusalWindow = time.Hour
 // Refusals warn only within refusalWindow of the last one.
 func (p *printer) ingest(m meta) {
 	if m.Ingest == nil {
-		p.line(ok, "ingest", "not served (no ingest.dropped): a studio older than ingest health, or a panel token — it is the dev token's")
+		p.line(ok, "ingest", "not served (no ingest.dropped): a studio older than ingest health")
 		return
 	}
 	in := m.Ingest
@@ -356,7 +346,7 @@ func (p *printer) ingest(m meta) {
 			at = " at " + in.LastAt.Format(time.RFC3339)
 		}
 		p.sub("last refused%s: %s", at, in.LastError)
-		p.sub("fix: studio's log names each refused batch with its request id (WARN \"studio: ingest batch refused\"); a 401 is the app's ingest token (exporter.Studio(url, token), studio.IngestToken)")
+		p.sub("fix: studio's log names each refused batch with its request id (WARN \"weftbase: ingest batch refused\"); a 401 is the app's ingest token (exporter.Studio(url, token), studio.IngestToken)")
 	}
 	if len(in.Dropped) > 0 {
 		for _, d := range in.Dropped {
@@ -373,67 +363,17 @@ func (p *printer) ingest(m meta) {
 	}
 }
 
-func (p *printer) runtimes(m meta, url string, getenv func(string) string) {
-	if m.Runtimes > 0 {
-		p.line(ok, "runtimes", "%d connected", m.Runtimes)
-		return
-	}
-	if !slices.Contains(m.Capabilities, "runtimes") {
-		// No runtime link at all: the shell's variables do not apply.
-		why := m.CapabilitiesOff["runtimes"]
-		if why == "" {
-			why = "the playground is off (weftbase dev --no-playground, or an app's studio.Playground(false))"
-		}
-		p.line(ok, "runtimes", "none: studio has no runtime link (%s)", why)
-		return
-	}
-	p.line(warn, "runtimes", "none connected")
-	if env := getenv("WEFT_ENV"); env != "dev" {
-		shown := "unset"
-		if env != "" {
-			shown = "=" + env
-		}
-		p.sub("WEFT_ENV is %s in this shell: the app opens the runtime link only with WEFT_ENV=dev (or runtime.Enabled(true))", shown)
-	} else {
-		p.sub("WEFT_ENV=dev in this shell: check the app's own environment, and that it calls runtime.Install")
-	}
-	switch su := strings.TrimRight(getenv("WEFTBASE_URL"), "/"); {
-	case su == "":
-		p.sub("WEFTBASE_URL is unset in this shell: the app dials the Studio a running `weftbase dev` names in its discovery file, else its otel Studio destination; set WEFTBASE_URL=%s to pin this one (or runtime.Studio(url, token))", url)
-	case su != url:
-		p.sub("WEFTBASE_URL=%s in this shell, not %s: the app dials the former", su, url)
-	}
-}
-
-func (p *printer) panel(m meta) {
-	switch {
-	case m.PanelVersion == "":
-		p.line(fail, "panel", "/panel.js carries no version stamp: this studio's build lacks the panel bundle")
-	case m.PanelVersion != m.StudioVersion:
-		p.line(fail, "panel", "/panel.js is %s, studio is %s: this weft build embeds a stale panel bundle", m.PanelVersion, m.StudioVersion)
-		p.sub("fix: install weft %s again (go install github.com/weftbase/weftbase/cmd/weftbase@%s); in a weft checkout, make studio-build; then reload the page", m.StudioVersion, m.StudioVersion)
-	default:
-		p.line(ok, "panel", "/panel.js matches studio %s", m.StudioVersion)
-	}
-}
-
 func (p *printer) manifest(m meta) {
 	// The label is the check, the source is the first words (UX-S5b-09):
-	// "weft.json" when a file was configured, "runtime registrations"
-	// when the manifests are the ones runtimes registered.
+	// "weft.json".
 	c := m.ManifestCheck
 	switch {
 	case !m.HasManifest:
-		p.line(ok, "manifest", "none: no weft.json configured (studio.Manifest, or --manifest / WEFT_MANIFEST) and no runtime registered one, nothing to compare")
+		p.line(ok, "manifest", "none: no weft.json configured (studio.Manifest, or --manifest / WEFT_MANIFEST), nothing to compare")
 	case c == nil:
-		p.line(ok, "manifest", "present (weft.json or a runtime's registration); not checked for this caller")
+		p.line(ok, "manifest", "present (weft.json); not checked for this caller")
 	case c.Error != "":
 		p.line(warn, "manifest", "the check failed: %s", c.Error)
-	case c.Source == "runtime" && len(c.Stale) > 0:
-		p.line(warn, "manifest", "runtime registrations (no weft.json): %s from their latest runs (runs from another build)%s: redeploy the app, or ignore it if those runs are old", agentsDiffer(c.Stale), lastRunHash(c.Stale, c.Latest))
-		p.sub("stale: %s", strings.Join(c.Stale, ", "))
-	case c.Source == "runtime":
-		p.line(ok, "manifest", "runtime registrations (no weft.json): %s, %d checked against their latest runs", agentsN(c.Agents), c.Checked)
 	case len(c.Stale) > 0:
 		p.line(warn, "manifest", "weft.json: stale for %s: weft.json and the latest runs disagree%s: regenerate weft.json, or redeploy the app if weft.json is newer", strings.Join(c.Stale, ", "), lastRunHash(c.Stale, c.Latest))
 	case c.Checked == 0:
@@ -441,14 +381,6 @@ func (p *printer) manifest(m meta) {
 	default:
 		p.line(ok, "manifest", "weft.json: %s, %d checked against their latest runs: current", agentsN(c.Agents), c.Checked)
 	}
-}
-
-// agentsDiffer is "1 agent differs" / "n agents differ".
-func agentsDiffer(names []string) string {
-	if len(names) == 1 {
-		return "1 agent differs"
-	}
-	return fmt.Sprintf("%d agents differ", len(names))
 }
 
 // agentsN is "1 agent" / "n agents".

@@ -17,8 +17,6 @@
       "session_id": "s_research",
       "public_id": "pub_research",
       "turn": 1,
-      "playground": false,
-      "experiment_id": "",
       "forked_from": "",
       "meta": {
         "cwd": "/tmp/demo"
@@ -79,8 +77,6 @@
       "session_id": "s_orders",
       "public_id": "pub_orders",
       "turn": 1,
-      "playground": false,
-      "experiment_id": "",
       "forked_from": "",
       "meta": {
         "cwd": "/tmp/demo"
@@ -128,8 +124,6 @@
       "session_id": "s_orders",
       "public_id": "pub_orders",
       "turn": 2,
-      "playground": false,
-      "experiment_id": "",
       "forked_from": "",
       "meta": {
         "cwd": "/tmp/demo"

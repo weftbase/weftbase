@@ -23,8 +23,6 @@ func TestDeriveSpanAttributes(t *testing.T) {
 			"gen_ai.agent.name":      "support",
 			"weft.step.index":        int64(2),
 			"weft.tool.seq":          int64(7),
-			"weft.playground":        true,
-			"weft.experiment.id":     "exp_1",
 			"weft.forked_from":       "s_01M3-t2#4",
 			"gen_ai.operation.name":  "invoke_agent",
 			"gen_ai.conversation.id": "s_01M3", // mirrors are not identity sources
@@ -35,8 +33,7 @@ func TestDeriveSpanAttributes(t *testing.T) {
 	want := Weft{
 		RunID: "s_01M3-t3", ParentRunID: "s_01M3-t2", ParentCallID: "call_9",
 		SessionID: "s_01M3", PublicID: "pub_7Hk2", Turn: 3, Agent: "support",
-		Step: 2, ToolSeq: 7, Playground: true,
-		ExperimentID: "exp_1", ForkedFrom: "s_01M3-t2#4",
+		Step: 2, ToolSeq: 7, ForkedFrom: "s_01M3-t2#4",
 	}
 	if w != want {
 		t.Fatalf("DeriveSpan = %+v, want %+v", w, want)
@@ -146,7 +143,7 @@ func TestDeriveNumericTolerance(t *testing.T) {
 // The string spelling of weft.turn is the one the real chain
 // produces: thread mints it as metadata (strconv.Itoa in turn.go) and
 // the core stamps every metadata value as attribute.String
-// (observe.go) — the whole programme read turn 0 off every studio run
+// (observe.go) — the whole programme once read turn 0 off every run
 // row because attrIntOr accepted only the numeric spellings OTLP
 // fixtures hand-build. Derive* must read "3" as 3; a non-numeric
 // string stays the default (never a fabrication).
@@ -179,29 +176,27 @@ func TestDeriveAbsentStepAndToolSeq(t *testing.T) {
 	}
 }
 
-// The string spelling of weft.playground is the one the real chain
-// produces: weftbase/runtime stamps it as run metadata
-// ("weft.playground": "true" in executor.go) and the core renders every
+// A boolean attribute's string spelling is the one the real chain
+// produces for a flag set as run metadata: the core renders every
 // metadata value as attribute.String — the turn-as-string bug's
-// sibling. Derive* must read "true" as true, or every playground run
-// lands in the session lists and RunQuery.Playground filters nothing.
-// Anything but true/"true" stays false.
-func TestDerivePlaygroundAsStringAttr(t *testing.T) {
+// sibling. Derive* must read "true" as true; anything but true/"true"
+// stays false.
+func TestDeriveBoolAsStringAttr(t *testing.T) {
 	if w := DeriveRecord(Record{Attrs: map[string]any{
-		"weft.run.id": "r_pg", "weft.record": "event", "weft.playground": "true",
-	}}); !w.Playground {
-		t.Fatal("DeriveRecord playground = false, want true (string attr)")
+		"weft.run.id": "r", "weft.record": "messages", "weft.messages.input": "true",
+	}}); !w.Input {
+		t.Fatal("DeriveRecord input = false, want true (string attr)")
 	}
 	if w := DeriveSpan(Span{Attrs: map[string]any{
-		"weft.run.id": "r_pg", "weft.playground": "true",
-	}}); !w.Playground {
-		t.Fatal("DeriveSpan playground = false, want true (string attr)")
+		"weft.run.id": "r", "weft.caller.run.id": "c", "weft.caller.remote": "true",
+	}}); w.CallerRunID != "" {
+		t.Fatalf("DeriveSpan caller = %q, want none (remote, string attr)", w.CallerRunID)
 	}
 	for _, v := range []any{"false", "", "yes", int64(1), false} {
 		if w := DeriveSpan(Span{Attrs: map[string]any{
-			"weft.run.id": "r", "weft.playground": v,
-		}}); w.Playground {
-			t.Fatalf("playground %#v derived true, want false", v)
+			"weft.run.id": "r", "weft.caller.run.id": "c", "weft.caller.remote": v,
+		}}); w.CallerRunID != "c" {
+			t.Fatalf("remote %#v read as true, want false", v)
 		}
 	}
 }

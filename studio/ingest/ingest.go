@@ -1,4 +1,4 @@
-// Package ingest is Studio's OTLP/HTTP receiver (S4.4): POST /v1/traces
+// Package ingest is weftbase's OTLP/HTTP receiver (S4.4): POST /v1/traces
 // and /v1/logs, protobuf and JSON, optional gzip, a 16 MiB limit on
 // the decompressed body, and the publish-then-write pipeline —
 //
@@ -11,7 +11,7 @@
 // The mapping itself lives in obsdb (FromOTLPTraces/FromOTLPLogs),
 // so the in-process local sink and this receiver produce identical
 // rows. Auth is the caller's: the handlers take an authorized
-// predicate (Studio: the ingest token, or loopback with none
+// predicate (the server's: the ingest token, or loopback with none
 // configured).
 package ingest
 
@@ -258,7 +258,7 @@ func respond(w http.ResponseWriter, r *http.Request, msg proto.Message) {
 
 // writeIngestError answers with the API's error shape (S4.2): the
 // exporter retries on the status code; the body is for the human.
-// The refusal's reason is the request's in Studio's server log
+// The refusal's reason is the request's in the server log
 // (studio/internal/reqlog: one WARN line per refused batch, ERROR on a
 // 5xx, each with the request id); a 5xx body carries request_id too.
 func writeIngestError(w http.ResponseWriter, r *http.Request, status int, code, msg string) {

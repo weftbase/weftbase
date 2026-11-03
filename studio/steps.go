@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -27,10 +29,7 @@ import (
 // runs those calls started, its usage, timing, the compaction view it
 // saw, and every hole that applies to it as a badge from ADR 0028 §11's
 // closed table (obsdb.Hole) with a reason and a fix. n is the step
-// ordinal (decision 8). Scoped like the events route; only the request
-// block follows the requests route's rule — a read-scoped panel token
-// gets {badge: "hidden", reason, fix} in its place, never a 403 on the
-// whole step.
+// ordinal (decision 8).
 
 // The step statuses: ok (finished), error (the run failed or stopped
 // reporting inside it), parked (finished with a call awaiting
@@ -244,13 +243,9 @@ type stepHole struct {
 	Cause  string `json:"cause,omitempty"`
 	Reason string `json:"reason"`
 	Fix    string `json:"fix,omitempty"`
-	// Count is the runs a hidden hole stands for (hiddenChildrenHole):
-	// child runs a panel token's scope left out. Absent elsewhere.
+	// Count is how many items the hole stands for (marks, turns),
+	// absent when it names none.
 	Count int `json:"count,omitempty"`
-	// CountFloor says Count is at least the sessions it stands for (a
-	// session document's delegated_holes past the walk's cap). Absent
-	// elsewhere.
-	CountFloor bool `json:"count_floor,omitempty"`
 }
 
 // truncatedMarker is the marker core's capResult ends a cut tool
@@ -540,9 +535,6 @@ walk:
 
 // serveRunStep answers api/runs/{id}/steps/{n}.
 func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item string) {
-	if !s.scopeRunID(w, r, id) {
-		return
-	}
 	n, err := strconv.Atoi(item)
 	if err != nil || n < 0 || strconv.Itoa(n) != item {
 		badRequest(w, r, "the step must be a non-negative integer ordinal")
@@ -553,7 +545,7 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 		writeStepError(w, r, id, n, err)
 		return
 	}
-	doc, err := sr.assembleStep(n, readsPrompts(r))
+	doc, err := sr.assembleStep(n)
 	if err != nil {
 		writeStepError(w, r, id, n, err)
 		return
@@ -597,11 +589,10 @@ func (s *Server) priceStep(ctx context.Context, doc *stepDoc, det obsdb.RunDetai
 	}
 }
 
-// assembleStep is step n of sr's run as the step route serves it;
-// prompts is readsPrompts' answer for the identity (false: the request
-// block is the hidden badge). errNoStep for a step nothing records; a
-// *stepReadError for a failed read.
-func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
+// assembleStep is step n of sr's run as the step route serves it.
+// errNoStep for a step nothing records; a *stepReadError for a failed
+// read.
+func (sr *stepRun) assembleStep(n int) (stepDoc, error) {
 	ctx, id, det, allSpans, comps := sr.ctx, sr.id, sr.det, sr.spans, sr.comps
 	item := strconv.Itoa(n)
 	evs, err := sr.readStepEvents(n)
@@ -891,17 +882,8 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 	// child named <run>/<step>/<call> (the core's childRunID) is this
 	// step's by its id alone — a call id may repeat across steps; only a
 	// child named otherwise joins on its parent call id.
-	// Under a panel token, a child outside its public id (inScope) is
-	// neither listed nor joined to its call: one counted hidden hole.
 	prefix := id + "/" + item + "/"
-	pub, hiddenKids := scopeOf(ctx), 0
 	for _, kid := range det.Children {
-		if !inScope(pub, kid) {
-			if strings.HasPrefix(kid.ID, prefix) || (!strings.HasPrefix(kid.ID, id+"/") && calls[kid.ParentCallID] != nil) {
-				hiddenKids++
-			}
-			continue
-		}
 		var c *stepToolCall
 		ok := false
 		switch {
@@ -920,13 +902,6 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 		doc.Children = append(doc.Children, stepChild{
 			ID: kid.ID, CallID: kid.ParentCallID, Agent: kid.Agent, Status: string(kid.Status), Usage: kid.Usage, rec: kid,
 		})
-	}
-	if hiddenKids > 0 {
-		h := hiddenChildrenHole(hiddenKids, pub)
-		holes.also(obsdb.HoleHidden, h.Reason, h.Fix)
-		cur := holes[obsdb.HoleHidden]
-		cur.Count = hiddenKids
-		holes[obsdb.HoleHidden] = cur
 	}
 	for _, cid := range order {
 		doc.ToolCalls = append(doc.ToolCalls, *calls[cid])
@@ -1040,9 +1015,6 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 	}
 	// The request block: attempt 1, as the requests route serves it.
 	switch {
-	case !prompts:
-		doc.Request = badgeOf(obsdb.HoleHidden)
-		holes.note(obsdb.HoleHidden)
 	case derived:
 		doc.Request = derivedBadge()
 	case reqHole != "":
@@ -1381,4 +1353,130 @@ func attrInt64(v any) (int64, bool) {
 		return n, err == nil
 	}
 	return 0, false
+}
+
+// The step and transcript helpers below.
+
+// stepMessage is one of the run's own messages and the step it joined.
+type stepMessage struct {
+	step int
+	msg  core.Message
+}
+
+// runSteps returns the run's own messages (every record but the input
+// one), each with its step: the stored step when every record carries
+// one, else the order walk.
+func runSteps(batches []obsdb.TranscriptBatch) ([]stepMessage, error) {
+	stored := true
+	var out []stepMessage
+	for _, b := range batches {
+		if b.Input || len(b.Messages) == 0 || string(b.Messages) == "null" {
+			continue
+		}
+		var batch []core.Message
+		if err := json.Unmarshal(b.Messages, &batch); err != nil {
+			return nil, fmt.Errorf("messages body: %w", err)
+		}
+		if b.Step < 0 {
+			stored = false
+		}
+		for _, m := range batch {
+			out = append(out, stepMessage{step: b.Step, msg: m})
+		}
+	}
+	if !stored {
+		at := -1
+		for i := range out {
+			if out[i].msg.Role == core.RoleAssistant {
+				at++
+			}
+			out[i].step = max(at, 0)
+		}
+	}
+	return out, nil
+}
+
+// allRequests reads every request record of the run, in index order.
+func allRequests(ctx context.Context, db obsdb.DB, id string) ([]obsdb.RequestRecord, error) {
+	q := obsdb.RequestQuery{Limit: maxRequestsLimit}
+	var out []obsdb.RequestRecord
+	for {
+		page, err := db.Requests(ctx, id, q)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, page...)
+		if len(page) < q.PageLimit() {
+			return out, nil
+		}
+		q.From = page[len(page)-1].Index + 1
+	}
+}
+
+// allEvents reads every stored event of the run in position order,
+// with the gaps the pages reported.
+func allEvents(ctx context.Context, db obsdb.DB, id string) ([]obsdb.PosEvent, []int64, error) {
+	var (
+		out   []obsdb.PosEvent
+		gaps  []int64
+		after int64 = -1
+	)
+	seen := map[int64]bool{}
+	for {
+		page, err := db.Events(ctx, id, after, 1000)
+		if err != nil {
+			return nil, nil, err
+		}
+		out = append(out, page.Events...)
+		for _, g := range page.Gaps {
+			if !seen[g] {
+				seen[g] = true
+				gaps = append(gaps, g)
+			}
+		}
+		if page.NextAfter == nil || len(page.Events) == 0 {
+			sort.Slice(gaps, func(i, j int) bool { return gaps[i] < gaps[j] })
+			return out, gaps, nil
+		}
+		after = *page.NextAfter
+	}
+}
+
+// compactedNote is a fixture's "compacted_at" header: the run-scope
+// compaction view (ADR 0028 §8) the step's request carried instead of
+// the plain transcript. wefttest.Replay ignores it (it decodes the
+// fields it knows); it is there for the reviewer, and it is why the
+// fixture's messages differ from the transcript.
+type compactedNote struct {
+	Index    int64  `json:"index"`
+	Step     int    `json:"step"`
+	FromSeq  int64  `json:"from_seq"`
+	ToSeq    int64  `json:"to_seq"`
+	Hash     string `json:"hash"`
+	Replaced int    `json:"replaced"`
+	Entries  int    `json:"entries"`
+}
+
+// noteOf is a view's compacted_at note: counts, range and hash, never
+// its body.
+func noteOf(v obsdb.Compaction) *compactedNote {
+	return &compactedNote{
+		Index: v.Index, Step: v.Step, FromSeq: v.FromSeq, ToSeq: v.ToSeq,
+		Hash: v.Hash, Replaced: v.Replaced, Entries: v.Entries,
+	}
+}
+
+// parseForkedFrom reads weft.forked_from "<run id>#<from_step>": the
+// source run and the step (what follows the last "#"; a run id may
+// hold one), ok false when it is not that shape.
+func parseForkedFrom(forkedFrom string) (source string, step int, ok bool) {
+	i := strings.LastIndexByte(forkedFrom, '#')
+	if i <= 0 {
+		return "", 0, false
+	}
+	n, err := strconv.Atoi(forkedFrom[i+1:])
+	if err != nil || n < 0 {
+		return "", 0, false
+	}
+	return forkedFrom[:i], n, true
 }

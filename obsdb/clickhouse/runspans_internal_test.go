@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -11,12 +12,43 @@ import (
 	"testing"
 	"time"
 
+	ch "github.com/ClickHouse/clickhouse-go/v2"
+
 	"github.com/weftbase/weftbase/obsdb"
 )
+
+// rawConn opens a driver connection to dsn, no migration run.
+func rawConn(t *testing.T, dsn string) ch.Conn {
+	t.Helper()
+	opts, err := ch.ParseDSN(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := ch.Open(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return conn
+}
 
 // freshDB opens Open on a database of its own on the live server named
 // by WEFT_CLICKHOUSE_DSN (skipping without one), dropped at cleanup.
 func freshDB(t *testing.T) *DB {
+	t.Helper()
+	return freshDSN(t, func(dsn string) *DB {
+		db, err := Open(dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db.(*DB)
+	})
+}
+
+// freshDSN creates a database of its own on the live server named by
+// WEFT_CLICKHOUSE_DSN (skipping without one), dropped at cleanup, and
+// hands open its DSN.
+func freshDSN(t *testing.T, open func(dsn string) *DB) *DB {
 	t.Helper()
 	base := os.Getenv("WEFT_CLICKHOUSE_DSN")
 	if base == "" {
@@ -40,12 +72,34 @@ func freshDB(t *testing.T) *DB {
 		_ = admin.Close()
 	})
 	u.Path = "/" + name
-	db, err := Open(u.String())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	return db.(*DB)
+	return open(u.String())
+}
+
+// TestPredatesRebuildRefused: a database written before the schema was
+// squashed into one 0001 (the old obsdb_migrations: no epoch column)
+// refuses to open, whatever version it recorded.
+func TestPredatesRebuildRefused(t *testing.T) {
+	freshDSN(t, func(dsn string) *DB {
+		conn := rawConn(t, dsn)
+		defer func() { _ = conn.Close() }()
+		ctx := context.Background()
+		if err := conn.Exec(ctx, `CREATE TABLE obsdb_migrations (
+			version UInt32, name String, applied_at DateTime DEFAULT now()
+		) ENGINE = MergeTree ORDER BY version`); err != nil {
+			t.Fatal(err)
+		}
+		if err := conn.Exec(ctx, `INSERT INTO obsdb_migrations (version, name) VALUES (35, '0035_runs_meta_union_utf8.sql')`); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Open(dsn)
+		if !errors.Is(err, ErrPredatesRebuild) {
+			t.Fatalf("Open on a pre-rebuild database = %v, want ErrPredatesRebuild", err)
+		}
+		if want := "this database predates the rebuild; start a fresh data dir"; !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to say %q", err, want)
+		}
+		return nil
+	})
 }
 
 // TestRunSpansUseTheTraceAndRunIndexes (U27; UX-E-35): a run's spans

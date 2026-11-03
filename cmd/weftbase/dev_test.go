@@ -23,8 +23,8 @@ import (
 // (dev_helper_test.go); Studio listens on a free port; every test ends
 // with no process and nothing listening.
 
-// oneLineRe is the one line: studio <link> · app pid <n> · <runtime part>.
-var oneLineRe = regexp.MustCompile(`(?m)^studio (\S+) · app pid (\d+) · (.*)$`)
+// oneLineRe is the one line: studio <link> · app pid <n>.
+var oneLineRe = regexp.MustCompile(`(?m)^studio (\S+) · app pid (\d+)$`)
 
 // helperRe is the helper's own line: its pid and what it was handed.
 var helperRe = regexp.MustCompile(`(?m)^helper pid=(\d+) WEFT_ENV=(\S*) WEFTBASE_URL=(\S*) WEFTBASE_TOKEN=(\S*) WEFTBASE_DB=(\S*)$`)
@@ -134,13 +134,6 @@ func notListening(t *testing.T, addr string) {
 	}
 }
 
-func shortRuntimeWait(t *testing.T, d time.Duration) {
-	t.Helper()
-	old := devRuntimeWait
-	devRuntimeWait = d
-	t.Cleanup(func() { devRuntimeWait = old })
-}
-
 func atoi(t *testing.T, s string) int {
 	t.Helper()
 	n, err := strconv.Atoi(s)
@@ -150,46 +143,14 @@ func atoi(t *testing.T, s string) int {
 	return n
 }
 
-// TestDevRuntimeRegisteredAfterRestart (U20.2-fix): weftbase dev stopped
-// and started again over the same database. The app's runtime comes
-// back under its stable id, which the restarted Studio lists restored
-// (disconnected) before the app starts; once the app's link registers
-// it reads connected — and the one line names it registered, never
-// "no runtime registered yet".
-func TestDevRuntimeRegisteredAfterRestart(t *testing.T) {
-	shortRuntimeWait(t, 3*time.Second)
-	dir := t.TempDir()
-	db := "sqlite://" + filepath.Join(dir, "weft.db")
-	var ids []string
-	for i := 0; i < 2; i++ {
-		addr := loop(freeBase(t, 1))
-		d := startDev(t, []string{"--addr", addr, "--db", db, "--watch", dir},
-			map[string]string{"WEFT_DEV_HELPER_RUNTIME": "1", "WEFTBASE_TOKEN": ""})
-		line := d.waitOut(t, oneLineRe, 1)[0]
-		m := regexp.MustCompile(`^runtime (rt_\S+) registered$`).FindStringSubmatch(line[3])
-		if m == nil {
-			t.Fatalf("run %d: runtime part %q, want runtime rt_… registered:\n%s", i+1, line[3], d.out.String())
-		}
-		ids = append(ids, m[1])
-		d.interrupt(t)
-		gone(t, "the app", atoi(t, line[2]))
-		notListening(t, addr)
-	}
-	if ids[0] != ids[1] {
-		t.Errorf("the restart registered %s, want the stable id %s (the case under test)", ids[1], ids[0])
-	}
-}
-
 // TestDevEnvAndOneLine: the app sees the four variables, the one line
 // names its pid, and the link is the bare URL for the database's stable
-// token (the default, plan B3) and for a fixed one — both the panel
-// tokens' signing key, which the app still receives — and carries the
-// token only when it was generated for this process (a database with
-// no file). Ctrl-C (SIGINT) stops the
-// app first with the same signal, then Studio: exit 0, the app gone,
-// nothing listening. With no runtime registering, the line says so.
+// token (the default, plan B3) and for a fixed one — which the app
+// still receives — and carries the token only when it was generated for
+// this process (a database with no file). Ctrl-C (SIGINT) stops the app
+// first with the same signal, then the server: exit 0, the app gone,
+// nothing listening.
 func TestDevEnvAndOneLine(t *testing.T) {
-	shortRuntimeWait(t, 300*time.Millisecond)
 	for _, c := range []struct {
 		name, token string
 	}{{"stable", ""}, {"fixed", "fixed-signing-key"}, {"generated", ""}} {
@@ -264,9 +225,6 @@ func TestDevEnvAndOneLine(t *testing.T) {
 			if gotTok != wantTok {
 				t.Errorf("token line %q, want %q", gotTok, wantTok)
 			}
-			if want := "no runtime registered yet (the app needs runtime.Install; WEFT_ENV=dev is set), or the app links its own embedded Studio"; line[3] != want {
-				t.Errorf("runtime part %q, want %q", line[3], want)
-			}
 
 			d.interrupt(t)
 			if !strings.Contains(d.out.String(), "helper pid="+line[2]+" got interrupt") {
@@ -289,7 +247,6 @@ func TestDevEnvAndOneLine(t *testing.T) {
 // helper's grandchild) gone — and two quick writes are one restart. A
 // non-.go file restarts nothing.
 func TestDevRestartOnSave(t *testing.T) {
-	shortRuntimeWait(t, 200*time.Millisecond)
 	dir, pids := t.TempDir(), t.TempDir()
 	src := filepath.Join(dir, "main.go")
 	if err := os.WriteFile(src, []byte("package main\n"), 0o600); err != nil {
@@ -366,7 +323,6 @@ func grandchild(t *testing.T, dir string, app int) int {
 // TestDevNoWatchExitCode: under --no-watch the app's own exit ends
 // weftbase dev, with the app's exit code, Studio stopped.
 func TestDevNoWatchExitCode(t *testing.T) {
-	shortRuntimeWait(t, 200*time.Millisecond)
 	addr := loop(freeBase(t, 1))
 	d := startDev(t, []string{"--addr", addr, "--db", "sqlite://" + filepath.Join(t.TempDir(), "weft.db"), "--no-watch"},
 		map[string]string{"WEFT_DEV_HELPER_EXIT": "3"})
@@ -374,23 +330,6 @@ func TestDevNoWatchExitCode(t *testing.T) {
 	if !strings.Contains(d.out.String(), "exited (exit code 3)") {
 		t.Errorf("the exit is not reported:\n%s", d.out.String())
 	}
-	notListening(t, addr)
-}
-
-// TestDevRuntimeRegistered: an app whose runtime registers with the
-// dev Studio (runtime.Install over WEFTBASE_URL / WEFTBASE_TOKEN,
-// WEFT_ENV=dev) is named on the one line.
-func TestDevRuntimeRegistered(t *testing.T) {
-	dir := t.TempDir()
-	addr := loop(freeBase(t, 1))
-	d := startDev(t, []string{"--addr", addr, "--db", "sqlite://" + filepath.Join(dir, "weft.db"), "--watch", dir},
-		map[string]string{"WEFT_DEV_HELPER_RUNTIME": "1", "WEFTBASE_TOKEN": ""})
-	line := d.waitOut(t, oneLineRe, 1)[0]
-	if !regexp.MustCompile(`^runtime rt_\S+ registered$`).MatchString(line[3]) {
-		t.Errorf("runtime part %q, want runtime rt_… registered", line[3])
-	}
-	d.interrupt(t)
-	gone(t, "the app", atoi(t, line[2]))
 	notListening(t, addr)
 }
 
@@ -443,7 +382,6 @@ func writeGo(t *testing.T, dir, name, body string) {
 // (a checkout, a mv) is a change — one restart — though no file event
 // inside it was ever watched.
 func TestDevNewDirRestarts(t *testing.T) {
-	shortRuntimeWait(t, 200*time.Millisecond)
 	dir, side := t.TempDir(), t.TempDir()
 	addr := loop(freeBase(t, 1))
 	d := startDev(t, []string{"--addr", addr, "--db", "sqlite://" + filepath.Join(side, "weft.db"), "--watch", dir}, nil)
@@ -477,13 +415,15 @@ func TestDevNewDirRestarts(t *testing.T) {
 // weftbase dev like Ctrl-C — the app first (SIGHUP becomes SIGTERM for
 // it: many servers read SIGHUP as reload), then Studio; exit 0.
 func TestDevStopSignals(t *testing.T) {
-	shortRuntimeWait(t, 200*time.Millisecond)
 	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGHUP} {
 		t.Run(sig.String(), func(t *testing.T) {
 			dir := t.TempDir()
 			addr := loop(freeBase(t, 1))
 			d := startDev(t, []string{"--addr", addr, "--db", "sqlite://" + filepath.Join(dir, "weft.db"), "--watch", dir}, nil)
 			pid := atoi(t, d.waitOut(t, oneLineRe, 1)[0][2])
+			// The one line prints as the app starts: wait for the app's
+			// own line (printed once its signal handler is set) first.
+			d.waitOut(t, regexp.MustCompile(`(?m)^helper pid=`+strconv.Itoa(pid)+` WEFT_ENV=`), 1)
 			signalSelf(t, sig)
 			d.wait(t, 0)
 			if !strings.Contains(d.out.String(), "helper pid="+strconv.Itoa(pid)+" got terminated") {
@@ -548,7 +488,6 @@ func TestDevAppExitThenSave(t *testing.T) {
 // base port moves Studio to the next one, said in one line, and the
 // app's WEFTBASE_URL (and the one line) name the port really used.
 func TestDevPortShift(t *testing.T) {
-	shortRuntimeWait(t, 200*time.Millisecond)
 	base := freeBase(t, 2)
 	foreign, err := net.Listen("tcp", loop(base))
 	if err != nil {
@@ -583,7 +522,6 @@ func TestDevPortShift(t *testing.T) {
 // the reuse line, the app pointed at its URL with that token — and
 // weftbase dev stops only the app: the reused Studio is not its to stop.
 func TestDevReusesRunningStudio(t *testing.T) {
-	shortRuntimeWait(t, 200*time.Millisecond)
 	base := freeBase(t, 1)
 	dir := t.TempDir()
 	db := "sqlite://" + filepath.Join(dir, "weft.db")
@@ -643,7 +581,6 @@ func TestDevPendingSignalStartsNoApp(t *testing.T) {
 	d := &devLoop{
 		argv: []string{"/nonexistent/weft-dev-pending-signal"},
 		out:  &lockedWriter{w: &buf},
-		url:  "http://127.0.0.1:1",
 	}
 	sigs := make(chan os.Signal, 1)
 	sigs <- os.Interrupt

@@ -50,7 +50,7 @@ func ExampleSessionTurnFacts() {
 // events of a few kinds: a session thread compacted, its newest turn
 // succeeded — SessionQuery's Compacted and Status keep it — and its
 // compaction marker read alone among its events (SessionEventQuery.Kinds,
-// what Studio's turn marks read).
+// what a session's turn marks read).
 func ExampleSessionQuery_states() {
 	db, err := sqlite.Open(":memory:")
 	if err != nil {
@@ -309,55 +309,6 @@ func ExampleSearcher() {
 	}
 	// Output:
 	// run_1 - Refund order 7
-}
-
-// A CommandStore keeps what Studio asked a runtime to do across a
-// restart: the command with its state and the times a restarted Studio
-// decides "lost" from, the route from the run an ack named back to the
-// runtime, and the runtime's breakpoint set.
-func ExampleCommandStore() {
-	db, err := sqlite.Open(":memory:")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer func() { _ = db.Close() }()
-	cs, ok := db.(obsdb.CommandStore)
-	if !ok {
-		log.Fatal("this backend keeps commands in memory only")
-	}
-	ctx := context.Background()
-	t0 := time.Unix(0, 1790845923120000000).UTC()
-
-	cmd := obsdb.StoredCommand{ID: "cmd_1", RuntimeID: "rt_1", State: obsdb.CommandQueued,
-		Created: t0, Body: []byte(`{"command_id":"cmd_1","agent":"support"}`)}
-	if err := cs.PutCommand(ctx, cmd); err != nil {
-		log.Fatal(err)
-	}
-	// The accepted ack names the run: the row moves on, the route is learned.
-	cmd.State, cmd.RunID, cmd.Updated, cmd.AcceptedAt = obsdb.CommandAccepted, "run_1", t0.Add(time.Second), t0.Add(time.Second)
-	if err := cs.PutCommand(ctx, cmd); err != nil {
-		log.Fatal(err)
-	}
-	if err := cs.PutRoute(ctx, obsdb.RunRoute{RunID: "run_1", RuntimeID: "rt_1", CommandID: "cmd_1", Seen: cmd.Updated}); err != nil {
-		log.Fatal(err)
-	}
-	if err := cs.PutBreakpoints(ctx, "rt_1", []string{"issue_refund"}); err != nil {
-		log.Fatal(err)
-	}
-
-	live, err := cs.Commands(ctx, obsdb.CommandQuery{States: []string{obsdb.CommandQueued, obsdb.CommandAccepted}})
-	if err != nil {
-		log.Fatal(err)
-	}
-	for _, c := range live {
-		fmt.Println(c.ID, c.State, c.RunID, "accepted at", c.AcceptedAt.Sub(c.Created))
-	}
-	route, _, _ := cs.Route(ctx, "run_1")
-	tools, _, _ := cs.Breakpoints(ctx, "rt_1")
-	fmt.Println("run_1 →", route.RuntimeID, "parks on", tools)
-	// Output:
-	// cmd_1 accepted run_1 accepted at 1s
-	// run_1 → rt_1 parks on [issue_refund]
 }
 
 // A SessionEventReader reads a session's state log — thread's records

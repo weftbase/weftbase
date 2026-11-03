@@ -53,7 +53,7 @@ func TestLimitOf(t *testing.T) {
 	}
 }
 
-// Status values carry the names Studio's API and the arena port read
+// Status values carry the names the server's API and the arena port read
 // (store.Succeeded and friends mapped onto these).
 func TestStatusValues(t *testing.T) {
 	for v, want := range map[Status]string{

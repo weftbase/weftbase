@@ -1,12 +1,12 @@
-// Package reqlog is Studio's server log of failed requests (UX-E-37,
+// Package reqlog is the server log of failed requests (UX-E-37,
 // audit row D10): every request carries a request id — the client's
 // X-Request-Id when it sent a well-formed one, else a generated one —
 // echoed on the response; a refused ingest batch (a 4xx on /v1/) is one
 // WARN line and every 5xx one ERROR line on slog.Default, each naming
 // the request id, the status and the reason the handler answered with
-// (Refuse; Cause when the body masks the real error). Studio's error
+// (Refuse; Cause when the body masks the real error). The server's error
 // bodies carry the id on a 5xx too, so a report from a user meets its
-// line in studio.log. A handler panic is one ERROR line with the id; the
+// line in the server's log. A handler panic is one ERROR line with the id; the
 // panic goes on up to net/http.
 //
 // Ingest refusals are rate-limited per (remote host, route, status,
@@ -47,7 +47,7 @@ import (
 const Header = "X-Request-Id"
 
 // maxID bounds a client's id: longer, or carrying anything but
-// [A-Za-z0-9._:-], and Studio generates its own.
+// [A-Za-z0-9._:-], and the server generates its own.
 const maxID = 64
 
 type ctxKey struct{}
@@ -87,9 +87,8 @@ func Refuse(ctx context.Context, code, msg string) {
 	}
 }
 
-// Cause records the real reason behind a refusal whose body masks it (a
-// 5xx answered to a panel token names the operation, never the
-// database's error text): the server log names msg, the body keeps what
+// Cause records the real reason behind a refusal whose body masks it:
+// the server log names msg, the body keeps what
 // Refuse was given. A no-op outside Wrap.
 func Cause(ctx context.Context, msg string) {
 	if in, _ := ctx.Value(ctxKey{}).(*info); in != nil {
@@ -252,7 +251,7 @@ func (l *Logger) Wrap(next http.Handler) http.Handler {
 		defer func() {
 			if v := recover(); v != nil {
 				if err, _ := v.(error); err != http.ErrAbortHandler { //nolint:errorlint // net/http compares the value itself
-					slog.Error("studio: handler panicked",
+					slog.Error("weftbase: handler panicked",
 						append(l.attrs(r, in, http.StatusInternalServerError, 0, 0, 0), "panic", fmt.Sprint(v))...)
 				}
 				panic(v)
@@ -269,11 +268,11 @@ func (l *Logger) Wrap(next http.Handler) http.Handler {
 		}
 		switch {
 		case status >= 500:
-			slog.Error("studio: request failed", l.attrs(r, in, status, 0, 0, 0)...)
+			slog.Error("weftbase: request failed", l.attrs(r, in, status, 0, 0, 0)...)
 		case status >= 400 && ingest:
 			key := hostOf(r.RemoteAddr) + "|" + routeClass(r.URL.Path) + "|" + in.code + "|" + http.StatusText(status)
 			if ok, n, over, exp := l.allow(key); ok {
-				slog.Warn("studio: ingest batch refused", l.attrs(r, in, status, n, over, exp)...)
+				slog.Warn("weftbase: ingest batch refused", l.attrs(r, in, status, n, over, exp)...)
 			}
 		}
 	})

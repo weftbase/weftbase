@@ -21,7 +21,7 @@ import (
 // rows are masked at once (every read, FINAL included, skips them) and
 // leave the parts at the next merge; Vacuum forces that merge. The
 // tables' TTLs (TTL, DefaultContentTTL, DefaultMetaTTL) stay as they
-// are: Studio's retention is additive.
+// are: the server's retention is additive.
 
 // deleteChunk bounds one IN list.
 const deleteChunk = 400

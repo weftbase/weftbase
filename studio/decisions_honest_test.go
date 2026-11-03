@@ -267,7 +267,7 @@ func TestDecisionsNoModelCall(t *testing.T) {
 // TestDecisionsResolvedResult (U13.2-fix2 2): core emits no tool event
 // or span for a resolve, so a resolved call's result is served on the
 // decided call from the resume's pre-step result — under the content
-// policy: hidden to a read token, not_recorded with no transcript.
+// policy: not_recorded with no transcript.
 func TestDecisionsResolvedResult(t *testing.T) {
 	res := decisionsServer(t, "resumed")
 	d := readDoc(t, firstOf(runBlocks(t, res, "a1100000000000000000000000000001", "srv")))
@@ -279,14 +279,9 @@ func TestDecisionsResolvedResult(t *testing.T) {
 	}
 	const sess = "01K00000000000000000000001"
 	h := decisionsServer(t, "thread_approvals")
-	read, err := signPanelToken([]byte("srv"), panelClaims{PublicID: "pub_thread_approvals", Scope: scopeRead, Exp: time.Now().Add(time.Hour)})
-	if err != nil {
-		t.Fatal(err)
-	}
 	full := readDoc(t, firstOf(runBlocks(t, h, sess+"-t7", "srv")))
-	hidden := readDoc(t, firstOf(runBlocks(t, h, sess+"-t7", read)))
-	if full.Calls[0].Result == "" || hidden.Calls[0].Result != "" || hidden.Calls[0].ResultBadge != "hidden" {
-		t.Errorf("t7's resolve: full %+v, read token %+v — want the result, then hidden", full.Calls[0], hidden.Calls[0])
+	if full.Calls[0].Result == "" {
+		t.Errorf("t7's resolve: %+v — want the result", full.Calls[0])
 	}
 	spans := ingestEdited(t, "resumed", false, func(map[string]any) bool { return true })
 	d = readDoc(t, firstOf(runBlocks(t, spans, "a1100000000000000000000000000001", "srv")))
@@ -309,7 +304,7 @@ func TestDecisionsUndecidedNamesNoOne(t *testing.T) {
 		return true
 	})
 	d := readDoc(t, firstOf(runBlocks(t, h, sess+"-t7", "srv")))
-	if c := d.Calls[0]; c.Outcome != outcomeNoDecision || c.Via != "" || c.Who != "" || c.KeyID != "" || c.WhoHidden {
+	if c := d.Calls[0]; c.Outcome != outcomeNoDecision || c.Via != "" || c.Who != "" || c.KeyID != "" {
 		t.Errorf("t7 undecided = %+v, want no_decision with no attribution", c)
 	}
 }

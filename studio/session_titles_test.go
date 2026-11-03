@@ -101,58 +101,6 @@ func TestSessionTitlesAndQuery(t *testing.T) {
 	if got := list("/api/sessions?id_prefix=onv_"); len(got) != 0 {
 		t.Errorf("?id_prefix=onv_ = %v, want none (a prefix, not a substring)", got)
 	}
-	// A panel token's document is recomputed over its turns
-	// (scopedSessionRow): the title and the first prompt survive it.
-	panel := mintPanel(t, ts.URL, serverTok, "pub_a")
-	code, out := b4Do(t, http.MethodGet, ts.URL+"/api/sessions/conv_t", panel, "")
-	if code != http.StatusOK {
-		t.Fatalf("panel GET /api/sessions/conv_t = %d %s", code, out)
-	}
-	var doc row
-	if err := json.Unmarshal([]byte(out), &doc); err != nil {
-		t.Fatal(err)
-	}
-	if doc.Title != "Order desk" || doc.FirstPrompt != "secret of pub_a" {
-		t.Errorf("panel session doc = %+v, want the title and first prompt", doc)
-	}
-	// The scoped document keeps the mark too (scopedSessionRow).
-	panelO := mintPanel(t, ts.URL, serverTok, "pub_o")
-	code, out = b4Do(t, http.MethodGet, ts.URL+"/api/sessions/conv_o", panelO, "")
-	if code != http.StatusOK {
-		t.Fatalf("panel GET /api/sessions/conv_o = %d %s", code, out)
-	}
-	doc = row{}
-	if err := json.Unmarshal([]byte(out), &doc); err != nil {
-		t.Fatal(err)
-	}
-	if !doc.ContentOff || doc.FirstPrompt != "" {
-		t.Errorf("panel session doc conv_o = %+v, want content_off", doc)
-	}
-}
-
-// A panel token's session document (scopedSessionRow) marks content_off
-// as lib/title.ts's contentOff does: not while the first turn is
-// running or settling — its messages records may still arrive (D7).
-func TestScopedSessionRowContentOffGate(t *testing.T) {
-	base := obsdb.RunRow{ID: "conv-t1", PublicID: "pub", Turn: 1, EventCount: 2, Status: obsdb.StatusSucceeded}
-	for _, c := range []struct {
-		name string
-		edit func(*obsdb.RunRow)
-		want bool
-	}{
-		{"settled, events, no messages", func(*obsdb.RunRow) {}, true},
-		{"running", func(r *obsdb.RunRow) { r.Status = obsdb.StatusRunning }, false},
-		{"settling", func(r *obsdb.RunRow) { r.Settling = true }, false},
-		{"messages stored", func(r *obsdb.RunRow) { r.MessageCount = 1 }, false},
-		{"derived", func(r *obsdb.RunRow) { r.Derived = true }, false},
-	} {
-		r := base
-		c.edit(&r)
-		got := scopedSessionRow(obsdb.SessionRow{ID: "conv"}, []obsdb.RunRow{r}, readScope{PublicID: "pub"})
-		if got.ContentOff != c.want {
-			t.Errorf("%s: ContentOff = %v, want %v", c.name, got.ContentOff, c.want)
-		}
-	}
 }
 
 // A session row serves obsdb's SessionRow.SummarizerUsage as
@@ -233,34 +181,5 @@ func TestSessionSummarizerUsage(t *testing.T) {
 	read("/api/sessions/conv_s", serverTok, &doc)
 	if doc.Summ == nil || *doc.Summ != (usage{140, 7}) {
 		t.Errorf("doc conv_s summarizer_usage = %v, want 140/7", doc.Summ)
-	}
-	panel := mintPanel(t, ts.URL, serverTok, "pub_a")
-	for _, c := range []struct {
-		id   string
-		want *usage
-	}{
-		{"conv_s", &usage{100, 5}}, // pub_b's colliding turn's summary is not pub_a's
-		{"conv_u", &usage{30, 3}},  // every turn pub_a's: carried as is
-		{"conv_n", nil},
-	} {
-		doc = row{}
-		read("/api/sessions/"+c.id, panel, &doc)
-		if (doc.Summ == nil) != (c.want == nil) || (c.want != nil && *doc.Summ != *c.want) {
-			t.Errorf("panel doc %s summarizer_usage = %v, want %v", c.id, doc.Summ, c.want)
-		}
-	}
-	page.Sessions = nil
-	read("/api/sessions", panel, &page)
-	seen := false
-	for _, r := range page.Sessions {
-		if r.ID == "conv_s" {
-			seen = true
-			if r.Summ == nil || *r.Summ != (usage{100, 5}) {
-				t.Errorf("panel list conv_s summarizer_usage = %v, want 100/5", r.Summ)
-			}
-		}
-	}
-	if !seen {
-		t.Error("panel list: conv_s not listed")
 	}
 }

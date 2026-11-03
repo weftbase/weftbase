@@ -3,7 +3,6 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"log/slog"
 	"maps"
 	"slices"
@@ -51,15 +50,15 @@ const attemptIndexSQL = `CASE json_type(a.attrs, '$."weft.attempt.index"')
 
 // spanStatsInsert derives span_stats rows from the spans the filter
 // keeps (a condition over spans' own columns, binds after it): the one
-// derivation the writer (one span) and migration 0023's backfill (a
-// batch) run. The rules are migration 0023's comment; ClickHouse's
+// derivation the writer runs, the row in the span's tenancy. The rules
+// are span_stats' comment in 0001_init.sql; ClickHouse's
 // statsSpans restates them over otel_traces, and the conformance suite
 // pins both agree.
 func spanStatsInsert(filter string) string {
-	return `INSERT OR IGNORE INTO span_stats (trace_id, span_id, run_id, op, name, provider, model, step,
+	return `INSERT OR IGNORE INTO span_stats (project_id, env, tenant_id, trace_id, span_id, run_id, op, name, provider, model, step,
 		start_ns, dur_ms, ttft_ms, attempts, failed, error_type, denied,
 		input_tokens, output_tokens, cached_input_tokens, cache_write_tokens, reasoning_tokens)
-	SELECT trace_id, span_id, run_id, op,
+	SELECT project_id, env, tenant_id, trace_id, span_id, run_id, op,
 		COALESCE(CASE op WHEN 'invoke_agent' THEN json_extract(attrs, '$."gen_ai.agent.name"')
 			WHEN 'execute_tool' THEN json_extract(attrs, '$."gen_ai.tool.name"')
 			ELSE json_extract(attrs, '$."gen_ai.request.model"') END, ''),
@@ -80,7 +79,7 @@ func spanStatsInsert(filter string) string {
 		` + chatInt("gen_ai.usage.cache_read.input_tokens") + `,
 		` + chatInt("gen_ai.usage.cache_creation.input_tokens") + `,
 		` + chatInt("gen_ai.usage.reasoning.output_tokens") + `
-	FROM (SELECT trace_id, span_id, run_id, name, step, start_ns, end_ns, status_code, attrs,
+	FROM (SELECT project_id, env, tenant_id, trace_id, span_id, run_id, name, step, start_ns, end_ns, status_code, attrs,
 		` + spanStatsOp + ` AS op, COALESCE(json_extract(attrs, '$."error.type"'), '') AS et
 		FROM spans WHERE ` + filter + `) AS x
 	WHERE run_id <> '' AND op IN ('invoke_agent', 'chat', 'execute_tool')
@@ -170,63 +169,6 @@ func (w *spanStatWriter) close() {
 	}
 }
 
-// spanStatsBatchSize is the backfill's keyset batch: spans per
-// statement. A var only so the backfill test can lower it.
-var spanStatsBatchSize = 5000
-
-// backfillSpanStats is migration 0023's Go step: the rollup derived for
-// every span already stored, spanStatsBatchSize spans at a time in primary
-// key order — each statement bounded, the whole inside the migration's
-// transaction (a large file's first open at 0023 takes as long as its
-// spans take to derive: TestSpanStatsBackfillTime measures it).
-func backfillSpanStats(tx *sql.Tx) (err error) {
-	ctx := context.Background()
-	// Open blocks for the backfill's length: one INFO line before (the
-	// span count) and one after (its duration), never a silent wait. A
-	// file with no spans (a new one) has nothing to wait for and logs
-	// nothing.
-	var spans int64
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM spans`).Scan(&spans); err != nil {
-		return err
-	}
-	if spans == 0 {
-		return nil
-	}
-	slog.Default().InfoContext(ctx, "obsdb/sqlite: migration 0023 backfills the span_stats rollup; Open waits for it", "spans", spans)
-	began := time.Now()
-	defer func() {
-		if err != nil {
-			return
-		}
-		slog.Default().InfoContext(ctx, "obsdb/sqlite: migration 0023 backfill done", "spans", spans, "duration", time.Since(began).Round(time.Millisecond).String())
-	}()
-	// The lower bound is a separate condition, never "first OR (…) >
-	// (…)": an OR with a bind defeats the primary key range, and every
-	// batch would scan the table from its start.
-	lower, largs := "1 = 1", []any(nil)
-	for {
-		var hiTrace, hiSpan string
-		err := tx.QueryRowContext(ctx, `SELECT trace_id, span_id FROM spans WHERE `+lower+`
-			ORDER BY trace_id, span_id LIMIT 1 OFFSET ?`, append(largs[:len(largs):len(largs)], spanStatsBatchSize-1)...).Scan(&hiTrace, &hiSpan)
-		last := errors.Is(err, sql.ErrNoRows)
-		if err != nil && !last {
-			return err
-		}
-		cond, args := lower, largs[:len(largs):len(largs)]
-		if !last {
-			cond += ` AND (trace_id, span_id) <= (?, ?)`
-			args = append(args, hiTrace, hiSpan)
-		}
-		if _, err := tx.ExecContext(ctx, spanStatsInsert(cond), args...); err != nil {
-			return err
-		}
-		if last {
-			return nil
-		}
-		lower, largs = `(trace_id, span_id) > (?, ?)`, []any{hiTrace, hiSpan}
-	}
-}
-
 // statsRuns is the runs CTE every Stats statement starts from: the
 // runs q keeps (runWhere), started in the window, each
 // with its bucket b; error_type keeps the failed runs alone.
@@ -264,7 +206,7 @@ func statsKey(by obsdb.StatsBy) (key, op string) {
 }
 
 // statsBelowSQL is by=agent's delegated calls over the r CTE (Stats'
-// comment above its use); scope is the panel token's condition, if any.
+// comment above its use); scope is the public id and tag filters' condition, if any.
 func statsBelowSQL(scope string) string {
 	return `SELECT DISTINCT r.agent AS k, s.trace_id, s.span_id, s.run_id, s.provider, s.model,
 			s.input_tokens, s.output_tokens, s.cached_input_tokens, s.cache_write_tokens, s.reasoning_tokens
@@ -391,8 +333,8 @@ func (d *DB) Stats(ctx context.Context, q obsdb.StatsQuery) (_ obsdb.StatsPage, 
 	if q.By == obsdb.StatsByAgent {
 		// The descendant c is held to the query's scope as a listed run
 		// is: its public id, and every meta pair on its own row
-		// (RunQuery.Meta's json_each rule) — a tag-scoped panel token
-		// never sums an untagged child (I4-fix).
+		// (RunQuery.Meta's json_each rule) — a tag filter never sums an
+		// untagged child (I4-fix).
 		scope, sargs := "", []any{since}
 		if q.PublicID != "" {
 			scope, sargs = " AND c.public_id = ?", append(sargs, q.PublicID)

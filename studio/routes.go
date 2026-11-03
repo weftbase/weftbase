@@ -5,31 +5,11 @@ import (
 
 	"github.com/weftbase/weftbase/obsdb"
 	"github.com/weftbase/weftbase/studio/ingest"
-	linkrt "github.com/weftbase/weftbase/studio/runtime"
 )
 
-// The route registry (S4.2): Studio's surface is a list of route
-// groups, and api/meta's capabilities are computed from that list —
-// never hard-coded. New registers the core groups below; the lanes
-// that follow add theirs in their own files without editing this one:
-//
-//   - step 7 (lane C1) adds studio/panel.go, which sets
-//     panelGroupHook through a package-level var initializer and so
-//     registers the panel group (always on);
-//   - step 8 (lane C2) adds studio/playground.go, which sets
-//     playgroundGroupHook the same way; the Playground(true) option
-//     is what enables it.
-//
-// A hook is nil in a build without its file, which then reports no
-// panel or playground capability: the group is simply not
-// registered. No init() anywhere — the var initializer is the whole
-// mechanism, and New does the enabling.
-var (
-	// panelGroupHook builds the devtools panel's group (step 7).
-	panelGroupHook func() routeGroup
-	// playgroundGroupHook builds the playground's group (step 8).
-	playgroundGroupHook func() routeGroup
-)
+// The route registry: the server's surface is a list of route groups,
+// and api/meta's capabilities are computed from that list — never
+// hard-coded. New registers the groups below.
 
 // routeGroup is one capability's block of routes: a name for errors
 // and logs, the capability api/meta reports when the group is
@@ -42,8 +22,7 @@ type routeGroup struct {
 }
 
 // addGroup registers g's routes and records the group for
-// meta.capabilities. New calls it for the core groups; the hooks above
-// call it for the step-7/8 groups.
+// meta.capabilities.
 func (s *Server) addGroup(g routeGroup) {
 	if g.register != nil {
 		g.register(s.mux, s)
@@ -97,15 +76,11 @@ func (s *Server) capabilityList() []string {
 	return caps
 }
 
-// registerGroups mounts the core route groups (S4.2), then the
-// optional ones their hooks provide. The playground group registers
-// only when Playground(true) asked for it; the panel group is always
-// on once its file exists. Runtime-link and experiment routes are
-// step 8 and are absent here.
+// registerGroups mounts the route groups.
 func (s *Server) registerGroups() {
 	// The read API: meta, manifest, runs, run detail, events,
 	// transcript, spans, traces, sessions, public-id resolution (and
-	// its reverse, sessions/{id}/public_id, the dev token's alone).
+	// its reverse, sessions/{id}/public_id).
 	// Always present, so it names no capability.
 	s.addGroup(routeGroup{
 		name:     "api",
@@ -223,32 +198,23 @@ func (s *Server) registerGroups() {
 	// rows, priced at read time.
 	s.addGroup(pricingGroup())
 	// Deletion (plan A7, §13.13): DELETE /api/runs/{id} and
-	// /api/sessions/{id}, obsdb's tables only. Always present; the
-	// dev token's (or loopback's in setup A), never a panel token's.
+	// /api/sessions/{id}, obsdb's tables only. Always present.
 	s.addGroup(deleteGroup())
-	// Proposed prompts (plan F6): PUT and DELETE
-	// /api/agents/{name}/proposal, held in memory and shown on
-	// /api/manifest beside the registered instructions. Always present;
-	// deletion's rule — the dev token's (or loopback's in setup A).
-	s.addGroup(proposalsGroup())
-	// The live stream (S4.5) and its grant (plan C5): the stream's
-	// credential is its other half, so one group, one capability.
+	// The live stream.
 	s.addGroup(routeGroup{
 		name:       "live",
 		capability: "live",
 		register: func(mux *http.ServeMux, s *Server) {
 			mux.HandleFunc("GET /api/live", s.serveLive)
-			mux.HandleFunc("POST /api/live-grant", s.serveLiveGrant)
 		},
 	})
-	// The tag scope (U22, UX-E-27, A5): tag.<k>=<v> and flow= (run
-	// metadata weft.flow) on /api/runs, /api/sessions, /api/search,
-	// /api/traces and /api/live (a selector over run frames, alone or
-	// narrowing another) — what the devtools panel's batch scope reads.
-	// The routes are the read API's and the live group's; the
+	// The tag filters: tag.<k>=<v> and flow= (run metadata weft.flow)
+	// on /api/runs, /api/sessions, /api/search, /api/traces and
+	// /api/live (a selector over run frames, alone or narrowing
+	// another). The routes are the read API's and the live group's; the
 	// capability says the parameters are served. Always present.
 	s.addGroup(routeGroup{name: "scope_tags", capability: "scope_tags"})
-	// OTLP ingest (S4.4), unless NoIngest turned the receiver off.
+	// OTLP ingest, unless NoIngest turned the receiver off.
 	if !s.noIngest {
 		s.addGroup(routeGroup{
 			name:       "ingest",
@@ -256,38 +222,6 @@ func (s *Server) registerGroups() {
 			register:   registerIngest,
 		})
 	}
-	// Panel-token minting (S4.6): present exactly when a server token
-	// is configured — there is nothing to sign without one.
-	if s.token != "" {
-		s.addGroup(routeGroup{
-			name:       "auth",
-			capability: "auth",
-			register: func(mux *http.ServeMux, s *Server) {
-				mux.HandleFunc("POST /api/panel-tokens", s.servePanelTokens)
-			},
-		})
-		// Tag-scoped panel tokens (I4): POST /api/panel-tokens takes
-		// "tags", and every read route holds such a token to them (a
-		// batch of runs across public ids). With the mint: there is no
-		// token to scope without a server token.
-		s.addGroup(routeGroup{name: "panel_token_tags", capability: "panel_token_tags"})
-		// The setup C hand-off (plan G3): a playground-scoped panel
-		// token's page opens the hosted Studio on a 5-minute read token
-		// (handoff.go). Under the same condition: no panel tokens
-		// without a server token.
-		s.addGroup(handoffGroup())
-	}
-	if panelGroupHook != nil {
-		s.addGroup(panelGroupHook()) // step 7: always on
-	}
-	s.addGroup(panelConfigGroup()) // plan B3: GET /panel-config.json, always on
-	if s.playground && playgroundGroupHook != nil {
-		s.addGroup(playgroundGroupHook()) // step 8: Playground(true)
-	}
-	// Unknown API and ingest paths are 404s in the error shape, never
-	// the SPA shell: a mis-routed API call must fail loudly, not
-	// hydrate. (Checked in serveUI, the "/" fallback, so a wrong-method
-	// request still gets ServeMux's own 405 with Allow.)
 }
 
 // serveAPINotFound answers any registered-group path the groups do
@@ -297,7 +231,7 @@ func (s *Server) serveAPINotFound(w http.ResponseWriter, r *http.Request) {
 		"no such api route "+r.URL.Path)
 }
 
-// registerReadAPI mounts the S4.2 read routes. Run ids contain slashes
+// registerReadAPI mounts the read routes. Run ids contain slashes
 // (a subagent's child id is <parent>/<step>/<callID>), so the run
 // subtree is one handler that takes everything after /api/runs/ as
 // the id, with at most one trailing segment a group registered through
@@ -317,7 +251,7 @@ func registerReadAPI(mux *http.ServeMux, s *Server) {
 	s.addRunRoute("spans", s.serveRunSpans)
 }
 
-// registerIngest mounts the OTLP/HTTP receiver (studio/ingest, S4.4).
+// registerIngest mounts the OTLP/HTTP receiver (studio/ingest).
 func registerIngest(mux *http.ServeMux, s *Server) {
 	ok := s.ingestAuthorized
 	mux.HandleFunc("POST /v1/traces", ingest.Traces(s.db, s.live, ok))
@@ -325,12 +259,3 @@ func registerIngest(mux *http.ServeMux, s *Server) {
 	// counts feed api/meta's ingest health (ingesthealth.go).
 	mux.HandleFunc("POST /v1/logs", ingest.Logs(s.db, healthHub{Hub: s.live, h: &s.ingestHealth}, ok))
 }
-
-// RuntimeServer is the runtime link server's in-process side
-// (studio/runtime): the registry of connected runtimes that
-// weftbase/runtime's runtime.Local(srv) drives and Server.Runtime
-// returns — an alias, so the S4.1 name stays in this package while
-// the type lives where the routes do. Nil on a Server built without
-// Playground(true); the runtime-link routes register with the
-// playground group.
-type RuntimeServer = linkrt.RuntimeServer

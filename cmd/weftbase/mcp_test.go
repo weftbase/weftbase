@@ -300,8 +300,6 @@ func mcpCalls() []mcpCall {
 		{tool: "transcript", args: map[string]any{"id": "r_ok"}, route: "/api/runs/r_ok/transcript"},
 		{tool: "live", route: "/api/runs?all=1&status=running", shape: rowsOf("runs", nil)},
 		{tool: "agents", route: "/api/manifest", wantErr: "404 no manifest"},
-		{tool: "experiments", route: "/api/experiments", wantErr: "404"},
-		{tool: "runtimes", route: "/api/runtimes", wantErr: "404"},
 		{tool: "explain_failure", args: map[string]any{"id": "r_fail"}},
 	}
 }
@@ -336,20 +334,6 @@ func routeBody(t *testing.T, base, token, route string) string {
 		t.Fatalf("GET %s = %d %s", route, resp.StatusCode, b)
 	}
 	return string(compact(b))
-}
-
-// directBody is GET route's raw body, whatever the status.
-func directBody(t *testing.T, base, token, route string) []byte {
-	t.Helper()
-	req, _ := http.NewRequest(http.MethodGet, base+route, nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	b, _ := io.ReadAll(resp.Body)
-	return b
 }
 
 // TestMCPStdio pins `weftbase mcp` over real stdio: this binary re-executed
@@ -613,10 +597,10 @@ func TestMCPReadOnlyMethods(t *testing.T) {
 	if len(methods) != 1 || !methods[http.MethodGet] {
 		t.Errorf("methods %v, want {GET}", methods)
 	}
-	// wefttest is refused before any request.
+	// An unknown format is refused before any request.
 	res, _ := cs.CallTool(ctx, &sdk.CallToolParams{Name: "export", Arguments: map[string]any{"id": "r_ok", "format": "wefttest"}})
-	if !res.IsError || !strings.Contains(texts(t, res)[0], "weftbase export <id> --wefttest") {
-		t.Errorf("export wefttest = %q, want the refusal naming the terminal command", texts(t, res))
+	if !res.IsError || !strings.Contains(texts(t, res)[0], "format must be json, jsonl or otlp") {
+		t.Errorf("export wefttest = %q, want the format refusal", texts(t, res))
 	}
 }
 
@@ -688,8 +672,8 @@ func TestMCPNoWriteVerbs(t *testing.T) {
 		"fixtures", "preview", "breakpoints", "vacuum", "resolve", "decide", "start", "send", "post", "put", "write"}
 	for _, tool := range lt.Tools {
 		switch tool.Name {
-		case "run", "runs", "runtimes", "experiments":
-			continue // GET /api/runs/{id}, /api/runs, /api/runtimes, /api/experiments: nouns, pinned GET by TestMCPReadOnlyMethods
+		case "run", "runs":
+			continue // GET /api/runs/{id}, /api/runs: nouns, pinned GET by TestMCPReadOnlyMethods
 		}
 		for _, v := range verbs {
 			if strings.Contains(tool.Name, v) {
@@ -728,110 +712,6 @@ func TestMCPTruncation(t *testing.T) {
 	}
 	if c := cut([]byte("aé"), 2); string(c) != "a" {
 		t.Errorf("cut mid-rune = %q", c)
-	}
-}
-
-// TestMCPPanelToken pins a read-only panel token: what it may read
-// answers, what it may not is the route's 403 as the tool's error text
-// (with Studio's body), never an empty result.
-func TestMCPPanelToken(t *testing.T) {
-	base := mcpSeedStudio(t)
-	req, _ := http.NewRequest(http.MethodPost, base+"/api/panel-tokens", strings.NewReader(`{"public_id":"pub_mcp","ttl":"1h"}`))
-	req.Header.Set("Authorization", "Bearer tok")
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var minted struct {
-		Token string `json:"token"`
-	}
-	_ = json.NewDecoder(resp.Body).Decode(&minted)
-	_ = resp.Body.Close()
-	if minted.Token == "" {
-		t.Fatalf("mint: %s", resp.Status)
-	}
-	cs := inProcess(t, newClient(base, minted.Token))
-	ctx := context.Background()
-	call := func(tool string, args map[string]any) (bool, []string) {
-		res, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: tool, Arguments: args})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return res.IsError, texts(t, res)
-	}
-	if isErr, got := call("run", map[string]any{"id": "r_ok"}); isErr || got[1] != routeBody(t, base, minted.Token, "/api/runs/r_ok") {
-		t.Errorf("run r_ok under its panel token = %v %q", isErr, got)
-	}
-	for _, c := range []struct {
-		tool string
-		args map[string]any
-		fix  bool // the route's 403 carries the badge's fix
-	}{
-		{"request", map[string]any{"id": "r_ok"}, true},
-		{"run", map[string]any{"id": "r_fail"}, false},
-	} {
-		isErr, got := call(c.tool, c.args)
-		if !isErr || !strings.Contains(got[0], "403") {
-			t.Errorf("%s %v under a read token = %v %q, want the 403 as an error", c.tool, c.args, isErr, got)
-		}
-		if c.fix {
-			var body struct {
-				Fix string `json:"fix"`
-			}
-			raw := directBody(t, base, minted.Token, "/api/runs/r_ok/requests")
-			if err := json.Unmarshal(raw, &body); err != nil || body.Fix == "" || !strings.Contains(got[0], body.Fix) {
-				t.Errorf("%s: the 403 error %q lacks Studio's fix %q (body %s)", c.tool, got[0], body.Fix, raw)
-			}
-		}
-	}
-	// The investigation tools under the read token (I5): app logs are
-	// refused (they may carry prompts); spans and a trace read only the
-	// token's public id — another's run or trace is the route's 403.
-	if isErr, got := call("logs", map[string]any{"id": "r_ok"}); !isErr || !strings.Contains(got[0], "403") {
-		t.Errorf("logs under a read token = %v %q, want the 403", isErr, got)
-	}
-	if isErr, got := call("spans", map[string]any{"id": "r_ok"}); isErr || len(got) < 2 || !strings.Contains(got[1], `"spans":[{`) {
-		t.Errorf("spans of its own run = %v %q", isErr, got)
-	}
-	if isErr, got := call("spans", map[string]any{"id": "r_fail"}); !isErr || !strings.Contains(got[0], "403") {
-		t.Errorf("spans of another public id's run = %v %q, want the 403", isErr, got)
-	}
-	traceOf := func(id string) string {
-		var r struct {
-			TraceID string `json:"trace_id"`
-		}
-		_ = json.Unmarshal([]byte(routeBody(t, base, "tok", "/api/runs/"+id)), &r)
-		return r.TraceID
-	}
-	if isErr, got := call("trace", map[string]any{"trace_id": traceOf("r_ok")}); isErr {
-		t.Errorf("trace of its own run = %q", got)
-	}
-	if isErr, got := call("trace", map[string]any{"trace_id": traceOf("r_fail")}); !isErr || !strings.Contains(got[0], "403") {
-		t.Errorf("trace of another public id's run = %v %q, want the 403", isErr, got)
-	}
-	// stats under the read token (U33.1): the route's scope — its own
-	// public id forced (only r_ok's agent counted), another's a 403.
-	window := map[string]any{"by": "agent", "since": "2000-01-01T00:00:00Z", "until": "2100-01-01T00:00:00Z"}
-	if isErr, got := call("stats", window); isErr || len(got) < 2 || !strings.Contains(got[1], `"key":"orders"`) ||
-		strings.Contains(got[1], `"key":"triage"`) {
-		t.Errorf("stats under a read token = %v %q, want its own public id's runs only", isErr, got)
-	}
-	window["public_id"] = "pub_other"
-	if isErr, got := call("stats", window); !isErr || !strings.Contains(got[0], "403") {
-		t.Errorf("stats of another public id = %v %q, want the 403", isErr, got)
-	}
-	// explain_failure under the read token: the step's request block is
-	// the hidden badge, so no request hint the token would be refused.
-	isErr, got := call("explain_failure", map[string]any{"id": "r_ok"})
-	var ex explanation
-	if isErr || json.Unmarshal([]byte(got[1]), &ex) != nil || ex.Step == nil {
-		t.Fatalf("explain_failure under a read token = %v %q", isErr, got)
-	}
-	for _, n := range ex.Next {
-		if strings.HasPrefix(n, "request ") {
-			t.Errorf("next %q offers the request tool to a read token", ex.Next)
-		}
 	}
 }
 
@@ -1251,68 +1131,5 @@ func TestMCPTurnDefaultsMostCommon(t *testing.T) {
 	one := `{"id":"s","runs":[{"id":"t1","model":{"provider":"p","name":"m"},"stop_reason":"stop","started":"2026-01-01T00:00:00Z"}]}`
 	if b := compactList([]byte(one), "runs", sessionSame); strings.Contains(string(b), "turn_defaults") || !strings.Contains(string(b), `"model":"p/m"`) {
 		t.Errorf("a one-turn session: %s", b)
-	}
-}
-
-// TestMCPStatsTagToken (U33.1-fix): the stats tool under a tag token
-// (a panel token minted for run metadata, I4) answers the route's scope
-// — the tagged batch's runs alone — and the tool's tag argument narrows
-// the server token's numbers to the same batch.
-func TestMCPStatsTagToken(t *testing.T) {
-	base := mcpSeedStudio(t)
-	ctx := context.Background()
-	p, err := exporter.Start(ctx, exporter.Studio(base, ""), otel.NoGlobal())
-	if err != nil {
-		t.Fatal(err)
-	}
-	batcher := core.New(wefttest.Script(wefttest.Say("batched")), core.Name("batcher"),
-		core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()))
-	if _, err := batcher.Generate(ctx, core.RunID("r_batch"), core.Prompt("go"),
-		core.Metadata(map[string]string{"arena.batch": "b1"})); err != nil {
-		t.Fatal(err)
-	}
-	if err := p.Shutdown(ctx); err != nil {
-		t.Fatal(err)
-	}
-	c := newClient(base, "tok")
-	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		if b, err := c.get(ctx, runPath("r_batch"), nil); err == nil && strings.Contains(string(b), `"status":"succeeded"`) {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("r_batch never settled")
-		}
-	}
-	req, _ := http.NewRequest(http.MethodPost, base+"/api/panel-tokens", strings.NewReader(`{"tags":{"arena.batch":"b1"},"ttl":"1h"}`))
-	req.Header.Set("Authorization", "Bearer tok")
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var minted struct {
-		Token string `json:"token"`
-	}
-	_ = json.NewDecoder(resp.Body).Decode(&minted)
-	_ = resp.Body.Close()
-	if minted.Token == "" {
-		t.Fatalf("mint a tag token: %s", resp.Status)
-	}
-	window := map[string]any{"by": "agent", "since": "2000-01-01T00:00:00Z", "until": "2100-01-01T00:00:00Z"}
-	stats := func(cs *sdk.ClientSession, args map[string]any) []string {
-		t.Helper()
-		res, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: "stats", Arguments: args})
-		if err != nil || res.IsError {
-			t.Fatalf("stats %v: %v %v", args, err, texts(t, res))
-		}
-		return texts(t, res)
-	}
-	got := stats(inProcess(t, newClient(base, minted.Token)), window)
-	if !strings.Contains(got[0], ": 1 group: batcher 1 run, 0 failed") || strings.Contains(got[1], `"key":"orders"`) {
-		t.Errorf("stats under the tag token = %q, want the b1 batch's runs alone", got)
-	}
-	window["tag"] = map[string]any{"arena.batch": "b1"}
-	if got := stats(inProcess(t, c), window); !strings.Contains(got[0], ": 1 group: batcher 1 run") {
-		t.Errorf("stats tag {arena.batch: b1} under the server token = %q, want the batch alone", got[0])
 	}
 }

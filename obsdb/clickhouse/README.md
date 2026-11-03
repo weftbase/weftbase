@@ -12,8 +12,9 @@ import (
 db, err := clickhouse.Open("clickhouse://default:pass@localhost:9000/weft",
     clickhouse.TTL(30*24*time.Hour, 90*24*time.Hour)) // content, spans+runs
 // db implements obsdb.DB: Write, Runs, Run, Events, Transcript,
-// RunSpans, Trace, Sessions, Session, ResolvePublicID, SaveExperiment,
-// Experiments, Experiment, Close.
+// RunSpans, Trace, Sessions, Session, ResolvePublicID, Close, and the
+// optional Searcher, Aggregator, TreeReader, SessionEventReader and
+// ManifestStore.
 ```
 
 **ClickHouse 25.6 or later.** The schema's TTLs are on `DateTime64(9)`
@@ -23,7 +24,9 @@ expression result column should have DateTime or Date type, but has
 DateTime64(9)". CI pins 25.8 (the recipe below).
 
 `Open` creates and versions the schema in `obsdb_migrations` (the
-SQLite backend's numbering rule), writes go through async inserts
+SQLite backend's numbering rule; one `0001_init.sql` holds the whole
+schema, and a database written before that squash is refused with
+`ErrPredatesRebuild`), writes go through async inserts
 (`async_insert=1, wait_for_async_insert=1`), and the weft tables are
 maintained by materialized views:
 
@@ -34,11 +37,16 @@ maintained by materialized views:
   indexes on `SessionId`, `PublicId`, `Agent` and `TraceId`. A stock
   collector pinned to that version, configured with
   `create_schema: false`, writes into the same database.
-- `weft_records` — `ReplacingMergeTree(InsertTime) ORDER BY (RunId,
-  Kind, Pos)` (the transport idempotency key), filled from `otel_logs`
-  where `weft.record IN ('event', 'messages')` — never `delta`, never
-  `heartbeat`. Exact reads use `FINAL`.
-- `weft_runs` — `AggregatingMergeTree ORDER BY RunId` filled from both
+- Tenancy: every table carries `ProjectId`, `Env` and `TenantId`
+  (defaults `prj_default`, `test`, `ten_project` until tenancy fills
+  them), and those three lead every `ORDER BY`, so an id colliding
+  across tenants never merges into another tenant's row.
+- `weft_records` — `ReplacingMergeTree(InsertTime) ORDER BY (ProjectId,
+  Env, TenantId, RunId, Kind, Pos)` (the transport idempotency key),
+  filled from `otel_logs` where `weft.record` is a durable kind —
+  never `delta`, never `heartbeat`. Exact reads use `FINAL`.
+- `weft_runs` — `AggregatingMergeTree ORDER BY (ProjectId, Env,
+  TenantId, RunId)` filled from both
   `otel_logs` (heartbeats included, for last-seen) and `otel_traces`;
   `Sessions` groups it by `SessionId`.
 
@@ -77,30 +85,27 @@ about 100 years (DateTime's range), the reads cut nothing, as before
 the cut existed.
 
 A run's metadata (`RunRow.Meta`, and everything that filters or scopes
-by it: the tag filters, a tag-scoped panel token, session titles) is
-the union of its rows' pairs, as on SQLite (migration 0034): `MetaKV`,
+by it: the tag filters, session titles) is
+the union of its rows' pairs, as on SQLite: `MetaKV`,
 a `maxMap` over each row's pairs that an insert fills from the row's
 own `Meta`, so a background merge keeps every key any row carried. On
 a key two rows carry with different values the greater value wins
 (SQLite: the later write); the core stamps one map on every row of a
-run, so only an app's own attributes can disagree. Before 0034 a run's
-`meta` was one row's map (`max(Meta)`, the greatest JSON string), and a
-row with fewer pairs could drop the caller's tag; a run whose rows were
-merged before the upgrade keeps the one map that merge kept. The
-column reads `toValidUTF8(Meta)` (migration 0035): a byte that is not
+run, so only an app's own attributes can disagree (never one row's
+map, `max(Meta)`: a row with fewer pairs could drop the caller's tag).
+The column reads `toValidUTF8(Meta)`: a byte that is not
 UTF-8 reads as U+FFFD, as on SQLite, and the rest of the map is kept.
 
 The tag filters (`SessionQuery.Meta`, `RunQuery.Meta`) narrow their
-row scan on `idx_meta_kv` (migration 0034; 0026's `idx_meta` over
-`Meta` is dropped), an ngram bloom filter over a row's `MetaKV` as
+row scan on `idx_meta_kv`, an ngram bloom filter over a row's `MetaKV` as
 JSON: each pair whose key and value are printable ASCII without `"`,
 `\` or `/` also asks that JSON `LIKE '%"<k>":"<v>"%'` (the pair's JSON
 text — a superset; the exact match on the union decides), so the
 granules holding none of it are skipped; any other pair reads every
 granule, as before.
 
-Deletion (`DeleteRun`, `DeleteSession`, `Sweep` — Studio's `DELETE`
-verbs and `studio.Retain`) is a lightweight `DELETE FROM … WHERE` on
+Deletion (`DeleteRun`, `DeleteSession`, `Sweep` — the server's delete
+verbs and its retention) is a lightweight `DELETE FROM … WHERE` on
 `otel_traces`, `otel_logs`, `weft_records`, `weft_deltas` and
 `weft_runs` (lightweight deletes, GA since ClickHouse 23.3, below the
 schema's own 25.6 floor): rows are masked at once and
@@ -111,7 +116,7 @@ to seven synchronous (`mutations_sync = 2`) lightweight DELETE
 mutations, so a large sweep is many mutations. The runs' own spans go
 after the non-weft spans below them, and `weft_runs` last: a deletion
 cut short leaves the run listed and a retry finishes it. The TTLs stay
-as they are: Studio's retention is additive.
+as they are: the server's retention is additive.
 
 The read-time status `parked` (`RunQuery.Status = obsdb.StatusParked`,
 `/api/runs?status=parked`) is an anti-join: a run with pending calls

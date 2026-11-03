@@ -9,10 +9,6 @@ import (
 	"strconv"
 	"syscall"
 	"time"
-
-	weftfw "github.com/weftbase/weft"
-	"github.com/weftbase/weft/wefttest"
-	"github.com/weftbase/weftbase/runtime"
 )
 
 // The helper process `weftbase dev`'s tests run as the app: this test
@@ -22,9 +18,7 @@ import (
 //	app        prints its pid and the four variables weftbase dev sets, then
 //	           — per WEFT_DEV_HELPER_EXIT — exits with that code, or
 //	           sleeps until a signal; WEFT_DEV_HELPER_GRANDCHILD=<dir>
-//	           first starts a grandchild that writes <dir>/<app pid>;
-//	           WEFT_DEV_HELPER_RUNTIME=1 registers a runtime with the
-//	           Studio weftbase dev named.
+//	           first starts a grandchild that writes <dir>/<app pid>.
 //	grandchild writes its pid to WEFT_DEV_HELPER_PIDFILE and sleeps
 //	           until a signal (its group's).
 func devHelper(mode string) int {
@@ -55,13 +49,6 @@ func devHelper(mode string) int {
 			return 7
 		}
 		go func() { _ = gc.Wait() }()
-	}
-	if os.Getenv("WEFT_DEV_HELPER_RUNTIME") == "1" {
-		agent := weftfw.New(wefttest.Script(wefttest.Say("hi")), weftfw.Name("dev-helper"))
-		stop := runtime.Install(
-			runtime.Studio(os.Getenv("WEFTBASE_URL"), os.Getenv("WEFTBASE_TOKEN")),
-			runtime.Agents(agent))
-		defer stop()
 	}
 	sig := <-sigs
 	fmt.Printf("helper pid=%d got %v\n", os.Getpid(), sig)

@@ -50,25 +50,11 @@ func runListSQL(q obsdb.RunQuery) (count, page string, args []any) {
 		`SELECT run_id FROM runs WHERE ` + where + runOrder(q) + ` LIMIT 50`, args
 }
 
-// TestExperimentRunsUseTheIndex (M2): an experiment's run list — the
-// filter GET /api/experiments reads once per experiment — is planned
-// on runs_experiment (0006, rebuilt in 0014), never a scan of runs;
-// the count and the page alike.
-func TestExperimentRunsUseTheIndex(t *testing.T) {
-	d := planDB(t)
-	count, page, args := runListSQL(obsdb.RunQuery{ExperimentID: "exp_1"})
-	for _, q := range []string{count, page} {
-		if p := queryPlan(t, d, q, args...); !strings.Contains(p, "runs_experiment") {
-			t.Errorf("plan of %q = %s, want the runs_experiment index", q, p)
-		}
-	}
-}
-
 // TestRunListsUseTheirIndexes (U27; UX-E-23, UX-E-36): each run list is
 // planned on the index made for it (migration 0014), never a scan of
 // runs or of every top-level run:
 //
-//   - the public id's list (the panel's) and a session's runs on the
+//   - the public id's list and a session's runs on the
 //     partial indexes runs_public and runs_session_turns (0021: a session's
 //     runs by start, its own-turn rule a filter, U14-fix) — runWhere
 //     states their own condition (<> ”) beside the equality, without
@@ -196,9 +182,9 @@ func TestSessionListUsesTheSessionIndex(t *testing.T) {
 
 // TestTracesWindowUsesSpansStart (U32.2, UX-E-64): the traces list's
 // Since window — the count and the page alike — narrows on spans_start
-// (migration 0019), a SEARCH over the range, each candidate trace's
-// group then read on the primary key; without a window the list is one
-// scan of the primary key's order, pinned so a change is seen.
+// (0001), a SEARCH over the range, each candidate trace's group then
+// read on spans_key; without a window the list is one scan in trace
+// order, pinned so a change is seen.
 func TestTracesWindowUsesSpansStart(t *testing.T) {
 	d := planDB(t)
 	group, having, args := traceGroup(obsdb.TraceQuery{Since: time.Now().Add(-time.Hour)})
@@ -208,13 +194,13 @@ func TestTracesWindowUsesSpansStart(t *testing.T) {
 	} {
 		p := queryPlan(t, d, q, args...)
 		if !strings.Contains(p, "SEARCH spans USING COVERING INDEX spans_start (start_ns>?)") ||
-			!strings.Contains(p, "SEARCH spans USING PRIMARY KEY (trace_id=?)") {
-			t.Errorf("plan of %q = %s, want a SEARCH on spans_start for the window and the groups on the primary key", q, p)
+			!strings.Contains(p, "SEARCH spans USING INDEX spans_key (trace_id=?)") {
+			t.Errorf("plan of %q = %s, want a SEARCH on spans_start for the window and the groups on spans_key", q, p)
 		}
 	}
 	group, having, args = traceGroup(obsdb.TraceQuery{})
 	if p := queryPlan(t, d, `SELECT COUNT(*) FROM (`+group+having+`)`, args...); strings.Contains(p, "spans_start") {
-		t.Errorf("unwindowed count plan = %s; the pin says one scan of the primary key — update the doc above", p)
+		t.Errorf("unwindowed count plan = %s; the pin says one scan in trace order — update the doc above", p)
 	}
 }
 
@@ -239,7 +225,7 @@ func TestResumedByUsesItsIndex(t *testing.T) {
 // which sqlite scanned the whole spans table and sorted it — and a run
 // tree's one read (treeSpansSQL, GET /api/runs/{id}/spans?tree=1) on
 // spans_trace_start (0020): the trace in start order, no temp B-tree,
-// each span's run row by runs' primary key. Trace and a derived run's
+// each span's run row by runs_id. Trace and a derived run's
 // spans read the same trace order.
 func TestRunSpansUseTheirIndexes(t *testing.T) {
 	d := planDB(t)
@@ -247,13 +233,13 @@ func TestRunSpansUseTheirIndexes(t *testing.T) {
 		t.Errorf("RunSpans plan = %s, want a SEARCH on spans_run", p)
 	}
 	// U9.1-fix: the tree is found from the rows — the recursive walk on
-	// runs_started, the id rule's range and each row on runs' primary
-	// key — and its spans read by run id on spans_run, never by trace.
+	// runs_started, the id rule's range and each row on runs_id — and
+	// its spans read by run id on spans_run, never by trace.
 	rows := queryPlan(t, d, treeRowsSQL, "r_1", "r_1/", "r_10", 10_001)
 	if !strings.Contains(rows, "runs_started (parent_run_id=?)") ||
-		!strings.Contains(rows, "sqlite_autoindex_runs_1 (run_id>? AND run_id<?)") ||
+		!strings.Contains(rows, "runs_id (run_id>? AND run_id<?)") ||
 		strings.Contains(rows, "SCAN r") || strings.Contains(rows, "SCAN runs") {
-		t.Errorf("RunTreeSpans rows plan = %s, want runs_started for the walk, the primary key for the id rule, no scan of runs", rows)
+		t.Errorf("RunTreeSpans rows plan = %s, want runs_started for the walk, runs_id for the id rule, no scan of runs", rows)
 	}
 	tree := queryPlan(t, d, treeSpansSQL, `["r_1","r_1/0/c"]`, 10001)
 	if !strings.Contains(tree, "SEARCH spans USING INDEX spans_run (run_id=?)") ||

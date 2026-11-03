@@ -188,59 +188,6 @@ func TestMetaDBPathSetupA(t *testing.T) {
 	}
 }
 
-// TestMetaRuntimes pins meta.runtimes: the runtimes holding a command
-// stream now — 0 without Playground(true), 0 before any dials in, 1
-// while one streams, 0 again once its stream ends.
-func TestMetaRuntimes(t *testing.T) {
-	off := New(Open(filepath.Join(t.TempDir(), "off.db")))
-	t.Cleanup(func() { _ = off.Close() })
-	offTS := httptest.NewServer(off.Handler())
-	t.Cleanup(offTS.Close)
-	if n := metaOf(t, offTS, "").Runtimes; n != 0 {
-		t.Errorf("runtimes without the playground = %d, want 0", n)
-	}
-
-	srv := New(Open(filepath.Join(t.TempDir(), "weft.db")), Playground(true))
-	t.Cleanup(func() { _ = srv.Close() })
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-	if n := metaOf(t, ts, "").Runtimes; n != 0 {
-		t.Errorf("runtimes before any runtime = %d, want 0", n)
-	}
-	resp, err := http.Post(ts.URL+"/api/runtime/register", "application/json",
-		strings.NewReader(`{"runtime_id":"rt_1","agents":[{"name":"a","manifest":"{\"weft\":1,\"agents\":[{\"name\":\"a\",\"model\":{},\"policy\":{},\"tools\":[]}]}","limits":{"max_steps":10,"parallelism":4}}]}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("register: %d", resp.StatusCode)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/runtime/commands?runtime=rt_1", nil)
-	stream, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	go func() { _, _ = io.Copy(io.Discard, stream.Body) }()
-	waitRuntimes := func(want int) {
-		t.Helper()
-		for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-			n := metaOf(t, ts, "").Runtimes
-			if n == want {
-				return
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("runtimes = %d, want %d", n, want)
-			}
-		}
-	}
-	waitRuntimes(1)
-	cancel()
-	_ = stream.Body.Close()
-	waitRuntimes(0)
-}
-
 // failingDB fails the reads meta makes: Runs, or Events only.
 type failingDB struct {
 	obsdb.DB

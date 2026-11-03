@@ -141,12 +141,12 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847120007000000",
+              "endTimeUnixNano": "1790847060007000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "invoke_agent warroom",
               "spanId": "5ba0000000000001",
-              "startTimeUnixNano": "1790847120000000000",
+              "startTimeUnixNano": "1790847060000000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -251,13 +251,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847120002000000",
+              "endTimeUnixNano": "1790847060002000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
               "parentSpanId": "5ba0000000000001",
               "spanId": "5ba0000000000002",
-              "startTimeUnixNano": "1790847120001000000",
+              "startTimeUnixNano": "1790847060001000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -332,13 +332,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847120004000000",
+              "endTimeUnixNano": "1790847060004000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "execute_tool check_metric",
               "parentSpanId": "5ba0000000000001",
               "spanId": "5ba0000000000003",
-              "startTimeUnixNano": "1790847120003000000",
+              "startTimeUnixNano": "1790847060003000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -449,13 +449,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847120006000000",
+              "endTimeUnixNano": "1790847060006000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
               "parentSpanId": "5ba0000000000001",
               "spanId": "5ba0000000000004",
-              "startTimeUnixNano": "1790847120005000000",
+              "startTimeUnixNano": "1790847060005000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -578,12 +578,12 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847120015000000",
+              "endTimeUnixNano": "1790847060015000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "invoke_agent warroom",
               "spanId": "5ba0000000000005",
-              "startTimeUnixNano": "1790847120008000000",
+              "startTimeUnixNano": "1790847060008000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -688,13 +688,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847120010000000",
+              "endTimeUnixNano": "1790847060010000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
               "parentSpanId": "5ba0000000000005",
               "spanId": "5ba0000000000006",
-              "startTimeUnixNano": "1790847120009000000",
+              "startTimeUnixNano": "1790847060009000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -769,13 +769,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847120012000000",
+              "endTimeUnixNano": "1790847060012000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "execute_tool check_metric",
               "parentSpanId": "5ba0000000000005",
               "spanId": "5ba0000000000007",
-              "startTimeUnixNano": "1790847120011000000",
+              "startTimeUnixNano": "1790847060011000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -886,13 +886,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847120014000000",
+              "endTimeUnixNano": "1790847060014000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
               "parentSpanId": "5ba0000000000005",
               "spanId": "5ba0000000000008",
-              "startTimeUnixNano": "1790847120013000000",
+              "startTimeUnixNano": "1790847060013000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -1015,12 +1015,12 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847120019000000",
+              "endTimeUnixNano": "1790847060019000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "invoke_agent warroom",
               "spanId": "5ba0000000000009",
-              "startTimeUnixNano": "1790847120016000000",
+              "startTimeUnixNano": "1790847060016000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -1131,13 +1131,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847120018000000",
+              "endTimeUnixNano": "1790847060018000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
               "parentSpanId": "5ba0000000000009",
               "spanId": "5ba000000000000a",
-              "startTimeUnixNano": "1790847120017000000",
+              "startTimeUnixNano": "1790847060017000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -1272,7 +1272,7 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847120026000000",
+              "endTimeUnixNano": "1790847060026000000",
               "events": [
                 {
                   "attributes": [
@@ -1290,14 +1290,14 @@
                     }
                   ],
                   "name": "exception",
-                  "timeUnixNano": "1790847120021000000"
+                  "timeUnixNano": "1790847060021000000"
                 }
               ],
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "invoke_agent warroom",
               "spanId": "5ba000000000000b",
-              "startTimeUnixNano": "1790847120020000000",
+              "startTimeUnixNano": "1790847060020000000",
               "status": {
                 "code": "STATUS_CODE_ERROR",
                 "message": "weft: run failed at step 1: context canceled"
@@ -1403,13 +1403,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847120023000000",
+              "endTimeUnixNano": "1790847060023000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
               "parentSpanId": "5ba000000000000b",
               "spanId": "5ba000000000000c",
-              "startTimeUnixNano": "1790847120022000000",
+              "startTimeUnixNano": "1790847060022000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -1484,13 +1484,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847120025000000",
+              "endTimeUnixNano": "1790847060025000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "execute_tool run_analysis",
               "parentSpanId": "5ba000000000000b",
               "spanId": "5ba000000000000d",
-              "startTimeUnixNano": "1790847120024000000",
+              "startTimeUnixNano": "1790847060024000000",
               "status": {
                 "code": "STATUS_CODE_ERROR"
               },
@@ -1613,12 +1613,12 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847120030000000",
+              "endTimeUnixNano": "1790847060030000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "invoke_agent warroom",
               "spanId": "5ba000000000000e",
-              "startTimeUnixNano": "1790847120027000000",
+              "startTimeUnixNano": "1790847060027000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -1729,13 +1729,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847120029000000",
+              "endTimeUnixNano": "1790847060029000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
               "parentSpanId": "5ba000000000000e",
               "spanId": "5ba000000000000f",
-              "startTimeUnixNano": "1790847120028000000",
+              "startTimeUnixNano": "1790847060028000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -1870,7 +1870,7 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847120037000000",
+              "endTimeUnixNano": "1790847060037000000",
               "events": [
                 {
                   "attributes": [
@@ -1888,14 +1888,14 @@
                     }
                   ],
                   "name": "exception",
-                  "timeUnixNano": "1790847120032000000"
+                  "timeUnixNano": "1790847060032000000"
                 }
               ],
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "invoke_agent warroom",
               "spanId": "5ba0000000000010",
-              "startTimeUnixNano": "1790847120031000000",
+              "startTimeUnixNano": "1790847060031000000",
               "status": {
                 "code": "STATUS_CODE_ERROR",
                 "message": "weft: run failed at step 1: context canceled"
@@ -2001,13 +2001,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847120034000000",
+              "endTimeUnixNano": "1790847060034000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
               "parentSpanId": "5ba0000000000010",
               "spanId": "5ba0000000000011",
-              "startTimeUnixNano": "1790847120033000000",
+              "startTimeUnixNano": "1790847060033000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -2082,13 +2082,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847120036000000",
+              "endTimeUnixNano": "1790847060036000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "execute_tool run_analysis",
               "parentSpanId": "5ba0000000000010",
               "spanId": "5ba0000000000012",
-              "startTimeUnixNano": "1790847120035000000",
+              "startTimeUnixNano": "1790847060035000000",
               "status": {
                 "code": "STATUS_CODE_ERROR"
               },
@@ -2223,12 +2223,12 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847120041000000",
+              "endTimeUnixNano": "1790847060041000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "invoke_agent warroom",
               "spanId": "5ba0000000000013",
-              "startTimeUnixNano": "1790847120038000000",
+              "startTimeUnixNano": "1790847060038000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -2351,13 +2351,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847120040000000",
+              "endTimeUnixNano": "1790847060040000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
               "parentSpanId": "5ba0000000000013",
               "spanId": "5ba0000000000014",
-              "startTimeUnixNano": "1790847120039000000",
+              "startTimeUnixNano": "1790847060039000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },

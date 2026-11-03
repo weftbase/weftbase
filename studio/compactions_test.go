@@ -3,12 +3,9 @@ package studio
 import (
 	"context"
 	"fmt"
-	"net/http/httptest"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/weftbase/weft/core"
 	"github.com/weftbase/weft/core/wefttest"
@@ -76,33 +73,6 @@ func TestRunCompactionsView(t *testing.T) {
 	}
 	stepGolden(t, "events-compacted.golden.json", fetchJSON(t, ts, "/api/runs/r_steps/events?limit=1000", nil))
 	stepGolden(t, "transcript-compacted.golden.json", fetchJSON(t, ts, "/api/runs/r_steps/transcript", nil))
-}
-
-// TestRunCompactionsReadToken: a read-scoped panel token reads the run
-// document's compactions — counts and hash — and no message body (the
-// view's replacement text appears nowhere in the answer).
-func TestRunCompactionsReadToken(t *testing.T) {
-	const tok = "srv-token"
-	srv := New(Open(filepath.Join(t.TempDir(), "weft.db")), Token(tok))
-	t.Cleanup(func() { _ = srv.Close() })
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-	recordStepsRun(t, ts.URL, "r_tok", map[string]string{"weft.public_id": "pub_a"})
-	read, err := signPanelToken([]byte(tok), panelClaims{PublicID: "pub_a", Scope: scopeRead, Exp: time.Now().Add(time.Hour)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := fetchJSONAs(t, ts, "/api/runs/r_tok", read, func(b string) bool { return strings.Contains(b, `"request_count":6`) })
-	var doc struct {
-		Compactions []runCompactionT `json:"compactions"`
-	}
-	decode(t, body, &doc)
-	if len(doc.Compactions) != 1 || doc.Compactions[0].Replaced != 2 || doc.Compactions[0].Entries != 1 || doc.Compactions[0].Hash == "" {
-		t.Errorf("read token compactions = %+v, want the view's counts and hash", doc.Compactions)
-	}
-	if strings.Contains(body, "summary: the order was looked up") || strings.Contains(body, `"messages"`) {
-		t.Errorf("read token run document carries message bodies: %s", body)
-	}
 }
 
 // TestRunCompactionsSession (plan A9.2): thread's session marker

@@ -37,56 +37,11 @@ func newStudio(t *testing.T, opts ...studio.Option) *httptest.Server {
 	return ts
 }
 
-func env(vars map[string]string) func(string) string {
-	return func(k string) string { return vars[k] }
-}
-
-func run(t *testing.T, url, token string, getenv func(string) string) (string, error) {
+func run(t *testing.T, url, token string) (string, error) {
 	t.Helper()
 	var out strings.Builder
-	err := doctor.Run(context.Background(), &out, doctor.Target{URL: url, Token: token}, getenv)
+	err := doctor.Run(context.Background(), &out, doctor.Target{URL: url, Token: token})
 	return out.String(), err
-}
-
-// TestNoRuntimeNamesTheEnv is B5's Done line: against a Studio with the
-// playground on and no runtime connected, the doctor's output names the
-// variables to set — WEFT_ENV and WEFTBASE_URL — and a missing
-// runtime is a warning, not a failure. With the playground off
-// (UX-S5a-08) the line says so with the flag that did it, and the
-// shell's variables, which cannot help, are not named.
-func TestNoRuntimeNamesTheEnv(t *testing.T) {
-	off := newStudio(t)
-	out, err := run(t, off.URL, tok, env(nil))
-	if err != nil {
-		t.Fatalf("doctor: %v\n%s", err, out)
-	}
-	if !strings.Contains(out, "ok   runtimes  none: studio has no runtime link (the playground is off: turn it on with studio.Playground(true); weftbase dev --no-playground turns it off)") ||
-		strings.Contains(out, "WEFT_ENV is") {
-		t.Errorf("playground off:\n%s", out)
-	}
-	ts := newStudio(t, studio.Playground(true))
-	out, err = run(t, ts.URL, tok, env(nil))
-	if err != nil {
-		t.Fatalf("doctor: %v\n%s", err, out)
-	}
-	for _, want := range []string{
-		"warn runtimes  none connected",
-		"WEFT_ENV is unset in this shell: the app opens the runtime link only with WEFT_ENV=dev",
-		"WEFTBASE_URL is unset in this shell",
-		"set WEFTBASE_URL=" + ts.URL,
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("output lacks %q:\n%s", want, out)
-		}
-	}
-	// With the playground on and the env set, only the app side is left
-	// to check.
-	pg := newStudio(t, studio.Playground(true))
-	out, _ = run(t, pg.URL, tok, env(map[string]string{"WEFT_ENV": "dev", "WEFTBASE_URL": pg.URL}))
-	if strings.Contains(out, "runtime link (") || strings.Contains(out, "WEFT_ENV is") ||
-		strings.Contains(out, "WEFTBASE_URL is unset") || !strings.Contains(out, "check the app's own environment") {
-		t.Errorf("playground on, env set:\n%s", out)
-	}
 }
 
 // TestEveryLineMapsToMeta: every check line's label is in Lines, in
@@ -183,7 +138,7 @@ func TestEveryLineMapsToMeta(t *testing.T) {
 		}
 	}
 
-	out, err := run(t, ts.URL, tok, env(nil))
+	out, err := run(t, ts.URL, tok)
 	if err != nil {
 		t.Fatalf("doctor: %v\n%s", err, out)
 	}
@@ -223,7 +178,7 @@ func TestEveryLineMapsToMeta(t *testing.T) {
 // ErrUnhealthy (exit 1), within the timeout; a Studio that never
 // answers ends with the caller's deadline, never a hang.
 func TestUnreachable(t *testing.T) {
-	out, err := run(t, "http://127.0.0.1:1", "", env(nil))
+	out, err := run(t, "http://127.0.0.1:1", "")
 	if !errors.Is(err, doctor.ErrUnhealthy) || !strings.HasPrefix(out, "studio not reachable at http://127.0.0.1:1: ") {
 		t.Errorf("closed port: %v\n%s", err, out)
 	}
@@ -234,7 +189,7 @@ func TestUnreachable(t *testing.T) {
 	defer cancel()
 	var b strings.Builder
 	start := time.Now()
-	err = doctor.Run(ctx, &b, doctor.Target{URL: hang.URL}, env(nil))
+	err = doctor.Run(ctx, &b, doctor.Target{URL: hang.URL})
 	if !errors.Is(err, doctor.ErrUnhealthy) || !strings.HasPrefix(b.String(), "studio not reachable at "+hang.URL+": ") || time.Since(start) > 2*time.Second {
 		t.Errorf("hung studio: %v after %v\n%s", err, time.Since(start), b.String())
 	}
@@ -249,7 +204,7 @@ func TestToken(t *testing.T) {
 		{"", "FAIL token     studio requires one: it is in <db>.token beside the database (the start banner names the file); set WEFTBASE_TOKEN or --token to it\n               - or run `weftbase open --with-token` from the directory the Studio started in"},
 		{"wrong", "FAIL token     refused: it is not this studio's token (WEFTBASE_TOKEN / --token)"},
 	} {
-		out, err := run(t, ts.URL, c.token, env(nil))
+		out, err := run(t, ts.URL, c.token)
 		if !errors.Is(err, doctor.ErrUnhealthy) || !strings.Contains(out, c.want) {
 			t.Errorf("token %q: %v\n%s", c.token, err, out)
 		}
@@ -258,7 +213,7 @@ func TestToken(t *testing.T) {
 	t.Cleanup(func() { _ = srv.Close() })
 	open := httptest.NewServer(srv.Handler())
 	t.Cleanup(open.Close)
-	out, err := run(t, open.URL, "", env(nil))
+	out, err := run(t, open.URL, "")
 	if err != nil || !strings.Contains(out, "ok   token     not required (no Token configured)") || !strings.Contains(out, "ok   db        sqlite /") {
 		t.Errorf("setup A: %v\n%s", err, out)
 	}
@@ -304,7 +259,7 @@ func (failingDB) Runs(context.Context, obsdb.RunQuery) (obsdb.RunPage, error) {
 // yet" — and the doctor still passes (warnings do not fail it).
 func TestReadErrorsWarn(t *testing.T) {
 	ts := newStudio(t, studio.DB(failingDB{memDB(t)}), studio.Manifest([]byte(`{"weft":`)))
-	out, err := run(t, ts.URL, tok, env(nil))
+	out, err := run(t, ts.URL, tok)
 	if err != nil {
 		t.Fatalf("doctor: %v\n%s", err, out)
 	}
@@ -346,7 +301,7 @@ func TestStaleManifest(t *testing.T) {
 	want2 := "): regenerate weft.json, or redeploy the app if weft.json is newer"
 	var out string
 	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		out, _ = run(t, ts.URL, tok, env(nil))
+		out, _ = run(t, ts.URL, tok)
 		if strings.Contains(out, want) && strings.Contains(out, want2) {
 			return
 		}
@@ -367,7 +322,7 @@ func TestRedirectNotFollowed(t *testing.T) {
 		http.Redirect(w, r, target.URL+"/api/meta", http.StatusFound)
 	}))
 	t.Cleanup(redirect.Close)
-	out, err := run(t, redirect.URL, tok, env(nil))
+	out, err := run(t, redirect.URL, tok)
 	if !errors.Is(err, doctor.ErrUnhealthy) || asked ||
 		!strings.Contains(out, "FAIL token     api/meta answered 302: a redirect to "+target.URL+"/api/meta, not followed") {
 		t.Errorf("redirect: %v (target asked: %v)\n%s", err, asked, out)
@@ -381,7 +336,7 @@ func TestTokenNotRequired(t *testing.T) {
 	t.Cleanup(func() { _ = srv.Close() })
 	open := httptest.NewServer(srv.Handler())
 	t.Cleanup(open.Close)
-	out, err := run(t, open.URL, "some-token", env(nil))
+	out, err := run(t, open.URL, "some-token")
 	if err != nil || strings.Contains(out, "token     accepted") || !strings.Contains(out, "ok   token     not required (no Token configured)") {
 		t.Errorf("token to an open studio: %v\n%s", err, out)
 	}
@@ -396,11 +351,11 @@ func TestIngestRefusalWindow(t *testing.T) {
 	}{{2 * time.Minute, "warn ingest    "}, {2 * time.Hour, "ok   ingest    "}} {
 		at := time.Now().Add(-c.ago).UTC().Format(time.RFC3339)
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_, _ = io.WriteString(w, `{"auth_required":true,"weft_version":"v","studio_version":"s","panel_version":"s",`+
+			_, _ = io.WriteString(w, `{"auth_required":true,"weft_version":"v","studio_version":"s",`+
 				`"db":{"kind":"sqlite"},"content":{"ingest":"as_received"},`+
 				`"ingest":{"dropped":[],"accepted":7,"refused":1,"last_error":"401 unauthorized: no token","last_at":"`+at+`"}}`)
 		}))
-		out, _ := run(t, ts.URL, tok, env(nil))
+		out, _ := run(t, ts.URL, tok)
 		ts.Close()
 		if !strings.Contains(out, c.want+"7 OTLP batches accepted, 1 refused") || !strings.Contains(out, "- last refused at "+at) {
 			t.Errorf("last refusal %s ago: want %q\n%s", c.ago, c.want, out)
@@ -413,13 +368,13 @@ func TestIngestRefusalWindow(t *testing.T) {
 // character in it never reaches the terminal raw.
 func TestControlCharactersStripped(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, `{"auth_required":true,"weft_version":"v\u001b[2J","studio_version":"s","panel_version":"s",`+
+		_, _ = io.WriteString(w, `{"auth_required":true,"weft_version":"v\u001b[2J","studio_version":"s",`+
 			`"db":{"kind":"sqlite"},"content":{"ingest":"as_received"},`+
 			`"ingest":{"dropped":[{"service":"evil\u001b]0;owned\u0007\rsvc","records":3,"last_heard":"2026-10-13T00:00:00Z"}],`+
 			`"accepted":7,"refused":2,"last_error":"401 unauthorized: bad\u001b[2Jtoken","last_at":"2026-10-13T00:00:01Z"}}`)
 	}))
 	t.Cleanup(ts.Close)
-	out, _ := run(t, ts.URL, tok, env(nil))
+	out, _ := run(t, ts.URL, tok)
 	if strings.ContainsAny(out, "\x1b\x07\r") {
 		t.Errorf("control characters reached the output: %q", out)
 	}
@@ -468,7 +423,7 @@ func TestDiscoveryLine(t *testing.T) {
 	check := func(d doctor.Discovery, want ...string) {
 		t.Helper()
 		var out strings.Builder
-		err := doctor.Run(context.Background(), &out, doctor.Target{URL: ts.URL, Token: tok, Discovery: d}, env(nil))
+		err := doctor.Run(context.Background(), &out, doctor.Target{URL: ts.URL, Token: tok, Discovery: d})
 		if err != nil {
 			t.Fatalf("doctor: %v\n%s", err, out.String())
 		}
@@ -491,55 +446,45 @@ func TestDiscoveryLine(t *testing.T) {
 	check(doctor.Discovery{}, "warn discovery no discovery file")
 
 	var out strings.Builder
-	err := doctor.Run(context.Background(), &out, doctor.Target{URL: "http://127.0.0.1:1"}, env(nil))
+	err := doctor.Run(context.Background(), &out, doctor.Target{URL: "http://127.0.0.1:1"})
 	if !errors.Is(err, doctor.ErrUnhealthy) || !strings.HasPrefix(out.String(), "studio not reachable at http://127.0.0.1:1: ") {
 		t.Errorf("unreachable default: %v\n%s", err, out.String())
 	}
 }
 
-// TestTokenAdviceAndNoPlaygroundWords (B7-fix): a 401 with no token
-// names the file and how to reach it without the resolver
-// (--token "$(cat <db>.token)"), not a command that shares it; the
-// runtimes line says the CLI flag in the host's words when the host
-// set them (studio.OffReason).
-func TestTokenAdviceAndNoPlaygroundWords(t *testing.T) {
-	out, _ := run(t, newStudio(t).URL, "", env(nil))
+// TestTokenAdvice (B7-fix): a 401 with no token names the file and how
+// to reach it without the resolver (--token "$(cat <db>.token)"), not
+// a command that shares it.
+func TestTokenAdvice(t *testing.T) {
+	out, _ := run(t, newStudio(t).URL, "")
 	if !strings.Contains(out, "from the directory the Studio started in (where its discovery file is found), or pass --token \"$(cat <db>.token)\"") {
 		t.Errorf("401 advice:\n%s", out)
 	}
-	ts := newStudio(t, studio.OffReason("playground", "weftbase dev was started with --no-playground: drop the flag to turn the playground on"))
-	out, _ = run(t, ts.URL, tok, env(nil))
-	if !strings.Contains(out, "ok   runtimes  none: studio has no runtime link (weftbase dev was started with --no-playground: drop the flag to turn the playground on)") {
-		t.Errorf("runtimes:\n%s", out)
-	}
 }
 
-// TestDataOtlpAndPanelLines (UX-S5a-08): the newest run from another
-// weft warns with both versions; a walled, open and switched-off OTLP
-// door each read as such; a stale panel bundle names the reinstall, not
-// a repo make target alone.
-func TestDataOtlpAndPanelLines(t *testing.T) {
+// TestDataAndOtlpLines (UX-S5a-08): the newest run from another weft
+// warns with both versions; a walled, open and switched-off OTLP door
+// each read as such.
+func TestDataAndOtlpLines(t *testing.T) {
 	serve := func(body string) string {
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, body) }))
 		t.Cleanup(ts.Close)
-		out, _ := run(t, ts.URL, tok, env(nil))
+		out, _ := run(t, ts.URL, tok)
 		return out
 	}
 	at := time.Now().Add(-2 * time.Minute).UTC().Format(time.RFC3339)
-	out := serve(`{"auth_required":true,"weft_version":"v0.19.0","studio_version":"v0.19.0","panel_version":"v0.18.0",` +
+	out := serve(`{"auth_required":true,"weft_version":"v0.19.0","studio_version":"v0.19.0",` +
 		`"db":{"kind":"sqlite"},"capabilities":["ingest"],"ingest_open":true,` +
 		`"content":{"ingest":"as_received","latest":{"run_id":"r1","mark":"full","note":"n","started":"` + at + `","weft_version":"v0.15.0","service":"shop"}}}`)
 	for _, want := range []string{
 		"warn data      newest run 2m0s ago by weft v0.15.0 (service shop), this Studio is weft v0.19.0: the versions differ",
 		"ok   otlp      open: OTLP at ",
-		"FAIL panel     /panel.js is v0.18.0, studio is v0.19.0: this weft build embeds a stale panel bundle",
-		"fix: install weft v0.19.0 again (go install github.com/weftbase/weftbase/cmd/weftbase@v0.19.0)",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
 	}
-	out = serve(`{"auth_required":true,"weft_version":"v","studio_version":"s","panel_version":"s","db":{"kind":"sqlite"},` +
+	out = serve(`{"auth_required":true,"weft_version":"v","studio_version":"s","db":{"kind":"sqlite"},` +
 		`"capabilities":[],"capabilities_off":{"ingest":"OTLP ingest is off: studio.NoIngest() turned it off"},"content":{"ingest":"as_received"}}`)
 	if !strings.Contains(out, "warn otlp      OTLP ingest is off: studio.NoIngest() turned it off: an app's spans cannot reach this Studio") ||
 		!strings.Contains(out, "ok   data      no run stored yet") {

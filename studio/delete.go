@@ -31,9 +31,9 @@ func deleteGroup() routeGroup {
 // Notes the two verbs answer with: what was deleted, said plainly.
 const (
 	deleteRunNote = "the run's observability rows (spans, records, app logs, search index) and its subagent children's " +
-		"are deleted from studio's database, with the runs derived from stock spans under its tools"
+		"are deleted from weftbase's database, with the runs derived from stock spans under its tools"
 	deleteSessionNote = "the session's observability rows (every run's spans, records, app logs, search index, " +
-		"children included) are deleted from studio's database; the app's conversation store is untouched"
+		"children included) are deleted from weftbase's database; the app's conversation store is untouched"
 )
 
 // deleteDoc is both verbs' 200 body.
@@ -45,18 +45,15 @@ type deleteDoc struct {
 }
 
 // mayDelete is the delete capability's rule — db.path's, mayReadDBPath:
-// the server token, or no Token configured and a loopback Host (setup
-// A, without the AllowOrigins widening); never a panel token, whatever
-// its scope. Only the refusal's wording is its own.
+// the server token, or no Token configured and a loopback Host
+// (without the AllowOrigins widening). Only the refusal's wording is
+// its own.
 func (s *Server) mayDelete(w http.ResponseWriter, r *http.Request) bool {
 	if mayReadDBPath(s, r) {
 		return true
 	}
-	msg := "deletion answers a loopback Host only when no studio.Token is configured"
-	if idFrom(r).panel != nil {
-		msg = "deletion answers the dev token (or loopback in setup A) only, never a panel token"
-	}
-	writeError(w, r, http.StatusForbidden, "forbidden", msg)
+	writeError(w, r, http.StatusForbidden, "forbidden",
+		"deletion answers a loopback Host only when no server token is configured")
 	return false
 }
 
@@ -124,7 +121,7 @@ func deleteError(w http.ResponseWriter, r *http.Request, noun, id string, err er
 // not-running rule counts a run silent for 30 s as interrupted, so a
 // short retention would sweep a live run paused at a breakpoint.
 //
-// The sweeper runs until Close: a Studio with Retain is built with New
+// The sweeper runs until Close: a server with Retain is built with New
 // and closed, never through Handler(...), whose server nothing can
 // close (its sweeper ends only when the DB does). The weft binary reads
 // it from --retain / WEFT_RETAIN.
@@ -191,14 +188,14 @@ func (s *Server) sweepOnce(ctx context.Context) bool {
 	n, err := s.db.Sweep(ctx, cutoff)
 	if err != nil {
 		if errors.Is(err, obsdb.ErrClosed) {
-			slog.Debug("studio: sweeper stopped: database closed", "retention", s.retain.String())
+			slog.Debug("weftbase: sweeper stopped: database closed", "retention", s.retain.String())
 			return false
 		}
 		if ctx.Err() == nil {
-			slog.Warn("studio: retention sweep failed", "retention", s.retain.String(), "err", err)
+			slog.Warn("weftbase: retention sweep failed", "retention", s.retain.String(), "err", err)
 		}
 		return true
 	}
-	slog.Debug("studio: retention sweep", "deleted_runs", n, "retention", s.retain.String(), "cutoff", cutoff)
+	slog.Debug("weftbase: retention sweep", "deleted_runs", n, "retention", s.retain.String(), "cutoff", cutoff)
 	return true
 }

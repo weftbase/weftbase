@@ -65,3 +65,19 @@ func (d *DB) Manifest(ctx context.Context, hash string) (_ obsdb.StoredManifest,
 	m.FirstSeen = timeOfNS(first)
 	return m, true, rows.Err()
 }
+
+// nsOf is t in Unix nanoseconds, 0 for the zero time.
+func nsOf(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	return t.UnixNano()
+}
+
+// timeOfNS is nsOf's inverse: 0 is the zero time.
+func timeOfNS(ns int64) time.Time {
+	if ns == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, ns).UTC()
+}

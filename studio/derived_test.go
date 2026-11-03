@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"slices"
 	"strings"
@@ -26,7 +25,7 @@ const (
 // HoleDerived, CauseStockSpans)) — pinned here so a change is seen.
 const (
 	derivedReason = "derived from spans · no events"
-	derivedFix    = "stock OTel GenAI spans carry no weft events or request records: set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true for the messages and tool arguments (Studio reads them from the span attributes) and gen_ai.conversation.id on the invoke_agent span for a session; weft's own records need a weft SDK (Go today)"
+	derivedFix    = "stock OTel GenAI spans carry no weft events or request records: set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true for the messages and tool arguments (weftbase reads them from the span attributes) and gen_ai.conversation.id on the invoke_agent span for a session; weft's own records need a weft SDK (Go today)"
 )
 
 // derivedFixture is a setup-A server over a fresh file database that
@@ -203,8 +202,7 @@ func TestDerivedRunRoutes(t *testing.T) {
 }
 
 // The export carries what exists — the row and the spans — and badges
-// every block spans cannot fill; the wefttest fixtures are refused 400:
-// there is no transcript to replay.
+// every block spans cannot fill.
 func TestDerivedExport(t *testing.T) {
 	h := derivedFixture(t)
 	code, _, body := get(t, h, "/studio/api/runs/"+derivedOK+"/export?format=json")
@@ -234,17 +232,6 @@ func TestDerivedExport(t *testing.T) {
 		if code, _, body := get(t, h, "/studio/api/runs/"+derivedOK+"/export?format="+f); code != http.StatusOK {
 			t.Errorf("export %s = %d %s", f, code, body)
 		}
-	}
-	code, _, body = get(t, h, "/studio/api/runs/"+derivedOK+"/export?format=wefttest")
-	var refused struct {
-		Error struct {
-			Code string `json:"code"`
-		} `json:"error"`
-		badged
-	}
-	decode(t, body, &refused)
-	if code != http.StatusBadRequest || refused.Error.Code != "bad_request" || !refused.derived() {
-		t.Errorf("export wefttest = %d %s, want 400 badged derived", code, body)
 	}
 }
 
@@ -334,53 +321,6 @@ func TestDerivedNoTwinForWeftRuns(t *testing.T) {
 		if list.Total != len(want.Runs) || strings.Contains(body, `"derived"`) || strings.Contains(body, `"otel-`) {
 			t.Errorf("%s: %d runs (%s), want exactly the %d weft runs, none derived", c, list.Total, body, len(want.Runs))
 		}
-	}
-}
-
-// The playground refuses a replay from a derived run with its words:
-// there is no transcript to replay (the run route's checkSource, the
-// preview route, and the fixtures builder the playground's fixtures
-// route shares). No command reaches the runtime.
-func TestDerivedReplayRefused(t *testing.T) {
-	pt := newPlaygroundTestServer(t)
-	b, err := os.ReadFile("../obsdb/testdata/contract/stock_genai/traces.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if code, out := previewPost(t, pt, "/v1/traces", "", string(b)); code != http.StatusOK {
-		t.Fatalf("ingest: %d %s", code, out)
-	}
-	run := func(engine string, from int, input string) string {
-		in := ""
-		if input != "" {
-			in = `"input":"` + input + `",`
-		}
-		return `{"runtime":"rt_test","agent":"acme-support",` + in + `"source":{"run_id":"` + derivedOK + `","from_step":` +
-			string(rune('0'+from)) + `},"engine":"` + engine + `","side_effects":"substitute","thread":"ephemeral"}`
-	}
-	for _, c := range []struct{ path, body string }{
-		{"/api/playground/preview", `{"agent":"support","source":{"run_id":"` + derivedOK + `","from_step":0}}`},
-		{"/api/playground/fixtures", `{"run_id":"` + derivedOK + `"}`},
-		// The run route: live and scripted, from step 0 and 1, and the
-		// input-only case that would otherwise spend a live model call.
-		{"/api/playground/runs", run("live", 0, "")},
-		{"/api/playground/runs", run("live", 1, "")},
-		{"/api/playground/runs", run("live", 0, "where is my order?")},
-		{"/api/playground/runs", run("scripted", 0, "")},
-		{"/api/playground/runs", run("scripted", 1, "")},
-	} {
-		code, out := previewPost(t, pt, c.path, "", c.body)
-		var refused badged
-		decode(t, out, &refused)
-		if code != http.StatusBadRequest || !refused.derived() || !strings.Contains(out, "derived from stock spans") ||
-			!strings.Contains(out, `"code":"bad_request"`) {
-			t.Errorf("%s %s = %d %s, want 400 bad_request badged derived, naming why", c.path, c.body, code, out)
-		}
-	}
-	select {
-	case cmd := <-pt.cmd:
-		t.Errorf("a command reached the runtime: %+v", cmd)
-	default:
 	}
 }
 
@@ -618,44 +558,6 @@ func noUsageCostUnknown(t *testing.T, h http.Handler) {
 	}
 }
 
-// The preview and the run route answer one body with a derived source
-// alike — the derived refusal, whatever else the body gets wrong (an
-// unknown runtime, a fork, malformed command and experiment ids) — and a command refusal's body is still the
-// bare error shape, no badge.
-func TestDerivedRefusalParity(t *testing.T) {
-	pt := newPlaygroundTestServer(t)
-	b, err := os.ReadFile("../obsdb/testdata/contract/stock_genai/traces.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if code, out := previewPost(t, pt, "/v1/traces", "", string(b)); code != http.StatusOK {
-		t.Fatalf("ingest: %d %s", code, out)
-	}
-	body := `{"runtime":"rt_nope","agent":"nobody","thread":"fork","command_id":"bad id!","experiment_id":"bad id!",` +
-		`"source":{"run_id":"` + derivedOK + `","from_step":0}}`
-	var answers []string
-	for _, path := range []string{"/api/playground/preview", "/api/playground/runs"} {
-		code, out := previewPost(t, pt, path, "", body)
-		var refused badged
-		decode(t, out, &refused)
-		if code != http.StatusBadRequest || !refused.derived() {
-			t.Errorf("%s = %d %s, want the derived refusal", path, code, out)
-		}
-		answers = append(answers, out)
-	}
-	if len(answers) == 2 && answers[0] != answers[1] {
-		t.Errorf("the two routes answer one body differently:\n%s\n%s", answers[0], answers[1])
-	}
-	code, out := previewPost(t, pt, "/api/playground/runs", "",
-		`{"runtime":"rt_test","agent":"acme-support","source":{"run_id":"r_unknown","from_step":-1},"engine":"live","side_effects":"substitute","thread":"ephemeral"}`)
-	var shape map[string]any
-	decode(t, out, &shape)
-	errObj, _ := shape["error"].(map[string]any)
-	if code != http.StatusBadRequest || len(shape) != 1 || len(errObj) != 2 || errObj["code"] != "bad_request" || errObj["message"] == nil {
-		t.Errorf("a command refusal = %d %s, want the bare {error: {code, message}} shape", code, out)
-	}
-}
-
 // A producer that captured no content (no gen_ai.tool.call.* on the
 // tool span): the derived call's arguments and result stay unknown —
 // args null, no result — never an empty value (§9, I6).
@@ -756,76 +658,6 @@ func TestDerivedTraceRuns(t *testing.T) {
 	decode(t, body, &run)
 	if code != http.StatusOK || !run.Derived || run.SessionID != "" || run.Agent != "planner" || run.Steps != 1 {
 		t.Errorf("runs/%s = %d %s, want derived, no session, planner, 1 step", noconv, code, body)
-	}
-}
-
-// A token that may not read system prompts (a read-scoped panel token,
-// here a tag token whose tag every stock span carries) reads a stock
-// trace's spans without the system prompt its content attributes carry
-// (docs/record-contract.md §9, the I6 review): no
-// gen_ai.system_instructions, no system-role input message, no legacy
-// system slot, no plain gen_ai.prompt / gen_ai.content.prompt string
-// (it cannot be split), no gen_ai.system.message event — the user's
-// messages stay. The server token reads them
-// all.
-func TestDerivedSpansHideSystemPromptFromReadTokens(t *testing.T) {
-	db, err := sqlite.Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	const tr = "7f000000000000000000000000000001"
-	at := time.Now().Add(-time.Minute)
-	tag := func(a map[string]any) map[string]any { a["arena.batch"] = "b1"; return a }
-	spans := []obsdb.Span{
-		{TraceID: tr, SpanID: "7f00000000000001", Name: "invoke_agent planner", Start: at, End: at.Add(time.Second),
-			Attrs: tag(map[string]any{"gen_ai.operation.name": "invoke_agent"})},
-		{TraceID: tr, SpanID: "7f00000000000002", ParentSpanID: "7f00000000000001", Name: "chat m", Start: at, End: at.Add(time.Second),
-			Attrs: tag(map[string]any{"gen_ai.operation.name": "chat",
-				"gen_ai.system_instructions": `[{"type":"text","content":"SECRET SYSTEM"}]`,
-				"gen_ai.input.messages":      `[{"role":"system","parts":[{"type":"text","content":"SECRET INLINE"}]},{"role":"user","parts":[{"type":"text","content":"hello there"}]}]`,
-				"gen_ai.prompt.0.role":       "system", "gen_ai.prompt.0.content": "SECRET LEGACY",
-				"gen_ai.prompt.1.role": "user", "gen_ai.prompt.1.content": "legacy user",
-				"gen_ai.content.prompt": "SECRET PLAIN CONTENT"}),
-			Events: []obsdb.SpanEvent{
-				{Time: at, Name: "gen_ai.system.message", Attrs: map[string]any{"content": "SECRET EVENT"}},
-				{Time: at, Name: "gen_ai.user.message", Attrs: map[string]any{"content": "user event"}},
-				{Time: at, Name: "gen_ai.content.prompt", Attrs: map[string]any{"gen_ai.prompt": "SECRET PROMPT EVENT"}},
-				{Time: at, Name: "gen_ai.client.inference.operation.details", Attrs: map[string]any{
-					"gen_ai.system_instructions": `[{"type":"text","content":"SECRET DETAILS"}]`,
-					"gen_ai.input.messages":      `[{"role":"system","parts":[{"type":"text","content":"SECRET DETAILS INLINE"}]},{"role":"user","parts":[{"type":"text","content":"details user"}]}]`}},
-			}},
-		{TraceID: tr, SpanID: "7f00000000000003", ParentSpanID: "7f00000000000001", Name: "chat m", Start: at, End: at.Add(time.Second),
-			Attrs: tag(map[string]any{"gen_ai.operation.name": "chat", "gen_ai.prompt": "SECRET PLAIN"})},
-	}
-	if err := db.Write(context.Background(), obsdb.Batch{Spans: spans}); err != nil {
-		t.Fatal(err)
-	}
-	srv := New(DB(db), Token("srv"))
-	t.Cleanup(func() { _ = srv.Close() })
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-	tok := mintTag(t, ts, `{"tags":{"arena.batch":"b1"}}`)
-
-	code, body := tcall(t, ts, http.MethodGet, "/api/traces/"+tr, tok, "")
-	if code != http.StatusOK {
-		t.Fatalf("tag token's trace read: %d %s", code, body)
-	}
-	for _, secret := range []string{"SECRET SYSTEM", "SECRET INLINE", "SECRET LEGACY", "SECRET PLAIN", "SECRET EVENT", "SECRET PROMPT EVENT", "SECRET DETAILS", "gen_ai.system_instructions"} {
-		if strings.Contains(body, secret) {
-			t.Errorf("a read token's trace carries %q: %s", secret, body)
-		}
-	}
-	for _, kept := range []string{"hello there", "legacy user", "user event", "details user", "gen_ai.client.inference.operation.details"} {
-		if !strings.Contains(body, kept) {
-			t.Errorf("a read token's trace lost %q: %s", kept, body)
-		}
-	}
-	if _, full := tcall(t, ts, http.MethodGet, "/api/traces/"+tr, "srv", ""); !strings.Contains(full, "SECRET SYSTEM") ||
-		!strings.Contains(full, "SECRET INLINE") || !strings.Contains(full, "SECRET LEGACY") ||
-		!strings.Contains(full, "SECRET PLAIN") || !strings.Contains(full, "SECRET EVENT") ||
-		!strings.Contains(full, "SECRET PROMPT EVENT") || !strings.Contains(full, "SECRET DETAILS") {
-		t.Errorf("the server token's trace lost the system prompt: %s", full)
 	}
 }
 

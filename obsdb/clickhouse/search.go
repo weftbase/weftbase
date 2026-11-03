@@ -207,7 +207,7 @@ func (d *DB) searchRows(ctx context.Context, now time.Time, sql string, args ...
 		var s runScan
 		if err := rs.Scan(&s.ID, &s.ParentRunID, &s.ParentCallID, &s.TraceID, &s.Agent,
 			&s.Provider, &s.Model, &s.ManifestHash, &s.WeftVersion, &s.Service,
-			&s.SessionID, &s.PublicID, &s.Turn, &s.Playground, &s.ExperimentID, &s.ForkedFrom,
+			&s.SessionID, &s.PublicID, &s.Turn, &s.ForkedFrom,
 			&s.Meta, &s.Started, &s.Finished, &s.LastSeen, &s.FinishedOK, &s.Failed, &s.Err,
 			&s.Steps, &s.Pending, &s.StopReason,
 			&s.InTok, &s.OutTok, &s.CachedTok, &s.CacheWriteTok, &s.ReasonTok, &s.DeltaCount,

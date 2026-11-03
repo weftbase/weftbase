@@ -63,8 +63,7 @@ func sessionsPartlyExpired(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		no := false
-		runs, err := db.Runs(ctx(), obsdb.RunQuery{SessionID: sid, Playground: &no})
+		runs, err := db.Runs(ctx(), obsdb.RunQuery{SessionID: sid})
 		if err != nil {
 			t.Fatal(err)
 		}

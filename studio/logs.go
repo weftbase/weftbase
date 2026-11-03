@@ -17,11 +17,7 @@ import (
 //
 // The non-weft log records of the run's traces — the app's own slog or
 // OTel Logs API lines — attributed to the run through the spans they
-// were emitted under (obsdb.DB.OtherLogs). An app may log anything,
-// prompts included, so the route is prompt-bearing: a read-scoped
-// panel token is refused it (403 with badge "hidden"), as it is the
-// request record; a playground-scoped token, the server token and
-// setup A's loopback API read it.
+// were emitted under (obsdb.DB.OtherLogs).
 
 // maxLogsLimit is the largest logs page (obsdb's LogQuery.PageLimit
 // cap): a larger limit is clamped, not refused.
@@ -116,16 +112,6 @@ const (
 	logsNoBridgeFix    = "bridge slog: otel.Install(…, otel.Slog()), or log through slog.New(otel.SlogHandler(h))"
 )
 
-// mayReadLogs refuses a read-scoped panel token (readsPrompts): 403 in
-// the error shape, with the hidden badge so the panel renders the hole.
-func mayReadLogs(w http.ResponseWriter, r *http.Request) bool {
-	if readsPrompts(r) {
-		return true
-	}
-	refuseHidden(w, r, "a run's app logs may carry anything the app logged, prompts included: a read-scoped panel token does not read them")
-	return false
-}
-
 // serveRunLogs answers api/runs/{id}/logs?from=&limit=&severity=: one
 // page of the run's app logs in time order. from is the first index
 // (next_from feeds straight back in); limit 0 = 100, max 1000;
@@ -133,9 +119,6 @@ func mayReadLogs(w http.ResponseWriter, r *http.Request) bool {
 // warn, error, fatal, a SeverityText spelling or a number 1–24) without
 // renumbering them.
 func (s *Server) serveRunLogs(w http.ResponseWriter, r *http.Request, id string) {
-	if !mayReadLogs(w, r) || !s.scopeRunID(w, r, id) {
-		return
-	}
 	q := r.URL.Query()
 	var query obsdb.LogQuery
 	if v := q.Get("from"); v != "" {

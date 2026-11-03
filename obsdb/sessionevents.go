@@ -14,8 +14,8 @@ import (
 // migration 0022's table, ClickHouse 0025's weft_session_events, both
 // keyed by session id and time). Both first-party backends implement it
 // and the obsdbtest conformance table holds them to the same answers; a
-// backend that does not is a database without the timeline — Studio
-// then leaves its timeline capability off and says why.
+// backend that does not is a database without the timeline — the
+// server then leaves its timeline capability off and says why.
 //
 // The index is fed at ingest from every record of those two kinds that
 // carries a weft.session.id, a record filed under no run included (a
@@ -38,7 +38,7 @@ type SessionEventReader interface {
 
 // SessionEventQuery selects one session's events for SessionEvents.
 // PublicID, when set, keeps only the events carrying that
-// weft.public_id (a panel token's scope): the page, the offsets and
+// weft.public_id (a filter): the page, the offsets and
 // Total all count those alone. Offset is the number of events skipped
 // (pass the previous offset plus the page's length to continue); Limit:
 // 0 = 100, max MaxSessionEventLimit. RunIDs, when set, keeps only the
@@ -47,7 +47,7 @@ type SessionEventReader interface {
 // page, the offsets and Total count those alone, as under PublicID.
 // Kinds, when set, keeps only the events whose SessionEventKind is one
 // of them ("compaction", "interrupt", "rewind", …) — a reader after a
-// few kinds pages those alone (Studio's turn marks, U16-fix); the page,
+// few kinds pages those alone (a session's turn marks, U16-fix); the page,
 // the offsets and Total count those alone, as under RunIDs.
 type SessionEventQuery struct {
 	SessionID string

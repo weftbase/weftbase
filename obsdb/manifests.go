@@ -23,12 +23,12 @@ import (
 // PutManifest of a stored hash changes nothing, so FirstSeen and Source
 // are the first write's.
 //
-// Both first-party backends implement it — obsdb/sqlite (migration
-// 0014) and obsdb/clickhouse (migration 0016) — and the obsdbtest
-// conformance table holds them to the same answers. Studio writes it
-// from the weft.json it serves and from runtime registrations.
+// Both first-party backends implement it — obsdb/sqlite and
+// obsdb/clickhouse — and the obsdbtest conformance table holds them to
+// the same answers. The server writes it from the manifests it is
+// given.
 //
-// Retention: manifests are kept forever. They are Studio's bookkeeping,
+// Retention: manifests are kept forever. They are the server's bookkeeping,
 // not run data — one small row per distinct agent configuration —
 // and DB.DeleteRun, DB.DeleteSession, DB.Sweep and DB.Vacuum never
 // touch them, so a run that remains always resolves its hash.
@@ -49,18 +49,15 @@ type StoredManifest struct {
 	Hash string
 	// Body is the one-agent core.Manifest document, verbatim.
 	Body json.RawMessage
-	// Source is where Studio first saw it: ManifestSourceFile or
-	// ManifestSourceRuntime ("" when the writer did not say).
+	// Source is where the server first saw it: ManifestSourceFile
+	// ("" when the writer did not say).
 	Source string
 	// FirstSeen is when it was first stored.
 	FirstSeen time.Time
 }
 
-// The sources Studio writes manifests from.
-const (
-	ManifestSourceFile    = "file"    // the weft.json Studio serves
-	ManifestSourceRuntime = "runtime" // a runtime registration
-)
+// ManifestSourceFile is the source of a manifest read from a weft.json.
+const ManifestSourceFile = "file"
 
 // ErrInvalidManifest is PutManifest's refusal of a row
 // CheckStoredManifest rejects.

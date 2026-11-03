@@ -14,11 +14,10 @@
   "session_id": "",
   "public_id": "",
   "turn": 0,
-  "playground": true,
-  "experiment_id": "",
   "forked_from": "r_src#2",
   "meta": {
     "cwd": "/tmp/demo",
+    "weft.playground": "true",
     "weft.replay.view": "unknown"
   },
   "started": "2020-01-01T09:00:00.123Z",
@@ -51,8 +50,8 @@
   "holes": [
     {
       "hole": "derived",
-      "reason": "this replay's prefix is the transcript before step 2 of r_src (weft.replay.view = unknown): the runtime could not read that step's records (Studio unreachable, content off, or a Studio without ?step=), so a compaction view its model saw may be missing",
-      "fix": "replay again with the runtime able to read the source's records: Studio reachable, content on, Studio upgraded"
+      "reason": "this replay's prefix is the transcript before step 2 of r_src (weft.replay.view = unknown): the runtime could not read that step's records (weftbase unreachable, content off, or a weftbase without ?step=), so a compaction view its model saw may be missing",
+      "fix": "replay again with the runtime able to read the source's records: weftbase reachable, content on, weftbase upgraded"
     }
   ],
   "compactions": []

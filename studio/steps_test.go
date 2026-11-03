@@ -2,13 +2,10 @@ package studio
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -429,136 +426,6 @@ func TestStepContentOff(t *testing.T) {
 	}
 }
 
-// TestStepNotRecorded: the file written before ADR 0028 (migrations
-// 0001 and 0002 by hand, one run row, no records or spans): step 0 is
-// there by the run's step count, its request and attempts are
-// not_recorded, its missing events a gap, its model the run's
-// (derived) — every hole listed, never an empty block alone.
-func TestStepNotRecorded(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "old.db")
-	raw, err := sql.Open("sqlite", "file:"+path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := raw.Exec(`CREATE TABLE obsdb_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
-		t.Fatal(err)
-	}
-	for v, name := range []string{"0001_init.sql", "0002_experiments.sql"} {
-		body, err := os.ReadFile(filepath.Join("..", "obsdb", "sqlite", "migrations", name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := raw.Exec(string(body)); err != nil {
-			t.Fatalf("migration %s: %v", name, err)
-		}
-		if _, err := raw.Exec(`INSERT INTO obsdb_migrations (version, applied_at) VALUES (?, '2026-10-01T00:00:00Z')`, v+1); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := raw.Exec(`INSERT INTO runs (run_id, agent, started_ns, last_seen_ns, finished_ok, steps)
-		VALUES ('old1', 'support', 100, 200, 1, 2)`); err != nil {
-		t.Fatal(err)
-	}
-	if err := raw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	srv := New(Open(path))
-	t.Cleanup(func() { _ = srv.Close() })
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-
-	body := fetchJSON(t, ts, "/api/runs/old1/steps/0", nil)
-	stepGolden(t, "step-not-recorded.golden.json", body)
-	var d stepDocT
-	decode(t, body, &d)
-	if d.Request == nil || d.Request.Badge != "not_recorded" || d.Request.Reason == "" || d.Request.Fix == "" {
-		t.Errorf("pre-A1 request = %+v, want the not_recorded badge with its reason and fix", d.Request)
-	}
-	if d.AttemptsBadge == nil || d.AttemptsBadge.Badge != "not_recorded" || len(d.Attempts) != 0 {
-		t.Errorf("pre-A1 attempts = %+v badge %+v, want [] under not_recorded", d.Attempts, d.AttemptsBadge)
-	}
-	if d.MessagesIn.Badge != "not_recorded" {
-		t.Errorf("pre-A1 messages_in = %+v, want not_recorded", d.MessagesIn)
-	}
-	if got := strings.Join(d.holes(), ","); got != "gap,not_recorded,derived" {
-		t.Errorf("pre-A1 holes = %s, want gap,not_recorded,derived", got)
-	}
-	checkHoles(t, "pre-A1", d)
-	if !strings.Contains(body, `"attempts":[]`) || !strings.Contains(body, `"events":[]`) || !strings.Contains(body, `"tool_calls":[]`) || !strings.Contains(body, `"children":[]`) {
-		t.Errorf("empty lists must be [], never null: %s", body)
-	}
-	resp, err := http.Get(ts.URL + "/api/runs/old1/steps/2")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Errorf("a step past the run's count = %d, want 404", resp.StatusCode)
-	}
-}
-
-// TestStepPanelTokens: a read-scoped panel token reads the whole step
-// — attempts, events, tool calls, children — with the request block
-// replaced by {badge: hidden, reason, fix} (never a 403 on the step);
-// a playground-scoped token and the server token read the request.
-func TestStepPanelTokens(t *testing.T) {
-	const tok = "srv-token"
-	srv := New(Open(filepath.Join(t.TempDir(), "weft.db")), Token(tok))
-	t.Cleanup(func() { _ = srv.Close() })
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-	recordStepsRun(t, ts.URL, "r_tok", map[string]string{"weft.public_id": "pub_a"})
-
-	get := func(bearer string) (int, string) {
-		t.Helper()
-		for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-			req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/runs/r_tok/steps/1", nil)
-			req.Header.Set("Authorization", "Bearer "+bearer)
-			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				t.Fatal(err)
-			}
-			b, _ := io.ReadAll(resp.Body)
-			_ = resp.Body.Close()
-			if (resp.StatusCode == http.StatusOK && strings.Contains(string(b), `"r_tok/1/c_sub"`)) || time.Now().After(deadline) {
-				return resp.StatusCode, string(b)
-			}
-		}
-	}
-	sign := func(scope string) string {
-		s, err := signPanelToken([]byte(tok), panelClaims{PublicID: "pub_a", Scope: scope, Exp: time.Now().Add(time.Hour)})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return s
-	}
-	code, body := get(sign(scopeRead))
-	if code != http.StatusOK {
-		t.Fatalf("read token = %d %s, want 200", code, body)
-	}
-	stepGolden(t, "step-hidden.golden.json", body)
-	var d stepDocT
-	decode(t, body, &d)
-	checkHoles(t, "read token", d)
-	if d.Request == nil || d.Request.Badge != "hidden" || d.Request.Fix != "use a playground token" || d.Request.Prompt != nil || strings.Contains(body, "You are a support agent.") {
-		t.Errorf("read token request = %+v, want the hidden badge and no system prompt", d.Request)
-	}
-	if len(d.Attempts) != 1 || len(d.Events) == 0 || len(d.ToolCalls) != 1 || len(d.Children) != 1 || d.MessagesIn.Count != 3 {
-		t.Errorf("read token step = %+v, want everything but the request", d)
-	}
-	if got := strings.Join(d.holes(), ","); got != "hidden" {
-		t.Errorf("read token holes = %s, want hidden", got)
-	}
-	for _, bearer := range []string{sign(scopePlayground), tok} {
-		code, body := get(bearer)
-		var d stepDocT
-		decode(t, body, &d)
-		if code != http.StatusOK || d.Request == nil || d.Request.Badge != "" || !strings.Contains(string(d.Request.Prompt), "You are a support agent.") {
-			t.Errorf("a prompt-reading identity = %d request %+v, want the row with the prompt", code, d.Request)
-		}
-	}
-}
-
 // withPipeline runs fn with an agent's observability options wired to
 // a fresh pipeline into url (traced: the tracer too), then flushes.
 func withPipeline(t *testing.T, url string, traced bool, fn func(prov []core.Option), dest ...otel.DestOption) {
@@ -707,37 +574,6 @@ func writeHand(t *testing.T, db obsdb.DB, runID string, t0 time.Time, attrs map[
 }
 
 func ev(pos int64, body string) handRec { return handRec{kind: "event", pos: pos, body: body} }
-
-// TestStepReadTokenNotRecorded: under a read-scoped token the request
-// block is hidden, and the run predates the request record (run_start
-// without weft.instructions.hash) — messages_in's not_recorded badge
-// still reaches holes beside hidden.
-func TestStepReadTokenNotRecorded(t *testing.T) {
-	const tok = "srv-token"
-	srv := New(Open(filepath.Join(t.TempDir(), "weft.db")), Token(tok))
-	t.Cleanup(func() { _ = srv.Close() })
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-	writeHand(t, srv.db, "r_old", time.Now().UTC(), map[string]any{"weft.public_id": "pub_a"}, []handRec{
-		ev(0, `{"type":"run_start","id":"r_old","model":{"provider":"p","name":"m"},"agent":"hand"}`),
-		ev(1, `{"type":"step_start","run_id":"r_old","index":0}`),
-		ev(2, `{"type":"step_finish","run_id":"r_old","index":0,"reason":"stop","usage":{"input_tokens":1,"output_tokens":1}}`),
-		ev(3, `{"type":"run_finish","run_id":"r_old","usage":{"input_tokens":1,"output_tokens":1},"steps":1}`),
-	})
-	read, err := signPanelToken([]byte(tok), panelClaims{PublicID: "pub_a", Scope: scopeRead, Exp: time.Now().Add(time.Hour)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var d stepDocT
-	decode(t, fetchJSONAs(t, ts, "/api/runs/r_old/steps/0", read, nil), &d)
-	checkHoles(t, "read token", d)
-	if d.Request == nil || d.Request.Badge != "hidden" || d.MessagesIn.Badge != "not_recorded" {
-		t.Errorf("request %+v messages_in %+v, want hidden and not_recorded", d.Request, d.MessagesIn)
-	}
-	if got := d.holes(); !slices.Contains(got, "hidden") || !slices.Contains(got, "not_recorded") {
-		t.Errorf("holes = %v, want hidden and not_recorded", got)
-	}
-}
 
 // TestStepLogsOnly: a run recorded without a tracer has its events and
 // requests but no spans — the attempts block says not_recorded with the

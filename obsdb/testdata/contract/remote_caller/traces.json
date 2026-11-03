@@ -135,7 +135,7 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847720003000000",
+              "endTimeUnixNano": "1790847600003000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "links": [
@@ -147,7 +147,7 @@
               ],
               "name": "invoke_agent helper",
               "spanId": "5ba0000000000001",
-              "startTimeUnixNano": "1790847720000000000",
+              "startTimeUnixNano": "1790847600000000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -234,13 +234,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847720002000000",
+              "endTimeUnixNano": "1790847600002000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
               "parentSpanId": "5ba0000000000001",
               "spanId": "5ba0000000000002",
-              "startTimeUnixNano": "1790847720001000000",
+              "startTimeUnixNano": "1790847600001000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -339,12 +339,12 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847720011000000",
+              "endTimeUnixNano": "1790847600011000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "invoke_agent lead",
               "spanId": "5ba0000000000003",
-              "startTimeUnixNano": "1790847720004000000",
+              "startTimeUnixNano": "1790847600004000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -425,13 +425,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847720006000000",
+              "endTimeUnixNano": "1790847600006000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
               "parentSpanId": "5ba0000000000003",
               "spanId": "5ba0000000000004",
-              "startTimeUnixNano": "1790847720005000000",
+              "startTimeUnixNano": "1790847600005000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -488,13 +488,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847720008000000",
+              "endTimeUnixNano": "1790847600008000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "execute_tool helper",
               "parentSpanId": "5ba0000000000003",
               "spanId": "5ba0000000000005",
-              "startTimeUnixNano": "1790847720007000000",
+              "startTimeUnixNano": "1790847600007000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -581,13 +581,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847720010000000",
+              "endTimeUnixNano": "1790847600010000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
               "parentSpanId": "5ba0000000000003",
               "spanId": "5ba0000000000006",
-              "startTimeUnixNano": "1790847720009000000",
+              "startTimeUnixNano": "1790847600009000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },

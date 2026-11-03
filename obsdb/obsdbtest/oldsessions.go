@@ -8,7 +8,7 @@ import (
 )
 
 // sessionsOldDated (U31.1): a session whose turns are years old — the
-// Studio fixtures' 2020 clock — reads the same through the count and
+// API fixtures' 2020 clock — reads the same through the count and
 // the page: Sessions' Total is the page's row count when one page holds
 // the match, scoped, with a Since and with a limit. A backend with
 // retention (ClickHouse's weft_runs TTL) may have dropped the turns —

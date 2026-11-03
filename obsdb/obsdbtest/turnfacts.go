@@ -66,7 +66,7 @@ func sessionTurnFacts(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			{sid: "s_tf", pub: "pub_tf", n: 3, status: 1, extra: map[string]any{"weft.resumed_from": "s_tf-t2"}},
 			{sid: "s_tf", pub: "pub_tf", n: 4, status: 2, extra: map[string]any{"error.type": "model_error"}},
 			{sid: "s_tf", pub: "pub_tf", n: 5, status: 2, extra: failed(obsdb.BusyCancelCause)},
-			{sid: "s_tf", pub: "pub_tf", n: 6, status: 2, extra: failed("studio.cancel")},
+			{sid: "s_tf", pub: "pub_tf", n: 6, status: 2, extra: failed("app.cancel")},
 			{sid: "s_tf", pub: "pub_tf", n: 7, status: 1, extra: map[string]any{"weft.run.pending": int64(1)}},
 			// A fork: its turns carry weft.session.forked_from.
 			{sid: "s_tf_fork", pub: "pub_tf", n: 1, status: 1, extra: map[string]any{obsdb.SessionForkedFromKey: "s_tf#e9"}},
@@ -232,13 +232,12 @@ func CheckTurnFactFilters(t *testing.T, db obsdb.DB) {
 	}
 	var awaiting, failed []string
 	byStatus := map[obsdb.Status][]string{}
-	no := false
 	for _, r := range all.Sessions {
 		det, err := db.Session(ctx(), r.ID)
 		if err != nil {
 			t.Fatalf("Session(%s): %v", r.ID, err)
 		}
-		turns, err := db.Runs(ctx(), obsdb.RunQuery{SessionID: r.ID, Playground: &no, Limit: 1})
+		turns, err := db.Runs(ctx(), obsdb.RunQuery{SessionID: r.ID, Limit: 1})
 		if err != nil {
 			t.Fatal(err)
 		}

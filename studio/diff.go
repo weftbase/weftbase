@@ -35,7 +35,7 @@ import (
 // from_steps where one side kept the source's step and the other re-ran
 // it: kept_by names the keeping side, whose column is the source's step,
 // compared with the re-run — a change there is a change (first_changed
-// too); a source Studio cannot read leaves those rows not compared
+// too); a source the server cannot read leaves those rows not compared
 // (every column unknown). Each step assembled
 // exactly as GET /api/runs/{id}/steps/{n} assembles it (assembleStep),
 // then compared field by field: the system prompt (by hash when both
@@ -50,14 +50,10 @@ import (
 // A compaction view and a subagent call are marks on their side, never
 // alignment changes (decision 12): they flip nothing by themselves.
 // What a side lacks is a hole from obsdb.HoleNote's table in its holes,
-// never an empty field without a reason. Scoped as the step route is:
-// both runs must be inside a panel token's public id (403, an unknown
-// run 404), and a read-scoped token reads every column but the system
-// prompt (system null, the hidden hole).
+// never an empty field without a reason. An unknown run is 404.
 //
 // The route is two-way; an N-way view calls it N−1 times against a
-// base run. Both clients (the panel's two columns, Studio's N) render
-// this one response.
+// base run.
 
 // maxDiffSteps bounds the steps one diff compares: a run row's step
 // count is the producer's number, and one hostile value must not size
@@ -157,8 +153,7 @@ type diffRow struct {
 }
 
 // diffSide is one run's step, reduced to the compared columns. System
-// is null when the step's request block does not carry it (hidden,
-// not_recorded, gap, a missing prompt record — the hole says which);
+// is null when the step's request block does not carry it (not_recorded, gap, a missing prompt record — the hole says which);
 // Text is null when no messages record of the step holds its
 // assistant message.
 type diffSide struct {
@@ -171,12 +166,6 @@ type diffSide struct {
 	Usage       core.Usage       `json:"usage"`
 	Marks       []string         `json:"marks"`
 	Holes       []stepHole       `json:"holes"`
-	// SystemHidden is true when the step's request block is withheld
-	// from this token (a read-scoped panel token: System null under the
-	// hidden hole) — the explicit fact lib/stepdiff.ts's systemHidden
-	// reads, never inferred from the hidden hole's count (a hidden hole
-	// with a count is child runs left out, and may stand beside it).
-	SystemHidden bool `json:"system_hidden,omitempty"`
 
 	// What the side could not record, for compareSides (never served:
 	// each is a hole in Holes). derived: the side's run was built from
@@ -208,18 +197,14 @@ func (s *Server) serveDiff(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, r, "a and b must both name a run: /api/diff?a=<run id>&b=<run id>")
 		return
 	}
-	if !s.scopeRunID(w, r, a) || !s.scopeRunID(w, r, b) {
-		return
-	}
-	prompts := readsPrompts(r)
-	ra, err := s.diffSteps(r, a, prompts)
+	ra, err := s.diffSteps(r, a)
 	if err != nil {
 		writeStepError(w, r, a, 0, err)
 		return
 	}
 	rb := ra
 	if b != a {
-		if rb, err = s.diffSteps(r, b, prompts); err != nil {
+		if rb, err = s.diffSteps(r, b); err != nil {
 			writeStepError(w, r, b, 0, err)
 			return
 		}
@@ -239,12 +224,8 @@ func (s *Server) serveDiff(w http.ResponseWriter, r *http.Request) {
 	// neither side ran.
 	offA, offB := 0, 0
 	if b != a {
-		depth := maxForkDepth
-		if idFrom(r).panel != nil {
-			depth = 1 // a panel token reads no ancestor row beyond the sides' own forked_from
-		}
-		ca := s.forkChain(r.Context(), a, ra.forkedFrom, depth)
-		cb := s.forkChain(r.Context(), b, rb.forkedFrom, depth)
+		ca := s.forkChain(r.Context(), a, ra.forkedFrom, maxForkDepth)
+		cb := s.forkChain(r.Context(), b, rb.forkedFrom, maxForkDepth)
 		if src, oa, ob, ok := lineageOffsets(ca, cb); ok {
 			// A source side that is one of the two must hold the steps the
 			// replay names: a from_step past its last is no alignment (a
@@ -282,7 +263,7 @@ func (s *Server) serveDiff(w http.ResponseWriter, r *http.Request) {
 	srcSide := func(n int) *diffSide {
 		if !srcRead {
 			srcRead = true
-			src = s.siblingSource(r, doc.Aligned.Source, prompts)
+			src = s.siblingSource(r, doc.Aligned.Source)
 		}
 		if n < 0 || n >= len(src) {
 			return nil
@@ -344,17 +325,10 @@ func (s *Server) serveDiff(w http.ResponseWriter, r *http.Request) {
 }
 
 // siblingSource reads the common source of two sibling replays for the
-// rows one kept and the other re-ran: nil when the token may not read
-// it (a panel token's other public id) or it cannot be read — the rows
-// then read not compared.
-func (s *Server) siblingSource(r *http.Request, id string, prompts bool) []*diffSide {
-	if p := idFrom(r).panel; p != nil {
-		det, err := s.db.Run(r.Context(), id)
-		if err != nil || !scopeOfClaims(p).admits(det.RunRow) {
-			return nil
-		}
-	}
-	src, err := s.diffSteps(r, id, prompts)
+// rows one kept and the other re-ran: nil when it cannot be read — the
+// rows then read not compared.
+func (s *Server) siblingSource(r *http.Request, id string) []*diffSide {
+	src, err := s.diffSteps(r, id)
 	if err != nil {
 		return nil
 	}
@@ -424,7 +398,7 @@ func lineageOffsets(a, b []forkLink) (source string, offA, offB int, ok bool) {
 // diffSteps assembles every step of run id (up to maxDiffSteps) and
 // reduces each to its compared columns. The steps are the ordinals
 // assembleStep answers, from 0 until the first it does not.
-func (s *Server) diffSteps(r *http.Request, id string, prompts bool) (diffRunSteps, error) {
+func (s *Server) diffSteps(r *http.Request, id string) (diffRunSteps, error) {
 	sr, err := s.loadStepRun(r.Context(), id)
 	if err != nil {
 		return diffRunSteps{}, err
@@ -435,14 +409,14 @@ func (s *Server) diffSteps(r *http.Request, id string, prompts bool) (diffRunSte
 	for n := 0; ; n++ {
 		if n == maxDiffSteps {
 			// One more step recorded is a truncated diff.
-			if _, err := sr.assembleStep(n, prompts); err == nil {
+			if _, err := sr.assembleStep(n); err == nil {
 				out.truncated = true
 			} else if !isNoStep(err) {
 				return diffRunSteps{}, err
 			}
 			break
 		}
-		doc, err := sr.assembleStep(n, prompts)
+		doc, err := sr.assembleStep(n)
 		if isNoStep(err) {
 			break
 		}
@@ -516,12 +490,6 @@ func diffSideOf(doc stepDoc, text *string, readable bool) *diffSide {
 	holes := holeSet{}
 	for _, h := range doc.Holes {
 		holes[obsdb.Hole(h.Hole)] = h
-	}
-	// The request block hidden (a read token) withholds the system
-	// prompt: said by SystemHidden, so a hidden hole with a count (the
-	// child runs' alone, hiddenChildrenHole) keeps its count beside it.
-	if b, ok := doc.Request.(badgeFields); ok && b.Badge == string(obsdb.HoleHidden) {
-		side.SystemHidden = true
 	}
 	for _, c := range doc.ToolCalls {
 		side.ToolCalls = append(side.ToolCalls, diffToolCall{Name: c.Name, Args: canonicalJSON(c.Args)})

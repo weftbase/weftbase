@@ -143,9 +143,7 @@ func TestSessionTurnChildren(t *testing.T) {
 
 // TestOwnDelegatedUsage (U30.2-fix, UX-A-19): own_usage / delegated_usage
 // split a delegating run's usage only where every Subagent child is
-// read and in scope. A panel token that cannot see one child gets
-// neither (usage − own − delegated would be the hidden subtree's
-// figure, I4's rule); a failed or capped children read omits both.
+// read; a failed or capped children read omits both.
 func TestOwnDelegatedUsage(t *testing.T) {
 	db := costDB(t)
 	t0 := time.Now().Add(-time.Hour).UTC()
@@ -156,10 +154,6 @@ func TestOwnDelegatedUsage(t *testing.T) {
 	costUsagePub(t, db, "p/0/c1", "p", "", "pub_a", "anthropic", "claude-opus-5-5", t0.Add(time.Second), mine, mine)
 	costUsagePub(t, db, "p/0/c2", "p", "", "pub_b", "anthropic", "claude-opus-5-5", t0.Add(2*time.Second), theirs, theirs)
 	h := Handler(DB(db), Token("srv"))
-	panel, err := signPanelToken([]byte("srv"), panelClaims{PublicID: "pub_a", Scope: scopeRead, Exp: time.Now().Add(time.Hour)})
-	if err != nil {
-		t.Fatal(err)
-	}
 	type split struct {
 		Own *core.Usage `json:"own_usage"`
 		Del *core.Usage `json:"delegated_usage"`
@@ -186,9 +180,6 @@ func TestOwnDelegatedUsage(t *testing.T) {
 		s := read(path, "srv")
 		if s.Own == nil || *s.Own != own || s.Del == nil || *s.Del != mine.Add(theirs) {
 			t.Errorf("server %s: own %+v delegated %+v; want %+v and %+v", path, s.Own, s.Del, own, mine.Add(theirs))
-		}
-		if s := read(path, panel); s.Own != nil || s.Del != nil {
-			t.Errorf("panel token, a hidden child, %s: own %+v delegated %+v; want neither", path, s.Own, s.Del)
 		}
 	}
 	// A failed children read (the list's per-row read): neither.

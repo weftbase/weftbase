@@ -64,7 +64,7 @@ type Problems struct {
 	// are read time, not ingest time — an app log carries the trace and
 	// span ids, not the run id, so it can only be attributed once the
 	// run's spans are known (DB.CountLogs) — and filled on the run
-	// document alone (Studio's run route), never on a list row.
+	// document alone (the run route), never on a list row.
 	LogWarn, LogError int64
 }
 

@@ -1,6 +1,6 @@
 {
   "case": "canceled",
-  "description": "a run canceled mid-tool with a typed cause (core.CancelCause(\"studio.cancel\"), what weft/runtime's cancel command passes): status failed, error.type context.Canceled, weft.run.stopped_by canceled and weft.cancel.cause studio.cancel on the invoke_agent span; no run_finish",
+  "description": "a run canceled mid-tool with a typed cause (core.CancelCause(\"app.cancel\"), what a caller's own cancel passes): status failed, error.type context.Canceled, weft.run.stopped_by canceled and weft.cancel.cause app.cancel on the invoke_agent span; no run_finish",
   "runs": [
     {
       "id": "a1100000000000000000000000000001",
@@ -19,7 +19,7 @@
       "steps": 1,
       "stop_reason": "tool_calls",
       "stopped_by": "canceled",
-      "cancel_cause": "studio.cancel",
+      "cancel_cause": "app.cancel",
       "usage": {
         "input_tokens": 10,
         "output_tokens": 5

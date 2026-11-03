@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -129,53 +128,6 @@ func TestTranscriptAsOfStepHoles(t *testing.T) {
 	}
 }
 
-// TestPlaygroundEditInsideCompactionRefused (ADR 0029): from_step 2 of
-// A9's step run replays the compacted prefix step 2's request carried,
-// which no longer holds step 0's lookup call and result — an edit of
-// that result is a 400 in weftbase/runtime's exact words (its
-// TestReplayAcrossCompactionReproducesTheModelsInput pins the same
-// sentence). Step 1's research call lies outside the replaced range:
-// its edit passes the transcript checks.
-func TestPlaygroundEditInsideCompactionRefused(t *testing.T) {
-	srv := New(Open(filepath.Join(t.TempDir(), "weft.db")), Playground(true))
-	t.Cleanup(func() { _ = srv.Close() })
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-	recordStepsRun(t, ts.URL, "r_steps", nil)
-	fetchJSON(t, ts, "/api/runs/r_steps", func(b string) bool { return strings.Contains(b, `"request_count":6`) })
-
-	post := func(edit string) (int, string) {
-		t.Helper()
-		body := `{"runtime":"rt_x","agent":"orders","source":{"run_id":"r_steps","from_step":2},` +
-			`"transcript_edits":[` + edit + `],"engine":"live","thread":"ephemeral"}`
-		resp, err := http.Post(ts.URL+"/api/playground/runs", "application/json", strings.NewReader(body))
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer func() { _ = resp.Body.Close() }()
-		b, _ := io.ReadAll(resp.Body)
-		return resp.StatusCode, string(b)
-	}
-	const want = `call \"c_lookup\" of step 0 was compacted away before step 2's request (messages [1, 3) replaced by 1): the model never saw it there; edit from an earlier from_step`
-	code, body := post(`{"step":0,"call_id":"c_lookup","tool_result":"x"}`)
-	if code != http.StatusBadRequest || !strings.Contains(body, want) {
-		t.Errorf("edit inside the view = %d %s\nwant 400 with %s", code, body, want)
-	}
-	// The F2 kinds (ADR 0029 §8): an args rewrite inside the range is
-	// refused in the same words; a user edit of the turn's prompt and an
-	// insert at the range's end lie outside it.
-	code, body = post(`{"kind":"tool_args","step":0,"call_id":"c_lookup","args":{"order_id":"1"}}`)
-	if code != http.StatusBadRequest || !strings.Contains(body, want) {
-		t.Errorf("args edit inside the view = %d %s\nwant 400 with %s", code, body, want)
-	}
-	if code, body := post(`{"kind":"user","step":0,"content":"x"},{"kind":"insert","step":1,"content":"y"}`); strings.Contains(body, "compacted") || strings.Contains(body, "kept prefix") {
-		t.Errorf("user edit and insert outside the view = %d %s, want the transcript checks passed", code, body)
-	}
-	if code, body := post(`{"step":1,"call_id":"c_sub","tool_result":"x"}`); strings.Contains(body, "compacted") || strings.Contains(body, "kept prefix") {
-		t.Errorf("edit outside the view = %d %s, want the transcript checks passed", code, body)
-	}
-}
-
 // recordAnsweredRun records, through the real pipeline into Studio, a
 // run whose last step's call has its (error) result but no reply: step
 // 0 looks up, step 1's refund errors, then the run stops before step 2
@@ -218,59 +170,28 @@ func recordAnsweredRun(t *testing.T, url, runID, shape string) {
 	}
 }
 
-// TestFromStepAtTheStepCount (ADR 0029): from_step equal to the run's
-// step count is fresh when the last step ended in answered tool calls —
-// the replay's first model call answers them — so a run that failed (or
-// hit its step budget) after step 1's refund errored replays from step
-// 2 with step 1's result edited: the playground accepts it, and
-// transcript?step=2 serves the prefix (the failed call's own request; a
-// derived whole transcript when no request was recorded). After a
-// call-free reply the same from_step has nothing to answer: still 400.
+// TestFromStepAtTheStepCount (ADR 0029): a run that failed (or hit its
+// step budget) after step 1's refund errored serves transcript?step=2:
+// the failed call's own request, or a derived whole transcript when no
+// request was recorded.
 func TestFromStepAtTheStepCount(t *testing.T) {
-	pt := newPlaygroundTestServer(t)
-	go func() {
-		for range pt.cmd {
-		}
-	}()
+	srv := New(Open(filepath.Join(t.TempDir(), "w.db")))
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
 	for _, shape := range []string{"failed", "budget", "done"} {
-		recordAnsweredRun(t, pt.ts.URL, "r_"+shape, shape)
+		recordAnsweredRun(t, ts.URL, "r_"+shape, shape)
 	}
 	for shape, want := range map[string]struct {
 		count int
 		badge string
 	}{"failed": {5, ""}, "budget": {5, "derived"}} {
-		body := fetchJSON(t, pt.ts, "/api/runs/r_"+shape+"/transcript?step=2", nil)
+		body := fetchJSON(t, ts, "/api/runs/r_"+shape+"/transcript?step=2", nil)
 		var doc transcriptAsOfT
 		decode(t, body, &doc)
 		if len(doc.Messages) != want.count || doc.Badge != want.badge || doc.CompactedAt != nil ||
 			doc.Messages[len(doc.Messages)-1].Role != core.RoleTool {
 			t.Errorf("%s: transcript?step=2 = %d messages, badge %q; want %d ending in the refund's result, badge %q", shape, len(doc.Messages), doc.Badge, want.count, want.badge)
-		}
-	}
-	for _, c := range []struct {
-		run  string
-		from int
-		code int
-	}{
-		{"r_failed", 2, http.StatusAccepted},
-		{"r_budget", 2, http.StatusAccepted},
-		{"r_failed", 3, http.StatusBadRequest},
-		{"r_done", 3, http.StatusBadRequest},
-	} {
-		code, out := pt.post(t, fmt.Sprintf(`{"runtime":"rt_test","agent":"acme-support","source":{"run_id":%q,"from_step":%d},`+
-			`"engine":"live","side_effects":"substitute","thread":"ephemeral","transcript_edits":[{"step":1,"call_id":"c2","tool_result":"refunded"}]}`, c.run, c.from))
-		if code != c.code || (c.code == http.StatusBadRequest && !strings.Contains(out, "beyond the source run's last step")) {
-			t.Errorf("%s from_step %d = %d %s, want %d", c.run, c.from, code, strings.TrimSpace(out), c.code)
-		}
-	}
-	// The scripted engine has nothing recorded for the step the source
-	// never answered: 400 in weftbase/runtime's words; from a recorded step
-	// it is accepted.
-	for from, want := range map[int]int{2: http.StatusBadRequest, 1: http.StatusAccepted} {
-		code, out := pt.post(t, fmt.Sprintf(`{"runtime":"rt_test","agent":"acme-support","source":{"run_id":"r_failed","from_step":%d},`+
-			`"engine":"scripted","side_effects":"substitute","thread":"ephemeral"}`, from))
-		if code != want || (want == http.StatusBadRequest && !strings.Contains(out, "scripted has no recorded answer for step 2: the source never answered it — run on live, or replay from an earlier step")) {
-			t.Errorf("scripted from_step %d = %d %s, want %d", from, code, strings.TrimSpace(out), want)
 		}
 	}
 }

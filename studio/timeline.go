@@ -23,15 +23,8 @@ import (
 // session_events index (obsdb.SessionEventReader). The marks are an
 // index of the session file, never evidence (ADR 0021 §5).
 //
-// Scope: a panel token reads its public id's session only (sessions/{id}'s
-// rule), its turns and the marks that carry its public id; a mark of
-// another public id is left out and counted (a hidden hole) — the
-// backend selects them (SessionEventQuery.PublicID), so both routes'
-// totals, offsets and hidden counts are the same exact numbers. Content: a
-// mark's content object (who decided, a reason, a steer's text, a
-// summary) rides only when the record carried it (content on) and the
-// identity reads content — every identity but a read-scoped panel
-// token, which gets content_hidden instead (readsThreadContent).
+// Content: a mark's content object (who decided, a reason, a steer's
+// text, a summary) rides only when the record carried it (content on).
 
 // timelineMarkCap bounds the marks one timeline response reads; past it
 // a truncated hole (cause response_cap) points at /entries. A var so a
@@ -77,12 +70,6 @@ func laneOf(kind string) string {
 	return laneOther
 }
 
-// readsThreadContent says whether the identity may read a mark's
-// content object: everyone but a read-scoped panel token (readsPrompts'
-// rule) — the object names who decided (an actor id), deny reasons and
-// steer texts, which a page-embedded read token must not carry.
-func readsThreadContent(r *http.Request) bool { return readsPrompts(r) }
-
 // sessionEntry is one mark: a thread record or a compaction marker as
 // the timeline and the entries list draw it. At is the record's time
 // (the order); FactAt the body's at, the fact's time on the session's
@@ -92,22 +79,20 @@ func readsThreadContent(r *http.Request) bool { return readsPrompts(r) }
 // of its turns. Entry is the thread entry the fact names. ContentMark is
 // the record's weft.content (full, none, stripped). Fields is the body
 // without kind, session, at, entry and content; Content the content
-// object, absent when the record carried none or ContentHidden says the
-// identity may not read it.
+// object, absent when the record carried none.
 type sessionEntry struct {
-	At            time.Time      `json:"at"`
-	FactAt        *time.Time     `json:"fact_at,omitempty"`
-	Record        string         `json:"record"`
-	Kind          string         `json:"kind"`
-	Event         string         `json:"event"`
-	Lane          string         `json:"lane"`
-	RunID         *string        `json:"run_id"`
-	Turn          *int           `json:"turn"`
-	Entry         string         `json:"entry,omitempty"`
-	ContentMark   string         `json:"content_mark"`
-	Fields        map[string]any `json:"fields"`
-	Content       map[string]any `json:"content,omitempty"`
-	ContentHidden bool           `json:"content_hidden,omitempty"`
+	At          time.Time      `json:"at"`
+	FactAt      *time.Time     `json:"fact_at,omitempty"`
+	Record      string         `json:"record"`
+	Kind        string         `json:"kind"`
+	Event       string         `json:"event"`
+	Lane        string         `json:"lane"`
+	RunID       *string        `json:"run_id"`
+	Turn        *int           `json:"turn"`
+	Entry       string         `json:"entry,omitempty"`
+	ContentMark string         `json:"content_mark"`
+	Fields      map[string]any `json:"fields"`
+	Content     map[string]any `json:"content,omitempty"`
 	// Actor is, on an approval.decision mark, the weft.approval.actor of
 	// the turn that resumed the run it is filed under — empty while no
 	// stored turn resumed it (the run's own actor names who decided the
@@ -161,17 +146,14 @@ type summarizerCost struct {
 // origin's entry it was taken at, the run the mark is filed under (the
 // run whose line was forked), and the forked session as stored here —
 // its turns and newest status (Turns 0, no status: no turn of it was
-// recorded, the fork ran none yet). Hidden for a panel token (another
-// session's state is not its to learn: a fork carries no public id of
-// its own); Unknown when it was not looked up (past timelineForkCap)
-// or the read failed.
+// recorded, the fork ran none yet); Unknown when it was not looked up
+// (past timelineForkCap) or the read failed.
 type timelineFork struct {
 	SessionID string  `json:"session_id"`
 	Entry     string  `json:"entry,omitempty"`
 	RunID     *string `json:"run_id"`
 	Turns     int     `json:"turns"`
 	Status    string  `json:"status,omitempty"`
-	Hidden    bool    `json:"hidden,omitempty"`
 	Unknown   bool    `json:"unknown,omitempty"`
 }
 
@@ -190,9 +172,8 @@ type timelineLane struct {
 // time order, at most timelineMarkCap), the lanes with their counts
 // (the six always, other when a mark sits on it), the session's whole
 // mark count and the holes — not_recorded (turns, no mark: the state
-// log never reached Studio), stripped (marks a content-off destination
-// stripped), hidden (marks or content the identity may not read),
-// truncated (marks past the cap).
+// log never reached the server), stripped (marks a content-off
+// destination stripped), truncated (marks past the cap).
 type timelineDoc struct {
 	SessionID  string         `json:"session_id"`
 	PublicID   string         `json:"public_id,omitempty"`
@@ -204,7 +185,7 @@ type timelineDoc struct {
 	MarksTotal int            `json:"marks_total"`
 	Holes      []stepHole     `json:"holes"`
 	// Forks are the sessions this one forked (UX-B-07): one per fork
-	// mark read, in mark order, each with what this Studio stored of the
+	// mark read, in mark order, each with what this server stored of the
 	// forked session — its turns (0: it ran none yet, so it has no page
 	// of its own) and its newest status. Absent when it forked none.
 	Forks []timelineFork `json:"forks,omitempty"`
@@ -238,9 +219,8 @@ type entriesDoc struct {
 // agent's LoggerProvider (thread files its records through it) and
 // thread.WithRunMetadata for the session's tags.
 const (
-	timelineNotRecordedReason = "no thread record or compaction marker of this session was stored: its state log never reached this Studio (an agent without the pipeline's LoggerProvider, a destination that dropped them, or a weft older than the thread record family)"
+	timelineNotRecordedReason = "no thread record or compaction marker of this session was stored: its state log never reached weftbase (an agent without the pipeline's LoggerProvider, a destination that dropped them, or a weft older than the thread record family)"
 	timelineNotRecordedFix    = "give the agent the pipeline's LoggerProvider — weft.LoggerProvider(lp), or otel.Install, which wires it — and thread reports its state log through it; thread.WithRunMetadata stamps the session's tags on every turn"
-	timelineHiddenFix         = "use a playground token, or the dev token"
 )
 
 // sessionEventsFor checks the database reads session events: 501 with
@@ -254,119 +234,60 @@ func (s *Server) sessionEventsFor(w http.ResponseWriter, r *http.Request) (obsdb
 	return er, true
 }
 
-// sessionScopeFor reads the session for the two routes: its detail
-// (turns scoped to a panel token's public id) and ok. A session no turn
-// of which is stored still answers when it has events (a session of
-// session-level records alone, every one held at Close); otherwise 404
-// — for a panel token the 403 another public id's session gets
-// (sessionReadError), so the refusal never says whether it exists
-// elsewhere.
-func (s *Server) sessionScopeFor(w http.ResponseWriter, r *http.Request, er obsdb.SessionEventReader, id string) (obsdb.SessionDetail, bool) {
-	if !s.scopeSessionID(w, r, id) {
-		return obsdb.SessionDetail{}, false
-	}
+// sessionFor reads the session for the two routes: its detail and ok.
+// A session no turn of which is stored still answers when it has events
+// (a session of session-level records alone, every one held at Close);
+// otherwise 404.
+func (s *Server) sessionFor(w http.ResponseWriter, r *http.Request, er obsdb.SessionEventReader, id string) (obsdb.SessionDetail, bool) {
 	det, err := s.db.Session(r.Context(), id)
 	switch {
 	case errors.Is(err, obsdb.ErrNotFound):
-		sc := panelScope(r)
-		if len(sc.Tags) > 0 {
-			// No stored turn carries the tags: a session of
-			// session-level records alone is no tag token's (its marks
-			// carry no metadata) — the 403 another scope's gets.
-			sessionReadError(w, r, id, err)
-			return obsdb.SessionDetail{}, false
-		}
-		page, perr := er.SessionEvents(r.Context(), obsdb.SessionEventQuery{SessionID: id, PublicID: sc.PublicID, Limit: 1})
+		page, perr := er.SessionEvents(r.Context(), obsdb.SessionEventQuery{SessionID: id, Limit: 1})
 		if perr != nil {
 			dbError(w, r, "session events", id, perr)
 			return obsdb.SessionDetail{}, false
 		}
 		if page.Total == 0 {
-			sessionReadError(w, r, id, err)
+			dbError(w, r, "session", id, err)
 			return obsdb.SessionDetail{}, false
 		}
-		det = obsdb.SessionDetail{SessionRow: obsdb.SessionRow{ID: id, PublicID: sc.PublicID}}
+		det = obsdb.SessionDetail{SessionRow: obsdb.SessionRow{ID: id}}
 	case err != nil:
-		sessionReadError(w, r, id, err)
+		dbError(w, r, "session", id, err)
 		return obsdb.SessionDetail{}, false
-	}
-	if sc := panelScope(r); !sc.none() && len(det.Runs) > 0 {
-		s.scopeSessionDetail(r.Context(), &det, sc)
 	}
 	return det, true
 }
 
 // markBuilder turns stored events into marks for one request: the
-// turns' numbers, the scope and the content rule, counting what it
-// leaves out.
+// turns' numbers and the decision actors, counting the stripped marks.
 type markBuilder struct {
-	sessionID    string
-	turns        map[string]int
-	actors       map[string]string // run id → its weft.approval.actor, else its resumer's
-	pub          string            // a panel token's public id, "" for any other identity
-	tagged       bool              // a panel token's tags (I4): the marks of its turns alone
-	turnIDs      []string          // under tagged, the scoped turns' ids — the runs whose marks it reads
-	runIDs       []string          // /entries?run=: scope, counts and holes over these runs' marks alone
-	readsContent bool
-	hidden       int // marks outside the scope (another public id, an untagged run's), left out (counted by the backend)
-	contentHid   int // marks read whose content the identity may not read
-	stripped     int // marks read that a content-off destination stripped
+	sessionID string
+	turns     map[string]int
+	actors    map[string]string // run id → its weft.approval.actor, else its resumer's
+	runIDs    []string          // /entries?run=: counts and holes over these runs' marks alone
+	stripped  int               // marks read that a content-off destination stripped
 }
 
-// scope counts the session's marks for the identity: visible, the marks
-// it reads (a panel token's public id's; every one otherwise), all the
-// session's whole count, and mb.hidden the difference — counts from the
-// backend, so a page's paging and both routes' totals agree. Under
-// runIDs (/entries?run=) every count is those runs' marks alone.
-func (mb *markBuilder) scope(r *http.Request, er obsdb.SessionEventReader) (visible, all int, err error) {
+// count is the session's mark count (under runIDs, those runs' marks
+// alone) — from the backend, so a page's paging and both routes'
+// totals agree.
+func (mb *markBuilder) count(r *http.Request, er obsdb.SessionEventReader) (int, error) {
 	page, err := er.SessionEvents(r.Context(), mb.query(obsdb.SessionEventQuery{SessionID: mb.sessionID, Limit: 1}))
 	if err != nil {
-		return 0, 0, err
+		return 0, err
 	}
-	visible, all = page.Total, page.Total
-	if mb.pub != "" || mb.tagged {
-		whole, err := er.SessionEvents(r.Context(), obsdb.SessionEventQuery{SessionID: mb.sessionID, RunIDs: mb.runIDs, Limit: 1})
-		if err != nil {
-			return 0, 0, err
-		}
-		all = max(whole.Total, visible)
-		mb.hidden = all - visible
-	}
-	return visible, all, nil
+	return page.Total, nil
 }
 
-// noRun is a run id no run has (a NUL leads it): the RunIDs of a tag
-// scope with no turn, so the read finds no mark rather than every one.
-const noRun = "\x00none"
-
-// query is q in the builder's scope: the token's public id, and the
-// runs whose marks it reads — /entries?run='s, and under a tag scope
-// only the scoped turns among them (none: noRun, never every run).
+// query is q over the runs whose marks the builder reads (/entries?run=).
 func (mb *markBuilder) query(q obsdb.SessionEventQuery) obsdb.SessionEventQuery {
-	q.PublicID, q.RunIDs = mb.pub, mb.runIDs
-	if mb.tagged {
-		ids := mb.turnIDs
-		if len(mb.runIDs) > 0 {
-			ids = slices.DeleteFunc(slices.Clone(mb.runIDs), func(id string) bool { return !slices.Contains(mb.turnIDs, id) })
-		}
-		if len(ids) == 0 {
-			ids = []string{noRun}
-		}
-		q.RunIDs = ids
-	}
+	q.RunIDs = mb.runIDs
 	return q
 }
 
-func (s *Server) newMarkBuilder(r *http.Request, det obsdb.SessionDetail) *markBuilder {
-	sc := panelScope(r)
-	mb := &markBuilder{sessionID: det.ID, turns: map[string]int{}, actors: map[string]string{}, pub: sc.PublicID, readsContent: readsThreadContent(r)}
-	if len(sc.Tags) > 0 {
-		// det's turns are the scope's already (sessionScopeFor).
-		mb.tagged = true
-		for _, rr := range det.Runs {
-			mb.turnIDs = append(mb.turnIDs, rr.ID)
-		}
-	}
+func (s *Server) newMarkBuilder(det obsdb.SessionDetail) *markBuilder {
+	mb := &markBuilder{sessionID: det.ID, turns: map[string]int{}, actors: map[string]string{}}
 	// thread files approval.decision under the parked run, and the
 	// decider is its resume's actor: a run's own weft.approval.actor
 	// names who decided the run before it (a chained park: t4 resumes
@@ -385,13 +306,8 @@ func (s *Server) newMarkBuilder(r *http.Request, det obsdb.SessionDetail) *markB
 	return mb
 }
 
-// mark is one event as a mark, ok false when the scope leaves it out.
+// mark is one event as a mark.
 func (mb *markBuilder) mark(e obsdb.SessionEvent) (sessionEntry, bool) {
-	if (mb.pub != "" && e.PublicID != mb.pub) || (mb.tagged && !slices.Contains(mb.turnIDs, e.RunID)) {
-		// A backend that ignored the PublicID or RunIDs filter: still
-		// never shown (scope's count already holds it).
-		return sessionEntry{}, false
-	}
 	kind := obsdb.SessionEventKind(e)
 	out := sessionEntry{
 		At: e.Time, Record: e.Kind, Kind: kind, Event: e.Name, Lane: laneOf(kind),
@@ -433,11 +349,6 @@ func (mb *markBuilder) mark(e obsdb.SessionEvent) (sessionEntry, bool) {
 			if !ok || len(c) == 0 {
 				continue
 			}
-			if !mb.readsContent {
-				out.ContentHidden = true
-				mb.contentHid++
-				continue
-			}
 			out.Content = c
 		default:
 			out.Fields[k] = v
@@ -450,8 +361,8 @@ func (mb *markBuilder) mark(e obsdb.SessionEvent) (sessionEntry, bool) {
 // decisionActor sets an approval.decision mark's actor: the resume's
 // weft.approval.actor. A resume deciding several calls carries every
 // decider, comma-joined (thread's decisionActors); the mark then names
-// its own call's — the key its record names (key_id: metadata), else,
-// for an identity that reads content, its who — when that is one of
+// its own call's — the key its record names (key_id: metadata), else
+// its who — when that is one of
 // them; otherwise the list stands and ActorOf "resume" says it is the
 // resume's, no one call's. The actor is metadata; who stays content.
 func (mb *markBuilder) decisionActor(out *sessionEntry, runID string, body map[string]any) {
@@ -466,7 +377,7 @@ func (mb *markBuilder) decisionActor(out *sessionEntry, runID string, body map[s
 	list := strings.Split(a, ",")
 	key, _ := body["key_id"].(string)
 	var who string
-	if c, ok := body["content"].(map[string]any); ok && mb.readsContent {
+	if c, ok := body["content"].(map[string]any); ok {
 		who, _ = c["who"].(string)
 	}
 	for _, name := range []string{key, who} {
@@ -499,18 +410,14 @@ func recordEvidence(runs []obsdb.RunRow) string {
 }
 
 // holes is the holes a set of marks carries, in ADR 0028 §11's order:
-// all is the session's whole mark count (every public id's),
-// truncatedAt the count the timeline stopped at (0: none), page true
-// for an /entries page (the content counts are the page's).
+// all is the session's whole mark count, truncatedAt the count the
+// timeline stopped at (0: none), page true for an /entries page (the
+// content counts are the page's).
 func (mb *markBuilder) holes(runs []obsdb.RunRow, all, truncatedAt int, page bool) []stepHole {
 	hs := holeSet{}
 	if len(mb.runIDs) > 0 {
 		// /entries?run=: the evidence is those runs' own.
 		runs = slices.DeleteFunc(slices.Clone(runs), func(rr obsdb.RunRow) bool { return !slices.Contains(mb.runIDs, rr.ID) })
-	}
-	whose := "this session's"
-	if len(mb.runIDs) > 0 {
-		whose = "this run's"
 	}
 	if all == 0 {
 		if why := recordEvidence(runs); why != "" {
@@ -534,22 +441,9 @@ func (mb *markBuilder) holes(runs []obsdb.RunRow, all, truncatedAt int, page boo
 		}
 		hs[obsdb.HoleStripped] = stepHole{Hole: string(obsdb.HoleStripped), Reason: reason, Fix: fix, Count: mb.stripped}
 	}
-	if n := mb.hidden + mb.contentHid; n > 0 {
-		var why []string
-		switch {
-		case mb.hidden > 0 && mb.tagged:
-			why = append(why, fmt.Sprintf("%d of %s marks are beyond your token's access (another public id, a run without its tags, or no run)", mb.hidden, whose))
-		case mb.hidden > 0:
-			why = append(why, fmt.Sprintf("%d of %s marks carry another public id than your token's", mb.hidden, whose))
-		}
-		if mb.contentHid > 0 {
-			why = append(why, fmt.Sprintf("%d marks' content (who decided, reasons, texts) is not read by a read-scoped panel token%s", mb.contentHid, of))
-		}
-		hs[obsdb.HoleHidden] = stepHole{Hole: string(obsdb.HoleHidden), Reason: strings.Join(why, "; "), Fix: timelineHiddenFix, Count: n}
-	}
 	if truncatedAt > 0 {
 		hs[obsdb.HoleTruncated] = stepHole{Hole: string(obsdb.HoleTruncated), Cause: string(obsdb.CauseResponseCap),
-			Reason: fmt.Sprintf("the session has %d marks; this response reads the first %d — nothing was lost", all-mb.hidden, truncatedAt),
+			Reason: fmt.Sprintf("the session has %d marks; this response reads the first %d — nothing was lost", all, truncatedAt),
 			Fix:    fmt.Sprintf("page the rest: GET /api/sessions/{id}/entries?offset=%d", truncatedAt)}
 	}
 	return hs.list()
@@ -561,12 +455,13 @@ func (s *Server) serveSessionTimeline(w http.ResponseWriter, r *http.Request, id
 	if !ok {
 		return
 	}
-	det, ok := s.sessionScopeFor(w, r, er, id)
+	det, ok := s.sessionFor(w, r, er, id)
 	if !ok {
 		return
 	}
-	mb := s.newMarkBuilder(r, det)
-	visible, all, err := mb.scope(r, er)
+	mb := s.newMarkBuilder(det)
+	all, err := mb.count(r, er)
+	visible := all
 	if err != nil {
 		dbError(w, r, "session events", id, err)
 		return
@@ -633,11 +528,8 @@ func (s *Server) serveSessionTimeline(w http.ResponseWriter, r *http.Request, id
 // distinct forked sessions — the first timelineForkCap of them, the
 // rest Unknown — are read in one Sessions query (SessionQuery.IDs): a
 // live page refetches the timeline on every run frame, so the lookup
-// is one grouped read, never a session document per fork. A panel
-// token gets them hidden — the ids are its session's record, the
-// forked sessions' state is not.
+// is one grouped read, never a session document per fork.
 func (s *Server) lookUpForks(r *http.Request, doc *timelineDoc) {
-	pub := !panelScope(r).none()
 	var ids []string
 	seen := map[string]bool{}
 	for _, m := range doc.Marks {
@@ -649,7 +541,7 @@ func (s *Server) lookUpForks(r *http.Request, doc *timelineDoc) {
 			continue
 		}
 		doc.Forks = append(doc.Forks, timelineFork{SessionID: id, Entry: m.Entry, RunID: m.RunID})
-		if !pub && !seen[id] && len(ids) < timelineForkCap {
+		if !seen[id] && len(ids) < timelineForkCap {
 			seen[id] = true
 			ids = append(ids, id)
 		}
@@ -673,8 +565,6 @@ func (s *Server) lookUpForks(r *http.Request, doc *timelineDoc) {
 	for i := range doc.Forks {
 		f := &doc.Forks[i]
 		switch {
-		case pub:
-			f.Hidden = true
 		case !seen[f.SessionID] || failed:
 			// Past the cap, or the read failed: not looked up.
 			f.Unknown = true
@@ -704,20 +594,20 @@ func (s *Server) serveSessionEntries(w http.ResponseWriter, r *http.Request, id 
 			*dst = n
 		}
 	}
-	det, ok := s.sessionScopeFor(w, r, er, id)
+	det, ok := s.sessionFor(w, r, er, id)
 	if !ok {
 		return
 	}
-	mb := s.newMarkBuilder(r, det)
+	mb := s.newMarkBuilder(det)
 	// ?run= narrows the page to the marks filed under one run (a parked
 	// run's request expiry, read in one request whatever the session's
-	// size): total, offsets, next_offset, the holes and the hidden count
-	// are then that run's.
+	// size): total, offsets, next_offset and the holes are then that
+	// run's.
 	run := q.Get("run")
 	if run != "" {
 		mb.runIDs = []string{run}
 	}
-	_, all, err := mb.scope(r, er)
+	all, err := mb.count(r, er)
 	if err != nil {
 		dbError(w, r, "session events", id, err)
 		return

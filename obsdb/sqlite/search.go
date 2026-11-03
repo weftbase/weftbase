@@ -109,7 +109,7 @@ func updateSearch(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) e
 		if s.prompt != "" || s.answerIdx >= 0 {
 			if _, err := tx.ExecContext(ctx, `INSERT INTO run_search (run_id, prompt, prompt_idx, answer, answer_idx)
 				VALUES (?, ?, ?, ?, ?)
-				ON CONFLICT (run_id) DO UPDATE SET
+				ON CONFLICT (project_id, env, tenant_id, run_id) DO UPDATE SET
 				  prompt = CASE WHEN excluded.prompt != '' AND (run_search.prompt = '' OR excluded.prompt_idx <= run_search.prompt_idx)
 				    THEN excluded.prompt ELSE run_search.prompt END,
 				  prompt_idx = CASE WHEN excluded.prompt != '' AND (run_search.prompt = '' OR excluded.prompt_idx <= run_search.prompt_idx)
@@ -197,71 +197,6 @@ func reindexRun(ctx context.Context, tx *sql.Tx, runID string) error {
 	_, e := tx.ExecContext(ctx, `INSERT INTO runs_fts (rowid, prompt, answer, err, tools) VALUES (?, ?, ?, ?, ?)`,
 		id, prompt, answer, err, tools.String)
 	return e
-}
-
-// backfillSearch is migration 0004's Go step: every run already stored
-// indexed as the writer would have indexed it, from its growth messages
-// records and tool_start events.
-func backfillSearch(tx *sql.Tx) error {
-	ctx := context.Background()
-	rows, err := tx.QueryContext(ctx, `SELECT run_id, kind, pos, event_type, body, attrs FROM records
-		WHERE (kind = 'messages' AND pos >= 0) OR (kind = 'event' AND event_type = 'tool_start')
-		ORDER BY run_id, kind, pos`)
-	if err != nil {
-		return err
-	}
-	upds := map[string]*runUpdate{}
-	var order []string
-	for rows.Next() {
-		var runID, kind, eventType, body, attrs string
-		var pos int64
-		if err := rows.Scan(&runID, &kind, &pos, &eventType, &body, &attrs); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		// The writer's reading of the flags (obsdb.DeriveRecord): a
-		// reason of any type is a compaction view, never a search field.
-		input, reason := messagesFlags([]byte(attrs))
-		if kind == "messages" && reason != "" {
-			continue
-		}
-		u := upds[runID]
-		if u == nil {
-			u = &runUpdate{}
-			upds[runID] = u
-			order = append(order, runID)
-		}
-		u.seeSearch(obsdb.Record{Body: body}, obsdb.Weft{Record: kind, Pos: pos, EventType: eventType, Input: input})
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-	// Runs whose only search field is their error.
-	errRows, err := tx.QueryContext(ctx, `SELECT run_id FROM runs WHERE err <> ''`)
-	if err != nil {
-		return err
-	}
-	for errRows.Next() {
-		var runID string
-		if err := errRows.Scan(&runID); err != nil {
-			_ = errRows.Close()
-			return err
-		}
-		if upds[runID] == nil {
-			upds[runID] = &runUpdate{}
-			order = append(order, runID)
-		}
-		upds[runID].errText = "backfill" // marks the run for reindexing; runs.err is what is indexed
-	}
-	if err := errRows.Close(); err != nil {
-		return err
-	}
-	for _, id := range order {
-		if err := updateSearch(ctx, tx, id, upds[id]); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // Search answers obsdb.Searcher over the index.

@@ -3,12 +3,12 @@
 // (thread/sqlite's choice). Open returns an obsdb.DB that also
 // implements interface{ Hub() obsdb.Hub } — every Write publishes its
 // frames to that in-process hub before returning, which is what setup
-// A's live lane runs on (weft/otel's local sink writes, Studio's SSE
-// handler subscribes, no network).
+// A's live lane runs on (weft/otel's local sink writes, the server's
+// SSE handler subscribes, no network).
 //
 // The handle shape is one writer connection plus a read pool: the local
-// sink's synchronous processors write on the run's goroutine, Studio
-// reads concurrently; WAL lets a reader in another process see the same
+// sink's synchronous processors write on the run's goroutine, the
+// server reads concurrently; WAL lets a reader in another process see the same
 // data through its own Open.
 package sqlite
 
@@ -207,14 +207,14 @@ func openHandles(path string) (*DB, *sql.DB, error) {
 }
 
 // Hub returns the DB's in-process live hub: every Write publishes its
-// frames to it before returning (D4 — this handle is what setup A's
-// studio.DB(exporter.LocalDB()) shares).
+// frames to it before returning (D4 — what a server sharing the
+// exporter's local database subscribes to).
 func (d *DB) Hub() obsdb.Hub { return d.hub }
 
 // Path returns the database file's absolute path, as Open resolved it
-// against the working directory at open time; "" for ":memory:". Studio
-// reads it for api/meta's db.path (through interface{ Path() string },
-// so another backend may answer too).
+// against the working directory at open time; "" for ":memory:". The
+// server reads it for its meta's db.path (through interface{ Path()
+// string }, so another backend may answer too).
 func (d *DB) Path() string { return d.path }
 
 // Close closes the handles.

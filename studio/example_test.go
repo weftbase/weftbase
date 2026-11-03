@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/weftbase/weftbase/studio"
@@ -15,7 +14,7 @@ import (
 	"github.com/weftbase/weftbase/obsdb/sqlite"
 )
 
-// ExampleHandler is setup A's shape on one screen: a Studio over an
+// ExampleHandler is the embedded shape on one screen: a server over an
 // obsdb handle, mounted under a prefix. exporter.Install's local sink
 // writes the handle in a real app; here a batch stands in for it.
 func ExampleHandler() {
@@ -32,15 +31,15 @@ func ExampleHandler() {
 	}
 	defer func() { _ = db.Close() }()
 
-	// The mount the doc comment shows; the server serves the UI, the
-	// API, the live stream and OTLP ingest under /studio/.
+	// The mount the doc comment shows; the server serves the Console,
+	// the API, the live stream and OTLP ingest under /weftbase/.
 	mux := http.NewServeMux()
-	mux.Handle("/studio/", http.StripPrefix("/studio",
-		studio.Handler(studio.DB(db))))
+	mux.Handle("/weftbase/", http.StripPrefix("/weftbase",
+		studio.Handler(studio.DB(db), studio.Base("/weftbase/"))))
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/studio/api/meta")
+	resp, err := http.Get(srv.URL + "/weftbase/api/meta")
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -51,9 +50,8 @@ func ExampleHandler() {
 	// 200
 }
 
-// ExampleServer shows the Server surface (S4.1): New when the
-// playground is in play, Handler() to serve, Close for what New
-// opened, Runtime() nil without Playground(true). New without DB or
+// ExampleServer shows the Server surface: New, Handler() to serve,
+// Close for what New opened. New without DB or
 // Open would open the default path ($WEFTBASE_DB or ./.weftbase/weftbase.db) —
 // pinned by TestOpenOption — so the example opens a throwaway sqlite
 // file instead of writing into the package directory.
@@ -68,15 +66,14 @@ func ExampleServer() {
 	srv := studio.New(studio.Open(dir+"/weft.db"), studio.NoIngest()) // read-only: no OTLP receiver
 	defer func() { _ = srv.Close() }()                                // New opened that DB: closed here
 
-	_ = srv.Handler() // mount it; the weft binary (cmd/weftbase) does
-	_ = srv.Runtime() // nil without Playground(true) (studio/runtime)
+	_ = srv.Handler() // mount it; the weftbase binary (cmd/weftbase) does
 	fmt.Println("ok")
 	// Output:
 	// ok
 }
 
 // ExampleRetain keeps a month of runs: the sweeper deletes the older
-// ones that are not running, from Studio's tables only, until Close.
+// ones that are not running, from weftbase's tables only, until Close.
 // api/meta reports the retention.
 func ExampleRetain() {
 	dir, err := os.MkdirTemp("", "weft-studio-retain-")
@@ -107,57 +104,10 @@ func ExampleRetain() {
 	// Output: 720h0m0s
 }
 
-// ExampleToken_tagScope mints a panel token scoped to a batch of runs
-// by their metadata (I4) — server token only — and reads with it: its
-// own batch answers, another value of its tag key is refused. A tag
-// scope is only as tight as the app's own tagging (metadata is
-// caller-written).
-func ExampleToken_tagScope() {
-	dir, err := os.MkdirTemp("", "weft-studio-tags-")
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	defer func() { _ = os.RemoveAll(dir) }()
-	srv := studio.New(studio.Open(dir+"/weft.db"), studio.Token("server-secret"))
-	defer func() { _ = srv.Close() }()
-	ts := httptest.NewServer(srv.Handler())
-	defer ts.Close()
-
-	do := func(method, path, bearer, body string) *http.Response {
-		req, _ := http.NewRequest(method, ts.URL+path, strings.NewReader(body))
-		req.Header.Set("Authorization", "Bearer "+bearer)
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			panic(err)
-		}
-		return resp
-	}
-	resp := do(http.MethodPost, "/api/panel-tokens", "server-secret", `{"tags":{"arena.batch":"b1"},"ttl":"1h"}`)
-	var minted struct {
-		Token string            `json:"token"`
-		Tags  map[string]string `json:"tags"`
-		Scope string            `json:"scope"`
-	}
-	_ = json.NewDecoder(resp.Body).Decode(&minted)
-	_ = resp.Body.Close()
-	fmt.Println(minted.Tags["arena.batch"], minted.Scope)
-
-	for _, path := range []string{"/api/runs?tag.arena.batch=b1", "/api/runs?tag.arena.batch=b2"} {
-		resp := do(http.MethodGet, path, minted.Token, "")
-		_ = resp.Body.Close()
-		fmt.Println(path, resp.StatusCode)
-	}
-	// Output:
-	// b1 read
-	// /api/runs?tag.arena.batch=b1 200
-	// /api/runs?tag.arena.batch=b2 403
-}
-
 // ExampleDiscoveryFile is what `weftbase dev` does for the discovery
 // file it writes: it names the path to the server, and api/meta serves
 // it (to the server token, or loopback with no Token) while the file
-// there names this process — Studio's connect lines print it. Here the
+// there names this process. Here the
 // file is written by hand, as the command writes it: 0600, this pid.
 func ExampleDiscoveryFile() {
 	dir, err := os.MkdirTemp("", "weft-studio-discovery-")
@@ -194,9 +144,8 @@ func ExampleDiscoveryFile() {
 	// Output: true
 }
 
-// ExampleOffReason is how `weftbase dev --no-playground` words the
-// playground's absence for a user who never wrote Go: meta's
-// capabilities_off (and `weftbase doctor`) say the flag.
+// ExampleOffReason is how a command words a capability's absence for a
+// user who never wrote Go: meta's capabilities_off says the flag.
 func ExampleOffReason() {
 	dir, err := os.MkdirTemp("", "weft-studio-offreason-")
 	if err != nil {
@@ -204,8 +153,8 @@ func ExampleOffReason() {
 		return
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
-	srv := studio.New(studio.Open(dir+"/weft.db"), studio.Playground(false),
-		studio.OffReason("playground", "weftbase dev was started with --no-playground"))
+	srv := studio.New(studio.Open(dir+"/weft.db"), studio.NoIngest(),
+		studio.OffReason("ingest", "the command was started with --no-ingest"))
 	defer func() { _ = srv.Close() }()
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -223,6 +172,6 @@ func ExampleOffReason() {
 		fmt.Println(err)
 		return
 	}
-	fmt.Println(meta.Off["runtimes"])
-	// Output: weftbase dev was started with --no-playground
+	fmt.Println(meta.Off["ingest"])
+	// Output: the command was started with --no-ingest
 }

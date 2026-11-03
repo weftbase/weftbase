@@ -79,26 +79,26 @@ func TestMetaDiscoveryFile(t *testing.T) {
 }
 
 // TestOffReason (B7-fix): the host's words replace the reason for the
-// capability it names and every capability off for the same cause —
-// the playground's family — and nothing else; nothing turns on.
+// capability it names and every capability off for the same cause,
+// and nothing else; nothing turns on.
 func TestOffReason(t *testing.T) {
-	words := "weftbase dev was started with --no-playground: drop the flag to turn the playground on"
-	srv := New(DB(fixtureDB(t)), OffReason("playground", words))
+	words := "weftbase dev was started with --no-ingest"
+	srv := New(DB(fixtureDB(t)), NoIngest(), OffReason("ingest", words))
 	t.Cleanup(func() { _ = srv.Close() })
 	off := srv.capabilitiesOff()
 	for c, why := range optionalCapabilities {
 		_, isOff := off[c]
 		switch {
-		case why == offPlayground && (!isOff || off[c] != words):
+		case why == offIngest && (!isOff || off[c] != words):
 			t.Errorf("%s: %q, want the host's words", c, off[c])
-		case why != offPlayground && isOff && off[c] != why:
+		case why != offIngest && isOff && off[c] != why:
 			t.Errorf("%s: %q, want its own reason %q", c, off[c], why)
 		}
 	}
-	for _, c := range srv.capabilityList() {
-		if c == "playground" {
-			t.Error("OffReason turned the playground on")
-		}
+	on := New(DB(fixtureDB(t)), OffReason("ingest", words))
+	t.Cleanup(func() { _ = on.Close() })
+	if _, isOff := on.capabilitiesOff()["ingest"]; isOff {
+		t.Error("OffReason turned ingest off")
 	}
 }
 
@@ -106,9 +106,9 @@ func TestOffReason(t *testing.T) {
 // a construction error, never silently ignored.
 func TestOffReasonUnknownPanics(t *testing.T) {
 	defer func() {
-		if r := recover(); r == nil || !strings.Contains(r.(string), "playgrund") {
+		if r := recover(); r == nil || !strings.Contains(r.(string), "ingset") {
 			t.Errorf("recover = %v, want a panic naming the capability", r)
 		}
 	}()
-	_ = New(DB(fixtureDB(t)), OffReason("playgrund", "typo"))
+	_ = New(DB(fixtureDB(t)), OffReason("ingset", "typo"))
 }

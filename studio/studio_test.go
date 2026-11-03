@@ -485,20 +485,16 @@ func TestMetaGolden(t *testing.T) {
 	wefttest.Golden(t, "testdata/api/meta.golden.json",
 		[]byte(metaPIDRe.ReplaceAllString(indent(t, body), `"pid": 1234`)))
 
-	// Capabilities are computed from the registered route groups
-	// (S4.2): the read API names none; the request record's routes
-	// (requests, ADR 0028 §10), the step route (steps, plan A7), the
-	// export and the app logs (export, logs, plan A7), the run diff
-	// (diff, plan E3.1), the trace list (traces, plan A7), the manifest
-	// store (manifests, U27; the DB is an obsdb.ManifestStore), deletion and
-	// proposed prompts (delete, plan A7; proposals, plan F6), live, ingest and
-	// the panel's config (panel-config, plan B3) are registered, so the
-	// open handler reports exactly
-	// [requests steps export logs diff traces search stats manifests spans_tree pricing delete proposals live scope_tags ingest panel-config] — the
-	// playground joins with its own (step 8).
+	// Capabilities are computed from the registered route groups: the
+	// read API names none; the request record's routes (requests, ADR
+	// 0028 §10), the step route (steps), the export and the app logs
+	// (export, logs), the run diff (diff), the trace list (traces), the
+	// manifest store (manifests, U27; the DB is an obsdb.ManifestStore),
+	// deletion (delete), live, the tag filters and ingest are
+	// registered, so the open handler reports exactly these.
 	_, _, plain := get(t, Handler(DB(fixtureDB(t))), "/studio/api/meta")
-	if !strings.Contains(plain, `"capabilities":["requests","steps","export","logs","diff","traces","search","stats","manifests","spans_tree","timeline","pricing","delete","proposals","live","scope_tags","ingest","panel-config"]`) {
-		t.Errorf("default capabilities = %s, want [requests steps export logs diff traces search stats manifests spans_tree timeline pricing delete proposals live scope_tags ingest panel-config]", plain)
+	if !strings.Contains(plain, `"capabilities":["requests","steps","export","logs","diff","traces","search","stats","manifests","spans_tree","timeline","pricing","delete","live","scope_tags","ingest"]`) {
+		t.Errorf("default capabilities = %s, want [requests steps export logs diff traces search stats manifests spans_tree timeline pricing delete live scope_tags ingest]", plain)
 	}
 	// Ingest is open on loopback without a token, and meta says so
 	// (S4.4); a configured token closes it.
@@ -511,22 +507,15 @@ func TestMetaGolden(t *testing.T) {
 	}
 	// NoIngest drops the ingest group with its routes and capability.
 	_, _, ro := get(t, Handler(DB(fixtureDB(t)), NoIngest()), "/studio/api/meta")
-	if !strings.Contains(ro, `"capabilities":["requests","steps","export","logs","diff","traces","search","stats","manifests","spans_tree","timeline","pricing","delete","proposals","live","scope_tags","panel-config"]`) || !strings.Contains(ro, `"ingest_open":false`) {
-		t.Errorf("NoIngest meta = %s, want capabilities [requests steps export logs diff traces search stats manifests spans_tree timeline pricing delete proposals live scope_tags panel-config] and ingest_open false", ro)
+	if !strings.Contains(ro, `"capabilities":["requests","steps","export","logs","diff","traces","search","stats","manifests","spans_tree","timeline","pricing","delete","live","scope_tags"]`) || !strings.Contains(ro, `"ingest_open":false`) {
+		t.Errorf("NoIngest meta = %s, want capabilities [requests steps export logs diff traces search stats manifests spans_tree timeline pricing delete live scope_tags] and ingest_open false", ro)
 	}
 	if code, _, _ := post(t, Handler(DB(fixtureDB(t)), NoIngest()), "/studio/v1/logs", "application/json", "{}"); code != http.StatusNotFound {
 		t.Errorf("NoIngest /v1/logs: %d, want 404", code)
 	}
-	// Playground(true) adds the playground group's capability and the
-	// runtime link's (step 8's playground.go registers both; the
-	// step-6 pin asserted neither existed yet).
-	_, _, pg := get(t, Handler(DB(fixtureDB(t)), Playground(true)), "/studio/api/meta")
-	if !strings.Contains(pg, `"capabilities":["requests","steps","export","logs","diff","traces","search","stats","manifests","spans_tree","timeline","pricing","delete","proposals","live","scope_tags","ingest","panel-config","runtimes","preview","target_check","runtime_forget","run_commands","breakpoints","steer","cancel","playground"]`) {
-		t.Errorf("Playground capabilities = %s", pg)
-	}
 	// A hosting wrapper declares its own verbs beside the groups'.
 	_, _, caps := get(t, Handler(DB(fixtureDB(t)), Capabilities("fleet")), "/studio/api/meta")
-	if !strings.Contains(caps, `"capabilities":["requests","steps","export","logs","diff","traces","search","stats","manifests","spans_tree","timeline","pricing","delete","proposals","live","scope_tags","ingest","panel-config","fleet"]`) {
+	if !strings.Contains(caps, `"capabilities":["requests","steps","export","logs","diff","traces","search","stats","manifests","spans_tree","timeline","pricing","delete","live","scope_tags","ingest","fleet"]`) {
 		t.Errorf("declared capabilities = %s", caps)
 	}
 }
@@ -595,130 +584,6 @@ func TestRunsGolden(t *testing.T) {
 		t.Errorf("runs list missing metadata: %s", body)
 	}
 	golden(t, "runs.golden.json", body)
-}
-
-// experimentDB is fixtureDB's experiment (plan F5.1): exp_g's two runs
-// — pg_e1 with a Subagent child that inherits the label, pg_e2 — and a
-// run of another experiment, each priced at p/m.
-func experimentDB(t *testing.T) obsdb.DB {
-	t.Helper()
-	db, err := sqlite.Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	at := func(d time.Duration) time.Time { return fixtureT0.Add(d) }
-	run := func(id, experiment string, start time.Duration, in, out int64, extra map[string]any) []obsdb.Record {
-		recs := []obsdb.Record{
-			fxRecord(id, "event", "run_start", 0, at(start), `{"type":"run_start","id":"`+id+`","model":{"provider":"p","name":"m"},"agent":"orders"}`),
-			fxRecord(id, "event", "run_finish", 1, at(start+time.Second),
-				fmt.Sprintf(`{"type":"run_finish","run_id":"%s","usage":{"input_tokens":%d,"output_tokens":%d},"steps":1}`, id, in, out)),
-		}
-		for _, r := range recs {
-			r.Attrs["weft.playground"] = true
-			r.Attrs["weft.experiment.id"] = experiment
-			for k, v := range extra {
-				r.Attrs[k] = v
-			}
-		}
-		return recs
-	}
-	var recs []obsdb.Record
-	recs = append(recs, run("pg_e1", "exp_g", 0, 100, 50, nil)...)
-	recs = append(recs, run("pg_e1/0/call_1", "exp_g", 100*time.Millisecond, 10, 5,
-		map[string]any{"weft.parent.run.id": "pg_e1", "weft.parent.call.id": "call_1"})...)
-	recs = append(recs, run("pg_e2", "exp_g", 2*time.Second, 20, 10, nil)...)
-	recs = append(recs, run("pg_other", "exp_other", 4*time.Second, 1, 1, nil)...)
-	if err := db.Write(context.Background(), obsdb.Batch{Records: recs}); err != nil {
-		t.Fatal(err)
-	}
-	return db
-}
-
-// experimentDates normalizes an experiment document's created and
-// updated (the save's clock) for its golden.
-var experimentDates = regexp.MustCompile(`"(created|updated)":"[^"]*"`)
-
-// TestExperimentsGolden pins plan F5.1's three gaps on one experiment:
-// /api/runs?experiment_id= lists its top-level runs and nothing else; a
-// saved experiment reads back with its whole command (engine,
-// side_effects, thread, from_step, source_run_id, transcript_edits, the
-// variants' overrides and modes); the history and the detail carry
-// created, run_count and the cost of its runs (own + delegated).
-func TestExperimentsGolden(t *testing.T) {
-	h := Handler(DB(experimentDB(t)), Playground(true),
-		Pricing(PricingTable{Dated: "2026-10-01", Models: []ModelPrice{{Provider: "p", ModelGlob: "m", Input: 1, Output: 2}}}))
-
-	code, _, body := get(t, h, "/studio/api/runs?experiment_id=exp_g")
-	if code != http.StatusOK || !strings.Contains(body, `"id":"pg_e1"`) || !strings.Contains(body, `"id":"pg_e2"`) ||
-		strings.Contains(body, "pg_other") || strings.Contains(body, `"pg_e1/`) || !strings.Contains(body, `"total":2`) {
-		t.Fatalf("runs?experiment_id=exp_g = %d %s, want pg_e2 and pg_e1, top-level only", code, body)
-	}
-	golden(t, "runs-experiment.golden.json", body)
-	if _, _, all := get(t, h, "/studio/api/runs?experiment_id=exp_g&all=1"); !strings.Contains(all, `"id":"pg_e1/0/call_1"`) || strings.Contains(all, "pg_other") {
-		t.Errorf("runs?experiment_id=exp_g&all=1 = %s, want the child too and no other experiment", all)
-	}
-	if _, _, srch := get(t, h, "/studio/api/search?experiment_id=exp_other"); !strings.Contains(srch, `"id":"pg_other"`) || strings.Contains(srch, "pg_e") {
-		t.Errorf("search?experiment_id=exp_other = %s, want pg_other alone", srch)
-	}
-
-	exp := `{"id":"exp_g","name":"tracking link","agent":"orders",
-	  "variants":[{"key":"A","overrides":{}},
-	    {"key":"B","overrides":{"instructions":"new","tools_enabled":["lookup_order"],"model":"m2","thinking":"high",
-	      "options":{"max_steps":4,"parallelism":1,"temperature":0.2},"params":{"top_p":0.9,"max_tokens":256,"stop":["END"],"seed":7},
-	      "tool_choice":{"mode":"named","name":"lookup_order"},"park_on":["refund"],"only_tools":["lookup_order"]},
-	     "engine":"scripted","side_effects":"park","thread":"ephemeral"}],
-	  "inputs":[{"key":"1","source_run_id":"r_ok"},{"key":"2","text":"angry user"},{"key":"3","source_run_id":"r_ok","from_step":2}],
-	  "pass_predicate":"status = succeeded AND answer ~ /shipped/",
-	  "engine":"live","side_effects":"substitute","thread":"ephemeral","from_step":1,"source_run_id":"r_ok",
-	  "transcript_edits":[{"kind":"tool_result","step":0,"call_id":"call_1","content":"order 42: lost"}]}`
-	// Saved after its runs (the re-save case): the answer carries the
-	// summary the detail does, not a zero run_count and an unknown cost.
-	code, _, saved := post(t, h, "/studio/api/experiments", "application/json", exp)
-	if code != http.StatusOK {
-		t.Fatalf("save = %d %s", code, saved)
-	}
-	for _, want := range []string{`"run_count":2`, `"cost_usd":0.00024`, `"cost_known":true`, `"cache":"not_reported"`} {
-		if !strings.Contains(saved, want) {
-			t.Errorf("the save's answer missing %s: %s", want, saved)
-		}
-	}
-	if code, _, again := post(t, h, "/studio/api/experiments", "application/json", exp); code != http.StatusOK || !strings.Contains(again, `"run_count":2`) || !strings.Contains(again, `"cost_usd":0.00024`) {
-		t.Errorf("re-save = %d %s, want run_count 2 and cost 0.00024", code, again)
-	}
-	for _, want := range []string{`"engine":"live"`, `"side_effects":"substitute"`, `"from_step":1`, `"source_run_id":"r_ok"`,
-		`"pass_predicate":"status = succeeded AND answer ~ /shipped/"`,
-		// A multi-source row's own step (U24.2-fix 11).
-		`{"key":"3","source_run_id":"r_ok","from_step":2}`,
-		`"transcript_edits":[{"kind":"tool_result"`, `"engine":"scripted"`, `"only_tools":["lookup_order"]`} {
-		if !strings.Contains(saved, want) {
-			t.Errorf("saved experiment missing %s: %s", want, saved)
-		}
-	}
-
-	code, _, detail := get(t, h, "/studio/api/experiments/exp_g")
-	if code != http.StatusOK {
-		t.Fatalf("detail = %d %s", code, detail)
-	}
-	// pg_e1's own 90 in + 45 out (its child's 10 + 5 taken out) and
-	// the child's 10 + 5, pg_e2's 20 + 10, at 1 and 2 USD per 1M:
-	// (90 + 90 + 10 + 10 + 20 + 20) / 1e6.
-	for _, want := range []string{`"run_count":2`, `"cost_usd":0.00024`, `"cost_known":true`, `"id":"pg_e1"`, `"id":"pg_e2"`} {
-		if !strings.Contains(detail, want) {
-			t.Errorf("detail missing %s: %s", want, detail)
-		}
-	}
-	golden(t, "experiment.golden.json", experimentDates.ReplaceAllString(detail, `"$1":"2020-01-01T09:00:00Z"`))
-
-	_, _, list := get(t, h, "/studio/api/experiments")
-	// The list row's outcome (UX-C-36): both runs succeeded, the newest
-	// one's start the last run.
-	for _, want := range []string{`"run_count":2`, `"succeeded":2`, `"last_run":"2020-01-01T09:00:02.123Z"`, `"cost_usd":0.00024`, `"created":"`, `"transcript_edits":[`} {
-		if !strings.Contains(list, want) {
-			t.Errorf("history missing %s: %s", want, list)
-		}
-	}
-	golden(t, "experiments.golden.json", experimentDates.ReplaceAllString(list, `"$1":"2020-01-01T09:00:00Z"`))
 }
 
 // TestRunsParentFilter pins the runs list's subagent filters (plan
@@ -1077,8 +942,12 @@ func TestManifestEndpoint(t *testing.T) {
 	}
 }
 
+// TestShellAndFallback: every path outside the API and ingest trees is
+// the Console's (its shell, the <base href> the Base option names, the
+// Title option's <title>); an unknown /api or /v1 path is a JSON 404,
+// never the shell.
 func TestShellAndFallback(t *testing.T) {
-	h := Handler(DB(fixtureDB(t)))
+	h := Handler(DB(fixtureDB(t)), Base("/studio/"))
 	code, hdr, body := get(t, h, "/studio/")
 	if code != http.StatusOK {
 		t.Fatalf("shell: %d", code)
@@ -1089,57 +958,27 @@ func TestShellAndFallback(t *testing.T) {
 	if ct := hdr.Get("Content-Type"); !strings.Contains(ct, "text/html") {
 		t.Errorf("shell content-type %q", ct)
 	}
-	if cc := hdr.Get("Cache-Control"); cc != "no-cache" {
-		t.Errorf("shell cache-control %q", cc)
-	}
 	if csp := hdr.Get("Content-Security-Policy"); !strings.HasPrefix(csp, "default-src 'self'") {
 		t.Errorf("CSP %q", csp)
 	}
 	if hdr.Get("X-Content-Type-Options") != "nosniff" || hdr.Get("Referrer-Policy") != "no-referrer" {
 		t.Errorf("security headers missing: %v", hdr)
 	}
-
 	// Deep links survive reload: every non-file GET is the shell.
-	for _, p := range []string{"/studio/runs", "/studio/runs/r_ok", "/studio/agents", "/studio/"} {
+	for _, p := range []string{"/studio/runs", "/studio/runs/r_ok", "/studio/agents"} {
 		if _, _, b := get(t, h, p); !strings.Contains(b, `<base href="/studio/">`) {
 			t.Errorf("%s is not the shell", p)
 		}
 	}
-
-	// Base and Title rewrite. The handler cannot see the mount prefix
-	// (StripPrefix removed it), so Base only decides what the shell
-	// says — the caller mounts consistently.
-	if _, _, b := get(t, Handler(DB(fixtureDB(t)), Base("/x/")), "/studio/runs/r_ok"); !strings.Contains(b, `<base href="/x/">`) {
-		t.Errorf("Base(/x/) not rewritten: %s", b)
-	}
-	if _, _, b := get(t, Handler(DB(fixtureDB(t)), Base("x")), "/studio/"); !strings.Contains(b, `<base href="/x/">`) {
-		t.Errorf("Base(x) not normalized: %s", b)
-	}
-	if _, _, b := get(t, Handler(DB(fixtureDB(t)), Title("dev studio")), "/studio/"); !strings.Contains(b, "<title>dev studio</title>") {
+	if _, _, b := get(t, Handler(DB(fixtureDB(t)), Title("dev server")), "/studio/"); !strings.Contains(b, "<title>dev server</title>") {
 		t.Errorf("Title not rewritten: %s", b)
 	}
-	if _, _, b := get(t, Handler(DB(fixtureDB(t)), Title("a <b> & c")), "/studio/"); !strings.Contains(b, "<title>a &lt;b&gt; &amp; c</title>") {
-		t.Errorf("Title not escaped: %s", b)
-	}
-	if code, hdr, _ := get(t, h, "/studio/assets/missing-0000.js"); code != http.StatusNotFound ||
-		strings.Contains(hdr.Get("Content-Type"), "text/html") {
-		t.Errorf("missing asset: %d %q, want a non-HTML 404", code, hdr.Get("Content-Type"))
-	}
-}
-
-func TestAssetHeaders(t *testing.T) {
-	h := Handler(DB(fixtureDB(t)))
-	// Meaningful once the web build is committed (step 2): hashed
-	// assets are immutable, other files revalidate.
-	for _, name := range files() {
-		_, hdr, _ := get(t, h, "/studio/"+name)
-		cc := hdr.Get("Cache-Control")
-		if strings.HasPrefix(name, "assets/") {
-			if cc != "public, max-age=31536000, immutable" {
-				t.Errorf("%s cache-control %q", name, cc)
-			}
-		} else if cc != "no-cache" {
-			t.Errorf("%s cache-control %q", name, cc)
+	// An unknown API or ingest path is the error shape, never the shell.
+	for _, p := range []string{"/studio/api/nope", "/studio/v1/nope", "/studio/api/runs/r_ok/nope/deeper"} {
+		code, hdr, b := get(t, h, p)
+		if code != http.StatusNotFound || !strings.Contains(hdr.Get("Content-Type"), "application/json") ||
+			!strings.Contains(b, `"not_found"`) || strings.Contains(b, "<html") {
+			t.Errorf("%s = %d %q %s, want a JSON 404", p, code, hdr.Get("Content-Type"), b)
 		}
 	}
 }
@@ -1154,19 +993,9 @@ func TestHandlerNilPanics(t *testing.T) {
 }
 
 // TestServerLifecycle pins S4.1's New/Server surface: Handler() is the
-// server's handler, Close closes only what New opened, and Runtime is
-// nil without Playground(true) and the link server with it.
+// server's handler and Close closes only what New opened.
 func TestServerLifecycle(t *testing.T) {
 	srv := New(DB(fixtureDB(t)))
-	if srv.Runtime() != nil {
-		t.Error("Runtime() is not nil without Playground(true)")
-	}
-	// Playground(true) builds the runtime link server: Runtime()
-	// returns it (the merge-C wiring of studio.go's runtimeSrv).
-	pg := New(DB(fixtureDB(t)), Playground(true))
-	if pg.Runtime() == nil {
-		t.Error("Playground(true): Runtime() is nil")
-	}
 	code, _, body := get(t, srv.Handler(), "/studio/api/meta")
 	if code != http.StatusOK || !strings.Contains(body, `"studio_version"`) {
 		t.Errorf("Server.Handler(): %d %s", code, body)
@@ -1206,22 +1035,6 @@ func TestLiveDefault(t *testing.T) {
 	custom := obsdb.NewHub()
 	if s2 := New(DB(db), Live(custom)); s2.live != custom {
 		t.Error("Live(h) not honoured")
-	}
-}
-
-// The CSP hashes must match what the browser computes over the PARSED
-// script text: the HTML parser replaces NUL bytes with U+FFFD (the
-// router's streamed match ids contain one), so a NUL in an inline
-// script must hash identically to its already-replaced form —
-// otherwise the script is blocked and the app never boots.
-func TestCSPHashMatchesParsedText(t *testing.T) {
-	withNUL := cspFor([]byte(`<script>x("a` + "\x00" + `");</script>`))
-	withReplacement := cspFor([]byte(`<script>x("a` + "�" + `");</script>`))
-	if withNUL != withReplacement {
-		t.Errorf("NUL script hashed differently than its parsed form:\n%s\n%s", withNUL, withReplacement)
-	}
-	if !strings.Contains(withNUL, "'sha256-") {
-		t.Errorf("no hash emitted: %s", withNUL)
 	}
 }
 
@@ -1282,8 +1095,8 @@ func TestSessionsAndPublic(t *testing.T) {
 	}
 }
 
-// TestRunsFilters pins the runs list's session, public-id and
-// playground filters (S4.2).
+// TestRunsFilters pins the runs list's session and public-id filters
+// (S4.2).
 func TestRunsFilters(t *testing.T) {
 	h := Handler(DB(fixtureDB(t)))
 	_, _, bySession := get(t, h, "/studio/api/runs?session=s_orders")
@@ -1293,18 +1106,6 @@ func TestRunsFilters(t *testing.T) {
 	_, _, byPub := get(t, h, "/studio/api/runs?public_id=pub_research")
 	if !strings.Contains(byPub, `"total":1`) || !strings.Contains(byPub, `"id":"r_sub"`) {
 		t.Errorf("runs?public_id: %s", byPub)
-	}
-	for _, v := range []string{"true", "false"} {
-		_, _, pg := get(t, h, "/studio/api/runs?playground="+v)
-		if v == "false" && !strings.Contains(pg, `"total":4`) {
-			t.Errorf("runs?playground=false: %s", pg)
-		}
-		if v == "true" && !strings.Contains(pg, `"total":0`) {
-			t.Errorf("runs?playground=true: %s", pg)
-		}
-	}
-	if code, _, b := get(t, h, "/studio/api/runs?playground=maybe"); code != http.StatusBadRequest || !strings.Contains(b, "bad_request") {
-		t.Errorf("bad playground: %d %s", code, b)
 	}
 }
 

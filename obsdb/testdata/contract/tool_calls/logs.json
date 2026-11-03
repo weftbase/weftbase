@@ -89,33 +89,9 @@
                   }
                 },
                 {
-                  "key": "weft.experiment.id",
-                  "value": {
-                    "stringValue": "exp_contract"
-                  }
-                },
-                {
                   "key": "weft.forked_from",
                   "value": {
                     "stringValue": "a1100000000000000000000000000099#1"
-                  }
-                },
-                {
-                  "key": "weft.playground",
-                  "value": {
-                    "stringValue": "true"
-                  }
-                },
-                {
-                  "key": "weft.playground.command",
-                  "value": {
-                    "stringValue": "cmd_contract"
-                  }
-                },
-                {
-                  "key": "weft.replay.view",
-                  "value": {
-                    "stringValue": "transcript"
                   }
                 },
                 {
@@ -199,33 +175,9 @@
                   }
                 },
                 {
-                  "key": "weft.experiment.id",
-                  "value": {
-                    "stringValue": "exp_contract"
-                  }
-                },
-                {
                   "key": "weft.forked_from",
                   "value": {
                     "stringValue": "a1100000000000000000000000000099#1"
-                  }
-                },
-                {
-                  "key": "weft.playground",
-                  "value": {
-                    "stringValue": "true"
-                  }
-                },
-                {
-                  "key": "weft.playground.command",
-                  "value": {
-                    "stringValue": "cmd_contract"
-                  }
-                },
-                {
-                  "key": "weft.replay.view",
-                  "value": {
-                    "stringValue": "transcript"
                   }
                 },
                 {
@@ -303,33 +255,9 @@
                   }
                 },
                 {
-                  "key": "weft.experiment.id",
-                  "value": {
-                    "stringValue": "exp_contract"
-                  }
-                },
-                {
                   "key": "weft.forked_from",
                   "value": {
                     "stringValue": "a1100000000000000000000000000099#1"
-                  }
-                },
-                {
-                  "key": "weft.playground",
-                  "value": {
-                    "stringValue": "true"
-                  }
-                },
-                {
-                  "key": "weft.playground.command",
-                  "value": {
-                    "stringValue": "cmd_contract"
-                  }
-                },
-                {
-                  "key": "weft.replay.view",
-                  "value": {
-                    "stringValue": "transcript"
                   }
                 },
                 {
@@ -401,33 +329,9 @@
                   }
                 },
                 {
-                  "key": "weft.experiment.id",
-                  "value": {
-                    "stringValue": "exp_contract"
-                  }
-                },
-                {
                   "key": "weft.forked_from",
                   "value": {
                     "stringValue": "a1100000000000000000000000000099#1"
-                  }
-                },
-                {
-                  "key": "weft.playground",
-                  "value": {
-                    "stringValue": "true"
-                  }
-                },
-                {
-                  "key": "weft.playground.command",
-                  "value": {
-                    "stringValue": "cmd_contract"
-                  }
-                },
-                {
-                  "key": "weft.replay.view",
-                  "value": {
-                    "stringValue": "transcript"
                   }
                 },
                 {
@@ -499,33 +403,9 @@
                   }
                 },
                 {
-                  "key": "weft.experiment.id",
-                  "value": {
-                    "stringValue": "exp_contract"
-                  }
-                },
-                {
                   "key": "weft.forked_from",
                   "value": {
                     "stringValue": "a1100000000000000000000000000099#1"
-                  }
-                },
-                {
-                  "key": "weft.playground",
-                  "value": {
-                    "stringValue": "true"
-                  }
-                },
-                {
-                  "key": "weft.playground.command",
-                  "value": {
-                    "stringValue": "cmd_contract"
-                  }
-                },
-                {
-                  "key": "weft.replay.view",
-                  "value": {
-                    "stringValue": "transcript"
                   }
                 },
                 {
@@ -615,33 +495,9 @@
                   }
                 },
                 {
-                  "key": "weft.experiment.id",
-                  "value": {
-                    "stringValue": "exp_contract"
-                  }
-                },
-                {
                   "key": "weft.forked_from",
                   "value": {
                     "stringValue": "a1100000000000000000000000000099#1"
-                  }
-                },
-                {
-                  "key": "weft.playground",
-                  "value": {
-                    "stringValue": "true"
-                  }
-                },
-                {
-                  "key": "weft.playground.command",
-                  "value": {
-                    "stringValue": "cmd_contract"
-                  }
-                },
-                {
-                  "key": "weft.replay.view",
-                  "value": {
-                    "stringValue": "transcript"
                   }
                 },
                 {
@@ -719,33 +575,9 @@
                   }
                 },
                 {
-                  "key": "weft.experiment.id",
-                  "value": {
-                    "stringValue": "exp_contract"
-                  }
-                },
-                {
                   "key": "weft.forked_from",
                   "value": {
                     "stringValue": "a1100000000000000000000000000099#1"
-                  }
-                },
-                {
-                  "key": "weft.playground",
-                  "value": {
-                    "stringValue": "true"
-                  }
-                },
-                {
-                  "key": "weft.playground.command",
-                  "value": {
-                    "stringValue": "cmd_contract"
-                  }
-                },
-                {
-                  "key": "weft.replay.view",
-                  "value": {
-                    "stringValue": "transcript"
                   }
                 },
                 {
@@ -835,33 +667,9 @@
                   }
                 },
                 {
-                  "key": "weft.experiment.id",
-                  "value": {
-                    "stringValue": "exp_contract"
-                  }
-                },
-                {
                   "key": "weft.forked_from",
                   "value": {
                     "stringValue": "a1100000000000000000000000000099#1"
-                  }
-                },
-                {
-                  "key": "weft.playground",
-                  "value": {
-                    "stringValue": "true"
-                  }
-                },
-                {
-                  "key": "weft.playground.command",
-                  "value": {
-                    "stringValue": "cmd_contract"
-                  }
-                },
-                {
-                  "key": "weft.replay.view",
-                  "value": {
-                    "stringValue": "transcript"
                   }
                 },
                 {
@@ -951,33 +759,9 @@
                   }
                 },
                 {
-                  "key": "weft.experiment.id",
-                  "value": {
-                    "stringValue": "exp_contract"
-                  }
-                },
-                {
                   "key": "weft.forked_from",
                   "value": {
                     "stringValue": "a1100000000000000000000000000099#1"
-                  }
-                },
-                {
-                  "key": "weft.playground",
-                  "value": {
-                    "stringValue": "true"
-                  }
-                },
-                {
-                  "key": "weft.playground.command",
-                  "value": {
-                    "stringValue": "cmd_contract"
-                  }
-                },
-                {
-                  "key": "weft.replay.view",
-                  "value": {
-                    "stringValue": "transcript"
                   }
                 },
                 {
@@ -1055,33 +839,9 @@
                   }
                 },
                 {
-                  "key": "weft.experiment.id",
-                  "value": {
-                    "stringValue": "exp_contract"
-                  }
-                },
-                {
                   "key": "weft.forked_from",
                   "value": {
                     "stringValue": "a1100000000000000000000000000099#1"
-                  }
-                },
-                {
-                  "key": "weft.playground",
-                  "value": {
-                    "stringValue": "true"
-                  }
-                },
-                {
-                  "key": "weft.playground.command",
-                  "value": {
-                    "stringValue": "cmd_contract"
-                  }
-                },
-                {
-                  "key": "weft.replay.view",
-                  "value": {
-                    "stringValue": "transcript"
                   }
                 },
                 {
@@ -1171,33 +931,9 @@
                   }
                 },
                 {
-                  "key": "weft.experiment.id",
-                  "value": {
-                    "stringValue": "exp_contract"
-                  }
-                },
-                {
                   "key": "weft.forked_from",
                   "value": {
                     "stringValue": "a1100000000000000000000000000099#1"
-                  }
-                },
-                {
-                  "key": "weft.playground",
-                  "value": {
-                    "stringValue": "true"
-                  }
-                },
-                {
-                  "key": "weft.playground.command",
-                  "value": {
-                    "stringValue": "cmd_contract"
-                  }
-                },
-                {
-                  "key": "weft.replay.view",
-                  "value": {
-                    "stringValue": "transcript"
                   }
                 },
                 {
@@ -1275,33 +1011,9 @@
                   }
                 },
                 {
-                  "key": "weft.experiment.id",
-                  "value": {
-                    "stringValue": "exp_contract"
-                  }
-                },
-                {
                   "key": "weft.forked_from",
                   "value": {
                     "stringValue": "a1100000000000000000000000000099#1"
-                  }
-                },
-                {
-                  "key": "weft.playground",
-                  "value": {
-                    "stringValue": "true"
-                  }
-                },
-                {
-                  "key": "weft.playground.command",
-                  "value": {
-                    "stringValue": "cmd_contract"
-                  }
-                },
-                {
-                  "key": "weft.replay.view",
-                  "value": {
-                    "stringValue": "transcript"
                   }
                 },
                 {
@@ -1391,33 +1103,9 @@
                   }
                 },
                 {
-                  "key": "weft.experiment.id",
-                  "value": {
-                    "stringValue": "exp_contract"
-                  }
-                },
-                {
                   "key": "weft.forked_from",
                   "value": {
                     "stringValue": "a1100000000000000000000000000099#1"
-                  }
-                },
-                {
-                  "key": "weft.playground",
-                  "value": {
-                    "stringValue": "true"
-                  }
-                },
-                {
-                  "key": "weft.playground.command",
-                  "value": {
-                    "stringValue": "cmd_contract"
-                  }
-                },
-                {
-                  "key": "weft.replay.view",
-                  "value": {
-                    "stringValue": "transcript"
                   }
                 },
                 {
@@ -1489,33 +1177,9 @@
                   }
                 },
                 {
-                  "key": "weft.experiment.id",
-                  "value": {
-                    "stringValue": "exp_contract"
-                  }
-                },
-                {
                   "key": "weft.forked_from",
                   "value": {
                     "stringValue": "a1100000000000000000000000000099#1"
-                  }
-                },
-                {
-                  "key": "weft.playground",
-                  "value": {
-                    "stringValue": "true"
-                  }
-                },
-                {
-                  "key": "weft.playground.command",
-                  "value": {
-                    "stringValue": "cmd_contract"
-                  }
-                },
-                {
-                  "key": "weft.replay.view",
-                  "value": {
-                    "stringValue": "transcript"
                   }
                 },
                 {
@@ -1593,33 +1257,9 @@
                   }
                 },
                 {
-                  "key": "weft.experiment.id",
-                  "value": {
-                    "stringValue": "exp_contract"
-                  }
-                },
-                {
                   "key": "weft.forked_from",
                   "value": {
                     "stringValue": "a1100000000000000000000000000099#1"
-                  }
-                },
-                {
-                  "key": "weft.playground",
-                  "value": {
-                    "stringValue": "true"
-                  }
-                },
-                {
-                  "key": "weft.playground.command",
-                  "value": {
-                    "stringValue": "cmd_contract"
-                  }
-                },
-                {
-                  "key": "weft.replay.view",
-                  "value": {
-                    "stringValue": "transcript"
                   }
                 },
                 {
@@ -1715,33 +1355,9 @@
                   }
                 },
                 {
-                  "key": "weft.experiment.id",
-                  "value": {
-                    "stringValue": "exp_contract"
-                  }
-                },
-                {
                   "key": "weft.forked_from",
                   "value": {
                     "stringValue": "a1100000000000000000000000000099#1"
-                  }
-                },
-                {
-                  "key": "weft.playground",
-                  "value": {
-                    "stringValue": "true"
-                  }
-                },
-                {
-                  "key": "weft.playground.command",
-                  "value": {
-                    "stringValue": "cmd_contract"
-                  }
-                },
-                {
-                  "key": "weft.replay.view",
-                  "value": {
-                    "stringValue": "transcript"
                   }
                 },
                 {
@@ -1813,33 +1429,9 @@
                   }
                 },
                 {
-                  "key": "weft.experiment.id",
-                  "value": {
-                    "stringValue": "exp_contract"
-                  }
-                },
-                {
                   "key": "weft.forked_from",
                   "value": {
                     "stringValue": "a1100000000000000000000000000099#1"
-                  }
-                },
-                {
-                  "key": "weft.playground",
-                  "value": {
-                    "stringValue": "true"
-                  }
-                },
-                {
-                  "key": "weft.playground.command",
-                  "value": {
-                    "stringValue": "cmd_contract"
-                  }
-                },
-                {
-                  "key": "weft.replay.view",
-                  "value": {
-                    "stringValue": "transcript"
                   }
                 },
                 {

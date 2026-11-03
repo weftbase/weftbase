@@ -24,7 +24,7 @@ import (
 
 const runColumns = `run_id, parent_run_id, parent_call_id, trace_id, agent, provider, model,
 	manifest_hash, weft_version, service, session_id, public_id, turn,
-	playground, experiment_id, forked_from, resumed_from, caller_run_id, caller_call_id, meta,
+	forked_from, resumed_from, caller_run_id, caller_call_id, meta,
 	started_ns, finished_ns, last_seen_ns, finished_ok, failed, err,
 	steps, pending, stop_reason,
 	input_tokens, output_tokens, cached_input_tokens, cache_write_tokens, reasoning_tokens,
@@ -141,7 +141,7 @@ func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (_ obsdb.RunPage, err e
 // makes started_ns an expression no index orders, so the plan is
 // SEARCH runs USING INDEX runs_last_seen (last_seen_ns>?) and a temp
 // B-tree over the matches (TestRunListsUseTheirIndexes pins both).
-// Not under a public id or session equality (the panel's public-id live
+// Not under a public id or session equality (a public id's live
 // backfill, a session's running list): runs_public / runs_session_turns
 // lead with that equality and narrow better than runs_last_seen, so the
 // plain spelling stays and the planner keeps them.
@@ -199,8 +199,8 @@ func runWhere(q obsdb.RunQuery, now time.Time) (string, []any) {
 	}
 	if q.SessionID != "" {
 		// The literal <> '' (redundant: the value is not empty) lets
-		// the planner use the partial index runs_session (0001), as
-		// for runs_experiment below.
+		// the planner use the partial index runs_session, which only a
+		// WHERE implying its own condition may.
 		conds = append(conds, "session_id = ? AND session_id <> ''")
 		args = append(args, q.SessionID)
 	}
@@ -211,15 +211,8 @@ func runWhere(q obsdb.RunQuery, now time.Time) (string, []any) {
 			args = append(args, id)
 		}
 	}
-	if q.ExperimentID != "" {
-		// The literal <> '' is redundant (the value is not empty) but
-		// lets the planner use the partial index runs_experiment
-		// (0006), which only a WHERE implying its own condition may.
-		conds = append(conds, "experiment_id = ? AND experiment_id <> ''")
-		args = append(args, q.ExperimentID)
-	}
 	if q.PublicID != "" {
-		conds = append(conds, "public_id = ? AND public_id <> ''") // runs_public (rebuilt in 0014)
+		conds = append(conds, "public_id = ? AND public_id <> ''") // runs_public
 		args = append(args, q.PublicID)
 	}
 	if q.ErrorType != "" {
@@ -284,10 +277,6 @@ func runWhere(q obsdb.RunQuery, now time.Time) (string, []any) {
 	if !q.LastSeenAfter.IsZero() {
 		conds = append(conds, "last_seen_ns >= ?")
 		args = append(args, q.LastSeenAfter.UnixNano())
-	}
-	if q.Playground != nil {
-		conds = append(conds, "playground = ?")
-		args = append(args, boolInt(*q.Playground))
 	}
 	for k, v := range q.Meta {
 		// Key and value are both bound parameters (the store's finding:
@@ -363,7 +352,7 @@ func (d *DB) runRowsQuery(ctx context.Context, where string, args []any) ([]runR
 		var r runRowScan
 		if err := rs.Scan(&r.ID, &r.ParentRunID, &r.ParentCallID, &r.TraceID, &r.Agent, &r.Provider,
 			&r.Model, &r.ManifestHash, &r.WeftVersion, &r.Service, &r.SessionID, &r.PublicID, &r.Turn,
-			&r.Playground, &r.ExperimentID, &r.ForkedFrom, &r.ResumedFrom, &r.CallerRunID, &r.CallerCallID, &r.Meta,
+			&r.ForkedFrom, &r.ResumedFrom, &r.CallerRunID, &r.CallerCallID, &r.Meta,
 			&r.Started, &r.Finished, &r.LastSeen, &r.FinishedOK, &r.Failed, &r.Err,
 			&r.Steps, &r.Pending, &r.StopReason,
 			&r.InTok, &r.OutTok, &r.CachedTok, &r.CacheWrite, &r.ReasonTok,
@@ -383,8 +372,7 @@ type runRowScan struct {
 	Agent, Provider, Model, ManifestHash, WeftVersion string
 	Service, SessionID, PublicID                      string
 	Turn                                              int
-	Playground                                        bool
-	ExperimentID, ForkedFrom, Meta                    string
+	ForkedFrom, Meta                                  string
 	ResumedFrom, ResumedBy                            string
 	CallerRunID, CallerCallID                         string
 	Started, LastSeen                                 int64
@@ -409,7 +397,7 @@ func scanRunRow(r runRowScan, now time.Time) (obsdb.RunRow, error) {
 		Agent: r.Agent, Provider: r.Provider, Model: r.Model,
 		ManifestHash: r.ManifestHash, WeftVersion: r.WeftVersion, Service: r.Service,
 		SessionID: r.SessionID, PublicID: r.PublicID, Turn: r.Turn,
-		Playground: r.Playground, ExperimentID: r.ExperimentID, ForkedFrom: r.ForkedFrom,
+		ForkedFrom:  r.ForkedFrom,
 		ResumedFrom: r.ResumedFrom, ResumedBy: r.ResumedBy,
 		CallerRunID: r.CallerRunID, CallerCallID: r.CallerCallID,
 		Started:  time.Unix(0, r.Started).UTC(),
@@ -924,8 +912,8 @@ func (d *DB) Trace(ctx context.Context, traceID string) (_ []obsdb.Span, err err
 // the traces with a span at or after it (spans_start, migration 0019;
 // a necessary condition of MIN(start_ns) >= since, so HAVING still
 // decides — obsdb/clickhouse's traceInner narrows the same way). The
-// scope filter reads weft.public_id off every span's attrs, the
-// attribute /api/traces/{id}'s scope check reads.
+// public id filter reads weft.public_id off every span's attrs, the
+// attribute a trace detail read checks.
 func (d *DB) Traces(ctx context.Context, q obsdb.TraceQuery) (_ obsdb.TracePage, err error) {
 	if err := d.checkOpen(); err != nil {
 		return obsdb.TracePage{}, err
@@ -1027,12 +1015,6 @@ func traceGroup(q obsdb.TraceQuery) (group, having string, args []any) {
 	if q.PublicID != "" {
 		conds = append(conds, `SUM(COALESCE(json_extract(attrs, '$."weft.public_id"'), '') <> ?) = 0`)
 		args = append(args, q.PublicID)
-	}
-	for _, k := range slices.Sorted(maps.Keys(q.ScopeMeta)) {
-		// Every span carries the pair: none of the group lacks it (key
-		// and value bound, json_each's rule).
-		conds = append(conds, `SUM(NOT EXISTS (SELECT 1 FROM json_each(spans.attrs) AS sj WHERE sj.key = ? AND sj.value = ?)) = 0`)
-		args = append(args, k, q.ScopeMeta[k])
 	}
 	if !q.Since.IsZero() {
 		conds = append(conds, "MIN(start_ns) >= ?")
@@ -1255,8 +1237,8 @@ func (d *DB) runExists(ctx context.Context, runID string) error {
 }
 
 // sessionScope is what a session is grouped over (D3, U14): its own
-// turns, non-playground (ownTurn), on the partial index runs_session.
-var sessionScope = `playground = 0 AND session_id <> '' AND ` + ownTurn("runs")
+// turns (ownTurn), on the partial index runs_session.
+var sessionScope = `session_id <> '' AND ` + ownTurn("runs")
 
 // turnScope is the turns a session row is grouped over beyond
 // sessionScope: SessionQuery.PublicID's and Meta's, a WHERE before the
@@ -1306,7 +1288,7 @@ func sessionParentExpr(alias string) string {
 	return `json_extract(` + alias + `.meta, '$."weft.session.parent"')`
 }
 
-// Sessions is a GROUP BY session_id over top-level, non-playground
+// Sessions is a GROUP BY session_id over top-level
 // runs (S3.4): turns, first/last seen, summed usage, and the newest
 // turn's derived status. A PublicID and Meta scope the runs before the
 // GROUP BY (RunQuery.PublicID's and Meta's WHERE; turnScope): every
@@ -1361,7 +1343,7 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		pubScope, pa := ts.sql("r8")
 		hargs = append(hargs, pa...)
 		having = append(having, `(SELECT `+sessionStatusExpr+` FROM runs r8 WHERE r8.session_id = runs.session_id AND r8.session_id <> ''
-			AND `+ownTurn("r8")+` AND r8.playground = 0`+pubScope+`
+			AND `+ownTurn("r8")+pubScope+`
 			ORDER BY r8.turn DESC, r8.started_ns DESC, r8.run_id DESC LIMIT 1) = ?`)
 		hargs = append(hargs, string(q.Status))
 	}
@@ -1381,7 +1363,7 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		pubScope, pa := ts.sql("r7")
 		having = append(having, `COALESCE((SELECT r7.failed = 0 AND (r7.finished_ok = 1 OR r7.root_ended = 1) AND r7.pending > 0
 			AND NOT EXISTS (SELECT 1 FROM runs AS rb WHERE rb.resumed_from = r7.run_id AND rb.resumed_from <> '')
-			FROM runs r7 WHERE r7.session_id = runs.session_id AND r7.session_id <> '' AND `+ownTurn("r7")+` AND r7.playground = 0`+pubScope+`
+			FROM runs r7 WHERE r7.session_id = runs.session_id AND r7.session_id <> '' AND `+ownTurn("r7")+pubScope+`
 			ORDER BY r7.turn DESC, r7.started_ns DESC, r7.run_id DESC LIMIT 1), 0) = 1`)
 		hargs = append(hargs, pa...)
 	}
@@ -1579,7 +1561,7 @@ func sessionTitleExpr(ts turnScope) (string, []any) {
 	scope, args := ts.sql("r3")
 	const title = `json_extract(r3.meta, '$."` + obsdb.SessionTitleKey + `"')`
 	return `COALESCE((SELECT ` + title + ` FROM runs r3
-		WHERE r3.session_id = runs.session_id AND r3.session_id <> '' AND ` + ownTurn("r3") + ` AND r3.playground = 0` + scope + `
+		WHERE r3.session_id = runs.session_id AND r3.session_id <> '' AND ` + ownTurn("r3") + scope + `
 		AND COALESCE(` + title + `, '') <> ''
 		ORDER BY r3.turn DESC, r3.started_ns DESC LIMIT 1), '')`, args
 }
@@ -1591,7 +1573,7 @@ func sessionTitleExpr(ts turnScope) (string, []any) {
 func sessionPromptExpr(ts turnScope) (string, []any) {
 	scope, args := ts.sql("r4")
 	return `COALESCE((SELECT rs.prompt FROM run_search rs WHERE rs.run_id = (SELECT r4.run_id FROM runs r4
-		WHERE r4.session_id = runs.session_id AND r4.session_id <> '' AND ` + ownTurn("r4") + ` AND r4.playground = 0` + scope + `
+		WHERE r4.session_id = runs.session_id AND r4.session_id <> '' AND ` + ownTurn("r4") + scope + `
 		ORDER BY r4.turn, r4.started_ns, r4.run_id LIMIT 1)), '')`, args
 }
 
@@ -1606,7 +1588,7 @@ func sessionFirstTurnExpr(ts turnScope) (string, []any) {
 	return `COALESCE((SELECT json_object('derived', r5.derived, 'messages', r5.message_count, 'events', r5.event_count,
 			'failed', r5.failed, 'finished_ok', r5.finished_ok, 'root_ended', r5.root_ended, 'last_seen', r5.last_seen_ns)
 		FROM runs r5
-		WHERE r5.session_id = runs.session_id AND r5.session_id <> '' AND ` + ownTurn("r5") + ` AND r5.playground = 0` + scope + `
+		WHERE r5.session_id = runs.session_id AND r5.session_id <> '' AND ` + ownTurn("r5") + scope + `
 		ORDER BY r5.turn, r5.started_ns, r5.run_id LIMIT 1), '')`, args
 }
 
@@ -1774,13 +1756,13 @@ func sessionRowsSQL(cutoff int64, ts turnScope, where string, wargs []any,
 		MIN(started_ns), MAX(last_seen_ns),
 		SUM(input_tokens), SUM(output_tokens), SUM(cached_input_tokens), SUM(cache_write_tokens), SUM(reasoning_tokens),
 		(SELECT ` + statusExpr + ` FROM runs r2 WHERE r2.session_id = runs.session_id AND r2.session_id <> ''
-		 AND ` + ownTurn("r2") + ` AND r2.playground = 0` + statusScope + `
+		 AND ` + ownTurn("r2") + statusScope + `
 		 ORDER BY r2.turn DESC, r2.started_ns DESC LIMIT 1),
 		` + title + `, substr(` + prompt + `, 1, ` + fmt.Sprint(obsdb.PromptPreviewRunes) + `), ` + off + `,
 		COALESCE(MAX(` + sessionParentExpr("runs") + `), ''),
 		COALESCE(MAX(json_extract(runs.meta, '$."weft.session.parent_call"')), ''),
 		COALESCE((SELECT CASE WHEN r6.caller_run_id <> '' THEN r6.caller_run_id ELSE r6.parent_run_id END FROM runs r6
-		 WHERE r6.session_id = runs.session_id AND r6.session_id <> '' AND ` + ownTurn("r6") + ` AND r6.playground = 0` + statusScope6 + `
+		 WHERE r6.session_id = runs.session_id AND r6.session_id <> '' AND ` + ownTurn("r6") + statusScope6 + `
 		 ORDER BY r6.turn, r6.started_ns, r6.run_id LIMIT 1), '')
 		FROM runs WHERE ` + where + ` GROUP BY session_id` + havingSQL(having) + tail, args
 }
@@ -1807,7 +1789,7 @@ func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err
 	// the newest — the ones a session view is opened for. A caller that
 	// wants pages reads Runs with RunQuery.SessionID.
 	runs, err := d.queryRunRows(ctx,
-		`session_id = ? AND session_id <> '' AND `+ownTurn("runs")+` AND playground = 0 ORDER BY turn, started_ns, run_id`,
+		`session_id = ? AND session_id <> '' AND `+ownTurn("runs")+` ORDER BY turn, started_ns, run_id`,
 		[]any{id}, now)
 	if err != nil {
 		return obsdb.SessionDetail{}, err

@@ -225,7 +225,7 @@ func runTree(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		if sc.HiddenCount != 2 || got.HiddenCount != 0 {
 			t.Errorf("RunTreeSpans(deep, pub_t).HiddenCount = %d (unscoped %d), want 2 (the nested turn and its child), 0", sc.HiddenCount, got.HiddenCount)
 		}
-		// Scoped to the tag tree.batch=tb (I4, a tag-scoped panel token):
+		// Filtered to the tag tree.batch=tb (I4):
 		// the same cut — the nested turn carries no tag — with PublicID
 		// or without; a tag no run carries leaves the root alone.
 		for _, q := range []obsdb.TreeQuery{

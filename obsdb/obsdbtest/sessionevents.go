@@ -138,7 +138,7 @@ func sessionEvents(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		}
 		// RunIDs: the named runs' events alone — Total and offsets count
 		// them alone, the runless record is under none, an unknown id
-		// selects nothing (Studio's decisions read t1 + t2, U13.2).
+		// selects nothing (a session's decisions read t1 + t2, U13.2).
 		turns := func(q obsdb.SessionEventQuery) ([]string, int) {
 			t.Helper()
 			p, err := er.SessionEvents(ctx(), q)

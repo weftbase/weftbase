@@ -23,7 +23,6 @@ import (
 	"github.com/weftbase/weft/version"
 	"github.com/weftbase/weftbase/internal/doctor"
 	"github.com/weftbase/weftbase/internal/release"
-	"github.com/weftbase/weftbase/studio"
 )
 
 // TestVersion pins `weftbase version` (and --version, the old studio
@@ -152,7 +151,7 @@ func TestNewServerClickhouse(t *testing.T) {
 	}
 	code, body := get("/api/meta", "tok")
 	if code != http.StatusOK || !strings.Contains(body, `"db":{"kind":"clickhouse"`) ||
-		!strings.Contains(body, `"ingest_open":true`) || !strings.Contains(body, `"auth"`) {
+		!strings.Contains(body, `"ingest_open":true`) || !strings.Contains(body, `"auth_required":true`) {
 		t.Errorf("meta: %d %s", code, body)
 	}
 	if code, body := get("/", ""); code != http.StatusOK || !strings.Contains(body, `<base href="/">`) {
@@ -203,7 +202,7 @@ func assertSetupB(t *testing.T, h http.Handler, token, dbPath string) {
 	}
 	code, body = get("/api/meta", token)
 	if code != http.StatusOK || !strings.Contains(body, `"db":{"kind":"sqlite"`) ||
-		!strings.Contains(body, `"ingest_open":true`) || !strings.Contains(body, `"auth"`) {
+		!strings.Contains(body, `"ingest_open":true`) || !strings.Contains(body, `"auth_required":true`) {
 		t.Errorf("meta: %d %s", code, body)
 	}
 	// The UI is served at the root (Base /).
@@ -405,7 +404,7 @@ func TestDoctorSubcommand(t *testing.T) {
 		t.Errorf("unreachable: exit %d, stderr %q\n%s", code, errb.String(), out.String())
 	}
 
-	srv, err := newServer("sqlite://"+t.TempDir()+"/weft.db", "tok", studio.Playground(true))
+	srv, err := newServer("sqlite://"+t.TempDir()+"/weft.db", "tok")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,7 +418,7 @@ func TestDoctorSubcommand(t *testing.T) {
 	if code := run([]string{"doctor"}, &out, &errb); code != 0 {
 		t.Fatalf("doctor from the env: exit %d\n%s%s", code, out.String(), errb.String())
 	}
-	if !strings.Contains(out.String(), "ok   token     accepted") || !strings.Contains(out.String(), "WEFT_ENV is unset") {
+	if !strings.Contains(out.String(), "ok   token     accepted") {
 		t.Errorf("doctor from the env:\n%s", out.String())
 	}
 	errb.Reset()
@@ -427,7 +426,7 @@ func TestDoctorSubcommand(t *testing.T) {
 		t.Errorf("doctor with an argument: exit %d, stderr %q, want 2 and a usage line", code, errb.String())
 	}
 	// A doctor error must not be mistaken for ErrUnhealthy's silence.
-	if !errors.Is(doctor.Run(context.Background(), io.Discard, doctor.Target{URL: "http://127.0.0.1:1"}, os.Getenv), doctor.ErrUnhealthy) {
+	if !errors.Is(doctor.Run(context.Background(), io.Discard, doctor.Target{URL: "http://127.0.0.1:1"}), doctor.ErrUnhealthy) {
 		t.Error("doctor.Run on an unreachable Studio is not ErrUnhealthy")
 	}
 }

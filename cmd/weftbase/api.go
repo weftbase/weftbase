@@ -1,8 +1,6 @@
 package main
 
 import (
-	"archive/zip"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,8 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -61,10 +57,6 @@ func (c *client) redacted() string {
 
 // maxBody bounds what a client reads from one response.
 const maxBody = 512 << 20
-
-// maxUnzip bounds what one wefttest export unzips to, all entries
-// together (a variable so a test reaches it).
-var maxUnzip int64 = maxBody
 
 // get answers GET path?q with the response body; a non-2xx answer is
 // an error carrying Studio's own error message.
@@ -141,7 +133,7 @@ func (e *statusError) Error() string { return e.line }
 func runPath(id string) string { return "/api/runs/" + url.PathEscape(id) }
 
 // parseArgs parses fs over args with the positional arguments allowed
-// anywhere — `weftbase export <id> --wefttest dir` — and returns them. A
+// anywhere — `weftbase export <id> --format jsonl` — and returns them. A
 // "--" ends the flags: everything after it is positional.
 func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
 	var pos []string
@@ -423,7 +415,7 @@ pages:
 		return nil
 	}
 	// The PUBLIC ID column appears when a row carries one (the id the
-	// app's logs and the panel show; weftbase open takes it).
+	// app's logs show; weftbase open takes it).
 	pub := false
 	for _, r := range rows {
 		pub = pub || r.PublicID != ""
@@ -476,7 +468,7 @@ func runOpen(args []string, stdout, stderr io.Writer) error {
 	fs := newFlags("open", stderr)
 	base, token := clientFlags(fs)
 	open := fs.Bool("open", false, "open the link in the browser too, the token in its fragment")
-	withToken := fs.Bool("with-token", false, "print the link with the token in its fragment (#token=), signed in; the token may be the panel tokens' signing key: keep it out of logs")
+	withToken := fs.Bool("with-token", false, "print the link with the token in its fragment (#token=), signed in; keep it out of logs")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return err
@@ -495,9 +487,8 @@ func runOpen(args []string, stdout, stderr io.Writer) error {
 		// The root: checked the Studio answers and the token opens it.
 		return err
 	}
-	// The printed link is bare unless asked: a fixed token is the panel
-	// tokens' signing key and stays out of logs (serveBoot's banner
-	// rule). The browser gets it in the fragment.
+	// The printed link is bare unless asked: a fixed token stays out of
+	// logs (serveBoot's banner rule). The browser gets it in the fragment.
 	printed := pageLink(c.base, page, "")
 	if *withToken {
 		printed = pageLink(c.base, page, c.token)
@@ -559,20 +550,11 @@ func runLink(base, id, token string) string {
 // ── weftbase export ────────────────────────────────────────────────────
 
 // runExport is `weftbase export <id>`: GET /api/runs/<id>/export to
-// stdout, or with --wefttest the run's save-as-test tree written into a
-// package directory — the very files Studio's "save as test" zip holds
-// (UX-S5a-07: one layout): <agent>_replay_test.go beside
-// testdata/TestReplay_<run>/*.json, a test that passes under go test.
-// --fixtures-only keeps the fixtures alone, under <dir>/<test>, where
-// wefttest.Replay(t, dir) reads them for a test of your own.
+// stdout, as json, jsonl or otlp.
 func runExport(args []string, stdout, stderr io.Writer) error {
 	fs := newFlags("export", stderr)
 	base, token := clientFlags(fs)
 	format := fs.String("format", "json", "the export written to stdout: json, jsonl or otlp")
-	dir := fs.String("wefttest", "", "write the run's save-as-test tree (the replay test and its testdata/, Studio's zip) into this package `dir` instead")
-	fixturesOnly := fs.Bool("fixtures-only", false, "with --wefttest: write the fixtures alone under <dir>/<test> (a suite's testdata), no test file")
-	test := fs.String("test", "", "with --fixtures-only: the `name` of the test that replays them, the fixtures' directory (default: the run id)")
-	force := fs.Bool("force", false, "with --wefttest: write over a test file or fixtures already there")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return err
@@ -581,326 +563,16 @@ func runExport(args []string, stdout, stderr io.Writer) error {
 		return usageError("export needs exactly one run id (got %s)", gotArgs(pos))
 	}
 	id := pos[0]
-	set := map[string]bool{}
-	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	switch *format {
+	case "json", "jsonl", "otlp":
+	default:
+		return usageError("--format must be json, jsonl or otlp")
+	}
 	c, _ := clientFor(*base, *token, stderr)
-	ctx := context.Background()
-	if *dir == "" {
-		if set["test"] || set["force"] || set["fixtures-only"] {
-			return usageError("--test, --fixtures-only and --force go with --wefttest")
-		}
-		switch *format {
-		case "json", "jsonl", "otlp":
-		case "wefttest":
-			return usageError("--format wefttest is a zip of fixtures: use --wefttest <dir>")
-		default:
-			return usageError("--format must be json, jsonl or otlp")
-		}
-		body, err := c.get(ctx, runPath(id)+"/export", url.Values{"format": {*format}})
-		if err != nil {
-			return err
-		}
-		_, err = stdout.Write(body)
-		return err
-	}
-	if set["format"] {
-		return usageError("--format and --wefttest are two exports: pick one")
-	}
-	if !*fixturesOnly {
-		if set["test"] {
-			return usageError("--test goes with --fixtures-only: the save-as-test tree names its test TestReplay_<run>, its fixtures' directory with it")
-		}
-		body, err := c.get(ctx, runPath(id)+"/export", url.Values{"format": {"wefttest"}})
-		if err != nil {
-			return err
-		}
-		tree, err := unzipTree(body, *dir, *force)
-		if err != nil {
-			return fmt.Errorf("export %s: %w", id, err)
-		}
-		_, err = fmt.Fprintf(stdout, "weftbase: wrote %s and %d fixtures under %s in %s; go test there replays run %s (rename the package clause to the directory's package plus _test)\n",
-			tree.test, tree.fixtures, tree.testdata, *dir, id)
-		return err
-	}
-	name := *test
-	if name == "" {
-		name = id
-	}
-	// A subtest's name (TestX/case) is a nested directory, as
-	// wefttest.Replay reads it; anything that climbs out is refused.
-	if filepath.IsAbs(name) || strings.HasPrefix(name, "/") || strings.HasPrefix(name, `\`) {
-		return usageError("--test %q must name a directory inside %s, not an absolute path", name, *dir)
-	}
-	target := filepath.Join(*dir, filepath.FromSlash(name))
-	if rel, err := filepath.Rel(*dir, target); err != nil || rel == "." || strings.HasPrefix(rel, "..") {
-		return usageError("--test %q must name a directory inside %s", name, *dir)
-	}
-	if !*force {
-		if entries, err := os.ReadDir(target); err == nil && len(entries) > 0 {
-			return fmt.Errorf("%s is not empty: --force writes into it", target)
-		}
-	}
-	body, err := c.get(ctx, runPath(id)+"/export", url.Values{"format": {"wefttest"}})
+	body, err := c.get(context.Background(), runPath(id)+"/export", url.Values{"format": {*format}})
 	if err != nil {
 		return err
 	}
-	n, err := unzipFixtures(body, target)
-	if err != nil {
-		return fmt.Errorf("export %s: %w", id, err)
-	}
-	_, err = fmt.Fprintf(stdout, "weftbase: wrote %d fixtures to %s; a test named %s replays them with wefttest.Replay(t, %q)\n",
-		n, target, name, *dir)
+	_, err = stdout.Write(body)
 	return err
-}
-
-// exportTree is what unzipTree wrote: the test file's name, the
-// fixtures' directory (relative to the package directory) and their
-// count.
-type exportTree struct {
-	test, testdata string
-	fixtures       int
-}
-
-// unzipTree writes Studio's save-as-test zip into the package
-// directory dir exactly as it is laid out — the one root *_test.go and
-// testdata/<test>/*.json, nothing else — so the terminal's tree is the
-// UI's byte for byte (UX-S5a-07). The zip is checked whole (names,
-// the one test file, the one fixture directory, the total size) before
-// the first write. A test file or fixtures already there are refused
-// without force; with it the test file is replaced and the fixture
-// directory's *.json removed first (as wefttest.Record replaces a
-// test's fixtures: a stale one would answer in place of
-// ErrNoFixture). Nothing is followed through a symlink: a symlinked
-// testdata or testdata/<test> is refused before any write, and a
-// symlink at a file path is removed, never written through.
-func unzipTree(body []byte, dir string, force bool) (exportTree, error) {
-	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
-	if err != nil {
-		return exportTree{}, fmt.Errorf("the wefttest export is not a zip: %w", err)
-	}
-	plain := func(name string) bool {
-		return name != "" && name != "." && name != ".." && !strings.ContainsAny(name, `/\:`)
-	}
-	var (
-		tree    exportTree
-		testZip *zip.File
-		fx      []*zip.File
-		names   []string
-		testDir string
-		total   uint64
-	)
-	for _, f := range zr.File {
-		if !f.Mode().IsRegular() {
-			return exportTree{}, fmt.Errorf("the wefttest export holds %q: want a test file and fixture files", f.Name)
-		}
-		total += f.UncompressedSize64
-		if total > uint64(maxUnzip) {
-			return exportTree{}, fmt.Errorf("the wefttest export unzips to more than %d bytes", maxUnzip)
-		}
-		if plain(f.Name) && strings.HasSuffix(f.Name, "_test.go") {
-			if testZip != nil {
-				return exportTree{}, fmt.Errorf("the wefttest export holds two test files (%q, %q)", testZip.Name, f.Name)
-			}
-			testZip = f
-			continue
-		}
-		rest, ok := strings.CutPrefix(f.Name, "testdata/")
-		test, file, cut := strings.Cut(rest, "/")
-		if !ok || !cut || !plain(test) || !plain(file) || testDir != "" && test != testDir {
-			return exportTree{}, fmt.Errorf("the wefttest export holds %q: want <name>_test.go and fixtures under one testdata/<test>/", f.Name)
-		}
-		testDir = test
-		fx = append(fx, f)
-		names = append(names, file)
-	}
-	if testZip == nil || len(fx) == 0 {
-		return exportTree{}, errors.New("the wefttest export holds no test file or no fixtures: a Studio before save as test (plan F6) — use --fixtures-only")
-	}
-	tree = exportTree{test: testZip.Name, testdata: "testdata/" + testDir + "/", fixtures: len(fx)}
-	fixDir := filepath.Join(dir, "testdata", testDir)
-	testPath := filepath.Join(dir, testZip.Name)
-	// Nothing under dir is followed through a symlink: testdata and
-	// testdata/<test> must be real directories (or absent), else the
-	// fixtures would land — and stale *.json be removed — wherever the
-	// link points.
-	for _, p := range []string{filepath.Join(dir, "testdata"), fixDir} {
-		if fi, err := os.Lstat(p); err == nil && (fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir()) {
-			return exportTree{}, fmt.Errorf("%s is a symlink or not a directory: the export writes only into real directories under %s", p, dir)
-		}
-	}
-	if !force {
-		if _, err := os.Lstat(testPath); err == nil {
-			return exportTree{}, fmt.Errorf("%s exists: --force writes over it", testPath)
-		}
-		if entries, err := os.ReadDir(fixDir); err == nil && len(entries) > 0 {
-			return exportTree{}, fmt.Errorf("%s is not empty: --force writes into it", fixDir)
-		}
-	}
-	read := func(f *zip.File, left int64) ([]byte, error) {
-		rc, err := f.Open()
-		if err != nil {
-			return nil, err
-		}
-		defer func() { _ = rc.Close() }()
-		// The declared sizes passed the cap; the read is bounded by what
-		// is left of it, so a lying header cannot exceed it.
-		b, err := io.ReadAll(io.LimitReader(rc, left+1))
-		if err == nil && int64(len(b)) > left {
-			err = fmt.Errorf("the wefttest export unzips to more than %d bytes", maxUnzip)
-		}
-		return b, err
-	}
-	left := maxUnzip
-	testBody, err := read(testZip, left)
-	if err != nil {
-		return exportTree{}, err
-	}
-	left -= int64(len(testBody))
-	bodies := make([][]byte, len(fx))
-	for i, f := range fx {
-		if bodies[i], err = read(f, left); err != nil {
-			return exportTree{}, fmt.Errorf("%s: %w", f.Name, err)
-		}
-		left -= int64(len(bodies[i]))
-	}
-	if err := os.MkdirAll(fixDir, 0o755); err != nil {
-		return exportTree{}, err
-	}
-	stale, err := filepath.Glob(filepath.Join(fixDir, "*.json"))
-	if err != nil {
-		return exportTree{}, err
-	}
-	for _, p := range stale {
-		if err := os.Remove(p); err != nil {
-			return exportTree{}, fmt.Errorf("clear the target: %w", err)
-		}
-	}
-	if err := writeNew(testPath, testBody); err != nil {
-		return exportTree{}, err
-	}
-	for i := range fx {
-		if err := writeNew(filepath.Join(fixDir, names[i]), bodies[i]); err != nil {
-			return exportTree{}, err
-		}
-	}
-	return tree, nil
-}
-
-// unzipFixtures writes the export's fixtures into dir. The zip holds
-// the fixtures under testdata/<test>/ beside a generated replay test
-// at its root (plan F6) — or, from a Studio before F6, flat. Every
-// fixture entry must be a plain file name inside that one directory
-// (or at the root, flat) and the skeleton a root *_test.go, so nothing
-// lands outside dir; the skeleton is not written (this command writes
-// fixtures where --test names them, which the skeleton's test name
-// need not match: the Studio download carries it). The zip is checked
-// whole (names and total size) before the first write. The *.json
-// files already in dir are removed first, as wefttest.Record replaces
-// a test's fixtures: Replay loads every *.json there, and a stale one
-// from an earlier export would answer in place of ErrNoFixture. A
-// symlink among them is removed, never followed.
-func unzipFixtures(body []byte, dir string) (int, error) {
-	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
-	if err != nil {
-		return 0, fmt.Errorf("the wefttest export is not a zip: %w", err)
-	}
-	plain := func(name string) bool {
-		return name != "" && name != "." && name != ".." && !strings.ContainsAny(name, `/\:`)
-	}
-	var (
-		fixtures []*zip.File
-		names    []string
-		testDir  string
-	)
-	for _, f := range zr.File {
-		name := f.Name
-		if !f.Mode().IsRegular() {
-			return 0, fmt.Errorf("the wefttest export holds %q: want fixture files", f.Name)
-		}
-		if plain(name) && strings.HasSuffix(name, "_test.go") {
-			continue // the replay skeleton (plan F6)
-		}
-		if rest, ok := strings.CutPrefix(name, "testdata/"); ok {
-			test, file, ok := strings.Cut(rest, "/")
-			if !ok || !plain(test) || !plain(file) || testDir != "" && test != testDir {
-				return 0, fmt.Errorf("the wefttest export holds %q: want fixture files under one testdata/<test>/", f.Name)
-			}
-			testDir, name = test, file
-		} else if !plain(name) {
-			return 0, fmt.Errorf("the wefttest export holds %q: want fixture files under testdata/<test>/", f.Name)
-		}
-		fixtures = append(fixtures, f)
-		names = append(names, name)
-	}
-	if len(fixtures) == 0 {
-		return 0, errors.New("the wefttest export holds no fixtures")
-	}
-	if testDir != "" {
-		// F6's layout is all under testdata/<test>/: a flat fixture
-		// beside it would land in the same target, a same-named one
-		// overwriting the other silently.
-		for _, f := range fixtures {
-			if !strings.HasPrefix(f.Name, "testdata/") {
-				return 0, fmt.Errorf("the wefttest export mixes flat fixtures (%q) with testdata/%s/", f.Name, testDir)
-			}
-		}
-	}
-	var total uint64
-	for _, f := range fixtures {
-		total += f.UncompressedSize64
-		if total > uint64(maxUnzip) {
-			return 0, fmt.Errorf("the wefttest export unzips to more than %d bytes", maxUnzip)
-		}
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return 0, err
-	}
-	stale, err := filepath.Glob(filepath.Join(dir, "*.json"))
-	if err != nil {
-		return 0, err
-	}
-	for _, p := range stale {
-		if err := os.Remove(p); err != nil {
-			return 0, fmt.Errorf("clear the target: %w", err)
-		}
-	}
-	var written int64
-	for i, f := range fixtures {
-		rc, err := f.Open()
-		if err != nil {
-			return 0, err
-		}
-		// The declared sizes passed the total cap; the read is bounded
-		// by what is left of it, so a lying header cannot exceed it.
-		b, err := io.ReadAll(io.LimitReader(rc, maxUnzip-written+1))
-		_ = rc.Close()
-		if err != nil {
-			return 0, fmt.Errorf("%s: %w", f.Name, err)
-		}
-		if written += int64(len(b)); written > maxUnzip {
-			return 0, fmt.Errorf("the wefttest export unzips to more than %d bytes", maxUnzip)
-		}
-		if err := writeNew(filepath.Join(dir, names[i]), b); err != nil {
-			return 0, err
-		}
-	}
-	return len(fixtures), nil
-}
-
-// writeNew writes b to path, replacing whatever is there without
-// following it: a symlink planted at path is removed, not written
-// through.
-func writeNew(path string, b []byte) error {
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(b); err != nil {
-		_ = f.Close()
-		return err
-	}
-	return f.Close()
 }

@@ -190,8 +190,8 @@ func TestRetainFloorMatchesStudio(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 	defer func() {
-		if r := recover(); r != "studio: "+retainFloorMsg {
-			t.Errorf("studio.New(Retain(30m)) panicked %v, want %q", r, "studio: "+retainFloorMsg)
+		if r := recover(); r != "weftbase: "+retainFloorMsg {
+			t.Errorf("studio.New(Retain(30m)) panicked %v, want %q", r, "weftbase: "+retainFloorMsg)
 		}
 	}()
 	_ = studio.New(studio.DB(db), studio.Retain(30*time.Minute))

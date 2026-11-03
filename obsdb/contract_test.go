@@ -49,14 +49,13 @@ import (
 	"github.com/weftbase/weftbase/obsdb/clickhouse"
 	"github.com/weftbase/weftbase/obsdb/obsdbtest"
 	"github.com/weftbase/weftbase/obsdb/sqlite"
-	"github.com/weftbase/weftbase/scope"
 )
 
 // The record contract's conformance set (docs/record-contract.md):
 // testdata/contract/<case>/ holds an OTLP/JSON export (traces.json,
-// logs.json — the request bodies Studio's /v1/traces and /v1/logs
+// logs.json — the request bodies the server's /otlp/v1/traces and /otlp/v1/logs
 // accept) and expect.json, the run rows any conforming store derives
-// from it. Every case is ingested through the path Studio's receiver
+// from it. Every case is ingested through the path the OTLP receiver
 // takes (protojson → obsdb.FromOTLPTraces/FromOTLPLogs → DB.Write)
 // into a fresh SQLite memory database, and into a fresh ClickHouse
 // database when WEFT_CLICKHOUSE_DSN names a server.
@@ -89,7 +88,7 @@ type expectDoc struct {
 	Runs        []contractRun `json:"runs"`
 	// Sessions are the case's session rows (§6's "A session"), by id:
 	// identity, turns, and the title, first prompt and content-off mark
-	// Studio titles a session with. Omitted for a case with no session.
+	// a reader titles a session with. Omitted for a case with no session.
 	Sessions []contractSession `json:"sessions,omitempty"`
 	// ThreadRecords are the case's thread records (§4, kind thread;
 	// U12.1) as its logs.json carries them (threadRecordsOf): the
@@ -167,8 +166,6 @@ type contractRun struct {
 	SessionID    string `json:"session_id,omitempty"`
 	PublicID     string `json:"public_id,omitempty"`
 	Turn         int    `json:"turn,omitempty"`
-	Playground   bool   `json:"playground,omitempty"`
-	ExperimentID string `json:"experiment_id,omitempty"`
 	ForkedFrom   string `json:"forked_from,omitempty"`
 	// ResumedFrom / ResumedBy are the approval link (§6, U13.1): the
 	// run a resume names (weft.resumed_from) and, on the parked run,
@@ -423,7 +420,7 @@ func readExpect(t *testing.T, dir string) expectDoc {
 	return doc
 }
 
-// ingestCase feeds a case's OTLP/JSON files to db the way Studio's
+// ingestCase feeds a case's OTLP/JSON files to db the way the OTLP
 // receiver does: protojson into the collector request, the obsdb
 // mapping, one Write per request.
 func ingestCase(t *testing.T, db obsdb.DB, dir string) {
@@ -476,7 +473,7 @@ func observeRuns(t *testing.T, db obsdb.DB) []contractRun {
 			TraceID: r.TraceID, Service: r.Service,
 			Agent: r.Agent, Provider: r.Provider, Model: r.Model,
 			SessionID: r.SessionID, PublicID: r.PublicID, Turn: r.Turn,
-			Playground: r.Playground, ExperimentID: r.ExperimentID, ForkedFrom: r.ForkedFrom,
+			ForkedFrom:  r.ForkedFrom,
 			ResumedFrom: r.ResumedFrom, ResumedBy: r.ResumedBy,
 			CallerRunID: r.CallerRunID, CallerCallID: r.CallerCallID,
 			ManifestHash: r.ManifestHash, WeftVersion: r.WeftVersion, Meta: r.Meta,
@@ -1064,7 +1061,7 @@ func openFreshClickHouse(t *testing.T) obsdb.DB {
 // TestRecordContractDocNames pins docs/record-contract.md to the code
 // both ways: every weft.* and gen_ai.* name the doc spells in
 // backticks is a string the emitters or obsdb spell (core, otel,
-// thread, runtime, scope, obsdb and every package under them —
+// thread, obsdb and every package under them —
 // non-test sources), and every attribute name obsdb/model.go spells is
 // in the doc. Names are matched in any case and with hyphens, so a
 // misspelt `weft.forked-from` is caught, not skipped. A `weft.x.*`
@@ -1076,7 +1073,7 @@ func TestRecordContractDocNames(t *testing.T) {
 	}
 	code := map[string]bool{}
 	lit := regexp.MustCompile(`"((?:weft|gen_ai)\.[A-Za-z0-9_.-]+)"`)
-	for _, root := range []string{weftsrc.Path(t, "core"), weftsrc.Path(t, "otel"), weftsrc.Path(t, "thread"), "../runtime", "../scope", "."} {
+	for _, root := range []string{weftsrc.Path(t, "core"), weftsrc.Path(t, "otel"), weftsrc.Path(t, "thread"), "."} {
 		err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return err
@@ -1123,7 +1120,7 @@ func TestRecordContractDocNames(t *testing.T) {
 			}
 			continue
 		}
-		if !code[s] {
+		if !code[s] && !retiredRow(doc, "`"+s+"`") {
 			t.Errorf("doc names `%s`, which no emitter or reader spells", s)
 		}
 	}
@@ -1224,6 +1221,29 @@ func TestRecordContractMigrationNames(t *testing.T) {
 	}
 }
 
+// retiredPackages are the weftbase packages the rebuild deleted (the
+// runtime link and the request scope). weft's docs/record-contract.md
+// still has rows whose names only they emitted, and §10 rows whose
+// fixtures only they drove; until the doc drops those rows, a row whose
+// text names one of these is not pinned to code or fixture.
+var retiredPackages = []string{"`weftbase/runtime`", "`weftbase/scope`", "`scope.WithFlow`"}
+
+// retiredRow reports whether doc's table row led by cell (a backticked
+// name) names a retired package.
+func retiredRow(doc []byte, cell string) bool {
+	for _, line := range strings.Split(string(doc), "\n") {
+		if !strings.HasPrefix(line, "| "+cell+" |") {
+			continue
+		}
+		for _, p := range retiredPackages {
+			if strings.Contains(line, p) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // --- the generator (-update-contract) ---
 
 // genCase is one real-pipeline case: run drives agents under the
@@ -1233,13 +1253,14 @@ func TestRecordContractMigrationNames(t *testing.T) {
 type genCase struct {
 	name, desc string
 	dest       []otel.DestOption
-	// studio captures through a Studio destination (exporter.Studio) rather
-	// than OTLP, and start adds pipeline options: the development detail
-	// level reaches a Studio destination alone (U23.1).
-	studio bool
-	start  []otel.Option
-	run    func(t *testing.T, ctx context.Context, p *otel.Pipeline, c *otlpCapture) []string
-	edit   func(tr *coltracepb.ExportTraceServiceRequest, lg *collogspb.ExportLogsServiceRequest)
+	// firstParty marks the OTLP destination otel.FirstParty (content
+	// on, raw bodies eligible), and start adds pipeline options: the
+	// development detail level reaches a first-party destination alone
+	// (U23.1).
+	firstParty bool
+	start      []otel.Option
+	run        func(t *testing.T, ctx context.Context, p *otel.Pipeline, c *otlpCapture) []string
+	edit       func(tr *coltracepb.ExportTraceServiceRequest, lg *collogspb.ExportLogsServiceRequest)
 }
 
 // fixtureEpoch is where every generated case's clock starts:
@@ -1286,8 +1307,8 @@ func captureCase(t *testing.T, gc genCase, epoch time.Time, dir string) []string
 	srv := httptest.NewServer(c)
 	defer srv.Close()
 	dest := otel.OTLP(srv.URL, gc.dest...)
-	if gc.studio {
-		dest = exporter.Studio(srv.URL, "", gc.dest...)
+	if gc.firstParty {
+		dest = otel.OTLP(srv.URL, append([]otel.DestOption{otel.FirstParty()}, gc.dest...)...)
 	}
 	opts := append([]otel.Option{otel.NoGlobal(), otel.NoEnv(), otel.Heartbeat(0),
 		otel.Service("contract-app"), dest}, gc.start...)
@@ -1916,7 +1937,7 @@ func genCases() []genCase {
 		},
 		{
 			name: "tool_calls",
-			desc: "two steps: a tool call (execute_tool lookup_order) then the answer; run metadata through core.Metadata — a caller key and enduser.id in meta (user.id, its mirror, not), and the playground marks weft/runtime stamps (weft.playground, weft.experiment.id and weft.forked_from as row columns; weft.playground.command and weft.replay.view in meta)",
+			desc: "two steps: a tool call (execute_tool lookup_order) then the answer; run metadata through core.Metadata — a caller key and enduser.id in meta (user.id, its mirror, not), and a fork link (weft.forked_from as a row column)",
 			dest: content,
 			run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
 				agt := pipelineAgent(p, "support", wefttest.Script(
@@ -1924,13 +1945,9 @@ func genCases() []genCase {
 					wefttest.Say("Order 1234 has shipped.")),
 					core.Instructions("You are a support agent."), lookupTool())
 				return []string{mustRun(t, ctx, agt, core.Prompt("Where is order 1234?"), core.Metadata(map[string]string{
-					"tenant":                  "acme",
-					"enduser.id":              "user_42",
-					"weft.playground":         "true",
-					"weft.playground.command": "cmd_contract",
-					"weft.experiment.id":      "exp_contract",
-					"weft.forked_from":        "a1100000000000000000000000000099#1",
-					"weft.replay.view":        "transcript",
+					"tenant":           "acme",
+					"enduser.id":       "user_42",
+					"weft.forked_from": "a1100000000000000000000000000099#1",
 				})).ID}
 			},
 		},
@@ -2195,13 +2212,13 @@ func genCases() []genCase {
 		},
 		{
 			name: "canceled",
-			desc: "a run canceled mid-tool with a typed cause (core.CancelCause(\"studio.cancel\"), what weft/runtime's cancel command passes): status failed, error.type context.Canceled, weft.run.stopped_by canceled and weft.cancel.cause studio.cancel on the invoke_agent span; no run_finish",
+			desc: "a run canceled mid-tool with a typed cause (core.CancelCause(\"app.cancel\"), what a caller's own cancel passes): status failed, error.type context.Canceled, weft.run.stopped_by canceled and weft.cancel.cause app.cancel on the invoke_agent span; no run_finish",
 			dest: content,
 			run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
 				rctx, cancel := context.WithCancelCause(ctx)
 				defer cancel(nil)
 				slow := core.Tool("lookup_order", "Look up an order.", func(ctx context.Context, _ lookupIn) (string, error) {
-					cancel(core.CancelCause("studio.cancel"))
+					cancel(core.CancelCause("app.cancel"))
 					<-ctx.Done()
 					return "", ctx.Err()
 				})
@@ -2405,7 +2422,7 @@ func genCases() []genCase {
 		},
 		{
 			name: "records_dropped",
-			desc: "the tool_calls run from a destination that had lost 3 records: weft.records.dropped 3 on its run_start and run_finish records (record contract §4; the run has no heartbeat — heartbeats are never stored). The count is ingest health's (Studio keeps the largest per service.name): it is not caller metadata, so meta omits it, and no row field or hole reads it — the row is tool_calls' own",
+			desc: "the tool_calls run from a destination that had lost 3 records: weft.records.dropped 3 on its run_start and run_finish records (record contract §4; the run has no heartbeat — heartbeats are never stored). The count is ingest health's (the server keeps the largest per service.name): it is not caller metadata, so meta omits it, and no row field or hole reads it — the row is tool_calls' own",
 			dest: content,
 			run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
 				agt := pipelineAgent(p, "support", wefttest.Script(
@@ -2504,12 +2521,6 @@ func genCases() []genCase {
 			run:  runCards,
 		},
 		{
-			name: "queue_breakpoints",
-			desc: "the phase 8 facts run_cards does not hold: a step's two calls under Parallelism(1), the first holding the one slot 30 ms, so the second's execute_tool span carries weft.tool.queue_ms (int, the wait rounded up; the generator sets it to 1) and the first's none; and a playground run's breakpoint park — the runtime's metadata weft.playground true and weft.playground.breakpoints refund_order (comma-joined, sorted) on every record and span, the call parked through ParkOn (weft.tool.pending.source park_on): what reads a park_on park named there as a breakpoint, not an approval gate; then the playground's continue, as weft/runtime resumes a runtime-started run (core.ApproveBy(call, \"runtime\", \"\"), core.ResumeOf the parked run, the same playground metadata): the resumed refund_order call's execute_tool span carries weft.tool.approved_by runtime and no weft.grant.id, the resume's row resumed_from the parked run",
-			dest: content,
-			run:  runQueueBreakpoints,
-		},
-		{
 			name: "bridge_overrides",
 			desc: "the facts the earlier cases do not hold (P8-pre-go): a run whose Params replace the agent's (temperature 0.2, top_p 0.9) with temperature 0.4 alone and whose ToolChoice forces any tool — the root's weft.override.params {\"temperature\":0.4,\"top_p\":null} (null: an agent knob the replacement leaves unset) and weft.override.tool_choice any (the mode; a named choice reads tool:<name>), beside weft.override.hash; and a bridged WARN under its execute_tool span (the OTLP destination opted in with otel.AppLogs(true), content on, a Redact over otel.ContentLog) carrying 125 attributes: the message redacted (\"card [redacted]\"), the first 120 kept and weft.log.attrs_dropped 5 (int) counted",
 			dest: []otel.DestOption{otel.WithContent(otel.ContentConfig{Redact: redactCards}), otel.AppLogs(true)},
@@ -2562,24 +2573,12 @@ func genCases() []genCase {
 	}
 	// Last: the fixtures' clock is shared, so a case added before
 	// another shifts its times.
-	flowScope := genCase{
-		name: "flow_scope",
-		desc: "a run started under scope.WithFlow (what scope.Header does for a Weft-Scope with flow=, U22) with a batch tag through core.Metadata: weft.flow and arena.batch in meta — the pairs /api/runs?flow= and ?tag.arena.batch= filter on",
-		dest: content,
-		run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
-			agt := pipelineAgent(p, "checkout", wefttest.Script(wefttest.Say("Your cart is ready.")),
-				core.Instructions("You run checkout."))
-			return []string{mustRun(t, scope.WithFlow(ctx, "f_checkout"), agt, core.Prompt("check out"),
-				core.Metadata(map[string]string{"arena.batch": "b_contract"})).ID}
-		},
-	}
-	// After flow_scope, for the same reason.
 	onion := genCase{
-		name:   "onion",
-		desc:   "the middleware onion recorded (U23.1), with a handler panic's stack and the model's wire facts (the request records' wire: gateway.example:8443, ExtraBody keys, ExtraHeaders names — no credential, no value): mw.Log › mw.Retry › mw.RepairJSON around the model and mw.Audit › mw.Allow › mw.MapErrors around the tools, under the development detail level (otel.DevDetail, a Studio destination with content on). The first model request fails with HTTP 503 and mw.Retry sends it again (attempt 2 carries weft.attempt.layer retry); the answer asks for a lookup with fenced arguments mw.RepairJSON repairs (a weft.repair event on the chat span with the original; the call's weft.tool.args_repaired), a delete mw.Allow refuses (weft.tool.denied_by allow) a flaky call whose io.EOF mw.MapErrors hides (error.type INTERNAL, weft.tool.error_masked *errors.errorString) and a charge whose handler panics (error.type panic, weft.panic.layer handler; its stack a weft.panic event, the text fixed by the generator); one layer span per layer per call (weft.layer.*), nested outer to inner. Problems attempts_retried 1, tool_errors 2, denied 1, repaired 1; the six new span keys stay out of meta",
-		dest:   content,
-		studio: true,
-		start:  []otel.Option{otel.DevMode(), otel.DevDetail()},
+		name:       "onion",
+		desc:       "the middleware onion recorded (U23.1), with a handler panic's stack and the model's wire facts (the request records' wire: gateway.example:8443, ExtraBody keys, ExtraHeaders names — no credential, no value): mw.Log › mw.Retry › mw.RepairJSON around the model and mw.Audit › mw.Allow › mw.MapErrors around the tools, under the development detail level (otel.DevDetail, a first-party destination with content on). The first model request fails with HTTP 503 and mw.Retry sends it again (attempt 2 carries weft.attempt.layer retry); the answer asks for a lookup with fenced arguments mw.RepairJSON repairs (a weft.repair event on the chat span with the original; the call's weft.tool.args_repaired), a delete mw.Allow refuses (weft.tool.denied_by allow) a flaky call whose io.EOF mw.MapErrors hides (error.type INTERNAL, weft.tool.error_masked *errors.errorString) and a charge whose handler panics (error.type panic, weft.panic.layer handler; its stack a weft.panic event, the text fixed by the generator); one layer span per layer per call (weft.layer.*), nested outer to inner. Problems attempts_retried 1, tool_errors 2, denied 1, repaired 1; the six new span keys stay out of meta",
+		dest:       content,
+		firstParty: true,
+		start:      []otel.Option{otel.DevMode(), otel.DevDetail()},
 		// A stack names addresses, goroutine ids and this machine's
 		// paths: the event is kept, its text fixed.
 		edit: func(tr *coltracepb.ExportTraceServiceRequest, _ *collogspb.ExportLogsServiceRequest) {
@@ -2743,7 +2742,7 @@ func genCases() []genCase {
 			return []string{res.ID, served}
 		},
 	}
-	return append(append(cases, threadGenCases()...), flowScope, onion, mcpMesh, remoteCaller)
+	return append(append(cases, threadGenCases()...), onion, mcpMesh, remoteCaller)
 }
 
 // gatewayModel is the onion case's model declaring its wire facts (the
@@ -2803,47 +2802,6 @@ func runBridgeStripped(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *o
 		wefttest.Say("Order 1234 has shipped.")),
 		core.Instructions("You are a support agent."), lookup)
 	return []string{mustRun(t, ctx, agt, core.Prompt("Where is order 1234?")).ID}
-}
-
-// runQueueBreakpoints drives the queue_breakpoints case: a queued call
-// (weft.tool.queue_ms) and a playground breakpoint park
-// (weft.playground.breakpoints), the metadata weftbase/runtime stamps.
-func runQueueBreakpoints(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
-	held := core.Tool("lookup_order", "Look up an order by ID.", func(_ context.Context, in lookupIn) (string, error) {
-		if in.OrderID == "6" {
-			// Hold the one Parallelism slot: the next call waits for it.
-			time.Sleep(30 * time.Millisecond)
-		}
-		return "order " + in.OrderID + ": shipped", nil
-	})
-	queued := pipelineAgent(p, "support", wefttest.Script(
-		wefttest.ToolCalls(
-			wefttest.Call{Name: "lookup_order", Args: `{"order_id":"6"}`},
-			wefttest.Call{Name: "lookup_order", Args: `{"order_id":"7"}`}),
-		wefttest.Say("Orders 6 and 7 have shipped."),
-	), held, core.Parallelism(1))
-	ids := []string{mustRun(t, ctx, queued, core.Prompt("Where are orders 6 and 7?")).ID}
-
-	refund := core.Tool("refund_order", "Refund an order.", func(_ context.Context, in lookupIn) (string, error) {
-		return "refunded " + in.OrderID, nil
-	})
-	debugged := pipelineAgent(p, "support", wefttest.Script(
-		wefttest.ToolCalls(wefttest.Call{Name: "refund_order", Args: `{"order_id":"8"}`}),
-		wefttest.Say("Order 8 is refunded.")), refund)
-	playground := core.Metadata(map[string]string{
-		"weft.playground":             "true",
-		"weft.playground.breakpoints": "refund_order",
-	})
-	parked := mustRun(t, ctx, debugged, core.Prompt("Refund order 8."), core.ParkOn("refund_order"), playground)
-	if len(parked.Pending) != 1 {
-		t.Fatalf("the breakpoint run parked %d calls, want 1", len(parked.Pending))
-	}
-	// The playground's continue on a runtime-started run, as
-	// weftbase/runtime's executor resumes it (approvedByRuntime): the
-	// approval names its provenance, runtime, and no grant.
-	resumed := mustRun(t, ctx, debugged, core.Messages(parked.Messages...),
-		core.ApproveBy(parked.Pending[0].ID, "runtime", ""), core.ResumeOf(parked.ID), playground)
-	return append(ids, parked.ID, resumed.ID)
 }
 
 // namedModel gives a scripted model its own identity: the fallback's
@@ -2956,7 +2914,7 @@ func TestContractTableMatchesFixtures(t *testing.T) {
 		}
 	}
 	for name := range inDoc {
-		if !onDisk[name] {
+		if !onDisk[name] && !retiredRow([]byte(sec), "`"+name+"`") {
 			t.Errorf("docs/record-contract.md §10 lists %q, which has no fixture under %s", name, contractDir)
 		}
 	}

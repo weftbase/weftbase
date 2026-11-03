@@ -12,8 +12,8 @@ import (
 // r_mu's records and invoke span carry the caller's tenant; a tool span
 // of the same run carries only weft.session.title, whose JSON
 // ({"weft.session.title":…}) sorts above {"tenant":…}: a backend that
-// kept the greatest row's map (ClickHouse's max(Meta) before migration
-// 0034) lost the tenant — the tag a panel token is scoped by — and the
+// kept the greatest row's map (an older ClickHouse max(Meta))
+// lost the tenant — the tag a filter reads — and the
 // title with the other order. Run, Runs and Sessions under the tag
 // filter, the session's title, the run tree's tag scope and Stats'
 // tag filter all keep both.

@@ -34,16 +34,6 @@ import (
 // arrives between page reads can be listed again on a later page
 // (never skipped); clients dedupe by trace_id. before_id without
 // before is ignored.
-//
-// A panel token lists its own public id only — /api/runs' scoping
-// (scopeRunsQuery): a foreign public_id is 403, and the list is forced
-// onto the token's public id with the rule /api/traces/{id} checks
-// (every span carries it), so it offers no trace the detail refuses
-// and no run id of another public id. So a trace holding any span
-// without its weft.public_id (an instrumented HTTP root, a client span
-// under a tool) is not listed to a panel token: its detail would be
-// refused. A row carries no span attribute, so the read scope's
-// override-tool-name redaction (spansFor) has nothing to remove here.
 
 // traceRoot is a trace's root span: the earliest span with no parent.
 type traceRoot struct {
@@ -109,14 +99,15 @@ func rootRunOf(ids []string) string {
 // first: the root by its id (rootRunOf over the weft ids — a trace of
 // more than a page of runs still names it), the failures by a
 // failed-only read of the root's id prefix (its core children with
-// it), each in the list's scope (public id, tags); past one page of
+// it), each of the list's public id when it names one; past one page of
 // failures the count is a floor (FailedRunsCapped). The runs derived
 // from the trace's stock spans (docs/record-contract.md §9) are read by
 // id: their failures counted, and — when the trace holds no weft run —
 // the root the derived run with no parent (its id's order says nothing
 // of the tree: a nested agent's span id may sort first), else the
 // first by start.
-func (s *Server) traceRuns(ctx context.Context, row *traceRow, sc readScope) error {
+func (s *Server) traceRuns(ctx context.Context, row *traceRow, pub string) error {
+	admits := func(rr obsdb.RunRow) bool { return pub == "" || rr.PublicID == pub }
 	var weft, derived []string
 	for _, id := range row.RunIDs {
 		if _, _, ok := obsdb.ParseStockRunID(id); ok {
@@ -133,7 +124,7 @@ func (s *Server) traceRuns(ctx context.Context, row *traceRow, sc readScope) err
 			continue
 		case err != nil:
 			return err
-		case !sc.admits(det.RunRow):
+		case !admits(det.RunRow):
 			continue
 		}
 		if det.Status == obsdb.StatusFailed {
@@ -156,10 +147,10 @@ func (s *Server) traceRuns(ctx context.Context, row *traceRow, sc readScope) err
 	case errors.Is(err, obsdb.ErrNotFound):
 	case err != nil:
 		return err
-	case sc.admits(det.RunRow):
+	case admits(det.RunRow):
 		row.RootRun = &traceRun{ID: det.ID, Agent: det.Agent, PromptPreview: det.PromptPreview, Status: string(det.Status)}
 	}
-	page, err := s.db.Runs(ctx, obsdb.RunQuery{IDPrefix: root, ParentRunID: "*", PublicID: sc.PublicID, Meta: sc.Tags,
+	page, err := s.db.Runs(ctx, obsdb.RunQuery{IDPrefix: root, ParentRunID: "*", PublicID: pub,
 		Status: obsdb.StatusFailed, Limit: traceFailedCap})
 	if err != nil {
 		return err
@@ -208,17 +199,6 @@ func (s *Server) serveTraces(w http.ResponseWriter, r *http.Request) {
 		}
 		query.NotRun = b
 	}
-	// The scope first: a foreign public id's 403 wins over any 400 —
-	// another value of a token's tag key's too (scopeRunsQuery).
-	scope := obsdb.RunQuery{PublicID: query.PublicID, Meta: query.Meta}
-	if !scopeRunsQuery(w, r, &scope, q.Get("public_id")) {
-		return
-	}
-	query.PublicID = scope.PublicID
-	// A tag token's tags hold on every span (TraceQuery.ScopeMeta, I4):
-	// the list offers no trace its /api/traces/{id} read refuses.
-	tokenScope := panelScope(r)
-	query.ScopeMeta = tokenScope.Tags
 	for _, p := range []struct {
 		name string
 		dst  *time.Time
@@ -262,7 +242,7 @@ func (s *Server) serveTraces(w http.ResponseWriter, r *http.Request) {
 		} else {
 			row.badgeFields = rootMissing
 		}
-		if err := s.traceRuns(r.Context(), &row, readScope{PublicID: query.PublicID, Tags: tokenScope.Tags}); err != nil {
+		if err := s.traceRuns(r.Context(), &row, query.PublicID); err != nil {
 			dbError(w, r, "traces", "", err)
 			return
 		}

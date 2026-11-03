@@ -25,8 +25,7 @@ import (
 // with no file (":memory:", ClickHouse) gets a token generated for
 // this process alone, printed at start as before.
 //
-// The stable token is the panel tokens' signing key, like a fixed one:
-// it stays out of the banner, the one line and every printed link.
+// The stable token, like a fixed one, stays out of the banner, the one line and every printed link.
 
 // tokenSource is where the served token came from.
 type tokenSource int
@@ -85,8 +84,8 @@ func tokenPath(dbPath string) string { return dbPath + ".token" }
 
 // stableProbe is the port probe's per-address bearer (listen.Request
 // TokenFor): the database's stable token, only for an address a
-// trusted discovery file of this user names — the token is long-lived
-// and the panel tokens' signing key, so whatever else holds a port is
+// trusted discovery file of this user names — the token is long-lived,
+// so whatever else holds a port is
 // probed bare (a token-walled Studio there is skipped for the next
 // port, as before B3). nil without a database file.
 func stableProbe(dbPath string) func(addr string) string {

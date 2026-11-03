@@ -2,14 +2,9 @@ package studio
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -188,30 +183,6 @@ func TestLiveFrameAttrs(t *testing.T) {
 	}
 }
 
-// TestRunHolesPreA1: the run of a database written by the previous
-// release (TestRequestsNotRecorded's file) reads not_recorded with the
-// table's reason and fix — the run header's badge. The file's row
-// counts two steps but holds no event: gap first (lostEvents, the
-// export's events block says the same).
-func TestRunHolesPreA1(t *testing.T) {
-	srv := New(Open(preA1File(t)))
-	t.Cleanup(func() { _ = srv.Close() })
-	code, _, body := get(t, srv.Handler(), "/studio/api/runs/old1")
-	if code != http.StatusOK {
-		t.Fatalf("run: %d %s", code, body)
-	}
-	// The run document the web's page test serves for a pre-A1 run.
-	golden(t, "run-pre-a1.golden.json", body)
-	var doc holesDoc
-	decode(t, body, &doc)
-	reason, fix := obsdb.HoleNote(obsdb.HoleNotRecorded)
-	if len(doc.Holes) != 2 || doc.Holes[0].Hole != "gap" || doc.Holes[1].Hole != "not_recorded" ||
-		doc.Holes[1].Reason != reason || doc.Holes[1].Fix != fix {
-		t.Errorf("pre-A1 run holes = %+v, want [gap, not_recorded], not_recorded with the table's words", doc.Holes)
-	}
-
-}
-
 // TestRunHolesInterrupted: a run that stopped reporting reads
 // interrupted, and the event position its lost batch left reads gap —
 // in the table's order. A run whose invoke_agent span arrived and no
@@ -276,116 +247,6 @@ func TestRunHolesInterrupted(t *testing.T) {
 		}
 		if strings.Join(got, " ") != strings.Join(wantS, " ") || doc.Status != c.status {
 			t.Errorf("%s (%s) holes = %v, want %v (%s)", run, doc.Status, got, wantS, c.status)
-		}
-	}
-}
-
-// v090File copies studio/testdata/v0.9.0.db — a database weft v0.9.0
-// wrote (its README says how) — into a temp dir: Studio migrates the
-// file it opens, and the committed one must stay as v0.9.0 left it.
-func v090File(t *testing.T) string {
-	t.Helper()
-	b, err := os.ReadFile(filepath.Join("testdata", "v0.9.0.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(t.TempDir(), "v0.9.0.db")
-	if err := os.WriteFile(path, b, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return path
-}
-
-// migrationMax is the highest obsdb migration a sqlite file records.
-func migrationMax(t *testing.T, path string) int {
-	t.Helper()
-	raw, err := sql.Open("sqlite", "file:"+path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = raw.Close() }()
-	var v int
-	if err := raw.QueryRow(`SELECT max(version) FROM obsdb_migrations`).Scan(&v); err != nil {
-		t.Fatal(err)
-	}
-	return v
-}
-
-// TestRunHolesV090: the database weft v0.9.0 really wrote opens in this
-// Studio — migrated to the current schema — and every pane that cannot
-// be filled says why: the run reads not_recorded, every step's
-// assembled holes carry it, and the requests and tools routes answer
-// it with the table's reason and fix. Its run, events and transcript
-// are goldened for the web's page test.
-func TestRunHolesV090(t *testing.T) {
-	path := v090File(t)
-	if got := migrationMax(t, path); got != 2 {
-		t.Fatalf("v0.9.0.db records migration %d, want 2 (v0.9.0's last)", got)
-	}
-	srv := New(Open(path))
-	t.Cleanup(func() { _ = srv.Close() })
-	h := srv.Handler()
-	code, _, body := get(t, h, "/studio/api/runs/r_v090")
-	if code != http.StatusOK {
-		t.Fatalf("run: %d %s", code, body)
-	}
-	migs, err := filepath.Glob(filepath.Join("..", "obsdb", "sqlite", "migrations", "*.sql"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The highest file's number; the files are 1..N with no gap
-	// (obsdb/sqlite's TestMigrationFilesAreContiguous), so it is also
-	// the count — a dropped file fails here too.
-	want := 0
-	for _, m := range migs {
-		if n, err := strconv.Atoi(strings.SplitN(filepath.Base(m), "_", 2)[0]); err == nil && n > want {
-			want = n
-		}
-	}
-	if want != len(migs) {
-		t.Errorf("sqlite migration files: %d, highest %d; want 1..N with no gap", len(migs), want)
-	}
-	if got := migrationMax(t, path); got != want {
-		t.Errorf("after open: migration %d, want the current %d", got, want)
-	}
-	golden(t, "run-v090.golden.json", body)
-	var doc struct {
-		holesDoc
-		Steps int `json:"steps"`
-	}
-	decode(t, body, &doc)
-	reason, fix := obsdb.HoleNote(obsdb.HoleNotRecorded)
-	if doc.Status != "succeeded" || doc.Steps != 2 || len(doc.Holes) != 1 || doc.Holes[0].Hole != "not_recorded" ||
-		doc.Holes[0].Reason != reason || doc.Holes[0].Fix != fix {
-		t.Fatalf("v0.9.0 run = %s, want a succeeded 2-step run with holes [not_recorded]", body)
-	}
-	_, _, events := get(t, h, "/studio/api/runs/r_v090/events?limit=1000")
-	golden(t, "run-v090-events.golden.json", events)
-	_, _, transcript := get(t, h, "/studio/api/runs/r_v090/transcript")
-	golden(t, "run-v090-transcript.golden.json", transcript)
-	for n := range doc.Steps {
-		code, _, step := get(t, h, fmt.Sprintf("/studio/api/runs/r_v090/steps/%d", n))
-		if code != http.StatusOK {
-			t.Fatalf("step %d: %d %s", n, code, step)
-		}
-		var sd struct {
-			Holes []struct{ Hole string } `json:"holes"`
-		}
-		decode(t, step, &sd)
-		found := false
-		for _, hl := range sd.Holes {
-			found = found || hl.Hole == "not_recorded"
-		}
-		if !found {
-			t.Errorf("step %d holes = %+v, want not_recorded among them", n, sd.Holes)
-		}
-	}
-	for _, route := range []string{"requests", "tools"} {
-		_, _, b := get(t, h, "/studio/api/runs/r_v090/"+route)
-		var env struct{ Badge, Reason, Fix string }
-		decode(t, b, &env)
-		if env.Badge != "not_recorded" || env.Reason != reason || env.Fix != fix {
-			t.Errorf("%s = %s, want the not_recorded badge with the table's words", route, b)
 		}
 	}
 }
@@ -611,7 +472,7 @@ func TestRunHolesReplayView(t *testing.T) {
 	}
 	h := Handler(DB(db))
 	for run, want := range map[string]string{
-		"r_unknown":          "this replay's prefix is the transcript before step 2 of r_src (weft.replay.view = unknown): the runtime could not read that step's records (Studio unreachable, content off, or a Studio without ?step=), so a compaction view its model saw may be missing",
+		"r_unknown":          "this replay's prefix is the transcript before step 2 of r_src (weft.replay.view = unknown): the runtime could not read that step's records (weftbase unreachable, content off, or a weftbase without ?step=), so a compaction view its model saw may be missing",
 		"r_derived":          "this replay's prefix was cut from the transcript at step 2 of r_src (weft.replay.view = derived): no request record placed that step's messages, so a compaction view its model saw is not known",
 		"r_view":             "",
 		"r_plain":            "",

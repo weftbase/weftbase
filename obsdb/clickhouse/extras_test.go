@@ -153,77 +153,37 @@ func TestReopenIsANoop(t *testing.T) {
 	if err := conn.QueryRow(ctx(), "SELECT count() FROM obsdb_migrations").Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	// One row per migration: 0001 (init), 0002 (experiments), 0003
-	// (status spelling), 0004 (request record), 0005 (raw record), 0006 (experiment command), 0007 (the experiment index), 0008 (the command store) and 0009 (the derived flag) — the same count TestMigrationPinsExporterVersion
-	// pins as the highest version. (Step 8b review fix 1: this read still
-	// wanted 1 after 0002 landed, failing only on a real server, where
-	// the gated suite first ran.)
+	// One row per migration — the same count TestMigrationPinsExporterVersion
+	// pins as the highest version.
 	if int(versions) != clickhouse.WantMigrationRows {
 		t.Errorf("obsdb_migrations rows after reopen = %d, want %d (one per migration)", versions, clickhouse.WantMigrationRows)
 	}
-	// 0007's skip index is on weft_runs (M2: an experiment's run list).
-	var idx uint64
-	if err := conn.QueryRow(ctx(), `SELECT count() FROM system.data_skipping_indices
-		WHERE database = currentDatabase() AND table = 'weft_runs' AND name = 'idx_experiment' AND type = 'bloom_filter'`).Scan(&idx); err != nil {
+	// Tenancy leads every sorting key: the key ReplacingMergeTree and
+	// AggregatingMergeTree collapse by, so an id colliding across
+	// tenants never merges (the history table aside: it is the
+	// database's own).
+	rows, err := conn.Query(ctx(), `SELECT name, sorting_key FROM system.tables
+		WHERE database = currentDatabase() AND engine LIKE '%MergeTree' AND name != 'obsdb_migrations' ORDER BY name`)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if idx != 1 {
-		t.Errorf("weft_runs idx_experiment = %d, want the bloom_filter skip index 0007 adds", idx)
-	}
-}
-
-// TestExperimentsOrderByWriteTime pins the list order against the
-// binding the step 8b review found live (review fix 2): Updated goes
-// in through a bound time.Time parameter, which the driver writes at
-// whole-second precision — saves within one second tie on Updated, so
-// the newest-first list must order by the engine's own write time
-// (InsertTime, DEFAULT now64(9), microsecond-precise), never fall
-// back to the id. The conformance subtest pins the same rule through
-// the public write path; the second leg here removes the timing luck
-// with rows whose Updated is identical by construction.
-func TestExperimentsOrderByWriteTime(t *testing.T) {
-	db, _ := openFresh(t)
-	// The review's probe shape: three saves 80 ms apart, the newest
-	// write on exp_1.
-	saves := []obsdb.Experiment{
-		{ID: "exp_0", Name: "older"},
-		{ID: "exp_1", Name: "newer"},
-		{ID: "exp_1", Name: "newer refresh"},
-	}
-	for _, e := range saves {
-		if err := db.SaveExperiment(ctx(), e); err != nil {
+	defer func() { _ = rows.Close() }()
+	var tables []string
+	for rows.Next() {
+		var name, key string
+		if err := rows.Scan(&name, &key); err != nil {
 			t.Fatal(err)
 		}
-		time.Sleep(80 * time.Millisecond)
+		tables = append(tables, name)
+		if !strings.HasPrefix(key, "ProjectId, Env, TenantId, ") {
+			t.Errorf("%s sorting key = %q, want it led by ProjectId, Env, TenantId", name, key)
+		}
 	}
-	list, err := db.Experiments(ctx())
-	if err != nil {
+	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if len(list) != 2 || list[0].ID != "exp_1" || list[0].Name != "newer refresh" {
-		t.Errorf("list = %+v, want exp_1's newest write first", list)
-	}
-
-	// The hard pin: two rows whose Updated is identical at whole-second
-	// precision (exactly what the bound parameter writes), the older
-	// write on the alphabetically-first id — InsertTime decides. The
-	// timestamps are SQL literals so sub-second precision survives by
-	// construction (a bound time.Time is the coarse path under test).
-	db2, dsn := openFresh(t)
-	conn := openRaw(t, dsn)
-	defer func() { _ = conn.Close() }()
-	if err := conn.Exec(ctx(), `INSERT INTO experiments
-		(Id, Name, Agent, Created, Updated, Variants, Inputs, InsertTime) VALUES
-		('exp_a', 'written first', 'ag', toDateTime64('2026-09-17 00:00:00', 9, 'UTC'), toDateTime64('2026-09-17 00:00:00', 9, 'UTC'), '[]', '[]', toDateTime64('2026-09-17 00:00:00.010', 9, 'UTC')),
-		('exp_z', 'written last',  'ag', toDateTime64('2026-09-17 00:00:00', 9, 'UTC'), toDateTime64('2026-09-17 00:00:00', 9, 'UTC'), '[]', '[]', toDateTime64('2026-09-17 00:00:00.090', 9, 'UTC'))`); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := db2.Experiments(ctx())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(raw) != 2 || raw[0].ID != "exp_z" {
-		t.Errorf("list with tied Updated = %+v, want exp_z (the newest write) before exp_a — InsertTime, never the id, breaks the tie", raw)
+	if want := "manifests otel_logs otel_traces weft_deltas weft_records weft_runs weft_session_events"; strings.Join(tables, " ") != want {
+		t.Errorf("tables = %v, want %s", tables, want)
 	}
 }
 
@@ -244,9 +204,8 @@ func TestErrClosed(t *testing.T) {
 // The behavioural pin of Runs(Meta:) — the offline test pins only the
 // SQL shape (TestRunsInnerMetaFilter); sqlite pins the behaviour
 // (sqlite's TestRunsMetaFilter). Two tenants' runs, a subset filter
-// returns the matching rows with their Meta present. The same
-// fixtures pin the Playground pointer bind: &false scopes the list to
-// non-playground runs.
+// returns the matching rows with their Meta present, and a second pair
+// narrows it.
 func TestRunsMetaFilterBehaviour(t *testing.T) {
 	db, _ := openFresh(t)
 	at := time.Unix(0, 1790845923120000000).UTC()
@@ -267,7 +226,7 @@ func TestRunsMetaFilterBehaviour(t *testing.T) {
 	if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{
 		rec("r1", map[string]any{"tenant": "acme", "pr": "77"}),
 		rec("r2", map[string]any{"tenant": "globex"}),
-		rec("r3", map[string]any{"tenant": "acme", "weft.playground": true}),
+		rec("r3", map[string]any{"tenant": "acme", "pr": "78"}),
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -285,16 +244,14 @@ func TestRunsMetaFilterBehaviour(t *testing.T) {
 			}
 		}
 	}
-	notPlayground := false
 	page, err = db.Runs(ctx(), obsdb.RunQuery{
-		Meta:       map[string]string{"tenant": "acme"},
-		Playground: &notPlayground,
+		Meta: map[string]string{"tenant": "acme", "pr": "77"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if page.Total != 1 || len(page.Runs) != 1 || page.Runs[0].ID != "r1" {
-		t.Fatalf("meta + Playground=&false = total %d / %d rows, want only r1", page.Total, len(page.Runs))
+		t.Fatalf("meta tenant=acme pr=77 = total %d / %d rows, want only r1", page.Total, len(page.Runs))
 	}
 }
 
@@ -444,48 +401,6 @@ func TestAsyncInsertsAreWaited(t *testing.T) {
 	}
 	if value != "1" {
 		t.Errorf("wait_for_async_insert = %q, want 1", value)
-	}
-}
-
-// Created survives an update (the audit's P2-4): the save's prior
-// read keeps the row's own Created, and only ErrNotFound means "first
-// save" — any other read error must surface instead of silently
-// resetting the created-at to the save time. The distinctive literal
-// makes survival deterministic; a reset would read as now.
-func TestExperimentCreatedSurvivesUpdate(t *testing.T) {
-	db, dsn := openFresh(t)
-	conn := openRaw(t, dsn)
-	defer func() { _ = conn.Close() }()
-	first := time.Date(2026, 9, 17, 0, 0, 0, 0, time.UTC)
-	if err := conn.Exec(ctx(), `INSERT INTO experiments
-		(Id, Name, Agent, Created, Updated, Variants, Inputs) VALUES
-		('exp_c', 'first', 'ag', toDateTime64('2026-09-17 00:00:00', 9, 'UTC'),
-		 toDateTime64('2026-09-17 00:00:00', 9, 'UTC'), '[]', '[]')`); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.SaveExperiment(ctx(), obsdb.Experiment{ID: "exp_c", Name: "refresh"}); err != nil {
-		t.Fatal(err)
-	}
-	got, err := db.Experiment(ctx(), "exp_c")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Name != "refresh" {
-		t.Errorf("name = %q, want the update", got.Name)
-	}
-	if !got.Created.Equal(first) {
-		t.Errorf("created = %v, want the first save's %v — an update must not reset it", got.Created, first)
-	}
-	// A genuinely new id stamps now (ErrNotFound is the reset case).
-	if err := db.SaveExperiment(ctx(), obsdb.Experiment{ID: "exp_new", Name: "n"}); err != nil {
-		t.Fatal(err)
-	}
-	gotNew, err := db.Experiment(ctx(), "exp_new")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if time.Since(gotNew.Created) > time.Minute {
-		t.Errorf("a first save's created = %v, want now", gotNew.Created)
 	}
 }
 

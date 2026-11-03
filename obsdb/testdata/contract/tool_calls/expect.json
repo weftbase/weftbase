@@ -1,6 +1,6 @@
 {
   "case": "tool_calls",
-  "description": "two steps: a tool call (execute_tool lookup_order) then the answer; run metadata through core.Metadata — a caller key and enduser.id in meta (user.id, its mirror, not), and the playground marks weft/runtime stamps (weft.playground, weft.experiment.id and weft.forked_from as row columns; weft.playground.command and weft.replay.view in meta)",
+  "description": "two steps: a tool call (execute_tool lookup_order) then the answer; run metadata through core.Metadata — a caller key and enduser.id in meta (user.id, its mirror, not), and a fork link (weft.forked_from as a row column)",
   "runs": [
     {
       "id": "a1100000000000000000000000000001",
@@ -9,16 +9,12 @@
       "agent": "support",
       "provider": "wefttest",
       "model": "script",
-      "playground": true,
-      "experiment_id": "exp_contract",
       "forked_from": "a1100000000000000000000000000099#1",
       "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
       "weft_version": "v0.0.0-contract",
       "meta": {
         "enduser.id": "user_42",
-        "tenant": "acme",
-        "weft.playground.command": "cmd_contract",
-        "weft.replay.view": "transcript"
+        "tenant": "acme"
       },
       "started": "2026-10-01T09:01:00Z",
       "finished": "2026-10-01T09:01:00.016Z",

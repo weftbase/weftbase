@@ -32,7 +32,7 @@ const (
 // subscription follows one run; a session- or public-id-scoped one spans
 // the many runs of one conversation, which is why the cursor is
 // hub-wide rather than per run. All is the explicit every-run scope
-// (Studio's Live page): it must be asked for, never implied.
+// (a Live page): it must be asked for, never implied.
 type Selector struct {
 	RunID, SessionID, PublicID, Agent string
 	// All matches every run's frames (subagent children included; a
@@ -102,9 +102,9 @@ type inProcessHub struct {
 }
 
 // NewHub returns the in-process hub: one Seq counter for every frame,
-// one bounded queue per subscriber (QueueSize, default 1000). Hosted
-// Studio swaps in a Redis/NATS implementation of the same interface;
-// this one is what setup A's live lane runs on.
+// one bounded queue per subscriber (QueueSize, default 1000). A
+// multi-node server swaps in a Redis/NATS implementation of the same
+// interface; this one is what a single node's live lane runs on.
 func NewHub(opts ...HubOption) Hub {
 	h := &inProcessHub{subs: map[*hubSub]struct{}{}}
 	for _, o := range opts {
@@ -198,7 +198,7 @@ func RunFrame(r RunRow) Frame {
 	w := Weft{
 		RunID: r.ID, ParentRunID: r.ParentRunID, ParentCallID: r.ParentCallID,
 		SessionID: r.SessionID, PublicID: r.PublicID, Turn: r.Turn, Agent: r.Agent,
-		Playground: r.Playground, ExperimentID: r.ExperimentID, ForkedFrom: r.ForkedFrom,
+		ForkedFrom:  r.ForkedFrom,
 		ResumedFrom: r.ResumedFrom, CallerRunID: r.CallerRunID, CallerCallID: r.CallerCallID,
 	}
 	return Frame{Kind: FrameRun, Run: &r, Weft: w}

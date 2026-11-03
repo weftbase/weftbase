@@ -15,7 +15,7 @@ import (
 // one of obsdb's own tables — runs, records, spans, other_logs,
 // run_search, run_tools, runs_fts, session_events — and nothing else. A file that also
 // holds thread's sessions (sessions, entries, session_locks,
-// thread_migrations) keeps them byte-identical: Studio never writes the
+// thread_migrations) keeps them byte-identical: obsdb never writes the
 // app's conversation store.
 
 // deleteChunk bounds one IN list: far under SQLite's bind-variable
@@ -212,7 +212,7 @@ func (d *DB) deleteInBatches(ctx context.Context, stmt string, args ...any) erro
 // WAL, so a checkpoint follows: PASSIVE (what no reader holds), then
 // TRUNCATE (the WAL back to zero bytes) — both under a short busy
 // timeout of their own (vacuumCheckpointWait), never the writer's 30 s,
-// so a live Studio's reader or writer never stalls the vacuum and the
+// so a live server's reader or writer never stalls the vacuum and the
 // vacuum never stalls it: the file's size after a vacuum is its size,
 // not the main file's plus a WAL the size of the database (UX-S5a-12).
 // A checkpoint a live reader or writer blocks is not an error — the

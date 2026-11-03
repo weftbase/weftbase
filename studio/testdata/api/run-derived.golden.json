@@ -14,8 +14,6 @@
   "session_id": "conv_7f3a",
   "public_id": "",
   "turn": 0,
-  "playground": false,
-  "experiment_id": "",
   "forked_from": "",
   "meta": {},
   "started": "2026-10-01T10:00:00Z",
@@ -49,7 +47,7 @@
     {
       "hole": "derived",
       "reason": "derived from spans · no events",
-      "fix": "stock OTel GenAI spans carry no weft events or request records: set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true for the messages and tool arguments (Studio reads them from the span attributes) and gen_ai.conversation.id on the invoke_agent span for a session; weft's own records need a weft SDK (Go today)"
+      "fix": "stock OTel GenAI spans carry no weft events or request records: set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true for the messages and tool arguments (weftbase reads them from the span attributes) and gen_ai.conversation.id on the invoke_agent span for a session; weft's own records need a weft SDK (Go today)"
     }
   ],
   "compactions": []

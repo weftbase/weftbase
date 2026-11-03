@@ -161,65 +161,6 @@ func TestSpanStatsAtIngest(t *testing.T) {
 	}
 }
 
-// rewindTo22 makes path's file a pre-0023 one: the rollup, its trigger,
-// the pass predicate column and their migration rows gone.
-func rewindTo22(t *testing.T, path string) {
-	t.Helper()
-	raw, err := sql.Open("sqlite", "file:"+path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = raw.Close() }()
-	for _, stmt := range []string{
-		`DROP TRIGGER span_stats_gone`, `DROP TABLE span_stats`,
-		`ALTER TABLE experiments DROP COLUMN pass_predicate`,
-		`DROP INDEX spans_attempt`,
-		`DELETE FROM obsdb_migrations WHERE version >= 23`,
-	} {
-		if _, err := raw.Exec(stmt); err != nil {
-			t.Fatalf("%s: %v", stmt, err)
-		}
-	}
-}
-
-// TestUpgradeTo0023BackfillsSpanStats: a file opened at 0023 derives the
-// rollup of every span it already holds, row for row what the writer
-// derives at ingest — over several backfill batches.
-func TestUpgradeTo0023BackfillsSpanStats(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "at22.db")
-	d, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t0 := time.Unix(1_800_000_000, 0)
-	for i := range 40 {
-		first, late := statSpans("r_"+strconv.Itoa(i), t0.Add(time.Duration(i)*time.Minute))
-		for _, b := range [][]obsdb.Span{first, late} {
-			if err := d.Write(context.Background(), obsdb.Batch{Spans: b}); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	ingested := spanStatRows(t, d.(*DB).reads, "1 = 1")
-	if err := d.Close(); err != nil {
-		t.Fatal(err)
-	}
-	rewindTo22(t, path)
-	old := spanStatsBatchSize
-	spanStatsBatchSize = 7 // several batches, one ending on the last span
-	defer func() { spanStatsBatchSize = old }()
-	d, err = Open(path)
-	if err != nil {
-		t.Fatalf("open a 0022 file: %v", err)
-	}
-	defer func() { _ = d.Close() }()
-	backfilled := spanStatRows(t, d.(*DB).reads, "1 = 1")
-	if len(ingested) != 40*5 || !slices.Equal(backfilled, ingested) {
-		t.Errorf("backfill = %d rows, ingest %d (want %d, equal):\n%s\nvs\n%s", len(backfilled), len(ingested), 40*5,
-			strings.Join(backfilled[:min(3, len(backfilled))], "\n"), strings.Join(ingested[:min(3, len(ingested))], "\n"))
-	}
-}
-
 // TestSpanStatsFollowDeletes: a deleted run's rollup rows go with its
 // spans (the trigger), and a sweep leaves none.
 func TestSpanStatsFollowDeletes(t *testing.T) {
@@ -260,63 +201,6 @@ func TestSpanStatsFollowDeletes(t *testing.T) {
 	}
 }
 
-// TestSpanStatsBackfillTime measures migration 0023's backfill on a
-// seeded file: WEFT_BACKFILL_RUNS runs (default 300; 50000 is the
-// measurement CHANGELOG quotes, 450,000 spans in 2.8 s) of statSpans'
-// eight spans each, rewound to 0022, then opened. The open is logged;
-// it must stay within a generous bound so a Studio over a large file
-// still starts.
-func TestSpanStatsBackfillTime(t *testing.T) {
-	n := 300
-	if v := os.Getenv("WEFT_BACKFILL_RUNS"); v != "" {
-		n, _ = strconv.Atoi(v)
-	}
-	path := filepath.Join(t.TempDir(), "seeded.db")
-	d, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t0 := time.Unix(1_800_000_000, 0)
-	const per = 100
-	for i := 0; i < n; i += per {
-		var b obsdb.Batch
-		for j := i; j < min(i+per, n); j++ {
-			first, late := statSpans("r_"+strconv.Itoa(j), t0.Add(time.Duration(j)*time.Second))
-			b.Spans = append(b.Spans, first...)
-			b.Spans = append(b.Spans, late...)
-		}
-		if err := d.Write(context.Background(), b); err != nil {
-			t.Fatal(err)
-		}
-	}
-	var spans int
-	if err := d.(*DB).reads.QueryRow(`SELECT COUNT(*) FROM spans`).Scan(&spans); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.Close(); err != nil {
-		t.Fatal(err)
-	}
-	rewindTo22(t, path)
-	start := time.Now()
-	d, err = Open(path)
-	took := time.Since(start)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = d.Close() }()
-	var rows int
-	if err := d.(*DB).reads.QueryRow(`SELECT COUNT(*) FROM span_stats`).Scan(&rows); err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("migration 0023 over %d spans (%d runs): %d rollup rows in %v (%.0f spans/s)", spans, n, rows, took, float64(spans)/took.Seconds())
-	if rows != n*5 {
-		t.Errorf("backfill = %d rows, want %d", rows, n*5)
-	}
-	if took > time.Minute {
-		t.Errorf("migration 0023 over %d spans took %v: a Studio over this file would not start", spans, took)
-	}
-}
-
 // longTrace is one run's trace of n spans: model calls, each with an
 // attempt span, under one root — the shape whose attempts subquery
 // once scanned the whole trace per chat span.
@@ -339,10 +223,9 @@ func longTrace(run string, n int, t0 time.Time) []obsdb.Span {
 	return append(out[:n-1], root)
 }
 
-// TestSpanStatsLongTrace: a 30,000-span trace ingests and backfills in
-// bounded time — the attempts subquery reads spans_attempt, never the
-// whole trace per chat span (before: 41.7 s to ingest, 46.8 s blocking
-// Open; now well under a second each).
+// TestSpanStatsLongTrace: a 30,000-span trace ingests in bounded time —
+// the attempts subquery reads spans_attempt, never the whole trace per
+// chat span (before: 41.7 s to ingest; now well under a second).
 func TestSpanStatsLongTrace(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "long.db")
 	d, err := Open(path)
@@ -375,27 +258,17 @@ func TestSpanStatsLongTrace(t *testing.T) {
 		}
 	}
 	ingest := time.Since(start)
-	if err := d.Close(); err != nil {
-		t.Fatal(err)
-	}
-	rewindTo22(t, path)
-	start = time.Now()
-	d, err = Open(path)
-	backfill := time.Since(start)
-	if err != nil {
-		t.Fatal(err)
-	}
 	defer func() { _ = d.Close() }()
 	var n int
 	if err := d.(*DB).reads.QueryRow(`SELECT COUNT(*) FROM span_stats`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("a 30,000-span trace: ingest %v, backfill on open %v, %d rollup rows", ingest, backfill, n)
+	t.Logf("a 30,000-span trace: ingest %v, %d rollup rows", ingest, n)
 	if n != 15_000 {
 		t.Errorf("rollup rows = %d, want 15000 (the chat spans and the root)", n)
 	}
-	if !raceEnabled && (ingest > 15*time.Second || backfill > 5*time.Second) {
-		t.Errorf("a 30,000-span trace took %v to ingest and %v to backfill: the attempts subquery is scanning the trace", ingest, backfill)
+	if !raceEnabled && ingest > 15*time.Second {
+		t.Errorf("a 30,000-span trace took %v to ingest: the attempts subquery is scanning the trace", ingest)
 	}
 }
 
@@ -453,42 +326,6 @@ func TestSpanStatsIngestCost(t *testing.T) {
 	}
 	if us > 150 {
 		t.Errorf("span_stats ingest costs %.0f µs/span, want under 150: is the INSERT … SELECT prepared once per Write?", us)
-	}
-}
-
-// TestUpgradeTo0025AddsSpansAttempt: a file that reached 0024 with
-// 0023's first text (no spans_attempt) gets the index at 0025, and a
-// span write — whose derivation names it — works again.
-func TestUpgradeTo0025AddsSpansAttempt(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "at24.db")
-	d, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := d.Close(); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := sql.Open("sqlite", "file:"+path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, stmt := range []string{`DROP INDEX spans_attempt`, `DELETE FROM obsdb_migrations WHERE version >= 25`} {
-		if _, err := raw.Exec(stmt); err != nil {
-			t.Fatal(err)
-		}
-	}
-	_ = raw.Close()
-	d, err = Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = d.Close() }()
-	first, late := statSpans("r_25", time.Unix(1_800_000_000, 0))
-	if err := d.Write(context.Background(), obsdb.Batch{Spans: append(first, late...)}); err != nil {
-		t.Fatalf("a span write after 0025: %v", err)
-	}
-	if n := len(spanStatRows(t, d.(*DB).reads, "run_id = 'r_25'")); n != 5 {
-		t.Errorf("rollup rows after 0025 = %d, want 5", n)
 	}
 }
 
@@ -650,45 +487,5 @@ func TestSpanStatsFailureKeepsTheBatch(t *testing.T) {
 	}
 	if n := strings.Count(logged.String(), "span_stats rollup write failed"); n != 1 || !strings.Contains(logged.String(), "level=WARN") {
 		t.Errorf("WARN lines = %d, want 1:\n%s", n, logged.String())
-	}
-}
-
-// TestUpgradeTo0023LogsTheBackfill (P10a-pre-go-fix item 6): Open
-// blocks for 0023's backfill, so it says so — one INFO line with the
-// span count before, one with the duration after; a file with no spans
-// logs neither.
-func TestUpgradeTo0023LogsTheBackfill(t *testing.T) {
-	var logged bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelInfo})))
-	defer slog.SetDefault(prev)
-
-	path := filepath.Join(t.TempDir(), "at22.db")
-	d, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(logged.String(), "0023") {
-		t.Errorf("a new file logged the backfill:\n%s", logged.String())
-	}
-	first, late := statSpans("r_log", time.Unix(1_800_000_000, 0))
-	spans := append(first, late...)
-	if err := d.Write(context.Background(), obsdb.Batch{Spans: spans}); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.Close(); err != nil {
-		t.Fatal(err)
-	}
-	rewindTo22(t, path)
-	logged.Reset()
-	d, err = Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = d.Close() }()
-	out := logged.String()
-	if !strings.Contains(out, "level=INFO msg=\"obsdb/sqlite: migration 0023 backfills the span_stats rollup; Open waits for it\" spans="+strconv.Itoa(len(spans))) ||
-		!strings.Contains(out, "migration 0023 backfill done") || !strings.Contains(out, "duration=") {
-		t.Errorf("the backfill's INFO lines:\n%s", out)
 	}
 }

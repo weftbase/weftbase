@@ -30,24 +30,14 @@ import (
 //	until       the window's end, RFC 3339; default now
 //	agent       the agent's name, exact
 //	tag.<k>=<v> metadata matches, /api/runs' meaning
-//	public_id   /api/runs' meaning; a panel token's own is forced
+//	public_id   /api/runs' meaning
 //	parent      "*" (the default: every run, subagent children
 //	            included — each counted under its own agent) | "" the
 //	            top-level runs | a run id its children. Note the
 //	            default differs from /api/runs', which lists the
 //	            top-level runs: a group's runs_query says all=1
-//	playground  false (the default: the app's own runs alone) | true
-//	            (playground runs alone, /api/runs' meaning) | all
-//	            (both). Not /api/runs' default (both): health numbers —
-//	            rates, percentiles, call counts — must not mix scripted
-//	            or playground replays into the app's own; a group's
-//	            runs_query carries the effective filter, so its link
-//	            lands on the same runs. With experiment_id the default is
-//	            all: every cell of an experiment is a playground run
-//	experiment_id the runs of one experiment (default: any); its cells
-//	            counted whatever playground's default
 //	status      /api/runs' status words (default: any); an unknown
-//	            value is 400, as since, until, by and playground are
+//	            value is 400, as since, until and by are
 //
 // since and until must lie in 1678..2262 (Unix nanoseconds), else 400.
 //
@@ -56,8 +46,7 @@ import (
 // group — its cost still priced per provider/model part; by=step keys a
 // call on its own run's step index, and a replay numbers its steps from
 // 0 at its from_step (not the source's ordinal the diff aligns on), so
-// a replay from step 3 counts under step 0 — playground=false, the
-// default, leaves replays out.
+// a replay from step 3 counts under step 0.
 //
 // A run is in the window when it started in [since, until); its spans
 // count with it, in its bucket. The series has statsBuckets buckets of
@@ -214,33 +203,7 @@ func (s *Server) serveStats(w http.ResponseWriter, r *http.Request) {
 	if _, set := q["parent"]; set {
 		query.ParentRunID = parentParam(q)
 	}
-	// The scope first: a foreign public id's 403 wins over any 400.
-	if !scopeRunsQuery(w, r, &query.RunQuery, q.Get("public_id")) {
-		return
-	}
-	// /api/runs' other filters, its words and its defaults — any status
-	// — except playground: the app's own runs unless asked (all: both).
-	// An experiment's cells are all playground runs (weft.playground), so
-	// with experiment_id and no playground the default is both: the
-	// experiment's own runs, counted.
-	query.ExperimentID = q.Get("experiment_id")
-	no := false
-	query.Playground = &no
-	switch v := q.Get("playground"); v {
-	case "":
-		if query.ExperimentID != "" {
-			query.Playground = nil
-		}
-	case "all":
-		query.Playground = nil
-	default:
-		b, err := strconv.ParseBool(v)
-		if err != nil {
-			badRequest(w, r, "playground must be true, false or all")
-			return
-		}
-		query.Playground = &b
-	}
+	// /api/runs' other filters, its words and its defaults — any status.
 	if query.Status, ok = statusParam(w, r, q); !ok {
 		return
 	}
@@ -420,15 +383,8 @@ func runsQueryOf(params url.Values, q obsdb.StatsQuery, by obsdb.StatsBy, key st
 	for k, val := range q.Meta {
 		v.Set("tag."+k, val)
 	}
-	for _, k := range []string{"public_id", "experiment_id"} {
-		if p := params.Get(k); p != "" {
-			v.Set(k, p)
-		}
-	}
-	// The effective playground filter (the default false included), in
-	// /api/search's spelling; both is its default, no parameter.
-	if q.Playground != nil {
-		v.Set("playground", strconv.FormatBool(*q.Playground))
+	if p := params.Get("public_id"); p != "" {
+		v.Set("public_id", p)
 	}
 	if q.Status != "" && by != obsdb.StatsByErrorType {
 		v.Set("status", string(q.Status))

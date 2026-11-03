@@ -17,20 +17,17 @@ import (
 // compact rows, the list tools' rule (mcp_compact.go): each group's
 // 24-bucket series is left out (full=true keeps it), empty and zero
 // figures are omitted, cost reasons lifted to one cost_reasons list
-// naming the group keys. The route scopes it: a panel token's own
-// public id is forced, a foreign one is 403, as for runs.
+// naming the group keys.
 
 type mcpStatsIn struct {
-	By           string            `json:"by" jsonschema:"group by: agent, model, tool, error_type or step"`
-	Since        string            `json:"since,omitempty" jsonschema:"the window's start: RFC 3339, or a duration back from until (90m, 24h, 7d); default 24h"`
-	Until        string            `json:"until,omitempty" jsonschema:"the window's end (RFC 3339); default now"`
-	Agent        string            `json:"agent,omitempty" jsonschema:"only this agent's runs (exact)"`
-	Tag          map[string]string `json:"tag,omitempty" jsonschema:"run metadata matches, key → value (tag.<k>=<v> on the route)"`
-	PublicID     string            `json:"public_id,omitempty" jsonschema:"only this public id's runs (a panel token's own is forced)"`
-	Parent       *string           `json:"parent,omitempty" jsonschema:"* (default: every run, subagent children included), empty: top-level runs only, or a run id: its children"`
-	Playground   string            `json:"playground,omitempty" jsonschema:"false (default: the app's own runs), true (playground runs) or all"`
-	ExperimentID string            `json:"experiment_id,omitempty" jsonschema:"one playground experiment's runs"`
-	Status       string            `json:"status,omitempty" jsonschema:"only runs in this status (the runs tool's words)"`
+	By       string            `json:"by" jsonschema:"group by: agent, model, tool, error_type or step"`
+	Since    string            `json:"since,omitempty" jsonschema:"the window's start: RFC 3339, or a duration back from until (90m, 24h, 7d); default 24h"`
+	Until    string            `json:"until,omitempty" jsonschema:"the window's end (RFC 3339); default now"`
+	Agent    string            `json:"agent,omitempty" jsonschema:"only this agent's runs (exact)"`
+	Tag      map[string]string `json:"tag,omitempty" jsonschema:"run metadata matches, key → value (tag.<k>=<v> on the route)"`
+	PublicID string            `json:"public_id,omitempty" jsonschema:"only this public id's runs"`
+	Parent   *string           `json:"parent,omitempty" jsonschema:"* (default: every run, subagent children included), empty: top-level runs only, or a run id: its children"`
+	Status   string            `json:"status,omitempty" jsonschema:"only runs in this status (the runs tool's words)"`
 	mcpFull
 	mcpBound
 }
@@ -41,7 +38,7 @@ func (m *mcpReader) stats(ctx context.Context, _ *sdk.CallToolRequest, in mcpSta
 	}
 	q := url.Values{"by": {in.By}}
 	for k, v := range map[string]string{"since": in.Since, "until": in.Until, "agent": in.Agent, "public_id": in.PublicID,
-		"playground": in.Playground, "experiment_id": in.ExperimentID, "status": in.Status} {
+		"status": in.Status} {
 		setStr(q, k, v)
 	}
 	if in.Parent != nil {

@@ -105,12 +105,12 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847600057000000",
+              "endTimeUnixNano": "1790847480057000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "invoke_agent support",
               "spanId": "5ba0000000000001",
-              "startTimeUnixNano": "1790847600000000000",
+              "startTimeUnixNano": "1790847480000000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -173,7 +173,7 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847600015000000",
+              "endTimeUnixNano": "1790847480015000000",
               "events": [
                 {
                   "attributes": [
@@ -209,7 +209,7 @@
                     }
                   ],
                   "name": "weft.repair",
-                  "timeUnixNano": "1790847600002000000"
+                  "timeUnixNano": "1790847480002000000"
                 }
               ],
               "flags": 257,
@@ -217,7 +217,7 @@
               "name": "chat",
               "parentSpanId": "5ba0000000000001",
               "spanId": "5ba0000000000002",
-              "startTimeUnixNano": "1790847600001000000",
+              "startTimeUnixNano": "1790847480001000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -256,13 +256,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847600004000000",
+              "endTimeUnixNano": "1790847480004000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "attempt",
               "parentSpanId": "5ba0000000000002",
               "spanId": "5ba0000000000003",
-              "startTimeUnixNano": "1790847600003000000",
+              "startTimeUnixNano": "1790847480003000000",
               "status": {
                 "code": "STATUS_CODE_ERROR",
                 "message": "503 Service Unavailable: overloaded"
@@ -302,13 +302,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847600006000000",
+              "endTimeUnixNano": "1790847480006000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "attempt",
               "parentSpanId": "5ba0000000000002",
               "spanId": "5ba0000000000004",
-              "startTimeUnixNano": "1790847600005000000",
+              "startTimeUnixNano": "1790847480005000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -347,13 +347,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847600014000000",
+              "endTimeUnixNano": "1790847480014000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "layer mw.Log",
               "parentSpanId": "5ba0000000000002",
               "spanId": "5ba0000000000005",
-              "startTimeUnixNano": "1790847600007000000",
+              "startTimeUnixNano": "1790847480007000000",
               "status": {},
               "traceId": "7ace0000000000000000000000000001"
             },
@@ -390,13 +390,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847600013000000",
+              "endTimeUnixNano": "1790847480013000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "layer mw.Retry",
               "parentSpanId": "5ba0000000000005",
               "spanId": "5ba0000000000006",
-              "startTimeUnixNano": "1790847600008000000",
+              "startTimeUnixNano": "1790847480008000000",
               "status": {},
               "traceId": "7ace0000000000000000000000000001"
             },
@@ -439,13 +439,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847600010000000",
+              "endTimeUnixNano": "1790847480010000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "layer mw.RepairJSON",
               "parentSpanId": "5ba0000000000006",
               "spanId": "5ba0000000000007",
-              "startTimeUnixNano": "1790847600009000000",
+              "startTimeUnixNano": "1790847480009000000",
               "status": {
                 "code": "STATUS_CODE_ERROR"
               },
@@ -484,13 +484,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847600012000000",
+              "endTimeUnixNano": "1790847480012000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "layer mw.RepairJSON",
               "parentSpanId": "5ba0000000000006",
               "spanId": "5ba0000000000008",
-              "startTimeUnixNano": "1790847600011000000",
+              "startTimeUnixNano": "1790847480011000000",
               "status": {},
               "traceId": "7ace0000000000000000000000000001"
             },
@@ -545,13 +545,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847600023000000",
+              "endTimeUnixNano": "1790847480023000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "execute_tool lookup_order",
               "parentSpanId": "5ba0000000000001",
               "spanId": "5ba0000000000009",
-              "startTimeUnixNano": "1790847600016000000",
+              "startTimeUnixNano": "1790847480016000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -602,13 +602,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847600022000000",
+              "endTimeUnixNano": "1790847480022000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "layer mw.Audit",
               "parentSpanId": "5ba0000000000009",
               "spanId": "5ba000000000000a",
-              "startTimeUnixNano": "1790847600017000000",
+              "startTimeUnixNano": "1790847480017000000",
               "status": {},
               "traceId": "7ace0000000000000000000000000001"
             },
@@ -657,13 +657,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847600021000000",
+              "endTimeUnixNano": "1790847480021000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "layer mw.Allow",
               "parentSpanId": "5ba000000000000a",
               "spanId": "5ba000000000000b",
-              "startTimeUnixNano": "1790847600018000000",
+              "startTimeUnixNano": "1790847480018000000",
               "status": {},
               "traceId": "7ace0000000000000000000000000001"
             },
@@ -712,13 +712,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847600020000000",
+              "endTimeUnixNano": "1790847480020000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "layer mw.MapErrors",
               "parentSpanId": "5ba000000000000b",
               "spanId": "5ba000000000000c",
-              "startTimeUnixNano": "1790847600019000000",
+              "startTimeUnixNano": "1790847480019000000",
               "status": {},
               "traceId": "7ace0000000000000000000000000001"
             },
@@ -779,13 +779,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847600029000000",
+              "endTimeUnixNano": "1790847480029000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "execute_tool delete_order",
               "parentSpanId": "5ba0000000000001",
               "spanId": "5ba000000000000d",
-              "startTimeUnixNano": "1790847600024000000",
+              "startTimeUnixNano": "1790847480024000000",
               "status": {
                 "code": "STATUS_CODE_ERROR"
               },
@@ -842,13 +842,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847600028000000",
+              "endTimeUnixNano": "1790847480028000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "layer mw.Audit",
               "parentSpanId": "5ba000000000000d",
               "spanId": "5ba000000000000e",
-              "startTimeUnixNano": "1790847600025000000",
+              "startTimeUnixNano": "1790847480025000000",
               "status": {
                 "code": "STATUS_CODE_ERROR"
               },
@@ -905,13 +905,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847600027000000",
+              "endTimeUnixNano": "1790847480027000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "layer mw.Allow",
               "parentSpanId": "5ba000000000000e",
               "spanId": "5ba000000000000f",
-              "startTimeUnixNano": "1790847600026000000",
+              "startTimeUnixNano": "1790847480026000000",
               "status": {
                 "code": "STATUS_CODE_ERROR"
               },
@@ -974,13 +974,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847600037000000",
+              "endTimeUnixNano": "1790847480037000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "execute_tool refund_order",
               "parentSpanId": "5ba0000000000001",
               "spanId": "5ba0000000000010",
-              "startTimeUnixNano": "1790847600030000000",
+              "startTimeUnixNano": "1790847480030000000",
               "status": {
                 "code": "STATUS_CODE_ERROR"
               },
@@ -1037,13 +1037,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847600036000000",
+              "endTimeUnixNano": "1790847480036000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "layer mw.Audit",
               "parentSpanId": "5ba0000000000010",
               "spanId": "5ba0000000000011",
-              "startTimeUnixNano": "1790847600031000000",
+              "startTimeUnixNano": "1790847480031000000",
               "status": {
                 "code": "STATUS_CODE_ERROR"
               },
@@ -1100,13 +1100,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847600035000000",
+              "endTimeUnixNano": "1790847480035000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "layer mw.Allow",
               "parentSpanId": "5ba0000000000011",
               "spanId": "5ba0000000000012",
-              "startTimeUnixNano": "1790847600032000000",
+              "startTimeUnixNano": "1790847480032000000",
               "status": {
                 "code": "STATUS_CODE_ERROR"
               },
@@ -1163,13 +1163,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847600034000000",
+              "endTimeUnixNano": "1790847480034000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "layer mw.MapErrors",
               "parentSpanId": "5ba0000000000012",
               "spanId": "5ba0000000000013",
-              "startTimeUnixNano": "1790847600033000000",
+              "startTimeUnixNano": "1790847480033000000",
               "status": {
                 "code": "STATUS_CODE_ERROR"
               },
@@ -1232,7 +1232,7 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847600046000000",
+              "endTimeUnixNano": "1790847480046000000",
               "events": [
                 {
                   "attributes": [
@@ -1244,7 +1244,7 @@
                     }
                   ],
                   "name": "weft.panic",
-                  "timeUnixNano": "1790847600039000000"
+                  "timeUnixNano": "1790847480039000000"
                 }
               ],
               "flags": 257,
@@ -1252,7 +1252,7 @@
               "name": "execute_tool charge_card",
               "parentSpanId": "5ba0000000000001",
               "spanId": "5ba0000000000014",
-              "startTimeUnixNano": "1790847600038000000",
+              "startTimeUnixNano": "1790847480038000000",
               "status": {
                 "code": "STATUS_CODE_ERROR"
               },
@@ -1309,13 +1309,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847600045000000",
+              "endTimeUnixNano": "1790847480045000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "layer mw.Audit",
               "parentSpanId": "5ba0000000000014",
               "spanId": "5ba0000000000015",
-              "startTimeUnixNano": "1790847600040000000",
+              "startTimeUnixNano": "1790847480040000000",
               "status": {
                 "code": "STATUS_CODE_ERROR"
               },
@@ -1372,13 +1372,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847600044000000",
+              "endTimeUnixNano": "1790847480044000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "layer mw.Allow",
               "parentSpanId": "5ba0000000000015",
               "spanId": "5ba0000000000016",
-              "startTimeUnixNano": "1790847600041000000",
+              "startTimeUnixNano": "1790847480041000000",
               "status": {
                 "code": "STATUS_CODE_ERROR"
               },
@@ -1435,13 +1435,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847600043000000",
+              "endTimeUnixNano": "1790847480043000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "layer mw.MapErrors",
               "parentSpanId": "5ba0000000000016",
               "spanId": "5ba0000000000017",
-              "startTimeUnixNano": "1790847600042000000",
+              "startTimeUnixNano": "1790847480042000000",
               "status": {
                 "code": "STATUS_CODE_ERROR"
               },
@@ -1510,13 +1510,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847600056000000",
+              "endTimeUnixNano": "1790847480056000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat",
               "parentSpanId": "5ba0000000000001",
               "spanId": "5ba0000000000018",
-              "startTimeUnixNano": "1790847600047000000",
+              "startTimeUnixNano": "1790847480047000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -1543,13 +1543,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847600049000000",
+              "endTimeUnixNano": "1790847480049000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "attempt",
               "parentSpanId": "5ba0000000000018",
               "spanId": "5ba0000000000019",
-              "startTimeUnixNano": "1790847600048000000",
+              "startTimeUnixNano": "1790847480048000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -1588,13 +1588,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847600055000000",
+              "endTimeUnixNano": "1790847480055000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "layer mw.Log",
               "parentSpanId": "5ba0000000000018",
               "spanId": "5ba000000000001a",
-              "startTimeUnixNano": "1790847600050000000",
+              "startTimeUnixNano": "1790847480050000000",
               "status": {},
               "traceId": "7ace0000000000000000000000000001"
             },
@@ -1631,13 +1631,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847600054000000",
+              "endTimeUnixNano": "1790847480054000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "layer mw.Retry",
               "parentSpanId": "5ba000000000001a",
               "spanId": "5ba000000000001b",
-              "startTimeUnixNano": "1790847600051000000",
+              "startTimeUnixNano": "1790847480051000000",
               "status": {},
               "traceId": "7ace0000000000000000000000000001"
             },
@@ -1674,13 +1674,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847600053000000",
+              "endTimeUnixNano": "1790847480053000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "layer mw.RepairJSON",
               "parentSpanId": "5ba000000000001b",
               "spanId": "5ba000000000001c",
-              "startTimeUnixNano": "1790847600052000000",
+              "startTimeUnixNano": "1790847480052000000",
               "status": {},
               "traceId": "7ace0000000000000000000000000001"
             }

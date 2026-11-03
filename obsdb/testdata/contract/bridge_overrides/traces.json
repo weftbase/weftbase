@@ -141,12 +141,12 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790846820007000000",
+              "endTimeUnixNano": "1790846760007000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "invoke_agent support",
               "spanId": "5ba0000000000001",
-              "startTimeUnixNano": "1790846820000000000",
+              "startTimeUnixNano": "1790846760000000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -227,13 +227,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790846820002000000",
+              "endTimeUnixNano": "1790846760002000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
               "parentSpanId": "5ba0000000000001",
               "spanId": "5ba0000000000002",
-              "startTimeUnixNano": "1790846820001000000",
+              "startTimeUnixNano": "1790846760001000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -284,13 +284,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790846820004000000",
+              "endTimeUnixNano": "1790846760004000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "execute_tool lookup_order",
               "parentSpanId": "5ba0000000000001",
               "spanId": "5ba0000000000003",
-              "startTimeUnixNano": "1790846820003000000",
+              "startTimeUnixNano": "1790846760003000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -377,13 +377,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790846820006000000",
+              "endTimeUnixNano": "1790846760006000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
               "parentSpanId": "5ba0000000000001",
               "spanId": "5ba0000000000004",
-              "startTimeUnixNano": "1790846820005000000",
+              "startTimeUnixNano": "1790846760005000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },

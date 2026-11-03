@@ -147,12 +147,12 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790846940011000000",
+              "endTimeUnixNano": "1790846880011000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "invoke_agent investment-lead",
               "spanId": "5ba0000000000001",
-              "startTimeUnixNano": "1790846940000000000",
+              "startTimeUnixNano": "1790846880000000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -263,13 +263,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790846940002000000",
+              "endTimeUnixNano": "1790846880002000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
               "parentSpanId": "5ba0000000000001",
               "spanId": "5ba0000000000002",
-              "startTimeUnixNano": "1790846940001000000",
+              "startTimeUnixNano": "1790846880001000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -356,13 +356,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790846940008000000",
+              "endTimeUnixNano": "1790846880008000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "execute_tool market_analyst",
               "parentSpanId": "5ba0000000000001",
               "spanId": "5ba0000000000003",
-              "startTimeUnixNano": "1790846940003000000",
+              "startTimeUnixNano": "1790846880003000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -509,13 +509,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790846940007000000",
+              "endTimeUnixNano": "1790846880007000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "invoke_agent market-analyst",
               "parentSpanId": "5ba0000000000003",
               "spanId": "5ba0000000000004",
-              "startTimeUnixNano": "1790846940004000000",
+              "startTimeUnixNano": "1790846880004000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -638,13 +638,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790846940006000000",
+              "endTimeUnixNano": "1790846880006000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
               "parentSpanId": "5ba0000000000004",
               "spanId": "5ba0000000000005",
-              "startTimeUnixNano": "1790846940005000000",
+              "startTimeUnixNano": "1790846880005000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -761,13 +761,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790846940010000000",
+              "endTimeUnixNano": "1790846880010000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
               "parentSpanId": "5ba0000000000001",
               "spanId": "5ba0000000000006",
-              "startTimeUnixNano": "1790846940009000000",
+              "startTimeUnixNano": "1790846880009000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },

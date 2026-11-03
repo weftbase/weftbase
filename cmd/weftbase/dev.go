@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -22,16 +21,15 @@ import (
 	"github.com/weftbase/weftbase/studio"
 )
 
-// `weftbase dev` (plan B1.2, FEATURES D7): Studio and the app in one
-// command, the app restarted on a .go save.
+// `weftbase dev` (plan B1.2, FEATURES D7): the server and the app in
+// one command, the app restarted on a .go save.
 //
 // Everything it does is something the app or the shell can do itself:
-// it is Studio alone (`weftbase dev` without "--": the same flags, the same
-// port policy) plus the app run
-// with four environment variables set — WEFT_ENV=dev (runtime.Install
-// opens its link), WEFTBASE_URL and WEFTBASE_TOKEN (otel's Studio
-// destination, which runtime.Install dials by default) and WEFTBASE_DB (the
-// otel local sink's path: the same file Studio serves).
+// it is the server alone (`weftbase dev` without "--": the same flags,
+// the same port policy) plus the app run with four environment
+// variables set — WEFT_ENV=dev, WEFTBASE_URL and WEFTBASE_TOKEN (the
+// exporter's destination) and WEFTBASE_DB (the otel local sink's path:
+// the same file the server serves).
 
 const (
 	// devStopGrace is how long a stopping app has between the polite
@@ -42,18 +40,12 @@ const (
 	devDebounce = 300 * time.Millisecond
 )
 
-// devRuntimeWait is how long the one line waits for the app's runtime
-// to register before saying none has yet; devPoll is how often the
-// runtimes view is read meanwhile. Variables so a test may shorten
-// them.
+// devDefaultAddr and devSpan are the port policy's unpinned start
+// (defaultAddr, listen.DefaultSpan); variables so a test may move them
+// to free ports.
 var (
-	devRuntimeWait = 5 * time.Second
-	// devDefaultAddr and devSpan are the port policy's unpinned start
-	// (defaultAddr, listen.DefaultSpan); variables so a test may move
-	// them to free ports.
 	devDefaultAddr = defaultAddr
 	devSpan        = 0
-	devPoll        = 100 * time.Millisecond
 )
 
 // exitCode is a run outcome that exits with a given code and prints
@@ -74,18 +66,16 @@ func runDev(args []string, stdout, stderr io.Writer) error {
 	db := fs.String("db", "",
 		"`sqlite://path` or `clickhouse://user:pass@host:9000/db` (default: $WEFTBASE_DB or ./.weftbase/weftbase.db)")
 	addr := fs.String("addr", "",
-		"listen `address` (default: $WEFTBASE_ADDR, else "+defaultAddr+"); --addr pins; without it Studio reuses a running one on the same DB or takes the next free port in 7331–7340")
+		"listen `address` (default: $WEFTBASE_ADDR, else "+defaultAddr+"); --addr pins; without it weftbase reuses a running one on the same DB or takes the next free port in 7331–7340")
 	token := fs.String("token", "",
 		"API token (default: $WEFTBASE_TOKEN, else the database's stable token, <db>.token); the app receives it as WEFTBASE_TOKEN")
 	manifest := fs.String("manifest", "",
 		"`path` to the app's weft.json (default: $WEFT_MANIFEST, else the nearest weft.json from the working directory upward)")
 	open := fs.Bool("open", stdoutIsTTY(),
 		"open the browser on the UI, the token in the URL fragment (default: on when stdout is a terminal)")
-	noPlayground := fs.Bool("no-playground", false,
-		"turn the playground off (the app's runtime link then has nothing to register with)")
 	rotate := fs.Bool("rotate-token", false,
 		"write a new stable dev token beside the database (<db>.token) before serving; an action, so no environment mirror")
-	retain := retainFlag(fs, "to keep runs after they were last seen: older ones that are not running are deleted from studio's tables")
+	retain := retainFlag(fs, "to keep runs after they were last seen: older ones that are not running are deleted from weftbase's tables")
 	pricing := pricingFlag(fs)
 	logs := addLogFlags(fs)
 	noWatch := fs.Bool("no-watch", false,
@@ -94,7 +84,7 @@ func runDev(args []string, stdout, stderr io.Writer) error {
 	fs.Func("watch", "`dir` to watch for .go changes, repeatable (default: the working directory)",
 		func(s string) error { roots = append(roots, s); return nil })
 	fs.Usage = func() {
-		_, _ = fmt.Fprintln(fs.Output(), "Usage: weftbase dev [flags] -- command args…   (without \"--\", weftbase dev serves Studio alone)")
+		_, _ = fmt.Fprintln(fs.Output(), "Usage: weftbase dev [flags] -- command args…   (without \"--\", weftbase dev serves alone)")
 		_, _ = fmt.Fprintln(fs.Output(), "  Run a package (go run ., go run ./cmd/app) or a module build, never go run main.go:\n  a file list has no build info, so its manifest sources read main/… and its runs read stale against weft.json.")
 		printDefaults(fs)
 	}
@@ -128,10 +118,6 @@ func runDev(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	opts = append(opts, studio.Playground(!*noPlayground))
-	if *noPlayground {
-		opts = append(opts, studio.OffReason("playground", noPlaygroundReason("weftbase dev")))
-	}
 	retainOpts, _, err := retainOptions(*retain)
 	if err != nil {
 		return err
@@ -144,7 +130,7 @@ func runDev(args []string, stdout, stderr io.Writer) error {
 	opts = append(opts, pricingOpts...)
 
 	// Signals are ours from here on: Ctrl-C stops the app first, then
-	// Studio. Armed before anything starts, so none is lost.
+	// the server. Armed before anything starts, so none is lost.
 	// SIGHUP (the terminal closed) is one of them on unix: its default
 	// action would end weftbase dev without stopping the app.
 	sigs := make(chan os.Signal, 1)
@@ -177,16 +163,13 @@ func runDev(args []string, stdout, stderr io.Writer) error {
 		changes = ch
 	}
 	d := &devLoop{
-		argv:       argv,
-		env:        devEnv(os.Environ(), st.url, st.token, st.dbPath),
-		stdout:     stdout,
-		stderr:     stderr,
-		out:        out,
-		link:       st.link,
-		url:        st.url,
-		token:      st.token,
-		playground: !st.noPlayground,
-		noWatch:    *noWatch,
+		argv:    argv,
+		env:     devEnv(os.Environ(), st.url, st.token, st.dbPath),
+		stdout:  stdout,
+		stderr:  stderr,
+		out:     out,
+		link:    st.link,
+		noWatch: *noWatch,
 	}
 	err = d.run(sigs, changes)
 	if d.stopSig != nil {
@@ -197,8 +180,9 @@ func runDev(args []string, stdout, stderr io.Writer) error {
 
 // devEnv is the app's environment: the parent's, plus WEFT_ENV=dev
 // (kept when already set to something), WEFTBASE_URL,
-// WEFTBASE_TOKEN and WEFTBASE_DB (when Studio serves a file) — those
-// three override what the shell had, so the app and Studio agree.
+// WEFTBASE_TOKEN and WEFTBASE_DB (when the server serves a file) —
+// those three override what the shell had, so the app and the server
+// agree.
 func devEnv(parent []string, url, token, dbPath string) []string {
 	set := map[string]string{
 		"WEFTBASE_URL":   url,
@@ -237,7 +221,6 @@ func devEnv(parent []string, url, token, dbPath string) []string {
 // this process, or a running one it reuses.
 type devStudioRun struct {
 	addr, url, link, token, dbPath string
-	noPlayground                   bool
 	stop                           func(os.Signal) // stops a Studio this process started
 }
 
@@ -325,7 +308,6 @@ func devStudio(dbFlag string, w want, tokenFlag string, rotate bool, out io.Writ
 	// Named once it can serve (never a Studio that failed to boot).
 	lock.SetHolder(dblock.Holder{URL: r.url, PID: os.Getpid()})
 	r.token = srv.token
-	r.noPlayground = srv.Runtime() == nil
 	// A fixed or stable token stays out of the log, link included
 	// (B1.1's rule; the stable token is the signing key too); only one
 	// generated for this process (a database with no file) is nobody's
@@ -403,9 +385,7 @@ type devLoop struct {
 	env            []string
 	stdout, stderr io.Writer     // the app's own output, passed through
 	out            *lockedWriter // weftbase dev's lines
-	link, url      string
-	token          string
-	playground     bool
+	link           string
 	noWatch        bool
 	stopSig        os.Signal // the signal that ended the loop, if one did
 }
@@ -422,7 +402,7 @@ func (d *devLoop) run(sigs <-chan os.Signal, changes <-chan string) error {
 		return nil
 	default:
 	}
-	cur, line := d.start()
+	cur := d.start()
 	if cur == nil && d.noWatch {
 		// Nothing will ever restart it: the shell's "command not found".
 		return exitCode(127)
@@ -436,14 +416,12 @@ func (d *devLoop) run(sigs <-chan os.Signal, changes <-chan string) error {
 		case sig := <-sigs:
 			d.stopSig = sig
 			if cur != nil {
-				line.finish()
 				cur.stop(appSignal(sig))
 			}
 			return nil
 		case path := <-changes:
 			d.say("%s changed; restarting the app", d.rel(path))
 			if cur != nil {
-				line.finish()
 				cur.stop(syscall.SIGTERM)
 			}
 			// A Ctrl-C during the stop's grace window ends here: no
@@ -454,9 +432,8 @@ func (d *devLoop) run(sigs <-chan os.Signal, changes <-chan string) error {
 				return nil
 			default:
 			}
-			cur, line = d.start()
+			cur = d.start()
 		case <-done:
-			line.finish()
 			cur.reap()
 			code := cur.exitCode()
 			if d.noWatch {
@@ -475,16 +452,19 @@ func (d *devLoop) run(sigs <-chan os.Signal, changes <-chan string) error {
 	}
 }
 
-// start starts the app and the one line's runtime wait. A start that
-// fails (no such command) is said and waited out like an exit.
-func (d *devLoop) start() (*child, *oneLine) {
-	before := d.runtimeIDs(context.Background())
+// start starts the app and prints its one line. A start that fails (no
+// such command) is said and waited out like an exit.
+func (d *devLoop) start() *child {
 	c, err := startChild(d.argv, d.env, d.stdout, d.stderr)
 	if err != nil {
 		d.say("could not start %q: %v", strings.Join(d.argv, " "), err)
-		return nil, &oneLine{done: closedChan()}
+		return nil
 	}
-	return c, d.announce(c.pid, before)
+	// The one line for the app:
+	//
+	//	studio <link> · app pid <n>
+	_, _ = fmt.Fprintf(d.out, "studio %s · app pid %d\n", d.link, c.pid)
+	return c
 }
 
 // say prints one "weftbase dev: …" line.
@@ -502,155 +482,8 @@ func (d *devLoop) rel(path string) string {
 	return path
 }
 
-// oneLine is the pending one line of an app start: printed when the
-// app's runtime registers, when devRuntimeWait lapses (and then a later
-// line when one registers), or when the app stops first.
-type oneLine struct {
-	cancel context.CancelFunc
-	done   chan struct{}
-}
-
-// finish stops the wait and returns once the line is printed.
-func (l *oneLine) finish() {
-	if l.cancel != nil {
-		l.cancel()
-	}
-	<-l.done
-}
-
-func closedChan() chan struct{} { c := make(chan struct{}); close(c); return c }
-
-// announce prints the one line for the app at pid:
-//
-//	studio <link> · app pid <n> · runtime <rt_id> registered
-//
-// The runtime is the first one this Studio lists connected that was
-// not connected before the app started (GET /api/runtimes, the API the
-// UI reads; newRuntime).
-func (d *devLoop) announce(pid int, before map[string]int) *oneLine {
-	ctx, cancel := context.WithCancel(context.Background())
-	l := &oneLine{cancel: cancel, done: make(chan struct{})}
-	head := fmt.Sprintf("studio %s · app pid %d · ", d.link, pid)
-	if !d.playground {
-		_, _ = fmt.Fprintln(d.out, head+"playground off (--no-playground): no runtime link")
-		close(l.done)
-		return l
-	}
-	go func() {
-		defer close(l.done)
-		deadline := time.NewTimer(devRuntimeWait)
-		defer deadline.Stop()
-		printed := false
-		for {
-			if id, err := d.newRuntime(ctx, before); err != nil {
-				if !printed {
-					_, _ = fmt.Fprintln(d.out, head+err.Error())
-				}
-				return
-			} else if id != "" {
-				if printed {
-					d.say("runtime %s registered (app pid %d)", id, pid)
-				} else {
-					_, _ = fmt.Fprintln(d.out, head+"runtime "+id+" registered")
-				}
-				return
-			}
-			select {
-			case <-ctx.Done():
-				if !printed {
-					_, _ = fmt.Fprintln(d.out, head+"no runtime registered (the app stopped first)")
-				}
-				return
-			case <-deadline.C:
-				printed = true
-				_, _ = fmt.Fprintln(d.out, head+"no runtime registered yet (the app needs runtime.Install; WEFT_ENV=dev is set), or the app links its own embedded Studio")
-			case <-time.After(devPoll):
-			}
-		}
-	}()
-	return l
-}
-
-// errNoPlayground is the runtimes view answering 404: a reused Studio
-// without the playground.
-var errNoPlayground = errors.New("the Studio's playground is off: no runtime link")
-
-// newRuntime is the id of a runtime connected now that was not
-// connected before the app started — absent from before, or connected
-// then from another process (another pid: the old app's link not yet
-// dropped when the restart read the list); "" when there is none (or
-// the view could not be read — the next poll retries). Only connected
-// rows count: a stable id listed disconnected or restored (a weftbase dev
-// restart over the same database, a .go-save restart) comes back under
-// the same id, and is this app's registration once it is connected.
-func (d *devLoop) newRuntime(ctx context.Context, before map[string]int) (string, error) {
-	rts, err := d.listRuntimes(ctx)
-	if errors.Is(err, errNoPlayground) {
-		return "", err
-	}
-	for _, r := range rts {
-		if !r.Connected {
-			continue
-		}
-		if pid, ok := before[r.ID]; !ok || pid != r.Pid {
-			return r.ID, nil
-		}
-	}
-	return "", nil
-}
-
-// runtimeIDs is the runtimes connected now, by id, with their pid.
-func (d *devLoop) runtimeIDs(ctx context.Context) map[string]int {
-	rts, _ := d.listRuntimes(ctx)
-	set := make(map[string]int, len(rts))
-	for _, r := range rts {
-		if r.Connected {
-			set[r.ID] = r.Pid
-		}
-	}
-	return set
-}
-
-// listedRuntime is one row of GET /api/runtimes, as weftbase dev reads it.
-type listedRuntime struct {
-	ID        string `json:"id"`
-	Pid       int    `json:"pid"`
-	Connected bool   `json:"connected"`
-}
-
-// listRuntimes reads GET /api/runtimes.
-func (d *devLoop) listRuntimes(ctx context.Context) ([]listedRuntime, error) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, d.url+"/api/runtimes", nil)
-	if err != nil {
-		return nil, err
-	}
-	if d.token != "" {
-		req.Header.Set("Authorization", "Bearer "+d.token)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, errNoPlayground
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET /api/runtimes: %s", resp.Status)
-	}
-	var body struct {
-		Runtimes []listedRuntime `json:"runtimes"`
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&body); err != nil {
-		return nil, err
-	}
-	return body.Runtimes, nil
-}
-
-// lockedWriter serialises weftbase dev's own lines (the one line's waiter
-// and the loop write from two goroutines).
+// lockedWriter serialises weftbase dev's own lines (the server and the
+// loop write from two goroutines).
 type lockedWriter struct {
 	mu sync.Mutex
 	w  io.Writer

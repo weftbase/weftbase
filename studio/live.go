@@ -202,8 +202,8 @@ type runFrameDTO struct {
 }
 
 // liveSelector parses S4.5's selector: exactly one of run, session,
-// public_id, agent or all (plan A7: all=1, every run — the dev token's
-// and setup A's alone, scopeLive), or none beside a run metadata
+// public_id, agent or all (plan A7: all=1, every run — the server
+// token's and the open loopback API's alone, liveAllowed), or none beside a run metadata
 // filter (liveMeta: tag.<k>=<v>, flow=; U22), else the request is a
 // 400. A selector the filter stands alone with is the zero Selector:
 // resolveLive names its base once the caller is known.
@@ -272,17 +272,11 @@ func first(q map[string][]string, k string) string {
 }
 
 // resolveLive names the base of a stream a metadata filter stands
-// alone in: a panel token's public id (the filter then reads what the
-// token already allows), else every run, filtered — allowed wherever
-// agent= alone is (scopeLiveFiltered): a filter narrows as an agent
-// does, so setup A behind an allowed Host gets its lane too, and a
-// tag-only panel token (I4) its batch, its tags in the filter.
-func resolveLive(r *http.Request, sel obsdb.Selector) obsdb.Selector {
+// alone in: every run, filtered — allowed wherever agent= alone is
+// (liveAllowed): a filter narrows as an agent does.
+func resolveLive(sel obsdb.Selector) obsdb.Selector {
 	if sel != (obsdb.Selector{}) {
 		return sel
-	}
-	if p := idFrom(r).panel; p != nil && p.PublicID != "" {
-		return obsdb.Selector{PublicID: p.PublicID}
 	}
 	return obsdb.Selector{All: true}
 }
@@ -391,44 +385,18 @@ func liveKinds(q map[string][]string) (map[string]bool, error) {
 	return kinds, nil
 }
 
-// scopeLiveFiltered is scopeLive, except that a stream a metadata
-// filter stands alone in (resolved to every run for any caller but a
-// public-id panel token) passes where agent= alone would — every
-// identity but a panel token — rather than under the all selector's
-// db.path rule (U22-fix): the filter narrows the frames as an agent
-// does. Under a panel token with tags (I4) the request's filter must
-// not name a token key with another value (403: a stream narrows,
-// never widens), and a filter-only stream of a tag-only token passes:
-// its tags join the filter (liveTokenMeta), so every frame is held to
-// them. meta is the request's own filter.
-func (s *Server) scopeLiveFiltered(w http.ResponseWriter, r *http.Request, sel obsdb.Selector, filterOnly bool, meta map[string]string) bool {
-	p := idFrom(r).panel
-	if p == nil {
-		if filterOnly {
-			return true
-		}
-		return s.scopeLive(w, r, sel)
-	}
-	if _, ok := narrowTags(meta, p.Tags); !ok {
-		forbidden(w, r)
-		return false
-	}
-	if filterOnly && p.PublicID == "" {
+// liveAllowed refuses the all selector (every run on one stream) to
+// anyone but the server token and the open loopback API (db.path's
+// rule, mayReadDBPath). A stream a metadata filter stands alone in is
+// all, filtered, and passes as agent= alone would: the filter narrows
+// the frames.
+func liveAllowed(s *Server, w http.ResponseWriter, r *http.Request, sel obsdb.Selector, filterOnly bool) bool {
+	if filterOnly || !sel.All || mayReadDBPath(s, r) {
 		return true
 	}
-	return s.scopeLive(w, r, sel)
-}
-
-// liveTokenMeta is a stream's run filter under the request's identity:
-// the request's pairs and a panel token's tags (narrowTags; a conflict
-// was refused by scopeLiveFiltered before).
-func liveTokenMeta(r *http.Request, meta map[string]string) map[string]string {
-	if p := idFrom(r).panel; p != nil {
-		if m, ok := narrowTags(meta, p.Tags); ok {
-			return m
-		}
-	}
-	return meta
+	writeError(w, r, http.StatusForbidden, "forbidden",
+		"the all selector streams every run: it needs the server token, or no token and a loopback Host")
+	return false
 }
 
 // serveLive streams the live lane over SSE (S4.5).
@@ -439,9 +407,9 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reqMeta := liveMeta(r.URL.Query())
-	filter := newLiveFilter(liveTokenMeta(r, reqMeta), liveAgent(r.URL.Query(), sel))
+	filter := newLiveFilter(reqMeta, liveAgent(r.URL.Query(), sel))
 	filterOnly := sel == (obsdb.Selector{})
-	sel = resolveLive(r, sel)
+	sel = resolveLive(sel)
 	kinds, err := liveKinds(map[string][]string(r.URL.Query()))
 	if err != nil {
 		writeError(w, r, http.StatusBadRequest, "bad_request", err.Error())
@@ -461,7 +429,7 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 		after = n
 	}
 
-	if !s.scopeLiveFiltered(w, r, sel, filterOnly, reqMeta) {
+	if !liveAllowed(s, w, r, sel, filterOnly) {
 		return
 	}
 
@@ -480,27 +448,10 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	// A panel token's frames are checked one by one against its scope
-	// (S4.6): the selector's own check passes a run or session that
-	// nothing has stored yet, and what later runs under that id may be
-	// anyone's. Its tags ride the filter (liveTokenMeta): a run frame
-	// by its row, a record or attempt frame by its admitted run or its
-	// own attributes.
-	scope := panelScope(r)
 	// Subscribe before the backfill reads the database: records that
 	// arrive during the backfill arrive on both paths, and the
 	// (run, kind, pos) dedup keeps each to one delivery.
-	//
-	// A panel token's stream ends at the token's expiry (plan C5),
-	// opened with the bearer or with a grant alike: the grant bounds
-	// opening, the token bounds the stream (the backfill included). The
-	// server token's and setup A's streams have nothing to end them.
-	ctx, cancel := context.WithCancel(r.Context())
-	if p := idFrom(r).panel; p != nil {
-		cancel()
-		ctx, cancel = context.WithDeadline(r.Context(), p.Exp)
-	}
-	defer cancel()
+	ctx := r.Context()
 	frames, err := s.live.Subscribe(ctx, sel, after)
 	if err != nil {
 		writeError(w, r, http.StatusInternalServerError, "internal", err.Error())
@@ -516,23 +467,12 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	sw := &sseWriter{w: w, rc: http.NewResponseController(w)}
 	sw.flush()
-	// tokenExpired is the end-of-token frame: the client may reopen only
-	// with a bearer that is still valid (a new token, a new grant).
-	tokenExpired := func() bool {
-		if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return false
-		}
-		sw.frame("event: expired\ndata: {}\n\n")
-		sw.flush()
-		return true
-	}
-
 	sent := newLiveDedup(liveDedupSize)
 	if r.Header.Get("Last-Event-ID") != "" {
 		// Nothing is evicted while the backfill writes, nor until the
 		// live frames queued behind it have drained (the first ping).
 		sent.hold = true
-		s.backfill(ctx, sw, sel, scope, kinds, sent, filter)
+		s.backfill(ctx, sw, sel, kinds, sent, filter)
 	}
 
 	ticker := time.NewTicker(pingEvery)
@@ -540,7 +480,6 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 	for sw.err == nil {
 		select {
 		case <-ctx.Done():
-			tokenExpired()
 			return
 		case <-ticker.C:
 			// The heartbeat frame (S4.5): keeps proxies from timing the
@@ -550,9 +489,6 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 			sw.flush()
 		case f, open := <-frames:
 			if !open {
-				if tokenExpired() {
-					return
-				}
 				// The hub dropped this subscriber: its queue (obsdb's
 				// QueueSize, 1,000 by default) overflowed. Say so and
 				// close (S4.5): the client refetches pages and
@@ -563,7 +499,7 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 				}
 				return
 			}
-			if !liveInScope(scope, f) || !filter.pass(f) || !liveWanted(kinds, f) {
+			if !filter.pass(f) || !liveWanted(kinds, f) {
 				continue
 			}
 			if key, ok := liveDedupKey(f); ok && sent.seen(key) {
@@ -572,24 +508,6 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 			writeFrame(sw, f, s.coster(ctx))
 		}
 	}
-}
-
-// liveInScope reports whether a panel token of scope may receive f;
-// the zero scope is the server token or setup A — everything. A run
-// frame is held to the whole scope (readScope.admits); any other frame
-// to the public id here, its tags by the stream's filter (which a tag
-// token's always carries). An explicit all stream never reaches here
-// with a scope: scopeLive refuses it to every panel token (403) before
-// the stream opens; a tag-only token's filter-only stream is all,
-// filtered.
-func liveInScope(scope readScope, f obsdb.Frame) bool {
-	if scope.none() {
-		return true
-	}
-	if f.Kind == obsdb.FrameRun && f.Run != nil {
-		return scope.admits(*f.Run)
-	}
-	return scope.PublicID == "" || f.Weft.PublicID == scope.PublicID
 }
 
 // liveWanted reports whether the kinds parameter admits this frame:
@@ -724,7 +642,7 @@ const (
 // at the first failed write: a client that left costs nothing more.
 func (s *Server) backfill(
 	ctx context.Context, sw *sseWriter,
-	sel obsdb.Selector, scope readScope, kinds map[string]bool, sent *liveDedup, filter *liveFilter,
+	sel obsdb.Selector, kinds map[string]bool, sent *liveDedup, filter *liveFilter,
 ) {
 	query := obsdb.RunQuery{ParentRunID: "*", Limit: 500}
 	if filter != nil {
@@ -740,7 +658,7 @@ func (s *Server) backfill(
 			}
 			filter.admit(rec.ID)
 		}
-		s.backfillRun(ctx, sw, rec, scope, kinds, sent)
+		s.backfillRun(ctx, sw, rec, kinds, sent)
 	}
 	switch {
 	case sel.RunID != "":
@@ -808,11 +726,8 @@ func (s *Server) backfill(
 // run's history is incomplete and can refetch the run's pages.
 func (s *Server) backfillRun(
 	ctx context.Context, sw *sseWriter,
-	rec obsdb.RunRow, scope readScope, kinds map[string]bool, sent *liveDedup,
+	rec obsdb.RunRow, kinds map[string]bool, sent *liveDedup,
 ) {
-	if !scope.admits(rec) {
-		return // outside the panel token's scope (S4.6, I4)
-	}
 	if kinds["event"] {
 		page, err := s.db.Events(ctx, rec.ID, -1, 1000)
 		if err != nil {
@@ -883,7 +798,7 @@ func (s *Server) backfillFailed(ctx context.Context, sw *sseWriter, runID, kind 
 	if ctx.Err() != nil {
 		return
 	}
-	slog.Warn("studio: live resume: a run's stored records could not be read",
+	slog.Warn("weftbase: live resume: a run's stored records could not be read",
 		"run_id", runID, "kind", kind, "err", err)
 	data, _ := json.Marshal(struct {
 		RunID string `json:"run_id"`

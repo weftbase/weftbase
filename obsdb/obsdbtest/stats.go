@@ -291,7 +291,7 @@ func statsTable(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		wantStats(t, a, q,
 			"m-small runs=1/0 calls=2/0 retried=1 denied=0 tok=150/30 dur=500/1000/2 ttft=100/300/2 models=[p/m-small 150/30] series=[1/0 2/0 150/30 | 0/0 0/0 0/0]",
 			"m-big runs=1/1 calls=1/0 retried=0 denied=0 tok=30/15 dur=2000/2000/1 ttft=500/500/1 models=[p/m-big 30/15] series=[0/0 0/0 0/0 | 1/1 1/0 30/15]")
-		// A panel token's scope: its public id's runs alone.
+		// A public id filter: its runs alone.
 		q = statsQ(obsdb.StatsByAgent)
 		q.PublicID = "pub_x"
 		wantStats(t, a, q,
@@ -478,7 +478,7 @@ func statsSpanBeforeRun(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 // statsDelegated: an agent's subagents' calls (by=agent's Delegated) —
 // every Subagent descendant of its runs whose agent is another, each
 // call once — beside its own usage; a descendant of the same agent is
-// its own run, and a panel token's scope leaves out a descendant of
+// its own run, and a public id or tag filter leaves out a descendant of
 // another public id, or one without its tags.
 func statsDelegated(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	return func(t *testing.T) {
@@ -557,7 +557,7 @@ func statsDelegated(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		if got := delegated(q); !slices.Equal(got, want) {
 			t.Errorf("delegated under pub_d =\n %v\nwant\n %v", got, want)
 		}
-		// A tag scope (RunQuery.Meta, a tag-scoped panel token: I4-fix)
+		// A tag filter (RunQuery.Meta, I4-fix)
 		// holds the descendants to it as the public id does: below dl-p
 		// the untagged helpers (call_3, call_5) and the b2 one (call_4)
 		// are not delegated, and neither is the tagged scout under the

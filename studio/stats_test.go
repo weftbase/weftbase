@@ -42,8 +42,6 @@ type statsRun struct {
 	steps                              []statsStep
 	tools                              []statsTool
 	attempts                           int // on step 0's call, the last one deciding it
-	playground                         bool
-	experiment                         string // weft.experiment.id: a playground cell's
 }
 
 type statsStep struct {
@@ -76,12 +74,6 @@ func (r statsRun) batch() obsdb.Batch {
 	root := attrs("invoke_agent")
 	root["gen_ai.agent.name"], root["gen_ai.provider.name"], root["gen_ai.request.model"] = r.agent, r.provider, r.model
 	root["weft.run.steps"] = int64(len(r.steps))
-	if r.playground {
-		root["weft.playground"] = true
-	}
-	if r.experiment != "" {
-		root["weft.experiment.id"] = r.experiment
-	}
 	if i := strings.LastIndex(r.id, "/"); i > 0 {
 		root["weft.parent.run.id"] = r.id[:strings.LastIndex(r.id[:i], "/")]
 		root["weft.parent.call.id"] = r.id[i+1:]
@@ -218,7 +210,7 @@ func TestStatsGoldens(t *testing.T) {
 		`"key":"orders","runs":2,"failed":0`, `"cost_badge":"scripted"`,
 		// director's subagent bill, apart from its own: unpriced.
 		`"delegated":{"runs":1,"input_tokens":40,"output_tokens":8,"cost_usd":null,"cost_known":false,"cost_badge":"unpriced"`,
-		`"runs_query":"agent=director\u0026all=1\u0026playground=false\u0026since=2020-01-01T00%3A00%3A00Z\u0026until=2020-01-02T00%3A00%3A00Z"`,
+		`"runs_query":"agent=director\u0026all=1\u0026since=2020-01-01T00%3A00%3A00Z\u0026until=2020-01-02T00%3A00%3A00Z"`,
 		`"buckets":24,"bucket_ms":3600000`,
 	} {
 		if !strings.Contains(body, want) {
@@ -228,8 +220,7 @@ func TestStatsGoldens(t *testing.T) {
 }
 
 // TestStatsRoute pins the parameters: by is required and closed, the
-// window reads RFC 3339 or a duration, agent / tag / parent narrow,
-// and a panel token's public id is forced (pinned in the auth matrix).
+// window reads RFC 3339 or a duration, agent / tag / parent narrow.
 func TestStatsRoute(t *testing.T) {
 	h := Handler(DB(statsFixtureDB(t)))
 	for _, c := range []struct {
@@ -248,13 +239,11 @@ func TestStatsRoute(t *testing.T) {
 		{"by=agent&public_id=pub_other&" + statsWindow, http.StatusOK, `"groups":[{"key":"orders","runs":1,`},
 		{"by=tool&agent=orders&" + statsWindow, http.StatusOK, `"key":"lookup_order","runs":1,"failed":0,"failure_rate":0,"calls":1`},
 		{"by=agent&parent=&" + statsWindow, http.StatusOK, `"key":"researcher"`},
-		{"by=agent&playground=maybe", http.StatusBadRequest, "playground must be true, false or all"},
 		{"by=agent&status=nope", http.StatusBadRequest, "status"},
 		{"by=agent&since=1000-01-01T00:00:00Z&until=2020-01-02T00:00:00Z", http.StatusBadRequest, "years 1678..2262"},
 		{"by=agent&since=2020-01-01T00:00:00Z&until=3000-01-01T00:00:00Z", http.StatusBadRequest, "years 1678..2262"},
 		{"by=agent&since=999999999d", http.StatusBadRequest, "since must be"},
-		{"by=agent&experiment_id=exp_none&" + statsWindow, http.StatusOK, `"groups":[]`},
-		{"by=agent&playground=false&status=failed&" + statsWindow, http.StatusOK, `"key":"researcher","runs":3,"failed":3`},
+		{"by=agent&status=failed&" + statsWindow, http.StatusOK, `"key":"researcher","runs":3,"failed":3`},
 	} {
 		code, _, body := get(t, h, "/studio/api/stats?"+c.path)
 		if code != c.code || !strings.Contains(body, c.want) {
@@ -339,23 +328,6 @@ func TestStatsOffWithoutAggregator(t *testing.T) {
 	}
 }
 
-// TestPassPredicateBounded: the predicate is kept verbatim up to
-// maxPassPredicateBytes; a longer one is 400.
-func TestPassPredicateBounded(t *testing.T) {
-	h := Handler(DB(statsFixtureDB(t)), Playground(true))
-	exp := func(pred string) string {
-		return `{"id":"exp_p","agent":"orders","variants":[{"key":"A","overrides":{}}],"inputs":[{"key":"1","text":"hi"}],"pass_predicate":"` + pred + `"}`
-	}
-	if code, _, body := post(t, h, "/studio/api/experiments", "application/json", exp(`status = succeeded`)); code != http.StatusOK ||
-		!strings.Contains(body, `"pass_predicate":"status = succeeded"`) {
-		t.Errorf("save with a predicate = %d %s", code, body)
-	}
-	if code, _, body := post(t, h, "/studio/api/experiments", "application/json", exp(strings.Repeat("x", maxPassPredicateBytes+1))); code != http.StatusBadRequest ||
-		!strings.Contains(body, "pass_predicate is 4097 bytes, at most 4096") {
-		t.Errorf("save with a long predicate = %d %s, want 400", code, body)
-	}
-}
-
 // TestStatsGoldensClickHouse: the same fixture through the ClickHouse
 // backend answers the same bodies, byte for byte — the goldens hold on
 // both backends (gated on WEFT_CLICKHOUSE_DSN, as the conformance
@@ -423,58 +395,6 @@ func checkRunsQueries(t *testing.T, h http.Handler) {
 	}
 }
 
-// TestStatsPlaygroundDefault (P10a-pre-go-fix item 3): health numbers
-// never mix replays into the app's own — one real run and two scripted
-// replays of the same agent count 1 by default, 2 with playground=true,
-// 3 with playground=all, and each group's runs_query (the effective
-// filter carried) lands on the same N.
-func TestStatsPlaygroundDefault(t *testing.T) {
-	db, err := sqlite.Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	for i, pg := range []bool{false, true, true} {
-		r := statsRun{id: fmt.Sprintf("pg_%d", i), agent: "orders", provider: "wefttest", model: "script",
-			at: time.Duration(i+1) * time.Hour, dur: time.Second, playground: pg,
-			steps: []statsStep{{in: 10, out: 5, ttft: 1, dur: 2 * time.Millisecond}}}
-		if err := db.Write(context.Background(), r.batch()); err != nil {
-			t.Fatal(err)
-		}
-	}
-	h := Handler(DB(db))
-	for _, c := range []struct {
-		param, query string
-		runs         int
-	}{
-		{"", "playground=false", 1},
-		{"&playground=false", "playground=false", 1},
-		{"&playground=true", "playground=true", 2},
-		{"&playground=all", "", 3},
-	} {
-		code, _, body := get(t, h, "/studio/api/stats?by=agent&"+statsWindow+c.param)
-		var page struct {
-			Groups []struct {
-				Runs      int    `json:"runs"`
-				Calls     int    `json:"calls"`
-				RunsQuery string `json:"runs_query"`
-			} `json:"groups"`
-		}
-		decode(t, body, &page)
-		if code != http.StatusOK || len(page.Groups) != 1 || page.Groups[0].Runs != c.runs || page.Groups[0].Calls != c.runs {
-			t.Errorf("stats?by=agent%s = %d %s, want one group of %d runs and calls", c.param, code, body, c.runs)
-			continue
-		}
-		g := page.Groups[0]
-		if (c.query == "") == strings.Contains(g.RunsQuery, "playground=") || c.query != "" && !strings.Contains(g.RunsQuery, c.query) {
-			t.Errorf("stats?by=agent%s runs_query = %q, want the filter %q", c.param, g.RunsQuery, c.query)
-		}
-		if _, total, _ := searchIDs(t, h, "/studio/api/search?"+g.RunsQuery); total != c.runs {
-			t.Errorf("stats?by=agent%s: runs_query %q lists %d, want %d", c.param, g.RunsQuery, total, c.runs)
-		}
-	}
-}
-
 // TestStatsScriptedZeroUsage (P10a-pre-go-fix item 4): an all-scripted
 // group — the scripted engine reports no usage by design — reads the
 // exact $0 its runs read, never "no model usage recorded".
@@ -512,9 +432,9 @@ func TestStatsScriptedBesideIdleModel(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	runs := []statsRun{
-		{id: "sm_0", agent: "orders", provider: "weft/runtime", model: "scripted", playground: true,
+		{id: "sm_0", agent: "orders", provider: "weft/runtime", model: "scripted",
 			at: time.Hour, dur: time.Second, steps: []statsStep{{dur: 2 * time.Millisecond}}},
-		{id: "sm_1", agent: "orders", provider: "anthropic", model: "claude-sonnet-4-5", playground: true,
+		{id: "sm_1", agent: "orders", provider: "anthropic", model: "claude-sonnet-4-5",
 			at: 2 * time.Hour, dur: time.Second, steps: []statsStep{{dur: 2 * time.Millisecond, failed: true}}},
 	}
 	for _, r := range runs {
@@ -523,65 +443,11 @@ func TestStatsScriptedBesideIdleModel(t *testing.T) {
 		}
 	}
 	h := Handler(DB(db))
-	for _, pg := range []string{"true", "all"} {
-		_, _, body := get(t, h, "/studio/api/stats?by=agent&playground="+pg+"&"+statsWindow)
-		if strings.Contains(body, `"cost_badge":"scripted"`) {
-			t.Errorf("playground=%s: a real model's idle part beside scripted ones read the scripted $0:\n%s", pg, body)
-		}
-		if !strings.Contains(body, `"cost_known":false,"cost_badge":"unknown","cost_reason":"no model usage recorded"`) {
-			t.Errorf("playground=%s: want the unknown cost, no usage recorded:\n%s", pg, body)
-		}
+	_, _, body := get(t, h, "/studio/api/stats?by=agent&"+statsWindow)
+	if strings.Contains(body, `"cost_badge":"scripted"`) {
+		t.Errorf("a real model's idle part beside scripted ones read the scripted $0:\n%s", body)
 	}
-}
-
-// TestStatsExperimentDefault (P10a-pre-go2-fix 1): every experiment
-// cell is a playground run, so experiment_id with no playground counts
-// its cells (the default is all), an explicit playground=false still
-// wins (nothing), and a group's runs_query states the effective filter
-// — no playground parameter: /api/search's both — landing on the same
-// runs.
-func TestStatsExperimentDefault(t *testing.T) {
-	db, err := sqlite.Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	runs := []statsRun{
-		{id: "ec_1", agent: "orders", provider: "wefttest", model: "script", playground: true, experiment: "exp_x",
-			at: time.Hour, dur: time.Second, steps: []statsStep{{in: 10, out: 5, dur: time.Millisecond}}},
-		{id: "ec_2", agent: "orders", provider: "wefttest", model: "script", playground: true, experiment: "exp_x",
-			at: 2 * time.Hour, dur: time.Second, steps: []statsStep{{in: 10, out: 5, dur: time.Millisecond}}},
-		{id: "ec_app", agent: "orders", provider: "wefttest", model: "script",
-			at: 3 * time.Hour, dur: time.Second, steps: []statsStep{{in: 10, out: 5, dur: time.Millisecond}}},
-	}
-	for _, r := range runs {
-		if err := db.Write(context.Background(), r.batch()); err != nil {
-			t.Fatal(err)
-		}
-	}
-	h := Handler(DB(db))
-	_, _, body := get(t, h, "/studio/api/stats?by=agent&experiment_id=exp_x&"+statsWindow)
-	if !strings.Contains(body, `"key":"orders","runs":2,`) {
-		t.Fatalf("experiment_id alone = %s, want its 2 cells", body)
-	}
-	var page struct {
-		Groups []struct {
-			RunsQuery string `json:"runs_query"`
-		} `json:"groups"`
-	}
-	decode(t, body, &page)
-	rq := page.Groups[0].RunsQuery
-	if v, _ := url.ParseQuery(rq); v.Has("playground") || v.Get("experiment_id") != "exp_x" {
-		t.Errorf("runs_query = %s, want experiment_id and no playground filter (both)", rq)
-	}
-	ids, total, _ := searchIDs(t, h, "/studio/api/search?"+rq)
-	if total != 2 || strings.Join(ids, ",") != "ec_2,ec_1" {
-		t.Errorf("search?<runs_query> = %v (total %d), want the 2 cells", ids, total)
-	}
-	if _, _, b := get(t, h, "/studio/api/stats?by=agent&experiment_id=exp_x&playground=false&"+statsWindow); !strings.Contains(b, `"groups":[]`) {
-		t.Errorf("experiment_id with playground=false = %s, want nothing", b)
-	}
-	if _, _, b := get(t, h, "/studio/api/stats?by=agent&"+statsWindow); !strings.Contains(b, `"key":"orders","runs":1,`) {
-		t.Errorf("no experiment_id = %s, want the app's own run alone", b)
+	if !strings.Contains(body, `"cost_known":false,"cost_badge":"unknown","cost_reason":"no model usage recorded"`) {
+		t.Errorf("want the unknown cost, no usage recorded:\n%s", body)
 	}
 }

@@ -1,13 +1,10 @@
 package main
 
 import (
-	"archive/zip"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
-	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -104,7 +101,7 @@ func TestUsage(t *testing.T) {
 }
 
 // TestParseArgs pins the interspersed positional: `weftbase export <id>
-// --wefttest dir` parses the flag after the id, and "--" ends the flags.
+// --format jsonl` parses the flag after the id, and "--" ends the flags.
 func TestParseArgs(t *testing.T) {
 	fs := newFlags("t", io.Discard)
 	f := fs.String("f", "", "")
@@ -159,7 +156,6 @@ func stopStudio(t *testing.T, done <-chan int) int {
 }
 
 // TestStudioCommand pins `weftbase dev` end to end (plan B1): the
-// playground on by default (meta lists it), --no-playground off; the
 // manifest found upward from the working directory and said in one
 // line after the banner; --open hands the browser the UI link with the
 // token in the fragment once the port is bound — and, on a reuse, the
@@ -182,12 +178,12 @@ func TestStudioCommand(t *testing.T) {
 	db := "sqlite://" + filepath.Join(t.TempDir(), "weft.db")
 
 	for _, c := range []struct {
-		name       string
-		extra      []string
-		playground bool
+		name  string
+		extra []string
+		open  bool
 	}{
-		{"default", []string{"--open"}, true},
-		{"no-playground", []string{"--no-playground"}, false},
+		{"open", []string{"--open"}, true},
+		{"no open", nil, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			takeOpened()
@@ -196,17 +192,7 @@ func TestStudioCommand(t *testing.T) {
 			done := make(chan int, 1)
 			args := append([]string{"dev", "--addr", addr, "--db", db, "--token", "tok"}, c.extra...)
 			go func() { done <- run(args, &out, io.Discard) }()
-			meta := waitMeta(t, addr, done, &out)
-			var m struct {
-				Capabilities []string `json:"capabilities"`
-			}
-			if err := json.Unmarshal([]byte(meta), &m); err != nil {
-				t.Fatal(err)
-			}
-			has := strings.Contains(","+strings.Join(m.Capabilities, ",")+",", ",playground,")
-			if has != c.playground {
-				t.Errorf("capabilities %v: playground %v, want %v", m.Capabilities, has, c.playground)
-			}
+			waitMeta(t, addr, done, &out)
 			// The manifest found upward is served.
 			req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/api/manifest", nil)
 			req.Header.Set("Authorization", "Bearer tok")
@@ -228,7 +214,7 @@ func TestStudioCommand(t *testing.T) {
 				lines[3] != "studio: manifest "+manifest+" (found upward)" {
 				t.Errorf("stdout:\n%s\nwant the banner, then the manifest line", out.String())
 			}
-			if c.playground {
+			if c.open {
 				if len(links) != 1 || links[0] != "http://"+addr+"/#token=tok" {
 					t.Errorf("--open handed the browser %q, want the UI with the token in the fragment", links)
 				}
@@ -689,317 +675,37 @@ func TestRunsCursorThatDoesNotMove(t *testing.T) {
 	}
 }
 
-// TestExportCommand is B1.1's Done line for export: `weftbase export <id>
-// --wefttest dir --fixtures-only` writes the fixtures where wefttest.Replay reads them,
-// and the same agent definition over the replayed model reproduces the
-// recorded transcript message for message. Without --wefttest the
-// export goes to stdout; a non-empty target needs --force.
+// TestExportCommand: `weftbase export <id>` writes GET
+// /api/runs/<id>/export to stdout, json by default, jsonl and otlp on
+// --format; any other format, no id, and an unknown flag are usage
+// errors; an unknown run is the server's 404.
 func TestExportCommand(t *testing.T) {
-	url, recorded := apiStudio(t, false)
+	url, _ := apiStudio(t, false)
 	t.Setenv("WEFTBASE_URL", url)
 	t.Setenv("WEFTBASE_TOKEN", "tok")
-	dir := filepath.Join(t.TempDir(), "testdata")
 
-	out, errb, code := weftbase("export", "r_ok", "--wefttest", dir, "--fixtures-only", "--test", t.Name())
-	if code != 0 || !strings.HasPrefix(out, "weftbase: wrote 2 fixtures to "+filepath.Join(dir, t.Name())) {
-		t.Fatalf("export --wefttest = exit %d %q %q", code, out, errb)
-	}
-	replay := wefttest.Replay(t, dir)
-	res, err := ordersAgent(replay).Generate(context.Background(), core.Prompt("where is order 42?"))
-	if err != nil {
-		t.Fatalf("replay: %v", err)
-	}
-	if res.Text() != "Order 42 shipped." || len(res.Messages) != len(recorded) {
-		t.Fatalf("replayed %d messages (%q), want the recorded %d", len(res.Messages), res.Text(), len(recorded))
-	}
-	for i := range recorded {
-		a, _ := json.Marshal(res.Messages[i])
-		b, _ := json.Marshal(recorded[i])
-		if !bytes.Equal(a, b) {
-			t.Errorf("message %d = %s, want %s", i, a, b)
-		}
-	}
-
-	// A non-empty target is refused without --force, written with it.
-	if _, errb, code := weftbase("export", "r_ok", "--wefttest", dir, "--fixtures-only", "--test", t.Name()); code != 1 || !strings.Contains(errb, "is not empty: --force") {
-		t.Errorf("second export = exit %d %q, want the refusal", code, errb)
-	}
-	// --force replaces the fixtures, never merges: a stray one from an
-	// earlier export is gone (Replay would load it).
-	stray := filepath.Join(dir, t.Name(), "00009-x.json")
-	if err := os.WriteFile(stray, []byte(`{}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, errb, code := weftbase("export", "--force", "r_ok", "--wefttest", dir, "--fixtures-only", "--test", t.Name()); code != 0 {
-		t.Errorf("--force = exit %d %q", code, errb)
-	}
-	if _, err := os.Stat(stray); !os.IsNotExist(err) {
-		t.Errorf("the stray fixture survived --force: %v", err)
-	}
-	if entries, _ := os.ReadDir(filepath.Join(dir, t.Name())); len(entries) != 2 {
-		t.Errorf("after --force the target holds %d files, want the 2 fixtures", len(entries))
-	}
-	// The directory defaults to the run id; --test cannot climb out.
-	if _, errb, code := weftbase("export", "r_ok", "--wefttest", dir, "--fixtures-only"); code != 0 {
-		t.Errorf("default name = exit %d %q", code, errb)
-	} else if _, err := os.Stat(filepath.Join(dir, "r_ok")); err != nil {
-		t.Errorf("default directory: %v", err)
-	}
-	for _, name := range []string{"../out", "/abs/TestX", filepath.Join(t.TempDir(), "TestX")} {
-		if _, errb, code := weftbase("export", "r_ok", "--wefttest", dir, "--fixtures-only", "--test", name); code != 2 {
-			t.Errorf("--test %s = exit %d %q, want 2", name, code, errb)
-		}
-	}
-
-	// To stdout: the json export (and the other two formats).
-	out, errb, code = weftbase("export", "r_ok")
+	out, errb, code := weftbase("export", "r_ok")
 	if code != 0 || !strings.Contains(out, `"format":"weft.run.export/1"`) {
 		t.Errorf("export to stdout = exit %d %.200q %q", code, out, errb)
 	}
 	if out, _, code := weftbase("export", "r_ok", "--format", "jsonl"); code != 0 || strings.Count(out, "\n") < 3 {
 		t.Errorf("jsonl = exit %d %.200q", code, out)
 	}
+	if out, _, code := weftbase("export", "r_ok", "--format", "otlp"); code != 0 || !strings.Contains(out, `"traces"`) {
+		t.Errorf("otlp = exit %d %.200q", code, out)
+	}
 	for _, args := range [][]string{
 		{"export", "r_ok", "--format", "wefttest"},
 		{"export", "r_ok", "--format", "xml"},
-		{"export", "r_ok", "--force"},
-		{"export", "r_ok", "--wefttest", dir, "--fixtures-only", "--format", "json"},
-		{"export", "r_ok", "--fixtures-only"},
-		{"export", "r_ok", "--wefttest", dir, "--test", "TestX"},
+		{"export", "r_ok", "--wefttest", "dir"},
 		{"export"},
 	} {
 		if _, errb, code := weftbase(args...); code != 2 {
 			t.Errorf("weft %q = exit %d %q, want a usage error", args, code, errb)
 		}
 	}
-	if _, errb, code := weftbase("export", "nope", "--wefttest", dir, "--fixtures-only"); code != 1 || !strings.Contains(errb, "404") {
+	if _, errb, code := weftbase("export", "nope"); code != 1 || !strings.Contains(errb, "404") {
 		t.Errorf("unknown run = exit %d %q", code, errb)
-	}
-}
-
-// TestExportTreeIsTheUIZip is UX-S5a-07's Done line: `weftbase export <id>
-// --wefttest <pkg dir>` writes the very tree Studio's "save as test"
-// zip holds — the generated test file at the root, the fixtures under
-// testdata/TestReplay_<run>/ — byte for byte; a second export is
-// refused without --force, and --force replaces a stray fixture.
-func TestExportTreeIsTheUIZip(t *testing.T) {
-	url, _ := apiStudio(t, false)
-	t.Setenv("WEFTBASE_URL", url)
-	t.Setenv("WEFTBASE_TOKEN", "tok")
-	pkg := filepath.Join(t.TempDir(), "orders")
-	out, errb, code := weftbase("export", "r_ok", "--wefttest", pkg)
-	if code != 0 || !strings.HasPrefix(out, "weftbase: wrote orders_replay_test.go and 2 fixtures under testdata/TestReplay_r_ok/ in "+pkg) {
-		t.Fatalf("export --wefttest = exit %d %q %q", code, out, errb)
-	}
-	// The UI's zip, as the run page's save as test fetches it.
-	req, _ := http.NewRequest(http.MethodGet, url+"/api/runs/r_ok/export?format=wefttest", nil)
-	req.Header.Set("Authorization", "Bearer tok")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	zipBody, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
-	zr, err := zip.NewReader(bytes.NewReader(zipBody), int64(len(zipBody)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	ui := map[string]string{}
-	for _, f := range zr.File {
-		rc, _ := f.Open()
-		b, _ := io.ReadAll(rc)
-		_ = rc.Close()
-		ui[f.Name] = string(b)
-	}
-	cli := map[string]string{}
-	if err := filepath.WalkDir(pkg, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		b, err := os.ReadFile(p)
-		rel, _ := filepath.Rel(pkg, p)
-		cli[filepath.ToSlash(rel)] = string(b)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if len(ui) != 3 || len(cli) != len(ui) {
-		t.Fatalf("trees: ui %d entries, cli %d, want the same 3 (test + 2 fixtures)", len(ui), len(cli))
-	}
-	for name, body := range ui {
-		if cli[name] != body {
-			t.Errorf("%s differs between the UI zip and weftbase export --wefttest", name)
-		}
-	}
-	if _, ok := cli["orders_replay_test.go"]; !ok {
-		t.Errorf("cli tree = %v, want orders_replay_test.go at the root", keysOf(cli))
-	}
-
-	if _, errb, code := weftbase("export", "r_ok", "--wefttest", pkg); code != 1 || !strings.Contains(errb, "exists: --force") {
-		t.Errorf("second export = exit %d %q, want the refusal", code, errb)
-	}
-	stray := filepath.Join(pkg, "testdata", "TestReplay_r_ok", "00009-x.json")
-	if err := os.WriteFile(stray, []byte(`{}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, errb, code := weftbase("export", "--force", "r_ok", "--wefttest", pkg); code != 0 {
-		t.Errorf("--force = exit %d %q", code, errb)
-	}
-	if _, err := os.Stat(stray); !os.IsNotExist(err) {
-		t.Errorf("the stray fixture survived --force: %v", err)
-	}
-}
-
-func keysOf(m map[string]string) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	return out
-}
-
-// TestUnzipTreeGuards: an entry outside the layout (a path, a second
-// test file, two fixture directories, no test file) refuses the whole
-// zip before anything is written.
-func TestUnzipTreeGuards(t *testing.T) {
-	layout := func(names ...string) []byte {
-		var buf bytes.Buffer
-		zw := zip.NewWriter(&buf)
-		for _, n := range names {
-			w, _ := zw.Create(n)
-			_, _ = w.Write([]byte("{}"))
-		}
-		_ = zw.Close()
-		return buf.Bytes()
-	}
-	for _, names := range [][]string{
-		{"a_test.go", "../x.json"},
-		{"a_test.go", "b_test.go", "testdata/T/1.json"},
-		{"a_test.go", "testdata/A/1.json", "testdata/B/2.json"},
-		{"testdata/T/1.json"},
-		{"a_test.go", "1.json"},
-		{"a_test.go", "testdata/T/sub/1.json"},
-		{"sub/a_test.go", "testdata/T/1.json"},
-	} {
-		dir := filepath.Join(t.TempDir(), "pkg")
-		if _, err := unzipTree(layout(names...), dir, false); err == nil {
-			t.Errorf("%q: unzipped", names)
-		}
-		if _, err := os.Stat(dir); !os.IsNotExist(err) {
-			t.Errorf("%q: the target was created (%v)", names, err)
-		}
-	}
-	// A symlinked testdata or testdata/<T> is refused, its target untouched.
-	for _, link := range []string{"testdata", "testdata/T"} {
-		pkg := filepath.Join(t.TempDir(), "pkg")
-		elsewhere := t.TempDir()
-		stale := filepath.Join(elsewhere, "keep.json")
-		if err := os.WriteFile(stale, []byte("{}"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.MkdirAll(filepath.Dir(filepath.Join(pkg, link)), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Symlink(elsewhere, filepath.Join(pkg, link)); err != nil {
-			t.Skip("no symlinks here:", err)
-		}
-		if _, err := unzipTree(layout("a_test.go", "testdata/T/00001-a.json"), pkg, true); err == nil || !strings.Contains(err.Error(), "symlink") {
-			t.Errorf("symlinked %s: err %v, want the refusal", link, err)
-		}
-		if _, err := os.Stat(stale); err != nil {
-			t.Errorf("symlinked %s: the link's target lost its file: %v", link, err)
-		}
-		if entries, _ := os.ReadDir(elsewhere); len(entries) != 1 {
-			t.Errorf("symlinked %s: the link's target holds %d entries, want its 1", link, len(entries))
-		}
-	}
-	dir := filepath.Join(t.TempDir(), "pkg")
-	tree, err := unzipTree(layout("a_test.go", "testdata/T/00001-a.json"), dir, false)
-	if err != nil || tree.test != "a_test.go" || tree.testdata != "testdata/T/" || tree.fixtures != 1 {
-		t.Errorf("unzipTree = %+v %v", tree, err)
-	}
-}
-
-// TestUnzipFixturesFlat pins the unzip's guard: an entry that is not a
-// plain file name (a path, a parent reference) refuses the whole zip
-// before anything is written.
-func TestUnzipFixturesFlat(t *testing.T) {
-	for _, name := range []string{"../escape.json", "sub/x.json", `..\x.json`, "..",
-		"testdata/../x.json", "testdata/T/sub/x.json", "testdata/x.json", "sub/a_test.go"} {
-		var buf bytes.Buffer
-		zw := zip.NewWriter(&buf)
-		for _, n := range []string{"ok.json", name} {
-			w, err := zw.Create(n)
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, _ = w.Write([]byte("{}"))
-		}
-		if err := zw.Close(); err != nil {
-			t.Fatal(err)
-		}
-		dir := filepath.Join(t.TempDir(), "target")
-		if _, err := unzipFixtures(buf.Bytes(), dir); err == nil {
-			t.Errorf("%q: unzipped", name)
-		}
-		if _, err := os.Stat(dir); !os.IsNotExist(err) {
-			t.Errorf("%q: the target was created (%v)", name, err)
-		}
-	}
-	// The cap is on the total: two entries each under it, together
-	// over, refuse the zip before the first write.
-	defer func(n int64) { maxUnzip = n }(maxUnzip)
-	maxUnzip = 10
-	var buf bytes.Buffer
-	zw := zip.NewWriter(&buf)
-	for _, n := range []string{"00000-a.json", "00001-b.json"} {
-		w, _ := zw.Create(n)
-		_, _ = w.Write([]byte("12345678"))
-	}
-	_ = zw.Close()
-	dir := filepath.Join(t.TempDir(), "target")
-	if _, err := unzipFixtures(buf.Bytes(), dir); err == nil || !strings.Contains(err.Error(), "more than 10 bytes") {
-		t.Errorf("16 bytes under a 10-byte total cap: %v", err)
-	}
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Errorf("the over-cap zip created the target (%v)", err)
-	}
-	maxUnzip = 100
-	if n, err := unzipFixtures(buf.Bytes(), dir); err != nil || n != 2 {
-		t.Errorf("under the cap: %d %v", n, err)
-	}
-	if _, err := unzipFixtures([]byte("not a zip"), t.TempDir()); err == nil {
-		t.Error("a non-zip unzipped")
-	}
-
-	// F6's layout: the fixtures under one testdata/<test>/, the replay
-	// skeleton at the root (not written); a second test directory is
-	// refused.
-	layout := func(names ...string) []byte {
-		var buf bytes.Buffer
-		zw := zip.NewWriter(&buf)
-		for _, n := range names {
-			w, _ := zw.Create(n)
-			_, _ = w.Write([]byte("{}"))
-		}
-		_ = zw.Close()
-		return buf.Bytes()
-	}
-	dir = filepath.Join(t.TempDir(), "target")
-	n, err := unzipFixtures(layout("orders_replay_test.go", "testdata/TestReplay_r/00001-a.json", "testdata/TestReplay_r/00002-b.json"), dir)
-	if entries, _ := os.ReadDir(dir); err != nil || n != 2 || len(entries) != 2 {
-		t.Errorf("F6 layout: %d %v, %d entries; want the two fixtures alone", n, err, len(entries))
-	}
-	if _, err := unzipFixtures(layout("testdata/A/00001-a.json", "testdata/B/00002-b.json"), t.TempDir()); err == nil {
-		t.Error("two test directories unzipped")
-	}
-	// A flat fixture beside testdata/<test>/ is refused, not merged.
-	mixed := filepath.Join(t.TempDir(), "target")
-	if _, err := unzipFixtures(layout("00001-a.json", "testdata/T/00001-a.json"), mixed); err == nil || !strings.Contains(err.Error(), "mixes flat fixtures") {
-		t.Errorf("a mixed zip: %v, want the refusal", err)
-	}
-	if _, err := os.Stat(mixed); !os.IsNotExist(err) {
-		t.Errorf("the mixed zip created the target (%v)", err)
 	}
 }
 

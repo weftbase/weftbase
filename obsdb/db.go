@@ -16,13 +16,7 @@ import (
 // DB is the observability database every backend implements (sqlite by
 // default, clickhouse hosted). Implementations must be safe for
 // concurrent use: writers are rare (the local sink's synchronous
-// processors), readers many (Studio).
-//
-// DeleteRun, DeleteSession, Sweep and Vacuum are the run tables' alone.
-// A CommandStore's rows — commands, run routes, breakpoints, runtimes —
-// are Studio's record of what it asked a runtime to do, not run data:
-// deleting a run leaves the commands and the route that name it, and
-// CommandStore.PruneCommands is their only retention.
+// processors), readers many (the server's read paths).
 type DB interface {
 	// Write stores one batch, idempotent on (run, record kind, pos)
 	// and (trace, span): a retried transport's duplicate is a no-op.
@@ -99,25 +93,16 @@ type DB interface {
 	Session(ctx context.Context, id string) (SessionDetail, error)
 	ResolvePublicID(ctx context.Context, publicID string) (sessionID string, err error)
 
-	// The playground's saved experiments (WEFT-PLAYGROUND §10.4,
-	// PQ4): the definition rows keyed by the weft.experiment.id the
-	// runs carry — one small table beside runs.
-	SaveExperiment(ctx context.Context, e Experiment) error // upsert by ID
-	Experiments(ctx context.Context) ([]Experiment, error)  // newest update first
-	Experiment(ctx context.Context, id string) (Experiment, error)
-
 	// Deletion and retention (plan A7, §13.13). Every one touches the
 	// observability tables alone — never another module's tables
 	// sharing the file (thread's sessions in one SQLite file stay
-	// byte-identical) and never the experiments table (its definitions
-	// name runs, they do not hold them).
+	// byte-identical).
 	//
 	// DeleteRun removes a run and its subagent children — every run
 	// whose ParentRunID chain reaches id — with everything stored under
 	// them: records (deltas kept by KeepDeltas included), the search
 	// index rows, the spans named by DeletedSpans and the app log
-	// records emitted under those spans; the CommandStore rows
-	// (commands, run_routes, breakpoints, runtimes) are never touched.
+	// records emitted under those spans.
 	// The derived run of a stock agent under the run's tool goes too
 	// (docs/record-contract.md §9): it is no child of the run — the
 	// derivation stops at weft spans — but its root is among the spans
@@ -209,8 +194,6 @@ func DedupBatches(batches []TranscriptBatch) []TranscriptBatch {
 type RunQuery struct {
 	Agent, SessionID, PublicID, ParentRunID string            // ParentRunID: "" top-level only (no parent, no caller link), "*" all
 	Status                                  Status            // "" any; a StatusWords word (parked, cancelled read time)
-	Playground                              *bool             // nil any
-	ExperimentID                            string            // the runs of one experiment
 	Meta                                    map[string]string // subset match on metadata
 	Before                                  time.Time         // cursor on Started; zero = newest
 	// LastSeenAfter keeps the runs last seen at or after it (zero = no
@@ -244,7 +227,7 @@ type RunQuery struct {
 	// top-level by ParentRunID.
 	CallerRunID string
 	// SessionIDs keeps the runs of any of these sessions (nil any; with
-	// SessionID both apply): one read for a set of sessions — Studio
+	// SessionID both apply): one read for a set of sessions — a reader
 	// prices a level of delegated sessions with one.
 	SessionIDs []string
 	// TurnBelow and TurnAbove keep the runs whose RunRow.Turn is below
@@ -270,28 +253,19 @@ type TraceQuery struct {
 	// service name is exactly this ("" any).
 	Service string
 	// PublicID keeps the traces every span of which carries
-	// weft.public_id = PublicID — the rule a panel token's
-	// /api/traces/{id} read applies, so a scoped list offers no trace
-	// its detail would refuse (a non-weft span or another public id's
+	// weft.public_id = PublicID (a non-weft span or another public id's
 	// run in the trace excludes it).
 	PublicID string
 	// Meta keeps the traces holding, for each pair, a span whose
 	// attributes carry it — run metadata rides every weft span verbatim
-	// (core.Metadata, core.WithMetadata: tag.<k>=<v> and flow= on
-	// /api/traces, U22). Empty: no filter.
+	// (core.Metadata, core.WithMetadata). Empty: no filter.
 	Meta map[string]string
-	// ScopeMeta keeps the traces every span of which carries each pair
-	// — PublicID's rule for a tag-scoped panel token (I4), so a scoped
-	// list offers no trace its /api/traces/{id} read would refuse (a
-	// span without the pair, a non-weft span included, excludes it).
-	// Empty: no filter.
-	ScopeMeta map[string]string
 	// NotRun keeps the GenAI traces that make no run
 	// (docs/record-contract.md §9, UX-H-02): a span without
 	// weft.run.id whose GenAI operation StockCandidate reads
 	// (invoke_agent, chat, execute_tool, by attribute or name), no span
-	// carrying weft.run.id, and no derived run row of the trace — what
-	// Studio's /runs counts as "GenAI traces that are not runs".
+	// carrying weft.run.id, and no derived run row of the trace — the
+	// "GenAI traces that are not runs" count.
 	NotRun bool
 	// IDPrefix keeps the traces whose id starts with it, byte for byte
 	// (RunQuery.IDPrefix's rule: no wildcard, no case folding) — the ⌘K
@@ -347,68 +321,6 @@ type TracePage struct {
 	NextBeforeID string
 }
 
-// Experiment is one saved playground group: a name, the variants and
-// inputs that define it, keyed by the id its runs carry as
-// weft.experiment.id (§10.4). Variants and inputs are the wire shapes
-// verbatim (overrides JSON included); the runs themselves stay in the
-// runs table.
-type Experiment struct {
-	ID, Name, Agent  string
-	Created, Updated time.Time
-	Variants         []ExperimentVariant
-	Inputs           []ExperimentInput
-	// PassPredicate is the experiment's pass predicate (UX plan D8), as
-	// the playground sent it: obsdb stores and returns it verbatim and
-	// reads nothing into it (Studio bounds its length). "" when none,
-	// and on an experiment saved before obsdb kept it.
-	PassPredicate string
-	// ExperimentCommand is the rest of the §5.1 command the matrix
-	// sent, so a saved experiment reopens as the form that ran it.
-	// Zero on an experiment saved before obsdb kept it.
-	ExperimentCommand
-}
-
-// ExperimentCommand is the experiment-wide part of the §5.1 run
-// command, kept as sent: the modes, the step the cells continue from,
-// the source run and the transcript edits. Every field is optional —
-// zero is "not recorded" (an older row) or the command's default, and
-// a reader does not tell the two apart. obsdb stores it as one JSON
-// document beside the definition and does not validate it (Studio
-// does, on the way in).
-type ExperimentCommand struct {
-	Engine          string          `json:"engine,omitempty"`           // live | scripted
-	SideEffects     string          `json:"side_effects,omitempty"`     // substitute | park | allow
-	Thread          string          `json:"thread,omitempty"`           // ephemeral | fork
-	FromStep        *int            `json:"from_step,omitempty"`        // the step every cell continues from
-	SourceRunID     string          `json:"source_run_id,omitempty"`    // the run the cells replay from
-	TranscriptEdits json.RawMessage `json:"transcript_edits,omitempty"` // the list as sent
-}
-
-// ExperimentVariant is one column of the matrix: a key, the overrides
-// object it applies (verbatim — instructions, tools_enabled, model,
-// thinking, options, params, tool_choice, park_on, only_tools, and any
-// key a later command adds), and the modes it runs under when they
-// differ from the experiment's (empty: the experiment's own).
-type ExperimentVariant struct {
-	Key         string          `json:"key"`
-	Overrides   json.RawMessage `json:"overrides,omitempty"`
-	Engine      string          `json:"engine,omitempty"`
-	SideEffects string          `json:"side_effects,omitempty"`
-	Thread      string          `json:"thread,omitempty"`
-}
-
-// ExperimentInput is one row of the matrix: a key, a source run to
-// take the turn from, or a literal text. FromStep is the row's own
-// step (UX-C-37's multi-source matrix: each source run continues from
-// its own failing step, keeping its own prefix); nil, the experiment's
-// ExperimentCommand.FromStep.
-type ExperimentInput struct {
-	Key         string `json:"key"`
-	SourceRunID string `json:"source_run_id,omitempty"`
-	Text        string `json:"text,omitempty"`
-	FromStep    *int   `json:"from_step,omitempty"`
-}
-
 // Status is a run's derived state. running, succeeded and failed are
 // what the data says; interrupted is what a reader concludes from a
 // stale last-seen (DeriveStatus) — never stored, so a crash leaves
@@ -423,7 +335,7 @@ const (
 	StatusInterrupted Status = "interrupted"
 )
 
-// The read-time status words (I3; Studio's lib/status.ts vocabulary):
+// The read-time status words (I3):
 // never a row's Status, only a RunQuery filter, each mapped onto the
 // stored columns by both backends (docs/record-contract.md §6).
 const (
@@ -482,10 +394,9 @@ type RunRow struct {
 	Agent, Provider, Model, ManifestHash, WeftVersion, Service string
 	SessionID, PublicID                                        string
 	Turn                                                       int
-	Playground                                                 bool
-	ExperimentID, ForkedFrom                                   string
+	ForkedFrom                                                 string
 	// ResumedFrom is the run this one resumes — its weft.resumed_from
-	// (core.ResumeOf; thread and weftbase/runtime pass it, an app passes
+	// (core.ResumeOf; thread passes it, an app passes
 	// the parked RunResult.ID) — and ResumedBy, on a parked run, the
 	// run that resumed it: the latest run by start time whose
 	// ResumedFrom names this run (a tie: the larger id), derived at read time on both backends, so a resumer
@@ -573,7 +484,7 @@ type RunRow struct {
 	// a run still going, or one recorded before the field existed.
 	StoppedBy string
 	// CancelCause is a canceled run's weft.cancel.cause
-	// (thread.interrupted, thread.closed, studio.cancel, deadline, or a
+	// (thread.interrupted, thread.closed, deadline, or a
 	// caller's own core.CancelCause kind); "" on a plain cancel and on
 	// every other run.
 	CancelCause string
@@ -698,12 +609,11 @@ const MaxGaps = 1000
 // listed when one of its own turns carries every pair, and its turns,
 // usage, first/last seen, agent, status, title, first prompt, turn
 // facts, the page's order, Total and the cursor are those turns' alone
-// (I4: a tag-scoped panel token's session lists its tagged turns, never
-// the rest). Compacted still reads the session's compaction markers,
+// (a tag filter's session lists its tagged turns, never the rest). Compacted still reads the session's compaction markers,
 // which carry no metadata.
 //
 // IDs keeps the sessions whose id is one of them, empty any: one read
-// gives a known set of sessions their rows (Studio's timeline reads the
+// gives a known set of sessions their rows (a timeline reads the
 // sessions a session forked so, U15.2-fix) — every aggregate still over
 // all of each one's turns.
 //
@@ -746,7 +656,7 @@ type SessionQuery struct {
 }
 
 // SessionRow is one session: a GROUP BY over its own turns (D3; record
-// contract §6) — the non-playground runs carrying its weft.session.id
+// contract §6) — the runs carrying its weft.session.id
 // that are turns of it: a run whose id is <session>-t<turn> (thread's
 // own id rule, a turn started inside a tool handler included), or one
 // linked to no run at all (neither ParentRunID nor CallerRunID: a run
@@ -808,7 +718,7 @@ type SessionRow struct {
 	// busy policy ended (Interrupt or Rollback: a cancel cause of
 	// BusyCancelCause, never a failure); CancelledTurns the other failed
 	// turns whose error type is ErrorTypeCancelled (a caller's cancel, a
-	// deadline, thread.closed, studio.cancel: no failure of the agent);
+	// deadline, thread.closed: no failure of the agent);
 	// Resumes the turns that resume a parked one (a stored ResumedFrom),
 	// so Turns - Resumes is the session's exchanges; Outcomes the newest
 	// MaxOutcomes turns' outcomes, oldest first (Turns - len(Outcomes)
@@ -878,7 +788,7 @@ func OutcomeOf(r RunRow) TurnOutcome {
 // EndedTurns, CancelledTurns, Resumes, Outcomes, ForkedFrom) from its
 // turns, given in
 // any order: they are read by turn, then start, then id, the newest
-// last. Every backend and Studio's scoped session row read it; the
+// last. Every backend and a filtered session row read it; the
 // SessionQuery filters state the same rule in SQL.
 func SessionTurnFacts(row *SessionRow, turns []RunRow) {
 	sorted := slices.Clone(turns)
@@ -949,9 +859,8 @@ func SumModelUsage(parts []ModelUsage) (core.Usage, []ModelUsage) {
 // first turn, a run row with its Status and Settling derived
 // (DeriveStatus, DeriveSettling): events stored, not one messages
 // record, not Derived, and over — not running, not settling, whose
-// messages records may still arrive. Every backend and Studio's scoped
-// session row read it; the web client's lib/title.ts contentOff is its
-// twin.
+// messages records may still arrive. Every backend and a filtered
+// session row read it.
 func SessionContentOff(first RunRow) bool {
 	return !first.Derived && first.MessageCount == 0 && first.EventCount > 0 &&
 		first.Status != StatusRunning && !first.Settling
@@ -975,15 +884,14 @@ type SessionPage struct {
 }
 
 // SessionDetail is one session with its turns — all of them: top-level
-// runs by Turn, then Started; experiments excluded (they hang off runs
-// via ForkedFrom).
+// runs by Turn, then Started.
 type SessionDetail struct {
 	SessionRow
 	Runs []RunRow
 }
 
 // ErrNotFound is returned by Run, Session, Events, Transcript,
-// RunSpans, OtherLogs, Requests, Prompt, Tools, Catalogs, Experiment,
+// RunSpans, OtherLogs, Requests, Prompt, Tools, Catalogs,
 // DeleteRun, DeleteSession and ResolvePublicID for an id the database does not hold (Prompt and
 // Tools also for a hash, possibly as a *HoleError). Trace answers an
 // unknown trace with no spans instead: a trace is only ever the spans
@@ -1039,7 +947,7 @@ func DeriveStatus(spanFailed, ended bool, lastSeen, now time.Time) Status {
 // stored (rootEnded), the run_finish record is not (finishRecorded
 // false), and now - lastSeen ≤ InterruptedAfter — the window in which a
 // destination that stored the root before the records behind it (a
-// log exporter's retry or backlog; Studio's destination batches logs
+// log exporter's retry or backlog; the server's destination batches logs
 // faster than spans, but a user's Exporters pair need not) may still
 // deliver them. Pass rootEnded false for a derived run — stock spans
 // have no records to wait for — and for a failed one: a failed root is

@@ -21,7 +21,7 @@
   },
   "content_off_t1_decided": {
     "run": "01K00000000000000000000001-t2",
-    "at": "2026-10-01T09:38:00.006Z",
+    "at": "2026-10-01T09:37:00.006Z",
     "actor": "agent-7",
     "source": "resume_calls",
     "calls": [
@@ -37,7 +37,7 @@
   },
   "grants_t1_decided": {
     "run": "01K00000000000000000000001-t2",
-    "at": "2026-10-01T09:31:00.006Z",
+    "at": "2026-10-01T09:30:00.006Z",
     "source": "resume_calls",
     "calls": [
       {
@@ -52,7 +52,7 @@
   },
   "grants_t2_decided": {
     "run": "01K00000000000000000000001-t3",
-    "at": "2026-10-01T09:31:00.014Z",
+    "at": "2026-10-01T09:30:00.014Z",
     "actor": "policy-bot",
     "source": "resume_calls",
     "calls": [
@@ -62,39 +62,6 @@
         "outcome": "approved",
         "via": "approver",
         "who": "policy-bot",
-        "at": "2026-10-01T09:00:00Z"
-      }
-    ]
-  },
-  "read_token_t1_decided": {
-    "run": "01K00000000000000000000001-t2",
-    "at": "2026-10-01T09:30:00.006Z",
-    "actor": "agent-7",
-    "source": "resume_calls",
-    "calls": [
-      {
-        "call_id": "r1",
-        "name": "issue_refund",
-        "outcome": "denied",
-        "via": "user",
-        "reason_badge": "hidden",
-        "at": "2026-10-01T09:00:00Z"
-      }
-    ]
-  },
-  "read_token_two_actors_t1_decided": {
-    "run": "01K00000000000000000000001-t2",
-    "at": "2026-10-01T09:30:00.006Z",
-    "actor": "agent-7,agent-8",
-    "source": "resume_calls",
-    "calls": [
-      {
-        "call_id": "r1",
-        "name": "issue_refund",
-        "outcome": "denied",
-        "via": "user",
-        "who_hidden": true,
-        "reason_badge": "hidden",
         "at": "2026-10-01T09:00:00Z"
       }
     ]
@@ -139,7 +106,7 @@
   },
   "thread_t1_decided": {
     "run": "01K00000000000000000000001-t2",
-    "at": "2026-10-01T09:30:00.006Z",
+    "at": "2026-10-01T09:29:00.006Z",
     "actor": "agent-7",
     "source": "resume_calls",
     "calls": [
@@ -156,7 +123,7 @@
   },
   "thread_t2_resumes": {
     "run": "01K00000000000000000000001-t1",
-    "at": "2026-10-01T09:30:00.006Z",
+    "at": "2026-10-01T09:29:00.006Z",
     "actor": "agent-7",
     "source": "resume_calls",
     "calls": [
@@ -173,7 +140,7 @@
   },
   "thread_t3_decided": {
     "run": "01K00000000000000000000001-t4",
-    "at": "2026-10-01T09:30:00.018Z",
+    "at": "2026-10-01T09:29:00.018Z",
     "actor": "k_alice",
     "source": "resume_calls",
     "calls": [
@@ -190,7 +157,7 @@
   },
   "thread_t7_decided": {
     "run": "01K00000000000000000000001-t8",
-    "at": "2026-10-01T09:30:00.042Z",
+    "at": "2026-10-01T09:29:00.042Z",
     "actor": "agent-7",
     "source": "resume_calls",
     "calls": [

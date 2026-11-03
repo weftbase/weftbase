@@ -17,7 +17,7 @@ import (
 )
 
 // FromOTLPTraces decodes an OTLP/HTTP trace export request into the
-// model. The receiver (studio/ingest) and a stock collector's dump
+// model. The server's OTLP receiver and a stock collector's dump
 // produce the same rows the local sink does; non-weft spans pass
 // through unchanged — a polyglot trace is a first-class citizen.
 func FromOTLPTraces(req *coltracepb.ExportTraceServiceRequest) []Span {
@@ -119,7 +119,7 @@ const (
 // OTLP/JSON spells ids as hex strings, not the base64 the standard
 // protobuf JSON mapping gives a bytes field — and a hex id is valid
 // base64, so a protojson decode of a real OTLP/JSON request (what
-// studio/ingest runs) succeeds and yields size*3/2 bytes of the hex
+// the OTLP receiver runs) succeeds and yields size*3/2 bytes of the hex
 // text read as base64. No real id has that width, and encoding the
 // bytes back returns the sender's string exactly: when that string is
 // hex of the right length, it is the id.

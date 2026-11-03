@@ -2,12 +2,10 @@ package studio
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -347,146 +345,13 @@ func TestDiffMarks(t *testing.T) {
 	}
 }
 
-// oldDB writes a sqlite file as a weft before ADR 0028 left it
-// (migrations 0001 and 0002 by hand, run rows, no records or spans).
-func oldDB(t *testing.T, rows ...string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "old.db")
-	raw, err := sql.Open("sqlite", "file:"+path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := raw.Exec(`CREATE TABLE obsdb_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
-		t.Fatal(err)
-	}
-	for v, name := range []string{"0001_init.sql", "0002_experiments.sql"} {
-		body, err := os.ReadFile(filepath.Join("..", "obsdb", "sqlite", "migrations", name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := raw.Exec(string(body)); err != nil {
-			t.Fatalf("migration %s: %v", name, err)
-		}
-		if _, err := raw.Exec(`INSERT INTO obsdb_migrations (version, applied_at) VALUES (?, '2026-10-01T00:00:00Z')`, v+1); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, id := range rows {
-		if _, err := raw.Exec(`INSERT INTO runs (run_id, agent, started_ns, last_seen_ns, finished_ok, steps)
-			VALUES (?, 'support', 100, 200, 1, 2)`, id); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := raw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return path
-}
-
-// TestDiffNotRecorded: two runs written before the request record —
-// each side's system is null under not_recorded, its text null with
-// the gap that says why, and nothing reads as a change: what neither
-// side recorded is not a difference.
-func TestDiffNotRecorded(t *testing.T) {
-	srv := New(Open(oldDB(t, "old1", "old2")))
-	t.Cleanup(func() { _ = srv.Close() })
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-	d, body := getDiff(t, ts, "old1", "old2", "")
-	stepGolden(t, "diff-not-recorded.golden.json", body)
-	if len(d.Steps) != 2 || len(d.Summary.ChangedSteps) != 0 {
-		t.Fatalf("pre-A1 diff = %d rows changed %v, want 2, none", len(d.Steps), d.Summary.ChangedSteps)
-	}
-	for _, row := range d.Steps {
-		if want := []string{"system", "tool_calls", "tool_results", "text", "usage"}; row.Changed || !slices.Equal(row.Unknown, want) {
-			t.Errorf("pre-A1 step %d = changed %v unknown %v, want unchanged and every column unknown %v", row.Step, row.Changed, row.Unknown, want)
-		}
-		for _, side := range []*diffSideT{row.A, row.B} {
-			h := side.holes()
-			if side.System != nil || side.SystemHash != "" || side.Text != nil || !slices.Contains(h, "not_recorded") || !slices.Contains(h, "gap") {
-				t.Errorf("pre-A1 step %d side = system %v text %v holes %v, want both null under not_recorded and gap", row.Step, side.System, side.Text, h)
-			}
-		}
-	}
-}
-
-// TestDiffPanelTokens: a read-scoped panel token reads the diff of two
-// runs inside its public id with every side's system null under the
-// hidden hole (the hash kept — the run row's instructions_hash is
-// read-scoped too) and every other column as the server token reads
-// it; a run outside its public id is 403 whichever side names it. A
-// playground-scoped token reads the system text.
-func TestDiffPanelTokens(t *testing.T) {
-	const tok = "srv-token"
-	srv := New(Open(filepath.Join(t.TempDir(), "weft.db")), Token(tok))
-	t.Cleanup(func() { _ = srv.Close() })
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-	pubA := map[string]string{"weft.public_id": "pub_a"}
-	recordDiffRun(t, ts.URL, "r_ta", "order 3 shipped", 4, pubA)
-	recordDiffRun(t, ts.URL, "r_tb", "order 3 lost", 4, pubA)
-	recordDiffRun(t, ts.URL, "r_tother", "order 3 lost", 4, map[string]string{"weft.public_id": "pub_b"})
-	for _, id := range []string{"r_ta", "r_tb", "r_tother"} {
-		waitRun(t, ts, id, 5, tok)
-	}
-	sign := func(scope string) string {
-		s, err := signPanelToken([]byte(tok), panelClaims{PublicID: "pub_a", Scope: scope, Exp: time.Now().Add(time.Hour)})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return s
-	}
-	full, _ := getDiff(t, ts, "r_ta", "r_tb", tok)
-	read, body := getDiff(t, ts, "r_ta", "r_tb", sign(scopeRead))
-	stepGolden(t, "diff-hidden.golden.json", body)
-	if strings.Contains(body, "You are a support agent.") {
-		t.Errorf("the read token's diff carries the system prompt: %s", body)
-	}
-	if !slices.Equal(read.Summary.ChangedSteps, []int{3}) || !slices.Equal(read.Steps[3].Changes, []string{"tool_results"}) {
-		t.Errorf("read token summary %+v step 3 %v, want [3], [tool_results]", read.Summary, read.Steps[3].Changes)
-	}
-	for i, row := range read.Steps {
-		for j, side := range []*diffSideT{row.A, row.B} {
-			fs := []*diffSideT{full.Steps[i].A, full.Steps[i].B}[j]
-			if side.System != nil || !slices.Equal(side.holes(), []string{"hidden"}) || side.Holes[0].Fix != "use a playground token" ||
-				side.SystemHash == "" || side.SystemHash != fs.SystemHash {
-				t.Errorf("read token step %d side = system %v hash %q holes %v, want null, the hash, hidden", row.Step, side.System, side.SystemHash, side.holes())
-			}
-			rs, _ := json.Marshal([]any{side.ToolCalls, side.ToolResults, side.Text, side.Usage})
-			fb, _ := json.Marshal([]any{fs.ToolCalls, fs.ToolResults, fs.Text, fs.Usage})
-			if string(rs) != string(fb) {
-				t.Errorf("read token step %d columns = %s, want the server token's %s", row.Step, rs, fb)
-			}
-		}
-	}
-	pg, _ := getDiff(t, ts, "r_ta", "r_tb", sign(scopePlayground))
-	if s := pg.Steps[0].A.System; s == nil || *s != "You are a support agent." || len(pg.Steps[0].A.Holes) != 0 {
-		t.Errorf("playground token step 0 system = %v holes %v, want the text, no hole", s, pg.Steps[0].A.holes())
-	}
-	for _, path := range []string{"/api/diff?a=r_ta&b=r_tother", "/api/diff?a=r_tother&b=r_ta"} {
-		req, _ := http.NewRequest(http.MethodGet, ts.URL+path, nil)
-		req.Header.Set("Authorization", "Bearer "+sign(scopeRead))
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		b, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusForbidden || strings.Contains(string(b), "order 3") {
-			t.Errorf("%s as a read token = %d %s, want 403 and nothing of either run", path, resp.StatusCode, b)
-		}
-	}
-}
-
 // TestDiffUnknownColumns (review finding 1): a column one side could
 // not record is never compared with the other side's value — it is
-// listed in unknown, neither changed nor the same. A run written before
-// the request record against a recorded one; a content-off run against
-// its content-on twin; a run whose step 1 lost its step_start against
+// listed in unknown, neither changed nor the same. A content-off run
+// against its content-on twin; a run whose step 1 lost its step_start against
 // a whole one.
 func TestDiffUnknownColumns(t *testing.T) {
-	path := oldDB(t, "old1")
-	srv := New(Open(path))
+	srv := New(Open(filepath.Join(t.TempDir(), "w.db")))
 	t.Cleanup(func() { _ = srv.Close() })
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
@@ -495,21 +360,9 @@ func TestDiffUnknownColumns(t *testing.T) {
 	waitRun(t, ts, "r_on", 5, "")
 	waitRun(t, ts, "r_off", 5, "")
 
-	// Pre-A1 against recorded: steps 0 and 1 compare nothing (the old
-	// run stored no event, request or message of them), 2..4 missing.
-	d, _ := getDiff(t, ts, "old1", "r_on", "")
-	if !slices.Equal(d.Summary.ChangedSteps, []int{2, 3, 4}) {
-		t.Errorf("pre-A1 vs recorded changed = %v, want [2 3 4] (missing only)", d.Summary.ChangedSteps)
-	}
-	for _, row := range d.Steps[:2] {
-		if row.Changed || !slices.Contains(row.Unknown, "usage") || !slices.Contains(row.Unknown, "system") {
-			t.Errorf("pre-A1 vs recorded step %d = changes %v unknown %v, want none changed, system and usage unknown", row.Step, row.Changes, row.Unknown)
-		}
-	}
-
 	// Content-off against content-on: the hashes compare the system,
 	// the usage compares; calls, results and text are unknown.
-	d, _ = getDiff(t, ts, "r_off", "r_on", "")
+	d, _ := getDiff(t, ts, "r_off", "r_on", "")
 	if len(d.Summary.ChangedSteps) != 0 {
 		t.Errorf("content-off vs on changed = %v (%+v), want none", d.Summary.ChangedSteps, d.Steps)
 	}
@@ -657,7 +510,7 @@ func TestDiffWalkResumes(t *testing.T) {
 				t.Errorf("step %d resumes at a %s of step %d, want its step_start", n, h.Type, h.Index)
 			}
 		}
-		got, err := seq.assembleStep(n, true)
+		got, err := seq.assembleStep(n)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -665,7 +518,7 @@ func TestDiffWalkResumes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want, err := alone.assembleStep(n, true)
+		want, err := alone.assembleStep(n)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -707,42 +560,6 @@ func TestCanonicalJSON(t *testing.T) {
 	}
 }
 
-// TestDiffNoInstructionsReadToken: an agent with no instructions sends
-// no system text — a fact every identity reads, so under a read token
-// the system column compares ("" on both sides, hash ""), never unknown.
-func TestDiffNoInstructionsReadToken(t *testing.T) {
-	const tok = "srv-token"
-	srv := New(Open(filepath.Join(t.TempDir(), "weft.db")), Token(tok))
-	t.Cleanup(func() { _ = srv.Close() })
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-	for _, id := range []string{"r_ni1", "r_ni2"} {
-		withPipeline(t, ts.URL, true, func(prov []core.Option) {
-			agent := core.New(wefttest.Script(wefttest.Say("hi")), prov...)
-			if _, err := agent.Generate(context.Background(), core.RunID(id), core.Prompt("go"),
-				core.Metadata(map[string]string{"weft.public_id": "pub_a"})); err != nil {
-				t.Fatal(err)
-			}
-		})
-		waitRun(t, ts, id, 1, tok)
-	}
-	read, err := signPanelToken([]byte(tok), panelClaims{PublicID: "pub_a", Scope: scopeRead, Exp: time.Now().Add(time.Hour)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, bearer := range []string{read, tok} {
-		d, _ := getDiff(t, ts, "r_ni1", "r_ni2", bearer)
-		if len(d.Steps) != 1 {
-			t.Fatalf("rows = %d, want 1", len(d.Steps))
-		}
-		r := d.Steps[0]
-		if slices.Contains(r.Unknown, "system") || r.Changed || r.A.System == nil || *r.A.System != "" || r.A.SystemHash != "" {
-			t.Errorf("no instructions (read token %v) = system %v hash %q unknown %v changes %v, want \"\" compared, unchanged",
-				bearer == read, r.A.System, r.A.SystemHash, r.Unknown, r.Changes)
-		}
-	}
-}
-
 // TestDiffWalkResumesPastLostStepStart: step 1's step_start was
 // dropped from a 3-step run. Assembled in sequence (each walk resuming
 // where the last stopped), every step equals the same step assembled
@@ -770,7 +587,7 @@ func TestDiffWalkResumesPastLostStepStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	for n := range 3 {
-		got, err := seq.assembleStep(n, true)
+		got, err := seq.assembleStep(n)
 		if err != nil {
 			t.Fatalf("step %d in sequence: %v", n, err)
 		}
@@ -778,7 +595,7 @@ func TestDiffWalkResumesPastLostStepStart(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want, err := alone.assembleStep(n, true)
+		want, err := alone.assembleStep(n)
 		if err != nil {
 			t.Fatalf("step %d alone: %v", n, err)
 		}
@@ -794,30 +611,8 @@ func TestDiffWalkResumesPastLostStepStart(t *testing.T) {
 			t.Error("step 1 (its step_start lost) reads eventsLost false")
 		}
 	}
-	if _, err := seq.assembleStep(3, true); !isNoStep(err) {
+	if _, err := seq.assembleStep(3); !isNoStep(err) {
 		t.Errorf("step 3 in sequence = %v, want no such step", err)
-	}
-}
-
-// TestDiffSideHiddenChildrenCount (P8-pre-web #7, U31.1): a step's
-// hidden hole with a count is its child runs' alone and stays counted on
-// the diff side; the system prompt is hidden only when the request block
-// is (a read token), said by the side's explicit system_hidden — never by
-// the hole's count, which stays.
-func TestDiffSideHiddenChildrenCount(t *testing.T) {
-	kids := hiddenChildrenHole(2, readScope{})
-	text := "be brief"
-	open := diffSideOf(stepDoc{Status: stepOK, sysText: &text, Holes: []stepHole{kids}}, &text, true)
-	if len(open.Holes) == 0 || open.Holes[0].Hole != string(obsdb.HoleHidden) || open.Holes[0].Count != 2 || open.SystemHidden {
-		t.Errorf("children only: holes %+v, system_hidden %v; want hidden with count 2, the prompt not hidden", open.Holes, open.SystemHidden)
-	}
-	read := diffSideOf(stepDoc{Status: stepOK, Request: badgeOf(obsdb.HoleHidden), Holes: []stepHole{kids}}, &text, true)
-	if len(read.Holes) == 0 || read.Holes[0].Hole != string(obsdb.HoleHidden) || read.Holes[0].Count != 2 || !read.SystemHidden {
-		t.Errorf("request hidden too: holes %+v, system_hidden %v; want hidden with count 2 and system_hidden", read.Holes, read.SystemHidden)
-	}
-	b, _ := json.Marshal(read)
-	if !strings.Contains(string(b), `"system_hidden":true`) {
-		t.Errorf("the side's JSON carries no system_hidden: %s", b)
 	}
 }
 

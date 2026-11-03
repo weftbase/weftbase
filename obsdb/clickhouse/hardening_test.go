@@ -229,43 +229,6 @@ func TestLegacyStatusSpellingStillReads(t *testing.T) {
 	}
 }
 
-// Created and Updated keep the save's sub-second time, like the SQLite
-// backend's nanosecond columns: a positional time.Time bind renders at
-// whole seconds (the driver's rule the cursor fix already met), so both
-// read back floored — Updated earlier than the instant before the save.
-func TestExperimentTimesKeepSubSecond(t *testing.T) {
-	db, _ := openFresh(t)
-	// Not on a second boundary: the floor must be visible.
-	for time.Now().Nanosecond() < int(50*time.Millisecond) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	before := time.Now().UTC()
-	if err := db.SaveExperiment(ctx(), obsdb.Experiment{ID: "exp_t", Name: "n"}); err != nil {
-		t.Fatal(err)
-	}
-	first, err := db.Experiment(ctx(), "exp_t")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first.Updated.Before(before) || first.Created.Before(before) {
-		t.Errorf("created %v / updated %v precede the save's start %v — floored to the second",
-			first.Created, first.Updated, before)
-	}
-	if err := db.SaveExperiment(ctx(), obsdb.Experiment{ID: "exp_t", Name: "n2"}); err != nil {
-		t.Fatal(err)
-	}
-	second, err := db.Experiment(ctx(), "exp_t")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !second.Created.Equal(first.Created) {
-		t.Errorf("created moved on update: %v → %v", first.Created, second.Created)
-	}
-	if !second.Updated.After(first.Updated) {
-		t.Errorf("updated did not advance: %v → %v", first.Updated, second.Updated)
-	}
-}
-
 // ResolvePublicID picks the newest turn by (turn, started) — the SQLite
 // backend's order. Two sessions sharing a public id at the same turn:
 // the later-started one wins even when the earlier one was seen last.

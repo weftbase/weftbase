@@ -45,17 +45,13 @@ import (
 //
 // and /api/runs' own filters with their meaning there: session,
 // public_id, parent ("" top-level only, "*" all, a run id its
-// children), all, playground, experiment_id (the runs labelled with
-// that weft.experiment.id), tag.<k>=<v>. A panel token searches its
-// own public id only — the scoping /api/runs applies (scopeRunsQuery):
-// a foreign public_id is 403. Hits are run rows and nothing else: no
-// snippet, so nothing of a system prompt or a tool catalog can leave
-// through a search (the read scope never reads either).
+// children), all, tag.<k>=<v>. Hits are run rows and nothing else: no
+// snippet.
 
 //
 // Cost (plan A5) is computed at read time, never stored, so min_cost and
 // sort=cost are applied here, not in SQL — one rule for both backends:
-// Studio reads the match's first costSortCap runs in the order asked
+// The server reads the match's first costSortCap runs in the order asked
 // (newest first for sort=cost), prices each (its own and its subagent
 // children's cost), filters and orders them, and pages the result with
 // offset and limit. A match larger than the cap is cut there, and the
@@ -145,7 +141,7 @@ func (s *Server) errorClasses(w http.ResponseWriter, r *http.Request, query *obs
 // A var only so TestCostSortCap can lower it; nothing else writes it.
 var costSortCap = 2000
 
-// sortCost is sort=cost: Studio's own order, not obsdb's.
+// sortCost is sort=cost: the server's own order, not obsdb's.
 const sortCost = "cost"
 
 func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
@@ -157,23 +153,18 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	query := obsdb.SearchQuery{
 		RunQuery: obsdb.RunQuery{
-			Agent:        q.Get("agent"),
-			SessionID:    q.Get("session"),
-			PublicID:     q.Get("public_id"),
-			ExperimentID: q.Get("experiment_id"),
-			StoppedBy:    q.Get("stopped_by"),
-			ErrorType:    q.Get("error_type"),
-			ParentRunID:  parentParam(q),
-			Meta:         tagParams(q),
+			Agent:       q.Get("agent"),
+			SessionID:   q.Get("session"),
+			PublicID:    q.Get("public_id"),
+			StoppedBy:   q.Get("stopped_by"),
+			ErrorType:   q.Get("error_type"),
+			ParentRunID: parentParam(q),
+			Meta:        tagParams(q),
 		},
 		Text:  q.Get("q"),
 		Tool:  q.Get("tool"),
 		Model: q.Get("model"),
 		Error: q.Get("error"),
-	}
-	// The scope first: a foreign public id's 403 wins over any 400.
-	if !scopeRunsQuery(w, r, &query.RunQuery, q.Get("public_id")) {
-		return
 	}
 	var minCost *float64
 	if _, set := q["min_cost"]; set {
@@ -196,14 +187,6 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	if query.Status, ok = statusParam(w, r, q); !ok {
 		return
-	}
-	if v := q.Get("playground"); v != "" {
-		b, err := strconv.ParseBool(v)
-		if err != nil {
-			badRequest(w, r, "playground must be true or false")
-			return
-		}
-		query.Playground = &b
 	}
 	if v := q.Get("all"); v != "" {
 		b, err := strconv.ParseBool(v)

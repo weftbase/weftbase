@@ -96,9 +96,8 @@ func (d *DB) deriveStock(ctx context.Context, spans []obsdb.Span) error {
 }
 
 // rederiveTraces re-derives each trace's runs from its stored spans
-// (deriveStock's body; migration 0031's step runs the same order in
-// chunks, rederiveChunk). Per trace, in this order — so the last writer
-// of a trace sees everything (two batches, or two Studios over one
+// (deriveStock's body). Per trace, in this order — so the last writer
+// of a trace sees everything (two batches, or two servers over one
 // database, racing on it):
 //
 //  1. read the spans, derive, insert every run's row (MessageCount into

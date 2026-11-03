@@ -1,7 +1,6 @@
 {
-  "weft_version": "v0.20.3",
-  "studio_version": "v0.20.3",
-  "panel_version": "v0.20.3",
+  "weft_version": "v0.21.0",
+  "studio_version": "v0.21.0",
   "db": {
     "kind": "sqlite"
   },
@@ -28,27 +27,10 @@
     "timeline",
     "pricing",
     "delete",
-    "proposals",
     "live",
     "scope_tags",
-    "ingest",
-    "panel-config"
+    "ingest"
   ],
-  "capabilities_off": {
-    "auth": "no server token to sign panel tokens with: turn it on with studio.Token(tok); weftbase dev always sets one",
-    "breakpoints": "the playground is off: turn it on with studio.Playground(true); weftbase dev --no-playground turns it off",
-    "cancel": "the playground is off: turn it on with studio.Playground(true); weftbase dev --no-playground turns it off",
-    "handoff": "no Token: panel tokens do not exist here, so there is none to hand off from: turn it on with studio.Token(tok); weftbase dev always sets one",
-    "panel_token_tags": "no server token to sign panel tokens with: turn it on with studio.Token(tok); weftbase dev always sets one",
-    "playground": "the playground is off: turn it on with studio.Playground(true); weftbase dev --no-playground turns it off",
-    "preview": "the playground is off: turn it on with studio.Playground(true); weftbase dev --no-playground turns it off",
-    "run_commands": "the playground is off: turn it on with studio.Playground(true); weftbase dev --no-playground turns it off",
-    "runtime_forget": "the playground is off: turn it on with studio.Playground(true); weftbase dev --no-playground turns it off",
-    "runtimes": "the playground is off: turn it on with studio.Playground(true); weftbase dev --no-playground turns it off",
-    "steer": "the playground is off: turn it on with studio.Playground(true); weftbase dev --no-playground turns it off",
-    "target_check": "the playground is off: turn it on with studio.Playground(true); weftbase dev --no-playground turns it off"
-  },
-  "manifest_sources": 1,
   "auth_required": false,
   "live_all": true,
   "content": {
@@ -61,7 +43,6 @@
     "models": 47
   },
   "retention": "720h0m0s",
-  "runtimes": 0,
   "manifest_check": {
     "source": "file",
     "agents": 1,

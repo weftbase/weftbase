@@ -452,7 +452,7 @@ func TestFailedRunFromSpan(t *testing.T) {
 }
 
 // Sessions and public-id resolution (S3.4): a GROUP BY over top-level
-// non-playground runs.
+// runs.
 func TestSessions(t *testing.T) {
 	db := openMem(t)
 	ctx := context.Background()
@@ -472,13 +472,6 @@ func TestSessions(t *testing.T) {
 	}
 	writeTurn("s1-t1", 1, true)
 	writeTurn("s1-t2", 2, false)
-	writeTurn("s1-t3", 3, true) // a playground experiment on the same session
-	pg := rec("s1-t3", "event", "run_start", 0, `{"type":"run_start","id":"s1-t3"}`,
-		map[string]any{"weft.turn": int64(3), "weft.playground": true, "weft.session.id": "s1"})
-	pg.Time = base(30 * time.Second)
-	if err := db.Write(ctx, obsdb.Batch{Records: []obsdb.Record{pg}}); err != nil {
-		t.Fatal(err)
-	}
 
 	page, err := db.Sessions(ctx, obsdb.SessionQuery{})
 	if err != nil {
@@ -492,15 +485,15 @@ func TestSessions(t *testing.T) {
 		t.Errorf("session row = %+v", s)
 	}
 	if s.Turns != 2 {
-		t.Errorf("turns = %d, want 2 (non-playground turns)", s.Turns)
+		t.Errorf("turns = %d, want 2", s.Turns)
 	}
 	if s.Usage.InputTokens != 10 || s.Usage.OutputTokens != 2 {
 		t.Errorf("usage = %+v, want the finished turn's", s.Usage)
 	}
 	if s.Status != obsdb.StatusRunning {
-		t.Errorf("status = %q, want the newest non-playground turn's (running)", s.Status)
+		t.Errorf("status = %q, want the newest turn's (running)", s.Status)
 	}
-	// Detail: the turns in order, experiments excluded.
+	// Detail: the turns in order.
 	det, err := db.Session(ctx, "s1")
 	if err != nil {
 		t.Fatal(err)
@@ -626,7 +619,7 @@ func TestNotFound(t *testing.T) {
 	}
 }
 
-// A file database survives Close and reopens (the Studio read path
+// A file database survives Close and reopens (the server's read path
 // opens another process's file).
 func TestFileReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "obs.db")
@@ -670,12 +663,39 @@ func TestNewerSchemaRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := raw.Exec(`INSERT INTO obsdb_migrations (version, applied_at) VALUES (9999, '2030-01-01T00:00:00Z')`); err != nil {
+	if _, err := raw.Exec(`INSERT INTO obsdb_migrations (version, epoch, applied_at) VALUES (9999, 'rebuild', '2030-01-01T00:00:00Z')`); err != nil {
 		t.Fatal(err)
 	}
 	_ = raw.Close()
 	if _, err := sqlite.Open(path); !errors.Is(err, sqlite.ErrNewerSchema) {
 		t.Errorf("Open on newer schema = %v, want ErrNewerSchema", err)
+	}
+}
+
+// A file written before the schema was squashed into one 0001 (the old
+// history table: no epoch column, versions up to 26) refuses to open,
+// whatever version it recorded: there is no upgrade path from it.
+func TestPredatesRebuildRefused(t *testing.T) {
+	for _, version := range []int{1, 26} {
+		path := filepath.Join(t.TempDir(), "old.db")
+		raw, err := sqlOpen(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := raw.Exec(`CREATE TABLE obsdb_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := raw.Exec(`INSERT INTO obsdb_migrations (version, applied_at) VALUES (?, '2026-01-01T00:00:00Z')`, version); err != nil {
+			t.Fatal(err)
+		}
+		_ = raw.Close()
+		_, err = sqlite.Open(path)
+		if !errors.Is(err, sqlite.ErrPredatesRebuild) {
+			t.Fatalf("Open on a version-%d pre-rebuild file = %v, want ErrPredatesRebuild", version, err)
+		}
+		if want := "this database predates the rebuild; start a fresh data dir"; !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to say %q", err, want)
+		}
 	}
 }
 
@@ -825,7 +845,7 @@ func TestNonWeftRecords(t *testing.T) {
 // stamps every metadata value as attribute.String (observe.go) — the
 // int64 fixtures everywhere else are a spelling the pipeline never
 // produces. The row must carry turn 3, not the 0 that made every
-// studio run row read "t0" (the programme audit's P1-1).
+// run row read "t0" (the programme audit's P1-1).
 func TestTurnStringAttrEndToEnd(t *testing.T) {
 	db := openMem(t)
 	ctx := context.Background()
@@ -1107,7 +1127,7 @@ func TestEventGapsAreBounded(t *testing.T) {
 }
 
 // Writers and readers share the handle (the local sink writes on the
-// runs' goroutines while Studio reads): on both handle shapes
+// runs' goroutines while the server reads): on both handle shapes
 // concurrent use neither errors nor loses a row, and Close afterwards
 // turns every further call into ErrClosed.
 func TestConcurrentWritersAndReaders(t *testing.T) {
@@ -1409,7 +1429,7 @@ func inputRecs() []obsdb.Record {
 	}
 }
 
-// TestPath pins Path (Studio's api/meta db.path): the absolute path of
+// TestPath pins Path (the server meta's db.path): the absolute path of
 // a file database, resolved at Open, and "" for ":memory:".
 func TestPath(t *testing.T) {
 	dir := t.TempDir()
@@ -1435,7 +1455,7 @@ func TestPath(t *testing.T) {
 }
 
 // ExampleDB_Path: the file a database lives in, through the interface
-// Studio's api/meta reads (db.path).
+// the server's meta reads (db.path).
 func ExampleDB_Path() {
 	dir, _ := os.MkdirTemp("", "obsdb")
 	defer func() { _ = os.RemoveAll(dir) }()

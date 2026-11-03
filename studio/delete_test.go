@@ -280,7 +280,7 @@ func TestRetainSweeper(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := logs.String()
-	if !strings.Contains(out, "studio: retention sweep") || !strings.Contains(out, "deleted_runs=3") ||
+	if !strings.Contains(out, "weftbase: retention sweep") || !strings.Contains(out, "deleted_runs=3") ||
 		!strings.Contains(out, "deleted_runs=1") || !strings.Contains(out, "retention=1h0m0s") {
 		t.Errorf("sweep log lines = %s", out)
 	}
@@ -304,10 +304,10 @@ func TestRetainSweepFailureIsLogged(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	deadline := time.Now().Add(5 * time.Second)
-	for !strings.Contains(logs.String(), "studio: retention sweep failed") && time.Now().Before(deadline) {
+	for !strings.Contains(logs.String(), "weftbase: retention sweep failed") && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if !strings.Contains(logs.String(), "level=WARN msg=\"studio: retention sweep failed\"") {
+	if !strings.Contains(logs.String(), "level=WARN msg=\"weftbase: retention sweep failed\"") {
 		t.Errorf("no Warn line for the failed sweep: %s", logs.String())
 	}
 	if code, _ := call(t, ts, http.MethodGet, "/api/runs", "", ""); code != http.StatusOK {
@@ -342,7 +342,7 @@ func TestRetainSweeperStopsOnClosedDB(t *testing.T) {
 	for !strings.Contains(logs.String(), "sweeper stopped: database closed") && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
-	if !strings.Contains(logs.String(), "level=DEBUG msg=\"studio: sweeper stopped: database closed\"") {
+	if !strings.Contains(logs.String(), "level=DEBUG msg=\"weftbase: sweeper stopped: database closed\"") {
 		t.Fatalf("no stop line: %s", logs.String())
 	}
 	n := counted.n.Load()

@@ -655,12 +655,12 @@ func TestCostPoolChild(t *testing.T) {
 	if childRow.SessionID != childSession {
 		t.Fatalf("the pool child's run carries session %q, want the child session %s", childRow.SessionID, childSession)
 	}
-	sc, _, _ := srv.sessionCost(ctx, childSession, readScope{})
+	sc, _, _ := srv.sessionCost(ctx, childSession)
 	if f := sc.fields(); usd(f.CostUSD) != "0.002" || !f.CostKnown {
 		t.Errorf("pool child session %s: cost %s known %v (%s), want 0.002", childSession, usd(f.CostUSD), f.CostKnown, f.CostReason)
 	}
 	// And the parent's session is its own turn's bill alone.
-	pc, _, _ := srv.sessionCost(ctx, s.ID(), readScope{})
+	pc, _, _ := srv.sessionCost(ctx, s.ID())
 	if f := pc.fields(); usd(f.CostUSD) != "0.04" {
 		t.Errorf("pool parent session: cost %s, want 0.04", usd(f.CostUSD))
 	}
@@ -814,30 +814,6 @@ func TestCostSortCap(t *testing.T) {
 	_, _, body = get(t, h, "/studio/api/search?sort=cost&limit=10&agent=billing&q=nothing-matches")
 	if strings.Contains(body, "cost_sort_cap") {
 		t.Errorf("an uncapped match carries cost_sort_cap: %s", body)
-	}
-}
-
-// TestCostZeroUsageIsExact: a set with no usage — a run-less
-// experiment — is a known $0, and nothing about it is overstated: its
-// cache reads exact, with no cache note for a reason.
-func TestCostZeroUsageIsExact(t *testing.T) {
-	ts := httptest.NewServer(New(Open(filepath.Join(t.TempDir(), "w.db")), Playground(true)).Handler())
-	t.Cleanup(ts.Close)
-	def := `{"id":"exp_empty","name":"n","agent":"a","variants":[{"key":"A","overrides":{}}],"inputs":[{"key":"1","text":"x"}]}`
-	resp, err := http.Post(ts.URL+"/api/experiments", "application/json", strings.NewReader(def))
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("save = %d %s", resp.StatusCode, b)
-	}
-	var r costRow
-	decode(t, string(b), &r)
-	if usd(r.CostUSD) != "0" || !r.CostKnown || r.Cache != cacheExact || r.CostReason != "" {
-		t.Errorf("run-less experiment: cost %s known %v cache %q reason %q; want 0, known, exact, no reason",
-			usd(r.CostUSD), r.CostKnown, r.Cache, r.CostReason)
 	}
 }
 

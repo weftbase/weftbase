@@ -147,13 +147,10 @@ func TestRunDocSummarizer(t *testing.T) {
 	}
 }
 
-// TestSummarizerPricedAlikeInEveryScope (P9-pre-go-fix): a session one
-// of whose turns another public id shares (a colliding run) is re-read
-// in a panel token's scope — by id (SessionQuery.IDs), never a
-// substring search — with its summarizer usage's per-model split, so a
-// panel token prices the summarizer exactly as the dev token does: at
-// the span's model's rates, not as one unattributed part.
-func TestSummarizerPricedAlikeInEveryScope(t *testing.T) {
+// TestSummarizerPricedAtTheSpansModel (P9-pre-go-fix): a session one of
+// whose turns another public id shares (a colliding run) prices its
+// summarizer at the span's model's rates, not as one unattributed part.
+func TestSummarizerPricedAtTheSpansModel(t *testing.T) {
 	db := timelineDB(t)
 	at := fixtureT0.Add(45 * time.Second)
 	foreign := obsdb.Record{Time: at, EventName: "weft.event", Severity: 9, Service: "svc", Body: `{"type":"run_start","id":"s_acme-t9"}`,
@@ -168,10 +165,6 @@ func TestSummarizerPricedAlikeInEveryScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := Handler(DB(db), Token("srv"))
-	panel, err := signPanelToken([]byte("srv"), panelClaims{PublicID: "pub_acme", Scope: scopePlayground, Exp: time.Now().Add(time.Hour)})
-	if err != nil {
-		t.Fatal(err)
-	}
 	figure := func(bearer string) string {
 		t.Helper()
 		code, _, body := getWith(t, h, "/studio/api/sessions/s_acme/timeline", bearer, "")
@@ -186,16 +179,16 @@ func TestSummarizerPricedAlikeInEveryScope(t *testing.T) {
 		}
 		return string(v.Summarizer)
 	}
-	dev, pub := figure("srv"), figure(panel)
-	if dev == "" || dev != pub {
-		t.Errorf("summarizer figure: dev token %s, panel token %s; want the same", dev, pub)
+	dev := figure("srv")
+	if dev == "" {
+		t.Fatal("summarizer figure: none")
 	}
 	var f summarizerCost
-	if err := json.Unmarshal([]byte(pub), &f); err != nil {
+	if err := json.Unmarshal([]byte(dev), &f); err != nil {
 		t.Fatal(err)
 	}
 	// The span's part at gpt-4o's own rates: known, no stand-in estimate.
 	if f.CostUSD == nil || !f.CostKnown || f.CostBadge != "" || f.Usage.InputTokens < 1_000_000 {
-		t.Errorf("panel figure = %s, want the span's 1M priced at gpt-4o, known, no estimate badge", pub)
+		t.Errorf("figure = %s, want the span's 1M priced at gpt-4o, known, no estimate badge", dev)
 	}
 }

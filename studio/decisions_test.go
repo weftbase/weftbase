@@ -4,10 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/weftbase/weftbase/obsdb"
 )
@@ -59,15 +57,6 @@ func TestRunDecisions(t *testing.T) {
 	_, out["thread_t2_resumes"] = runBlocks(t, h, sess+"-t2", "srv")
 	out["thread_t3_decided"], _ = runBlocks(t, h, sess+"-t3", "srv")
 	out["thread_t7_decided"], _ = runBlocks(t, h, sess+"-t7", "srv")
-	read, err := signPanelToken([]byte("srv"), panelClaims{PublicID: "pub_thread_approvals", Scope: scopeRead, Exp: time.Now().Add(time.Hour)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	out["read_token_t1_decided"], _ = runBlocks(t, h, sess+"-t1", read)
-	if s := string(out["read_token_t1_decided"]); strings.Contains(s, "need a photo") ||
-		strings.Contains(s, `"who"`) || !strings.Contains(s, `"reason_badge":"hidden"`) {
-		t.Errorf("read token: who or the reason leaked, or no hidden badge: %s", s)
-	}
 	if s := string(out["thread_t1_decided"]); !strings.Contains(s, `"outcome":"denied"`) ||
 		!strings.Contains(s, `"who":"agent-7"`) || !strings.Contains(s, `"reason":"need a photo of the damage"`) ||
 		!strings.Contains(s, `"run":"`+sess+`-t2"`) {
@@ -77,19 +66,6 @@ func TestRunDecisions(t *testing.T) {
 		t.Errorf("t2 resumes = %s, want t1's deny", s)
 	}
 
-	// U13.2-fix2 1: a resume decided by two actors (thread comma-joins
-	// them) names no one call's decider: a read token gets the hidden
-	// badge, not a bare "denied".
-	two := ingestEdited(t, "thread_approvals", true, func(kv map[string]any) bool {
-		if kv["key"] == "weft.approval.actor" {
-			kv["value"] = map[string]any{"stringValue": "agent-7,agent-8"}
-		}
-		return true
-	})
-	out["read_token_two_actors_t1_decided"], _ = runBlocks(t, two, sess+"-t1", read)
-	if s := string(out["read_token_two_actors_t1_decided"]); !strings.Contains(s, `"who_hidden":true`) || strings.Contains(s, `"who"`) {
-		t.Errorf("two actors, read token: %s, want who_hidden and no who", s)
-	}
 	off := decisionsServer(t, "thread_content_off")
 	out["content_off_t1_decided"], _ = runBlocks(t, off, sess+"-t1", "srv")
 	if s := string(out["content_off_t1_decided"]); !strings.Contains(s, `"reason_badge":"not_recorded"`) || strings.Contains(s, `"who"`) {
@@ -170,21 +146,16 @@ func TestTimelineDecisionActor(t *testing.T) {
 	if d.Actor == "" {
 		t.Fatalf("t1 decided names no actor: %s", decided)
 	}
-	read, err := signPanelToken([]byte("srv"), panelClaims{PublicID: "pub_thread_approvals", Scope: scopeRead, Exp: time.Now().Add(time.Hour)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, tok := range []string{"srv", read} {
+	for _, tok := range []string{"srv"} {
 		code, _, body := getWith(t, h, "/studio/api/sessions/"+sess+"/timeline", tok, "")
 		if code != http.StatusOK {
 			t.Fatalf("timeline: %d %s", code, body)
 		}
 		var v struct {
 			Marks []struct {
-				Kind          string `json:"kind"`
-				RunID         string `json:"run_id"`
-				Actor         string `json:"actor"`
-				ContentHidden bool   `json:"content_hidden"`
+				Kind  string `json:"kind"`
+				RunID string `json:"run_id"`
+				Actor string `json:"actor"`
 			} `json:"marks"`
 		}
 		decode(t, body, &v)
@@ -197,15 +168,9 @@ func TestTimelineDecisionActor(t *testing.T) {
 			if m.Actor != d.Actor {
 				t.Errorf("token %q: t1's decision mark actor %q, want the decided block's %q", tok[:3], m.Actor, d.Actor)
 			}
-			if tok == read && !m.ContentHidden {
-				t.Errorf("read token: the decision's content is not hidden")
-			}
 		}
 		if !found {
 			t.Errorf("token %q: no decision mark for t1: %s", tok[:3], body)
-		}
-		if tok == read && strings.Contains(body, "need a photo") {
-			t.Errorf("read token: the deny reason leaked: %s", body)
 		}
 	}
 }
@@ -218,9 +183,8 @@ func TestTimelineDecisionActor(t *testing.T) {
 // turn (t3's own "carol") changes nothing. A run no stored turn resumed
 // has no actor yet (P9-pre-web-fix3 F1: its own names who decided the
 // run before it, never its decisions). One resume deciding several calls (t6 resumes t5 as
-// "bob,k_dave") names each call's own — the key its record names, else,
-// to a content reader, its who — and otherwise the list, as the
-// resume's (actor_of).
+// "bob,k_dave") names each call's own — the key its record names, else
+// its who — and otherwise the list, as the resume's (actor_of).
 func TestTimelineDecisionActorChained(t *testing.T) {
 	const sess = "01K00000000000000000000009"
 	run := func(n int, actor, from string) obsdb.RunRow {
@@ -234,9 +198,8 @@ func TestTimelineDecisionActorChained(t *testing.T) {
 	lone := run(8, "erin", "")
 	det := obsdb.SessionDetail{SessionRow: obsdb.SessionRow{ID: sess}, Runs: []obsdb.RunRow{t3, t4, t5, t6, lone}}
 	srv := &Server{}
-	mark := func(reads bool, runID, body string) sessionEntry {
-		mb := srv.newMarkBuilder(httptest.NewRequest(http.MethodGet, "/api/sessions/"+sess+"/timeline", nil), det)
-		mb.readsContent = reads
+	mark := func(runID, body string) sessionEntry {
+		mb := srv.newMarkBuilder(det)
 		m, ok := mb.mark(obsdb.SessionEvent{SessionID: sess, RunID: runID, Kind: obsdb.RecordThread, Name: "weft.thread.approval.decision", Body: json.RawMessage(body)})
 		if !ok {
 			t.Fatalf("mark %s left out", runID)
@@ -246,26 +209,24 @@ func TestTimelineDecisionActorChained(t *testing.T) {
 	plain := `{"kind":"approval.decision","call_id":"c1","outcome":"approve"}`
 	for _, c := range []struct {
 		run, body  string
-		reads      bool
 		actor, off string
 	}{
-		{t3.ID, plain, true, "alice", ""},
-		{t4.ID, plain, true, "bob", ""},
-		{t4.ID, plain, false, "bob", ""},
-		{t5.ID, `{"kind":"approval.decision","call_id":"c1","outcome":"approve","key_id":"k_dave","content":{"who":"dave"}}`, false, "k_dave", ""},
-		{t5.ID, `{"kind":"approval.decision","call_id":"c2","outcome":"deny","content":{"who":"bob"}}`, true, "bob", ""},
-		{t5.ID, `{"kind":"approval.decision","call_id":"c2","outcome":"deny","content":{"who":"bob"}}`, false, "bob,k_dave", "resume"},
-		{t5.ID, `not json`, true, "bob,k_dave", "resume"},
-		{lone.ID, plain, true, "", ""},
-		{t6.ID, plain, true, "", ""},
+		{t3.ID, plain, "alice", ""},
+		{t4.ID, plain, "bob", ""},
+		{t5.ID, `{"kind":"approval.decision","call_id":"c1","outcome":"approve","key_id":"k_dave","content":{"who":"dave"}}`, "k_dave", ""},
+		{t5.ID, `{"kind":"approval.decision","call_id":"c2","outcome":"deny","content":{"who":"bob"}}`, "bob", ""},
+		{t5.ID, `{"kind":"approval.decision","call_id":"c2","outcome":"deny","content":{"who":"erin"}}`, "bob,k_dave", "resume"},
+		{t5.ID, `not json`, "bob,k_dave", "resume"},
+		{lone.ID, plain, "", ""},
+		{t6.ID, plain, "", ""},
 	} {
-		m := mark(c.reads, c.run, c.body)
+		m := mark(c.run, c.body)
 		if m.Actor != c.actor || m.ActorOf != c.off {
-			t.Errorf("%s %s (reads %v): actor %q of %q, want %q of %q", c.run[len(sess):], c.body, c.reads, m.Actor, m.ActorOf, c.actor, c.off)
+			t.Errorf("%s %s: actor %q of %q, want %q of %q", c.run[len(sess):], c.body, m.Actor, m.ActorOf, c.actor, c.off)
 		}
 	}
 	// Any other kind carries no actor.
-	mb := srv.newMarkBuilder(httptest.NewRequest(http.MethodGet, "/", nil), det)
+	mb := srv.newMarkBuilder(det)
 	if m, _ := mb.mark(obsdb.SessionEvent{SessionID: sess, RunID: t3.ID, Kind: obsdb.RecordThread, Name: "weft.thread.approval.request", Body: json.RawMessage(plain)}); m.Actor != "" {
 		t.Errorf("a request mark carries actor %q", m.Actor)
 	}
@@ -275,8 +236,8 @@ func TestTimelineDecisionActorChained(t *testing.T) {
 // t4 resumes it as alice and parks; bob's decision on t4 is recorded
 // (a Quorum(2) approval while still parked, or Decide before Resume)
 // before t5 is stored. t4's mark names no actor — never alice, whose
-// actor names who decided t3 — for every identity: the decider is not
-// recorded yet. t3's stays alice's.
+// actor names who decided t3: the decider is not recorded yet. t3's
+// stays alice's.
 func TestTimelineDecisionActorBeforeResume(t *testing.T) {
 	const sess = "01K0000000000000000000000A"
 	t3 := obsdb.RunRow{ID: sess + "-t3", Turn: 3, Pending: 1, StoppedBy: "parked", Meta: map[string]string{}}
@@ -285,16 +246,15 @@ func TestTimelineDecisionActorBeforeResume(t *testing.T) {
 	det := obsdb.SessionDetail{SessionRow: obsdb.SessionRow{ID: sess}, Runs: []obsdb.RunRow{t3, t4}}
 	srv := &Server{}
 	body := `{"kind":"approval.decision","call_id":"c1","outcome":"approve","content":{"who":"bob"}}`
-	for _, reads := range []bool{true, false} {
-		mb := srv.newMarkBuilder(httptest.NewRequest(http.MethodGet, "/api/sessions/"+sess+"/timeline", nil), det)
-		mb.readsContent = reads
+	{
+		mb := srv.newMarkBuilder(det)
 		for run, want := range map[string]string{t3.ID: "alice", t4.ID: ""} {
 			m, ok := mb.mark(obsdb.SessionEvent{SessionID: sess, RunID: run, Kind: obsdb.RecordThread, Name: "weft.thread.approval.decision", Body: json.RawMessage(body)})
 			if !ok {
 				t.Fatalf("mark %s left out", run)
 			}
 			if m.Actor != want || m.ActorOf != "" {
-				t.Errorf("%s (reads %v): actor %q of %q, want %q", run[len(sess):], reads, m.Actor, m.ActorOf, want)
+				t.Errorf("%s: actor %q of %q, want %q", run[len(sess):], m.Actor, m.ActorOf, want)
 			}
 		}
 	}

@@ -6,14 +6,12 @@ package studio
 // carries too (X-Request-Id, and request_id in the 5xx body).
 import (
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 )
 
 // captureLog points slog.Default at a buffer for the test.
@@ -56,7 +54,7 @@ func TestServerLogNamesARefusedIngestBatch(t *testing.T) {
 		t.Fatalf("logged %d lines, want one: %q", len(lines), lines)
 	}
 	l := lines[0]
-	for _, want := range []string{"level=WARN", `msg="studio: ingest batch refused"`, "request_id=" + id,
+	for _, want := range []string{"level=WARN", `msg="weftbase: ingest batch refused"`, "request_id=" + id,
 		"status=400", "path=/v1/traces", "code=bad_request", `reason="decode application/json:`} {
 		if !strings.Contains(l, want) {
 			t.Errorf("the line %q lacks %q", l, want)
@@ -111,7 +109,7 @@ func TestServerLogNamesA5xxWithItsRequestID(t *testing.T) {
 	if len(errLines) != 1 {
 		t.Fatalf("ERROR lines %q, want one", errLines)
 	}
-	for _, want := range []string{`msg="studio: request failed"`, "request_id=" + id, "status=500", "path=/api/runs", "code=internal"} {
+	for _, want := range []string{`msg="weftbase: request failed"`, "request_id=" + id, "status=500", "path=/api/runs", "code=internal"} {
 		if !strings.Contains(errLines[0], want) {
 			t.Errorf("the line %q lacks %q", errLines[0], want)
 		}
@@ -125,33 +123,6 @@ func TestServerLogNamesA5xxWithItsRequestID(t *testing.T) {
 	New(DB(fixtureDB(t))).Handler().ServeHTTP(w, req)
 	if w.Code != http.StatusNotFound || logged.Len() != 0 {
 		t.Errorf("a 404: %d, logged %q", w.Code, logged.String())
-	}
-}
-
-// P8-fix-a 2: a 5xx answered to a panel token masks the database's error
-// text in its body, but Studio's server log line for that request id
-// still names the real error — the operator's only way to it.
-func TestServerLogNamesAPanelTokens5xxCause(t *testing.T) {
-	logged := captureLog(t)
-	stub := stubDB{err: errors.New("open /var/lib/studio/secret.db: disk on fire")}
-	h := Handler(DB(stub), Token("srv"))
-	tok, err := signPanelToken([]byte("srv"), panelClaims{PublicID: "pub_orders", Scope: scopeRead, Exp: time.Now().Add(time.Hour)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	code, hdr, body := getWith(t, h, "/studio/api/runs/r_x", tok, "")
-	if code != http.StatusInternalServerError || strings.Contains(body, "disk on fire") {
-		t.Fatalf("panel token's 500: %d %s", code, body)
-	}
-	id := hdr.Get("X-Request-Id")
-	var line string
-	for _, l := range linesOf(logged) {
-		if strings.Contains(l, "request_id="+id) {
-			line = l
-		}
-	}
-	if !strings.Contains(line, `reason="read run r_x: open /var/lib/studio/secret.db: disk on fire"`) {
-		t.Errorf("the 5xx line for %s does not name the real error: %q", id, line)
 	}
 }
 

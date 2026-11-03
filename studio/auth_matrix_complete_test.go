@@ -15,12 +15,12 @@ import (
 	"testing"
 )
 
-// The auth matrix's completeness check: every route Studio registers
+// The auth matrix's completeness check: every route the server registers
 // has a TestAuthMatrix row, and every row reaches a registered route
 // (a row marked noRoute pins the API's 404 and must reach none). The
 // registered set is read, not listed: the mux patterns are the string
-// literals the package's sources pass to HandleFunc / Handle / the
-// runtime link's mount (each one then resolved on the matrix's own
+// literals the package's sources pass to HandleFunc / Handle (each one
+// then resolved on the matrix's own
 // server, so a pattern a group leaves unmounted is caught too), and
 // the two subtrees' sub-routes are the live tables their dispatchers
 // walk (Server.runRoutes, Server.sessionSubRoutes).
@@ -37,14 +37,12 @@ type matrixRow struct {
 var muxPattern = regexp.MustCompile(`^((GET|HEAD|POST|PUT|PATCH|DELETE) )?/`)
 
 // sourcePatterns returns every mux pattern literal the non-test Go
-// files under the studio package directory register (examples/ is a
-// program with a mux of its own, web/ the UI's sources). A registering
+// files under the studio package directory register. A registering
 // call whose pattern is not a literal is a problem — the check could
-// not see it — except the runtime link's mount helper, whose pattern
-// parameter is fed by the literals at its call sites.
+// not see it.
 func sourcePatterns(t *testing.T) (patterns []string, problems []string) {
 	t.Helper()
-	skip := map[string]bool{"examples": true, "web": true, "dist": true, "testdata": true, "screenshots": true, "node_modules": true}
+	skip := map[string]bool{"web": true, "testdata": true, "node_modules": true}
 	fset := token.NewFileSet()
 	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -75,7 +73,7 @@ func sourcePatterns(t *testing.T) (patterns []string, problems []string) {
 			case *ast.Ident:
 				fn = f.Name
 			}
-			if fn != "HandleFunc" && fn != "Handle" && fn != "mount" {
+			if fn != "HandleFunc" && fn != "Handle" {
 				return true
 			}
 			switch a := call.Args[0].(type) {
@@ -88,10 +86,6 @@ func sourcePatterns(t *testing.T) (patterns []string, problems []string) {
 					return true
 				}
 				patterns = append(patterns, p)
-			case *ast.Ident:
-				if a.Name != "pattern" { // MountGuarded's mount(pattern, h)
-					problems = append(problems, fset.Position(call.Pos()).String()+": a route registered with a non-literal pattern ("+a.Name+"): the auth matrix's completeness check cannot see it")
-				}
 			default:
 				problems = append(problems, fset.Position(call.Pos()).String()+": a route registered with a non-literal pattern: the auth matrix's completeness check cannot see it")
 			}
@@ -265,17 +259,16 @@ func authMatrixGaps(srv *Server, routes map[string]bool, rows []matrixRow) []str
 // registered route passes; a route with no row and a row naming no
 // route are each reported by name.
 func TestAuthMatrixCompletenessCheck(t *testing.T) {
-	srv := New(Open(t.TempDir()+"/c.db"), Playground(true), Token("srv"), IngestToken("ing"))
+	srv := New(Open(t.TempDir()+"/c.db"), Token("srv"), IngestToken("ing"))
 	t.Cleanup(func() { _ = srv.Close() })
 	routes, problems := registeredRoutes(t, srv)
 	for _, p := range problems {
 		t.Error(p)
 	}
 	// Every kind the sources register is in the set.
-	for _, k := range []string{"/", "GET /api/meta", "POST /v1/traces", "POST /api/runtime/register",
+	for _, k := range []string{"/", "GET /api/meta", "POST /v1/traces",
 		"GET /api/runs/{id}", "GET /api/runs/{id}/events", "GET /api/runs/{id}/steps/{item}",
-		"GET /api/sessions/{id}/timeline", "GET /api/sessions/{id}/public_id", "DELETE /api/sessions/{id}",
-		"PUT /api/agents/{name}/proposal"} {
+		"GET /api/sessions/{id}/timeline", "GET /api/sessions/{id}/public_id", "DELETE /api/sessions/{id}"} {
 		if !routes[k] {
 			t.Errorf("registered routes lack %s: %v", k, routes)
 		}

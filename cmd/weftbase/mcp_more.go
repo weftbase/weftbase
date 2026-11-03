@@ -13,8 +13,7 @@ import (
 // The investigation tools (I5, UX-H-27): what Studio shows that the
 // first thirteen tools could not read — a run's app logs, its spans
 // (and its run tree's), a trace by id, a run's transcript on its own,
-// the running runs, the agents' manifests, the playground's experiments
-// and the connected runtimes. Each is one GET of an existing route,
+// the running runs and the agents' manifests. Each is one GET of an existing route,
 // under the same bound; nothing new on the server.
 
 type mcpLogsIn struct {
@@ -48,12 +47,6 @@ type mcpLiveIn struct {
 	Agent string `json:"agent,omitempty" jsonschema:"only this agent's runs"`
 	Limit int    `json:"limit,omitempty" jsonschema:"page size (Studio's default when 0)"`
 	mcpFull
-	mcpBound
-}
-
-type mcpExperimentsIn struct {
-	ID    string `json:"id,omitempty" jsonschema:"one experiment (its saved command and runs); else the list"`
-	Limit int    `json:"limit,omitempty" jsonschema:"list size (50 when 0, at most 200)"`
 	mcpBound
 }
 
@@ -179,31 +172,6 @@ func (m *mcpReader) agents(ctx context.Context, _ *sdk.CallToolRequest, in mcpMe
 		s = fmt.Sprintf("agents: %d (%s)", len(names), joinOr(names, "none"))
 	}
 	return out(in.MaxBytes, s, b)
-}
-
-func (m *mcpReader) experiments(ctx context.Context, _ *sdk.CallToolRequest, in mcpExperimentsIn) (*sdk.CallToolResult, any, error) {
-	if in.ID != "" {
-		b, err := m.get(ctx, "/api/experiments/"+url.PathEscape(in.ID), nil)
-		if err != nil {
-			return nil, nil, err
-		}
-		return out(in.MaxBytes, "experiment "+in.ID, b)
-	}
-	q := url.Values{}
-	setInt(q, "limit", int64(in.Limit))
-	b, err := m.get(ctx, "/api/experiments", q)
-	if err != nil {
-		return nil, nil, err
-	}
-	return out(in.MaxBytes, pageSummary("experiments", b, "experiments"), b)
-}
-
-func (m *mcpReader) runtimes(ctx context.Context, _ *sdk.CallToolRequest, in mcpMetaIn) (*sdk.CallToolResult, any, error) {
-	b, err := m.get(ctx, "/api/runtimes", nil)
-	if err != nil {
-		return nil, nil, err
-	}
-	return out(in.MaxBytes, pageSummary("runtimes", b, "runtimes"), b)
 }
 
 // holesSuffix names a document's holes in the summary line.

@@ -1,23 +1,19 @@
 # Build output
 /weftbase
 /bin/
-/examples/studio-local/studio-local
-/studio/cmd/cmd
 /examples/approvals/approvals
-/studio/examples/basic/basic
-/runtime/examples/local/local
 
-# Studio's web project: contributor-side build state only — the build
-# output itself (studio/dist) is committed and embedded (ADR 0018 §3).
-/studio/web/node_modules/
-/studio/web/.output/
-/studio/web/.tanstack/
-/studio/web/.vinxi/
-/studio/web/.vite/
-/studio/web/dist-tmp/
+# The Console's Bun project: contributor-side build state only. The
+# build itself (console/dist) is committed and embedded.
+/console/app/node_modules/
+/console/app/.output/
+/console/app/.tanstack/
+/console/app/.vinxi/
+/console/app/.vite/
+/console/app/dist-tmp/
 
-# The local data a weftbase dev writes beside a project (database, dev
-# token, discovery file).
+# The local data a weftbase dev writes beside a project (databases,
+# bootstrap key, discovery file).
 .weftbase/
 
 # Go test artifacts

@@ -61,8 +61,7 @@ type Weft struct {
 	Pos                              int64 // event pos, messages index, delta pos, or request/prompt/tools index
 	Step                             int   // -1 when absent
 	ToolSeq                          int64 // -1 when absent
-	Playground                       bool
-	ExperimentID, ForkedFrom         string
+	ForkedFrom                       string
 	// ResumedFrom is a resuming run's weft.resumed_from (core.ResumeOf,
 	// UX-E-17): the parked run it resumes. On its invoke_agent span and
 	// run_start record only.
@@ -107,8 +106,6 @@ const (
 	attrRawIdx       = "weft.raw.index" // ADR 0028 §12: the raw record's own per-run index
 	attrStepIndex    = "weft.step.index"
 	attrToolSeq      = "weft.tool.seq"
-	attrPlayground   = "weft.playground"
-	attrExperimentID = "weft.experiment.id"
 	attrForkedFrom   = "weft.forked_from"
 	attrResumedFrom  = "weft.resumed_from"
 	attrCallerRunID  = "weft.caller.run.id"
@@ -139,8 +136,6 @@ func DeriveSpan(s Span) Weft {
 		Agent:        attr(s.Attrs, attrAgentName),
 		Step:         attrIntOr(s.Attrs, attrStepIndex, -1),
 		ToolSeq:      int64(attrIntOr(s.Attrs, attrToolSeq, -1)),
-		Playground:   attrBool(s.Attrs, attrPlayground),
-		ExperimentID: attr(s.Attrs, attrExperimentID),
 		ForkedFrom:   attr(s.Attrs, attrForkedFrom),
 		ResumedFrom:  attr(s.Attrs, attrResumedFrom),
 		CallerRunID:  localCaller(s.Attrs, attrCallerRunID),
@@ -180,8 +175,6 @@ func DeriveRecord(r Record) Weft {
 		EventType:    attr(r.Attrs, attrEventType),
 		Step:         attrIntOr(r.Attrs, attrStepIndex, -1),
 		ToolSeq:      int64(attrIntOr(r.Attrs, attrToolSeq, -1)),
-		Playground:   attrBool(r.Attrs, attrPlayground),
-		ExperimentID: attr(r.Attrs, attrExperimentID),
 		ForkedFrom:   attr(r.Attrs, attrForkedFrom),
 		ResumedFrom:  attr(r.Attrs, attrResumedFrom),
 		CallerRunID:  localCaller(r.Attrs, attrCallerRunID),
@@ -313,9 +306,8 @@ func attrIntOr(m map[string]any, k string, def int) int {
 
 // attrBool reads a boolean attribute; anything but a present true is
 // false. The string "true" counts as true for attrIntOr's reason: the
-// flags weft's own modules set travel as run metadata (weftbase/runtime
-// stamps "weft.playground": "true"), and the core renders every
-// metadata value as a string attribute — so the string spelling is the
+// flags weft's own modules set travel as run metadata, and the core
+// renders every metadata value as a string attribute — so the string spelling is the
 // one the pipeline produces and the bool the one fixtures hand-build.
 // ClickHouse's views read the same pair (the stringified attr = 'true').
 func attrBool(m map[string]any, k string) bool {
@@ -340,7 +332,7 @@ var nonMetaAttr = map[string]struct{}{
 	attrSessionID: {}, attrPublicID: {}, attrTurn: {}, attrAgentName: {},
 	attrRecord: {}, attrEventType: {}, attrEventPos: {}, attrDeltaPos: {},
 	attrMessagesIdx: {}, attrStepIndex: {}, attrToolSeq: {},
-	attrPlayground: {}, attrExperimentID: {}, attrForkedFrom: {},
+	attrForkedFrom:                 {},
 	attrResumedFrom:                {}, // U13.1: the run row's resumed_from column
 	"weft.resume.calls":            {}, // U13.1: a resume's decisions per parked call (on the spans)
 	"weft.tool.denied":             {}, // U13.1: a denied call's execute_tool span

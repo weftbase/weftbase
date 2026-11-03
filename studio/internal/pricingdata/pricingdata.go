@@ -1,4 +1,4 @@
-// Package pricingdata is the hand-maintained source of Studio's default
+// Package pricingdata is the hand-maintained source of weftbase's default
 // pricing table (plan A5): studio/pricing.json is generated from it by
 // studio/internal/pricinggen (go generate ./studio/...), committed, and
 // held equal to JSON's output by studio's TestPricingJSONIsGenerated.
@@ -14,7 +14,7 @@
 //     tier) is left out: one rate per token kind cannot price it exactly;
 //   - a model whose rate the author was not sure of is left out — an
 //     unpriced run reads "unpriced", never a guessed number;
-//   - a rate column the vendor does not publish is omitted, and Studio
+//   - a rate column the vendor does not publish is omitted, and the server
 //     then prices that token kind at the base rate (input or output);
 //   - cache_write is the 5-minute-TTL write rate (Anthropic: 1.25× the
 //     input rate); a 1-hour write bills 2×, which the usage cannot tell
@@ -44,7 +44,7 @@ const Dated = "2026-10-10"
 const Note = "Prices are the vendors' public per-1M-token list rates in USD (first-party APIs), read on the dated day. " +
 	"model_glob is a path.Match pattern over provider/model; the first match wins. A row with no provider (or provider \"*\") " +
 	"matches on model_glob alone, any transport (an OpenAI-compatible endpoint behind the openai adapter). " +
-	"A scripted model no row matches (wefttest/*, weft/runtime/scripted; any other wrapper ships its own row) is an exact $0, badge scripted: a rule in Studio, not a row. A missing cached_input, " +
+	"A scripted model no row matches (wefttest/*, weft/runtime/scripted; any other wrapper ships its own row) is an exact $0, badge scripted: a rule in weftbase, not a row. A missing cached_input, " +
 	"cache_write or reasoning rate prices those tokens at the input or output rate. " +
 	"cache_write is the 5-minute-TTL rate (1.25x input): a 1-hour cache write (2x) is understated. " +
 	"The Gemini rows have no cached_input: a cached Gemini prompt is priced at the input rate. " +

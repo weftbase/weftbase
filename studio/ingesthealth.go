@@ -15,15 +15,15 @@ import (
 // their own losses. Each weft/otel destination stamps its cumulative
 // lost-record count on its heartbeats and on every run's run_start and
 // run_finish event records (weft.records.dropped, record contract §4);
-// Studio keeps the largest value heard per service.name — in memory,
+// The server keeps the largest value heard per service.name — in memory,
 // like registered manifests: a restart forgets it until the next such
 // record. The max is per service, not per process: the pipeline's
 // resource carries no process identity (no service.instance.id, no
 // pid), so an app restarted under the same name, whose count starts
 // again from zero, reads the earlier process's larger count until
-// Studio restarts. GET /api/meta serves it as ingest.dropped, the
+// the server restarts. GET /api/meta serves it as ingest.dropped, the
 // Settings page shows it, `weftbase doctor` prints it. Heard on the OTLP
-// ingest path (setup B, `weftbase dev`): a Local destination writes its own
+// ingest path (`weftbase dev`): a Local destination writes its own
 // heartbeats into the database directly, and never overflows (it has no
 // queue).
 
@@ -88,7 +88,7 @@ type metaIngest struct {
 	// first; never null.
 	Dropped []metaIngestDrop `json:"dropped"`
 	// Accepted and Refused count the OTLP batches (POSTs under /v1/)
-	// this Studio answered 2xx and 4xx/5xx since it started; LastError
+	// this server answered 2xx and 4xx/5xx since it started; LastError
 	// is the last refusal — "<status> <code>: <reason>", the reason its
 	// server log line names — and LastAt its time, both omitted before
 	// the first (UX-E-37; studio/internal/reqlog, in memory).

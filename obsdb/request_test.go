@@ -12,7 +12,7 @@ import (
 
 // The hole vocabulary is ADR 0028 §11's closed table, in its order:
 // a new badge is an amendment to that ADR, so this list changes only
-// with it (and with Studio's TypeScript twin).
+// with it (and with a client's twin of it).
 func TestHolesClosedTable(t *testing.T) {
 	var got []string
 	for _, h := range obsdb.Holes() {
@@ -25,18 +25,17 @@ func TestHolesClosedTable(t *testing.T) {
 }
 
 // The badge table in words (ADR 0028 §11, plan A3): every hole has a
-// one-line reason; a fix exactly where one exists. The golden lives
-// beside Studio's API goldens because Studio's TypeScript table
-// (studio/web/src/lib/honesty.ts) is checked against it key by key —
-// one file, so the two trees cannot drift.
+// one-line reason; a fix exactly where one exists. The golden is the
+// one file a client's table (the Console's) is checked against key by
+// key, so the two cannot drift.
 func TestHoleNotesGolden(t *testing.T) {
 	type note struct {
 		Reason string `json:"reason"`
 		Fix    string `json:"fix,omitempty"`
 	}
 	// Causes (HoleNoteFor) ride under their hole in a sub-object: the
-	// ten top-level rows stay HoleNote's, which Studio's TypeScript
-	// table is checked against (it ignores causes).
+	// ten top-level rows stay HoleNote's, which a client's table is
+	// checked against (it may ignore causes).
 	type row struct {
 		Hole   obsdb.Hole               `json:"hole"`
 		Reason string                   `json:"reason"`
@@ -79,7 +78,7 @@ func TestHoleNotesGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wefttest.Golden(t, "../studio/testdata/holes.golden.json", append(b, '\n'))
+	wefttest.Golden(t, "testdata/holes.golden.json", append(b, '\n'))
 }
 
 // The reading table (ADR 0028 §10) over a run row.

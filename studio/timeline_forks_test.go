@@ -112,7 +112,6 @@ func timelineForks(t *testing.T, base obsdb.DB) {
 		RunID     *string `json:"run_id"`
 		Turns     int     `json:"turns"`
 		Status    string  `json:"status"`
-		Hidden    bool    `json:"hidden"`
 		Unknown   bool    `json:"unknown"`
 	}
 	read := func(h http.Handler, tok string) []forkView {
@@ -145,26 +144,12 @@ func timelineForks(t *testing.T, base obsdb.DB) {
 	if got[0].Entry != "e4" || got[2].Entry != "e6" {
 		t.Errorf("fork entries = %q, %q; want e4, e6", got[0].Entry, got[2].Entry)
 	}
-	if f := got[1]; f.SessionID != "s_never" || f.Turns != 0 || f.Status != "" || f.Unknown || f.Hidden {
+	if f := got[1]; f.SessionID != "s_never" || f.Turns != 0 || f.Status != "" || f.Unknown {
 		t.Errorf("the fork that ran no turn = %+v, want 0 turns and no status", f)
 	}
 	defer func(n int) { timelineForkCap = n }(timelineForkCap)
 	timelineForkCap = 1
 	if got := read(Handler(DB(db)), ""); got[0].Unknown || got[2].Unknown || !got[1].Unknown || got[0].Turns != 2 {
 		t.Errorf("past the cap = %+v, want s_fork (both marks) looked up, s_never unknown", got)
-	}
-	timelineForkCap = 20
-	reads()
-	// A panel token: the forks named, their state hidden — and not read.
-	h := Handler(DB(db), Token("srv"))
-	tok, err := signPanelToken([]byte("srv"), panelClaims{PublicID: "pub_trip", Scope: scopeRead, Exp: time.Now().Add(time.Hour)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := read(h, tok); len(got) != 3 || !got[0].Hidden || got[0].Turns != 0 || got[0].Status != "" {
-		t.Errorf("a panel token's forks = %+v, want all hidden, no turns or status", got)
-	}
-	if many, _ := reads(); many != 0 {
-		t.Errorf("a panel token's timeline read %d Sessions queries, want none", many)
 	}
 }

@@ -22,7 +22,7 @@ import (
 // with native GROUP BY over otel_traces and weft_runs, no table of its
 // own — and the obsdbtest conformance table holds them to the same
 // answers. A backend that does not implement it is a database without
-// aggregates: Studio then leaves its stats capability off and says why.
+// aggregates: the server then leaves its stats capability off and says why.
 type Aggregator interface {
 	// Stats answers StatsQuery: one StatsGroup per key of q.By over the
 	// runs started in [q.Since, q.Until) that q.RunQuery's filters keep,
@@ -59,10 +59,8 @@ const (
 	// StatsByStep groups model calls by their step index
 	// (weft.step.index, the key its decimal string). A replay's calls
 	// key on the replay's own step index, counted from its from_step's
-	// 0 — not the source's step it re-asks (the playground diff's
-	// aligned step): a replay from step 3 adds to step 0's group. Studio
-	// leaves playground runs out by default, which removes the common
-	// case.
+	// 0 — not the source's step it re-asks (a diff's aligned step): a
+	// replay from step 3 adds to step 0's group.
 	StatsByStep StatsBy = "step"
 )
 
@@ -87,15 +85,13 @@ const (
 )
 
 // ErrInvalidStats is returned by CheckStats and Stats for a query
-// outside its bounds; Studio answers it 400.
+// outside its bounds; the server answers it 400.
 var ErrInvalidStats = errors.New("obsdb: invalid stats query")
 
 // StatsQuery selects what Stats aggregates. Its RunQuery carries the
-// filters /api/runs reads — agent, public id (the panel token's scope),
-// metadata (tag.<k>), parent ("*" every run, children included; "" the
-// top-level runs only), playground, experiment, status — with the same
-// meaning (Playground nil: both; Studio's /api/stats sends false unless
-// asked, so health numbers never mix in replays); RunQuery's Before,
+// filters a runs list reads — agent, public id, metadata (tag.<k>),
+// parent ("*" every run, children included; "" the top-level runs
+// only), status — with the same meaning; RunQuery's Before,
 // BeforeID, Limit and Oldest are not read.
 // A derived run (RunRow.Derived: built from stock spans) counts as a
 // run — so a group's Runs is the runs list's count under the same
@@ -194,10 +190,10 @@ type StatsPage struct {
 //     depth) whose own agent is another — what the agent's subagents
 //     spent for it, apart from its own Usage — each call once however
 //     many of the group's runs it sits under, and how many such runs
-//     made a call. Under a scope (RunQuery.PublicID, Meta: a panel
-//     token's) a descendant is read when its own row is in the scope
-//     and so is every run between it and the group's run — the run
-//     tree's rule (TreeQuery's scope): a run under a hidden one is
+//     made a call. Under a filter (RunQuery.PublicID, Meta) a
+//     descendant is read when its own row passes the filter and so
+//     does every run between it and the group's run — the run tree's
+//     rule (TreeQuery's filter): a run under a hidden one is
 //     hidden with its subtree, so the figure matches what the run
 //     document and the span tree show. Zero for every other By. A call can sit in several groups'
 //     delegated figures (boss → helper → boss: the grandchild's call is

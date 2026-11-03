@@ -113,7 +113,7 @@ func TestDeleteRunClearsEveryTable(t *testing.T) {
 }
 
 // threadDump renders every row of thread's tables (and their schema)
-// in key order: the bytes a Studio deletion must leave unchanged.
+// in key order: the bytes an obsdb deletion must leave unchanged.
 func threadDump(t *testing.T, path string) string {
 	t.Helper()
 	h, err := sql.Open("sqlite", fileURI(path)+"?_pragma=busy_timeout(30000)")
@@ -284,7 +284,7 @@ func TestSweepYieldsBetweenPasses(t *testing.T) {
 
 // TestVacuumCheckpointNeverStalls (U33.1-fix; UX-S5a-12): Vacuum's WAL
 // checkpoint waits a short busy timeout of its own, never the writer's
-// 30 s — a live reader holding a snapshot (a running Studio's) costs the
+// 30 s — a live reader holding a snapshot (a running server's) costs the
 // vacuum at most that wait, the WAL folded later — and the writer's own
 // busy timeout is put back after. With no reader the WAL ends at 0.
 func TestVacuumCheckpointNeverStalls(t *testing.T) {

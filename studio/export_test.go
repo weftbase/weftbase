@@ -1,19 +1,14 @@
 package studio
 
 import (
-	"archive/zip"
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -21,8 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftbase/weft/core"
-	"github.com/weftbase/weft/core/mw"
 	"github.com/weftbase/weft/core/wefttest"
 	"github.com/weftbase/weft/otel"
 	"github.com/weftbase/weftbase/obsdb"
@@ -206,7 +199,6 @@ func TestExportJSON(t *testing.T) {
 		"/api/runs/r_exp/export":                     http.StatusBadRequest,
 		"/api/runs/nope/export?format=json":          http.StatusNotFound,
 		"/api/runs/nope/export?format=otlp":          http.StatusNotFound,
-		"/api/runs/nope/export?format=wefttest":      http.StatusNotFound,
 		"/api/runs/r_exp/1/c_sub/export?format=json": http.StatusOK,
 	} {
 		resp, err := http.Get(ts.URL + path)
@@ -387,141 +379,12 @@ func withoutChildren(t *testing.T, body []byte) string {
 	return string(b)
 }
 
-// stepsReplayAgent is recordStepsRun's agent definition — the same
-// tools, Subagent, PrepareStep and model chain — over model, the
-// replayed primary. Keep the two in step.
-func stepsReplayAgent(model core.Model) *core.Agent {
-	type orderIn struct {
-		OrderID string `json:"order_id" jsonschema:"the order"`
-	}
-	lookup := core.Tool("lookup_order", "Look up an order.", func(context.Context, orderIn) (string, error) {
-		return "order 42 shipped", nil
-	})
-	refund := core.Tool("refund", "Refund an order.", func(context.Context, orderIn) (string, error) {
-		return "refunded", nil
-	}, core.RequireApproval())
-	child := core.New(wefttest.Script(wefttest.Say("the carrier lost it")), core.Name("researcher"), core.Instructions("You research orders."))
-	b := namedModel{wefttest.Script(), "glm-b"}
-	return core.New(model,
-		core.Name("orders"), core.Instructions("You are a support agent."),
-		lookup, refund, core.Subagent("research", "Research an order.", child),
-		core.PrepareStep(func(_ context.Context, step int, req core.ModelRequest) (core.ModelRequest, error) {
-			if step != 2 || len(req.Messages) < 4 {
-				return req, nil
-			}
-			m := req.Messages
-			req.Messages = []core.Message{m[0], core.User("summary: the order was looked up"), m[len(m)-2], m[len(m)-1]}
-			return req, nil
-		}),
-		core.WrapModel(mw.Retry(mw.MaxRetries(3), mw.BaseDelay(0)), mw.Fallback(b)),
-	)
-}
-
-// TestExportWefttestReplay is A9's byte-faithful proof: the wefttest
-// export of the steps run — whose step 2 request carried a compaction
-// view — unzipped into a suite's testdata and replayed with
-// wefttest.Replay under the same agent definition reproduces the
-// source transcript message for message; step 2's fixture keys on the
-// compacted messages and says so in its compacted_at header. The
-// fixtures are pinned byte for byte.
-func TestExportWefttestReplay(t *testing.T) {
-	ts, _ := requestsServer(t)
-	recordStepsRun(t, ts.URL, "r_fx", nil)
-	_, doc := exportGet(t, ts, "/api/runs/r_fx/export?format=json", settled("r_fx"))
-	resp, body := exportGet(t, ts, "/api/runs/r_fx/export?format=wefttest", nil)
-	if ct, cd := resp.Header.Get("Content-Type"), resp.Header.Get("Content-Disposition"); ct != "application/zip" || cd != `attachment; filename="r_fx.zip"` {
-		t.Errorf("headers = %q %q", ct, cd)
-	}
-	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := t.TempDir()
-	fixtures := filepath.Join(dir, "testdata", t.Name())
-	if err := os.MkdirAll(fixtures, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	var all strings.Builder
-	n := 0
-	for _, f := range zr.File {
-		// The fixtures sit under testdata/TestReplay_<run>/ beside the
-		// replay skeleton (plan F6; TestSaveAsTestPasses runs it).
-		name, ok := strings.CutPrefix(f.Name, "testdata/TestReplay_r_fx/")
-		if !ok {
-			if f.Name != "orders_replay_test.go" {
-				t.Errorf("zip entry %q: want the skeleton or a fixture", f.Name)
-			}
-			continue
-		}
-		n++
-		rc, err := f.Open()
-		if err != nil {
-			t.Fatal(err)
-		}
-		b, _ := io.ReadAll(rc)
-		_ = rc.Close()
-		if err := os.WriteFile(filepath.Join(fixtures, name), b, 0o644); err != nil {
-			t.Fatal(err)
-		}
-		fmt.Fprintf(&all, "=== %s\n%s", name, b)
-	}
-	if n != 3 || len(zr.File) != 4 {
-		t.Fatalf("fixtures = %d of %d entries, want one per step and the skeleton", n, len(zr.File))
-	}
-	if strings.Contains(all.String(), `"compacted_at"`) != true || strings.Count(all.String(), `"compacted_at"`) != 1 {
-		t.Errorf("want exactly step 2's fixture to carry compacted_at:\n%s", all.String())
-	}
-	if !strings.Contains(all.String(), `"system": "You are a support agent."`) {
-		t.Error("the fixtures lack the system prompt for the reviewer")
-	}
-	wefttest.Golden(t, "testdata/api/export-wefttest.golden", []byte(all.String()))
-	if _, again := exportGet(t, ts, "/api/runs/r_fx/export?format=wefttest", nil); !bytes.Equal(again, body) {
-		t.Error("two wefttest exports of one run differ")
-	}
-
-	var src exportDocT
-	decode(t, string(doc), &src)
-	var want []json.RawMessage
-	for _, b := range src.Transcript.Batches {
-		var msgs []json.RawMessage
-		decode(t, string(b.Messages), &msgs)
-		want = append(want, msgs...)
-	}
-
-	replay := wefttest.Replay(t, filepath.Join(dir, "testdata"))
-	res, err := stepsReplayAgent(replay).Generate(context.Background(), core.Prompt("refund order 42"))
-	if err != nil {
-		t.Fatalf("replay: %v", err)
-	}
-	if len(res.Pending) != 1 || res.Pending[0].ID != "c_refund" {
-		t.Errorf("replayed pending = %+v, want the refund parked", res.Pending)
-	}
-	if len(res.Messages) != len(want) {
-		t.Fatalf("replayed transcript = %d messages, want %d", len(res.Messages), len(want))
-	}
-	for i, m := range res.Messages {
-		b, err := json.Marshal(m)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(b, want[i]) {
-			t.Errorf("message %d = %s, want %s", i, b, want[i])
-		}
-	}
-	// The replayed requests are the recorded ones: step 2's is the view.
-	reqs := replay.(interface{ Requests() []core.ModelRequest }).Requests()
-	if len(reqs) != 3 || len(reqs[2].Messages) != 4 || reqs[2].Messages[1].Text() != "summary: the order was looked up" {
-		t.Errorf("replayed requests = %d (step 2: %d messages), want 3 with the compacted view", len(reqs), len(reqs[len(reqs)-1].Messages))
-	}
-}
-
 // TestExportContentOff: a content-off run's json export keeps every
 // block it has and badges the rest — the request rows stripped, their
-// prompts and catalogs {hash, badge: stripped}, the transcript stripped
-// — and its wefttest export is 409 with the stripped badge (no
-// transcript to fixture).
+// prompts and catalogs {hash, badge: stripped}, the transcript
+// stripped.
 func TestExportContentOff(t *testing.T) {
-	ts, srv := requestsServer(t)
+	ts, _ := requestsServer(t)
 	recordStepsRun(t, ts.URL, "r_xoff", nil, otel.NoContent())
 	_, body := exportGet(t, ts, "/api/runs/r_xoff/export?format=json", settled("r_xoff"))
 	shapeGolden(t, "export-json-stripped.shape.golden", body)
@@ -545,212 +408,6 @@ func TestExportContentOff(t *testing.T) {
 	}
 	if d.holes() != "stripped" {
 		t.Errorf("content-off holes = %s, want stripped", d.holes())
-	}
-	resp, err := http.Get(ts.URL + "/api/runs/r_xoff/export?format=wefttest")
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusConflict || !strings.Contains(string(b), `"badge":"stripped"`) || !strings.Contains(string(b), `"code":"conflict"`) {
-		t.Errorf("content-off wefttest = %d %s, want 409 with the stripped badge", resp.StatusCode, b)
-	}
-	// The playground's fixtures route answers alike: 409, stripped.
-	pg := Handler(DB(srv.db), Playground(true))
-	w := httptest.NewRecorder()
-	pg.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "http://127.0.0.1/api/playground/fixtures", strings.NewReader(`{"run_id":"r_xoff"}`)))
-	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), `"badge":"stripped"`) {
-		t.Errorf("content-off playground fixtures = %d %s, want 409 with the stripped badge", w.Code, w.Body)
-	}
-}
-
-// TestExportNotRecorded: the file written before ADR 0028 (one run
-// row, no records or spans) exports every block, each hole badged with
-// its reason and fix — the request block not_recorded, the events and
-// transcript gap — pinned whole; jsonl carries the same badges as
-// lines.
-func TestExportNotRecorded(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "old.db")
-	raw, err := sql.Open("sqlite", "file:"+path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := raw.Exec(`CREATE TABLE obsdb_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
-		t.Fatal(err)
-	}
-	for v, name := range []string{"0001_init.sql", "0002_experiments.sql"} {
-		body, err := os.ReadFile(filepath.Join("..", "obsdb", "sqlite", "migrations", name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := raw.Exec(string(body)); err != nil {
-			t.Fatalf("migration %s: %v", name, err)
-		}
-		if _, err := raw.Exec(`INSERT INTO obsdb_migrations (version, applied_at) VALUES (?, '2026-10-01T00:00:00Z')`, v+1); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := raw.Exec(`INSERT INTO runs (run_id, agent, started_ns, last_seen_ns, finished_ok, steps)
-		VALUES ('old1', 'support', 100, 200, 1, 2)`); err != nil {
-		t.Fatal(err)
-	}
-	if err := raw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	srv := New(Open(path))
-	t.Cleanup(func() { _ = srv.Close() })
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-
-	_, body := exportGet(t, ts, "/api/runs/old1/export?format=json", nil)
-	golden(t, "export-not-recorded.golden.json", string(body))
-	var d exportDocT
-	decode(t, string(body), &d)
-	if d.Requests.Badge != "not_recorded" || d.Requests.Reason == "" || d.Requests.Fix == "" || len(d.Requests.Requests) != 0 {
-		t.Errorf("pre-A1 requests = %+v, want [] under not_recorded with its reason and fix", d.Requests)
-	}
-	if d.Events.Badge != "gap" || d.Transcript.Badge != "gap" {
-		t.Errorf("pre-A1 events %q transcript %q, want both gap", d.Events.Badge, d.Transcript.Badge)
-	}
-	if d.holes() != "gap,not_recorded" {
-		t.Errorf("pre-A1 holes = %s, want gap,not_recorded", d.holes())
-	}
-	for _, h := range d.Holes {
-		if h.Reason == "" {
-			t.Errorf("hole %s has no reason", h.Hole)
-		}
-	}
-	if !strings.Contains(string(body), `"requests":[]`) || !strings.Contains(string(body), `"events":[]`) || !strings.Contains(string(body), `"batches":[]`) || !strings.Contains(string(body), `"spans":[]`) {
-		t.Errorf("empty lists must be [], never null: %s", body)
-	}
-	_, lines := exportGet(t, ts, "/api/runs/old1/export?format=jsonl", nil)
-	for _, want := range []string{`{"record":"badge","block":"events","badge":"gap"`, `{"record":"badge","block":"transcript","badge":"gap"`, `{"record":"badge","block":"requests","badge":"not_recorded"`} {
-		if !strings.Contains(string(lines), want) {
-			t.Errorf("pre-A1 jsonl lacks %s:\n%s", want, lines)
-		}
-	}
-	resp, err := http.Get(ts.URL + "/api/runs/old1/export?format=wefttest")
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusConflict || !strings.Contains(string(b), `"badge":"gap"`) {
-		t.Errorf("pre-A1 wefttest = %d %s, want 409 with the gap badge", resp.StatusCode, b)
-	}
-}
-
-// TestExportPanelTokens: the read-scope rule over a real run. A
-// read-scoped panel token exports json and jsonl with the request block
-// replaced by {badge: hidden} and never a byte of the system prompt;
-// otlp and wefttest are 403 with the hidden badge. A playground-scoped
-// token and the server token export the prompt.
-func TestExportPanelTokens(t *testing.T) {
-	const tok = "srv-token"
-	srv := New(Open(filepath.Join(t.TempDir(), "weft.db")), Token(tok))
-	t.Cleanup(func() { _ = srv.Close() })
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-	recordStepsRun(t, ts.URL, "r_xtok", map[string]string{"weft.public_id": "pub_a"})
-	sign := func(scope string) string {
-		s, err := signPanelToken([]byte(tok), panelClaims{PublicID: "pub_a", Scope: scope, Exp: time.Now().Add(time.Hour)})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return s
-	}
-	get := func(format, bearer string) (int, string) {
-		t.Helper()
-		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/runs/r_xtok/export?format="+format, nil)
-		req.Header.Set("Authorization", "Bearer "+bearer)
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		b, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		return resp.StatusCode, string(b)
-	}
-	// Ingest lands asynchronously: wait for the settled run first.
-	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		if _, b := get("json", tok); settled("r_xtok")(b) || time.Now().After(deadline) {
-			break
-		}
-	}
-	read := sign(scopeRead)
-	const viewText = "summary: the order was looked up" // step 2's compaction view: request content
-	for _, format := range []string{"json", "jsonl"} {
-		code, body := get(format, read)
-		if code != http.StatusOK || !strings.Contains(body, `"badge":"hidden"`) || strings.Contains(body, "You are a support agent.") ||
-			!strings.Contains(body, `refund order 42`) {
-			t.Errorf("read token %s = %d, want 200 with the transcript, the request block hidden and no prompt:\n%s", format, code, body)
-		}
-		if strings.Contains(body, viewText) || !regexp.MustCompile(`"scope":"run"[^{}]*"messages":null[^{}]*"badge":"hidden"`).MatchString(body) {
-			t.Errorf("read token %s carries the compaction view's body, or no hidden badge in its place:\n%s", format, body)
-		}
-	}
-	for _, bearer := range []string{sign(scopePlayground), tok} {
-		if _, body := get("json", bearer); !strings.Contains(body, viewText) {
-			t.Errorf("a prompt-reading identity's json lacks the compaction view's body")
-		}
-	}
-
-	for _, format := range []string{"otlp", "wefttest"} {
-		code, body := get(format, read)
-		if code != http.StatusForbidden || !strings.Contains(body, `"badge":"hidden"`) || strings.Contains(body, "You are a support agent.") {
-			t.Errorf("read token %s = %d %s, want 403 with the hidden badge", format, code, body)
-		}
-	}
-	for _, bearer := range []string{sign(scopePlayground), tok} {
-		for _, format := range []string{"json", "jsonl", "otlp"} {
-			code, body := get(format, bearer)
-			if code != http.StatusOK || !strings.Contains(body, "You are a support agent.") || strings.Contains(body, `"badge":"hidden"`) {
-				t.Errorf("a prompt-reading identity's %s = %d, want 200 with the prompt", format, code)
-			}
-		}
-		if code, _ := get("wefttest", bearer); code != http.StatusOK {
-			t.Errorf("a prompt-reading identity's wefttest = %d, want 200", code)
-		}
-	}
-}
-
-// TestExportReadTokenContentOff: a read-scoped token's json export of a
-// content-off run badges the transcript stripped — the request records'
-// content marks are read even though their rows are hidden — and lists
-// stripped and hidden, never a gap.
-func TestExportReadTokenContentOff(t *testing.T) {
-	const tok = "srv-token"
-	srv := New(Open(filepath.Join(t.TempDir(), "weft.db")), Token(tok))
-	t.Cleanup(func() { _ = srv.Close() })
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-	recordStepsRun(t, ts.URL, "r_roff", map[string]string{"weft.public_id": "pub_a"}, otel.NoContent())
-	read, err := signPanelToken([]byte(tok), panelClaims{PublicID: "pub_a", Scope: scopeRead, Exp: time.Now().Add(time.Hour)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	get := func(bearer string) string {
-		t.Helper()
-		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/runs/r_roff/export?format=json", nil)
-		req.Header.Set("Authorization", "Bearer "+bearer)
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		b, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("export = %d %s", resp.StatusCode, b)
-		}
-		return string(b)
-	}
-	for deadline := time.Now().Add(5 * time.Second); !settled("r_roff")(get(tok)) && time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
-	}
-	var d exportDocT
-	decode(t, get(read), &d)
-	if d.Transcript.Badge != "stripped" || d.Requests.Badge != "hidden" || len(d.Requests.Requests) != 0 || d.holes() != "stripped,hidden" {
-		t.Errorf("read token × content-off = transcript %q requests %q (%d rows) holes %s, want stripped, hidden, none, stripped,hidden",
-			d.Transcript.Badge, d.Requests.Badge, len(d.Requests.Requests), d.holes())
 	}
 }
 
@@ -840,60 +497,6 @@ func TestExportOTLPInputDerived(t *testing.T) {
 	}
 	if has(0) || !has(1) {
 		t.Errorf("weft.messages.input on (derived, recorded) = (%v, %v), want (false, true)", has(0), has(1))
-	}
-}
-
-// TestFixturesRefuseAStepWithoutItsRequest: a run that recorded
-// request records but not one step's cannot key that step — the
-// builder refuses with the gap hole instead of keying it on nothing.
-func TestFixturesRefuseAStepWithoutItsRequest(t *testing.T) {
-	src := fixtureSource{
-		batches: []obsdb.TranscriptBatch{
-			{Index: 0, Step: 0, Input: true, Messages: json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"hi"}]}]`)},
-			{Index: 1, Step: 0, Messages: json.RawMessage(`[{"role":"assistant","content":[{"type":"text","text":"a"}]}]`)},
-			{Index: 2, Step: 1, Messages: json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"more"}]},{"role":"assistant","content":[{"type":"text","text":"b"}]}]`)},
-		},
-		requests: []obsdb.RequestRecord{{Index: 0, Step: 0}},
-	}
-	_, err := runFixtures(src)
-	var fe *fixtureError
-	if !errors.As(err, &fe) || fe.hole != obsdb.HoleGap || !strings.Contains(fe.msg, "step 1") {
-		t.Errorf("err = %v, want the gap refusal naming step 1", err)
-	}
-	src.requests = append(src.requests, obsdb.RequestRecord{Index: 1, Step: 1})
-	if files, err := runFixtures(src); err != nil || len(files) != 2 {
-		t.Errorf("with both requests = %d files, %v; want 2", len(files), err)
-	}
-}
-
-// TestFixturesRefuseAPrefixTheModelDidNotSee (ADR 0029): a step whose
-// request names a messages record that was never stored (a lost view,
-// its count matching a 1:1 replacement), or was rewritten with no view
-// recorded at all, is not keyed on the plain transcript — the builder
-// refuses with obsdb's gap hole, as the transcript route's ?step= does.
-func TestFixturesRefuseAPrefixTheModelDidNotSee(t *testing.T) {
-	ref := func(i int64) *int64 { return &i }
-	batches := []obsdb.TranscriptBatch{
-		{Index: 0, Step: 0, Input: true, Messages: json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"hi"}]}]`)},
-		{Index: 1, Step: 0, Messages: json.RawMessage(`[{"role":"assistant","content":[{"type":"text","text":"a"}]}]`)},
-		{Index: 2, Step: 0, Messages: json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"more"}]}]`)},
-		{Index: 4, Step: 1, Messages: json.RawMessage(`[{"role":"assistant","content":[{"type":"text","text":"b"}]}]`)},
-	}
-	step0 := obsdb.RequestRecord{Index: 0, Step: 0, Body: obsdb.RequestBody{MessagesRef: obsdb.RequestMessagesRef{Index: ref(0), Count: 1}}}
-	for name, step1 := range map[string]obsdb.RequestRecord{
-		"a ref to an unstored record": {Index: 1, Step: 1, Body: obsdb.RequestBody{MessagesRef: obsdb.RequestMessagesRef{Index: ref(3), Count: 3}}},
-		"rewritten without a view":    {Index: 1, Step: 1, Body: obsdb.RequestBody{MessagesRef: obsdb.RequestMessagesRef{Count: 2}}},
-	} {
-		_, err := runFixtures(fixtureSource{batches: batches, requests: []obsdb.RequestRecord{step0, step1}})
-		var fe *fixtureError
-		if !errors.As(err, &fe) || fe.hole != obsdb.HoleGap || !strings.Contains(fe.msg, "step 1") {
-			t.Errorf("%s: err = %v, want the gap refusal naming step 1", name, err)
-		}
-	}
-	// The same run with step 1's request naming the stored record keys fine.
-	ok := obsdb.RequestRecord{Index: 1, Step: 1, Body: obsdb.RequestBody{MessagesRef: obsdb.RequestMessagesRef{Index: ref(2), Count: 3}}}
-	if files, err := runFixtures(fixtureSource{batches: batches, requests: []obsdb.RequestRecord{step0, ok}}); err != nil || len(files) != 2 {
-		t.Errorf("a plain ref = %d files, %v; want 2", len(files), err)
 	}
 }
 

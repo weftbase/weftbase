@@ -12,27 +12,22 @@ import (
 	"github.com/weftbase/weftbase/studio"
 )
 
-// ExampleRun checks a Studio with nothing connected to it: one line per
-// check, each read from its /api/meta. No discovery file names it (an
-// embedded Studio writes none): that line warns. With the playground
-// on and no runtime connected the runtimes line warns, and its
-// continuation lines name the variables this shell lacks (WEFT_ENV,
-// WEFTBASE_URL).
+// ExampleRun checks a server with nothing connected to it: one line
+// per check, each read from its /api/meta. No discovery file names it
+// (an embedded server writes none): that line warns.
 func ExampleRun() {
 	dir, _ := os.MkdirTemp("", "doctor")
 	defer func() { _ = os.RemoveAll(dir) }()
-	srv := studio.New(studio.Open(filepath.Join(dir, "weft.db")), studio.Playground(true))
+	srv := studio.New(studio.Open(filepath.Join(dir, "weft.db")))
 	defer func() { _ = srv.Close() }()
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
 	var out strings.Builder
-	err := doctor.Run(context.Background(), &out, doctor.Target{URL: ts.URL}, func(string) string { return "" })
+	err := doctor.Run(context.Background(), &out, doctor.Target{URL: ts.URL})
 	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
 		if f := strings.Fields(line); !strings.HasPrefix(line, " ") {
 			fmt.Println(f[0], f[1])
-		} else if strings.Contains(line, "WEFT_ENV is unset") {
-			fmt.Println("  names WEFT_ENV")
 		}
 	}
 	fmt.Println("err:", err)
@@ -45,9 +40,6 @@ func ExampleRun() {
 	// ok data
 	// ok otlp
 	// ok ingest
-	// warn runtimes
-	//   names WEFT_ENV
-	// ok panel
 	// ok manifest
 	// err: <nil>
 }

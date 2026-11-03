@@ -707,11 +707,9 @@ func TestLiveAllSetupA(t *testing.T) {
 	}
 }
 
-// TestLiveAllThroughGrant: the Studio UI's EventSource opens the all
-// stream with a grant — the server token's grant opens it and frames of
-// two public ids arrive on it; a panel token is refused the grant and
-// the stream (403 forbidden), whatever its scope.
-func TestLiveAllThroughGrant(t *testing.T) {
+// TestLiveAllWithTheBearer: the all stream opens with the server
+// token's bearer and carries frames of every public id.
+func TestLiveAllWithTheBearer(t *testing.T) {
 	db, err := sqlite.Open(":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -723,68 +721,21 @@ func TestLiveAllThroughGrant(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
-	grant := func(bearer string) (int, string) {
-		t.Helper()
-		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/live-grant", strings.NewReader(`{"all":true,"kinds":"event"}`))
-		req.Header.Set("Authorization", "Bearer "+bearer)
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer func() { _ = resp.Body.Close() }()
-		var g struct {
-			Sig   string `json:"sig"`
-			Error struct {
-				Code string `json:"code"`
-			} `json:"error"`
-		}
-		_ = json.NewDecoder(resp.Body).Decode(&g)
-		if resp.StatusCode != http.StatusOK {
-			return resp.StatusCode, g.Error.Code
-		}
-		return resp.StatusCode, g.Sig
-	}
-	hour := time.Now().Add(time.Hour)
-	for _, scope := range []string{scopeRead, scopePlayground} {
-		tok, err := signPanelToken([]byte("srv"), panelClaims{PublicID: "pub_a", Scope: scope, Exp: hour})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if code, what := grant(tok); code != http.StatusForbidden || what != "forbidden" {
-			t.Errorf("%s panel token's all grant: %d %q, want 403 forbidden", scope, code, what)
-		}
-		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/live?all=1&kinds=event", nil)
-		req.Header.Set("Authorization", "Bearer "+tok)
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusForbidden {
-			t.Errorf("%s panel token's all stream: %d, want 403", scope, resp.StatusCode)
-		}
-	}
-
-	code, sig := grant("srv")
-	if code != http.StatusOK {
-		t.Fatalf("server token's all grant: %d", code)
-	}
-	// The sig names this stream: kinds=event and all=1 (all=true is the
-	// same stream).
-	resp, err := http.Get(ts.URL + "/api/live?all=true&kinds=event&sig=" + sig)
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/live?all=true&kinds=event", nil)
+	req.Header.Set("Authorization", "Bearer srv")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = resp.Body.Close() })
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("all stream with the grant: %d", resp.StatusCode)
+		t.Fatalf("all stream with the bearer: %d", resp.StatusCode)
 	}
 	ctx := context.Background()
 	hub.Publish(ctx, obsdb.RecordFrame(pubRecord("r_a", "pub_a", "", 0)))
 	hub.Publish(ctx, obsdb.RecordFrame(pubRecord("r_b", "pub_b", "", 0)))
 	if got := strings.Join(liveRunIDs(t, readSSE(t, resp, 2, 5*time.Second)), " "); got != "r_a r_b" {
-		t.Errorf("granted all stream saw runs %q, want r_a r_b", got)
+		t.Errorf("all stream saw runs %q, want r_a r_b", got)
 	}
 }
 

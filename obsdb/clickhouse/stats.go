@@ -110,8 +110,8 @@ func statsSpans(runs string) string {
 // own agent is another, each (agent, span) once. SQLite reads the same
 // set as an id range below each run. The descendant is held to the
 // query's scope: its spans to the public id (pub), its own run row to
-// every meta pair (RunQuery.Meta's rule over the collapsed row: a
-// tag-scoped panel token never sums an untagged child, I4-fix), and
+// every meta pair (RunQuery.Meta's rule over the collapsed row: a tag
+// filter never sums an untagged child, I4-fix), and
 // under a scope a descendant with an out-of-scope run between it and
 // the group's run is left out with that run's subtree — the tree's
 // rule, the run document's hidden children (I4-fix2): the out-of-scope

@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -422,98 +421,6 @@ func TestRequestsNoModelCall(t *testing.T) {
 	}
 	if got := fetchJSON(t, ts, "/api/runs/r_none/tools", nil); strings.TrimSpace(got) != `{"catalogs":[]}` {
 		t.Errorf("tools = %s, want {\"catalogs\":[]}", got)
-	}
-}
-
-// preA1File is a sqlite file as weft v0.9.0 left it: migrations 0001
-// and 0002 only, and one finished run (old1) written before the request
-// record — the stand-in for a database written by the previous release.
-func preA1File(t *testing.T) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "old.db")
-	raw, err := sql.Open("sqlite", "file:"+path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := raw.Exec(`CREATE TABLE obsdb_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
-		t.Fatal(err)
-	}
-	for v, name := range []string{"0001_init.sql", "0002_experiments.sql"} {
-		body, err := os.ReadFile(filepath.Join("..", "obsdb", "sqlite", "migrations", name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := raw.Exec(string(body)); err != nil {
-			t.Fatalf("migration %s: %v", name, err)
-		}
-		if _, err := raw.Exec(`INSERT INTO obsdb_migrations (version, applied_at) VALUES (?, '2026-10-01T00:00:00Z')`, v+1); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := raw.Exec(`INSERT INTO runs (run_id, agent, started_ns, last_seen_ns, finished_ok, steps)
-		VALUES ('old1', 'support', 100, 200, 1, 2)`); err != nil {
-		t.Fatal(err)
-	}
-	if err := raw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return path
-}
-
-// TestRequestsNotRecorded: a file written before ADR 0028 (migrations
-// 0001 and 0002 applied by hand, one run inserted) opens through 0003;
-// its run reads requests_badge not_recorded, and both routes answer
-// 200 with the badge, its reason and fix beside an empty list — never
-// an empty list alone.
-func TestRequestsNotRecorded(t *testing.T) {
-	path := preA1File(t)
-	srv := New(Open(path))
-	t.Cleanup(func() { _ = srv.Close() })
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-
-	run := fetchJSON(t, ts, "/api/runs/old1", nil)
-	for _, want := range []string{`"instructions_hash":""`, `"catalog_hash":""`, `"request_count":0`, `"requests_badge":"not_recorded"`} {
-		if !strings.Contains(run, want) {
-			t.Errorf("pre-A1 run lacks %s: %s", want, run)
-		}
-	}
-	reqs := fetchJSON(t, ts, "/api/runs/old1/requests", nil)
-	requestsGolden(t, "requests-not-recorded.golden.json", reqs)
-	tools := fetchJSON(t, ts, "/api/runs/old1/tools", nil)
-	requestsGolden(t, "tools-not-recorded.golden.json", tools)
-	var rd requestsDoc
-	decode(t, reqs, &rd)
-	var td toolsDocT
-	decode(t, tools, &td)
-	if len(rd.Requests) != 0 || rd.Badge != "not_recorded" || rd.Reason == "" || rd.Fix == "" {
-		t.Errorf("pre-A1 requests = %s, want [] with not_recorded, a reason and a fix", reqs)
-	}
-	if len(td.Catalogs) != 0 || td.Badge != "not_recorded" || td.Reason == "" || td.Fix == "" {
-		t.Errorf("pre-A1 tools = %s, want [] with not_recorded, a reason and a fix", tools)
-	}
-	if !strings.Contains(reqs, `"requests":[]`) || !strings.Contains(tools, `"catalogs":[]`) {
-		t.Errorf("empty lists must be [], never null: %s %s", reqs, tools)
-	}
-}
-
-// TestRequestsNotRecordedV090: the same reading over the database weft
-// v0.9.0 really wrote (testdata/v0.9.0.db): both routes answer 200
-// with not_recorded, its reason and fix, beside an empty list.
-func TestRequestsNotRecordedV090(t *testing.T) {
-	srv := New(Open(v090File(t)))
-	t.Cleanup(func() { _ = srv.Close() })
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-	var rd requestsDoc
-	decode(t, fetchJSON(t, ts, "/api/runs/r_v090/requests", nil), &rd)
-	var td toolsDocT
-	decode(t, fetchJSON(t, ts, "/api/runs/r_v090/tools", nil), &td)
-	if len(rd.Requests) != 0 || rd.Badge != "not_recorded" || rd.Reason == "" || rd.Fix == "" {
-		t.Errorf("v0.9.0 requests = %+v, want [] with not_recorded, a reason and a fix", rd)
-	}
-	if len(td.Catalogs) != 0 || td.Badge != "not_recorded" || td.Reason == "" || td.Fix == "" {
-		t.Errorf("v0.9.0 tools = %+v, want [] with not_recorded, a reason and a fix", td)
 	}
 }
 

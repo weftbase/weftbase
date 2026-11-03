@@ -24,8 +24,8 @@ import (
 //
 //   - one "session" record, from the reads made before the first byte:
 //     the format (weft.session.export/1), the session's id, public id,
-//     agent, its turn count and the state-log marks in the token's
-//     scope (what the file can hold, before either cap);
+//     agent, its turn count and its state-log marks (what the file can
+//     hold, before either cap);
 //   - every turn's run export, oldest turn first, exactly as
 //     GET /api/runs/{id}/export?format=jsonl writes it (each turn's
 //     lines begin with its own "run" record, so a reader groups the
@@ -44,10 +44,9 @@ import (
 //     after it); a
 //     plain truncated hole when a read failed after the first byte (the
 //     status was already sent: the lines before it are whole); the
-//     timeline's not_recorded / stripped / hidden when the turns ran
-//     to the end (stripped counted over the marks written), and when
-//     they stopped — no mark read — its hidden and not_recorded alone,
-//     the scope read's, made before the first byte; and not_recorded
+//     timeline's not_recorded / stripped when the turns ran to the end
+//     (stripped counted over the marks written), and when they stopped
+//     — no mark read — its not_recorded alone; and not_recorded
 //     naming obsdb.SessionEventReader when the database cannot read
 //     the state log;
 //   - one "session_end" record, last: turns_exported, marks_exported
@@ -60,11 +59,7 @@ import (
 // events, transcript, compactions, spans and requests are its own reads.
 //
 // jsonl is the only format: a session is many runs, and the per-run
-// json, otlp and wefttest exports stay the run page's. The scope is the
-// session document's: a panel token reads its public id's turns and
-// marks only; a read-scoped token's turns carry the request block
-// badged hidden, as the run export's jsonl does, and its marks
-// content_hidden.
+// json and otlp exports stay the run page's.
 
 // sessionExportVersion names the session export's line shape.
 const sessionExportVersion = "weft.session.export/1"
@@ -158,29 +153,24 @@ func (s *Server) serveSessionExport(w http.ResponseWriter, r *http.Request, id s
 		badRequest(w, r, "format must be jsonl: a session exports as JSON lines — its turns' run exports in turn order, then its state log; a single turn's json, otlp or wefttest export is GET /api/runs/{id}/export")
 		return
 	}
-	if !s.scopeSessionID(w, r, id) {
-		return
-	}
 	ctx := r.Context()
 	det, err := s.db.Session(ctx, id)
 	if err != nil {
-		sessionReadError(w, r, id, err)
+		dbError(w, r, "session", id, err)
 		return
 	}
-	if sc := panelScope(r); !sc.none() {
-		s.scopeSessionDetail(ctx, &det, sc)
-	}
-	// The state log's scope before the first byte: its count is the
-	// head's, and a failure here is still an error status.
+	// The state log's count before the first byte: it is the head's,
+	// and a failure here is still an error status.
 	er, hasMarks := s.db.(obsdb.SessionEventReader)
 	var mb *markBuilder
 	var visible, all int
 	if hasMarks {
-		mb = s.newMarkBuilder(r, det)
-		if visible, all, err = mb.scope(r, er); err != nil {
+		mb = s.newMarkBuilder(det)
+		if all, err = mb.count(r, er); err != nil {
 			dbError(w, r, "session events", id, err)
 			return
 		}
+		visible = all
 	}
 	st := &sessionStream{w: w, r: r, id: id}
 	head, err := sessionLine("session", struct {
@@ -210,7 +200,6 @@ func (s *Server) serveSessionExport(w http.ResponseWriter, r *http.Request, id s
 			Count:  len(det.Runs) - sessionExportTurnCap})
 		turns = turns[:sessionExportTurnCap]
 	}
-	hideRequests := !readsPrompts(r)
 	c := s.coster(ctx)
 	kids, batched := exportTurnChildren(ctx, s.db, c, turns)
 	exported, failed := 0, false
@@ -220,9 +209,9 @@ func (s *Server) serveSessionExport(w http.ResponseWriter, r *http.Request, id s
 		}
 		var x *runExport
 		if batched {
-			x, err = s.collectExportOf(ctx, c, obsdb.RunDetail{RunRow: rr, Children: kids[rr.ID]}, hideRequests)
+			x, err = s.collectExportOf(ctx, c, obsdb.RunDetail{RunRow: rr, Children: kids[rr.ID]})
 		} else {
-			x, err = s.collectExport(ctx, rr.ID, hideRequests)
+			x, err = s.collectExport(ctx, rr.ID)
 		}
 		if errors.Is(err, obsdb.ErrNotFound) {
 			continue // deleted between the reads
@@ -232,7 +221,6 @@ func (s *Server) serveSessionExport(w http.ResponseWriter, r *http.Request, id s
 			failed = true
 			break
 		}
-		x.spans = spansFor(r, x.spans)
 		b, err := x.jsonl()
 		if err != nil {
 			holes = append(holes, readFailedHole("turn "+rr.ID, err))
@@ -299,14 +287,13 @@ func (s *Server) serveSessionExport(w http.ResponseWriter, r *http.Request, id s
 	case hasMarks:
 		// The turns stopped (a failed read, the byte cap): no mark line,
 		// but the timeline's holes still say what the file could not
-		// hold whatever it carries — a panel token's hidden marks above
-		// all, counted by the scope read before the first byte. No mark
-		// is read, so no stripped hole: hidden and not_recorded alone.
+		// hold whatever it carries. No mark is read, so no stripped
+		// hole: not_recorded alone.
 		holes = append(holes, mb.holes(det.Runs, all, 0, false)...)
 	case !hasMarks:
 		holes = append(holes, stepHole{Hole: string(obsdb.HoleNotRecorded),
 			Reason: "the session's state log is not in this export: " + offTimeline,
-			Fix:    "serve Studio over obsdb/sqlite or obsdb/clickhouse"})
+			Fix:    "serve weftbase over obsdb/sqlite or obsdb/clickhouse"})
 	}
 	for _, h := range holes {
 		if b, err := sessionLine("session_hole", h); err == nil {
@@ -322,7 +309,7 @@ func (s *Server) serveSessionExport(w http.ResponseWriter, r *http.Request, id s
 		st.write(end)
 	}
 	if st.err != nil {
-		slog.DebugContext(ctx, "studio: a session export's client went away", "session", id, "err", st.err)
+		slog.DebugContext(ctx, "weftbase: a session export's client went away", "session", id, "err", st.err)
 	}
 }
 
@@ -343,7 +330,7 @@ func exportTurnChildren(ctx context.Context, db obsdb.DB, c *coster, turns []obs
 	}
 	kids, err := tr.ChildRuns(ctx, ids)
 	if err != nil {
-		slog.DebugContext(ctx, "studio: a session export's turn children could not be read at once; reading each turn", "err", err)
+		slog.DebugContext(ctx, "weftbase: a session export's turn children could not be read at once; reading each turn", "err", err)
 		return nil, false
 	}
 	var all []obsdb.RunRow

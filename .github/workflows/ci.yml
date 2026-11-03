@@ -2,16 +2,17 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, rebuild]
   pull_request:
 
 permissions:
   contents: read
 
 # Every job checks weftbase out into ./weftbase and weft's main beside
-# it (.github/actions/workspace writes the go.work joining them) until
-# weft is tagged under github.com/weftbase/weft. WEFT_CHECKOUT_TOKEN
-# reads weftbase/weft while it is private.
+# it (.github/actions/workspace); the committed go.work joins the server
+# module, the client module and ../weft until weft is tagged under
+# github.com/weftbase/weft. WEFT_CHECKOUT_TOKEN reads weftbase/weft
+# while it is private.
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -31,16 +32,50 @@ jobs:
           check-latest: true
           cache-dependency-path: |
             weftbase/go.sum
+            weftbase/client/go.sum
             weft/**/go.sum
-      - name: vet
+      - name: build (both modules)
         working-directory: weftbase
-        run: go vet ./...
-      - name: test
+        run: make build
+      - name: vet (both modules)
         working-directory: weftbase
-        run: go test -race -timeout 20m ./...
-      - name: build
+        run: make vet
+      - name: test (both modules)
         working-directory: weftbase
-        run: go build ./...
+        run: make test
+
+  # The layering check, the client module's dependency allow-list and
+  # the Go vocabulary audit (docs/architecture.md). Each fails on its
+  # own seeded violation in scripts/layering's tests.
+  layering:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: weftbase
+      - uses: ./weftbase/.github/actions/workspace
+        with:
+          token: ${{ secrets.WEFT_CHECKOUT_TOKEN || github.token }}
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          check-latest: true
+          cache-dependency-path: |
+            weftbase/go.sum
+            weftbase/client/go.sum
+            weft/**/go.sum
+      - name: layering
+        working-directory: weftbase
+        run: make layering
+      - name: client module dependencies
+        working-directory: weftbase
+        run: make client-deps
+      - name: vocabulary
+        working-directory: weftbase
+        run: make vocab
+      - name: layering check's own tests
+        working-directory: weftbase
+        run: go test ./scripts/layering/...
 
   lint:
     runs-on: ubuntu-latest
@@ -57,6 +92,7 @@ jobs:
           check-latest: true
           cache-dependency-path: |
             weftbase/go.sum
+            weftbase/client/go.sum
             weft/**/go.sum
       # Pinned as weft's lint job pins it.
       - name: install golangci-lint
@@ -64,14 +100,13 @@ jobs:
           curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/v2.14.0/install.sh | sh -s -- -b "$(go env GOPATH)/bin" v2.14.0
       - name: lint
         working-directory: weftbase
-        run: golangci-lint run
+        run: make lint
 
   # The gated ClickHouse suite (obsdb/clickhouse's README "CI job
-  # (service container)" block): the conformance table and the
-  # collector-shape insert test need a server; each test creates and
-  # drops its own database. The same DSN also un-gates cmd/weftbase's
-  # hosted-backend test. A gated test that skips fails the job — a DSN
-  # the tests cannot read must not turn it green.
+  # (service container)"): the conformance table and the collector-shape
+  # insert test need a server; each test creates and drops its own
+  # database. A gated test that skips fails the job: a DSN the tests
+  # cannot read must not turn it green.
   clickhouse:
     runs-on: ubuntu-latest
     services:
@@ -112,14 +147,8 @@ jobs:
             echo "gated tests skipped: WEFT_CLICKHOUSE_DSN did not reach them" >&2
             exit 1
           fi
-      - name: test (cmd/weftbase, gated --db clickhouse:// test)
-        working-directory: weftbase/cmd/weftbase
-        run: |
-          set -o pipefail
-          go test -race -count=1 -v -run '^TestNewServerClickhouse$' ./... | tee "$RUNNER_TEMP/weftbase-cmd.log"
-          grep -q -- '--- PASS: TestNewServerClickhouse' "$RUNNER_TEMP/weftbase-cmd.log"
 
-  # The offline gate: the whole module stays green under
+  # The offline gate: both modules stay green under
   # WEFT_MODEL_REQUESTS=deny.
   offline:
     runs-on: ubuntu-latest
@@ -136,66 +165,29 @@ jobs:
           check-latest: true
           cache-dependency-path: |
             weftbase/go.sum
+            weftbase/client/go.sum
             weft/**/go.sum
       - name: test (WEFT_MODEL_REQUESTS=deny)
         working-directory: weftbase
-        run: WEFT_MODEL_REQUESTS=deny go test ./...
+        run: make offline
 
-  # The studio freshness gate (ADR 0018 §4): rebuild the web app, prove
-  # the committed studio/dist matches byte for byte and fits the 800 KiB
-  # gzip budget, then run the web typecheck and tests. Bun is pinned to
-  # the version the committed dist was built with; Go and the workspace
-  # are there because the panel's version stamp is read from the weft
-  # module (studio/web/scripts/weft-version.ts).
-  studio:
+  # The Console freshness gate: rebuild console/app with Bun, prove the
+  # committed console/dist matches and fits the 800 KiB gzip budget, then
+  # run the app's typecheck, lint, vocabulary audit and tests. Skipped
+  # until console/app lands on the branch.
+  console:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
           path: weftbase
-      - uses: ./weftbase/.github/actions/workspace
-        with:
-          token: ${{ secrets.WEFT_CHECKOUT_TOKEN || github.token }}
-      - uses: actions/setup-go@v7
-        with:
-          go-version: stable
-          check-latest: true
-          cache-dependency-path: |
-            weftbase/go.sum
-            weft/**/go.sum
-      - uses: oven-sh/setup-bun@v2
+      - id: app
+        run: test -f weftbase/console/app/package.json && echo present=true >> "$GITHUB_OUTPUT" || echo present=false >> "$GITHUB_OUTPUT"
+      - if: steps.app.outputs.present == 'true'
+        uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14
-      - name: make studio-check
+      - if: steps.app.outputs.present == 'true'
+        name: make console-check
         working-directory: weftbase
-        run: make studio-check
-
-  # The phase 3 gate's first clause (Makefile devtools-vite-check): the
-  # packed @weftgo/devtools in a real Vite app, built and smoke-tested
-  # in jsdom.
-  devtools-vite:
-    runs-on: ubuntu-latest
-    needs: studio
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          path: weftbase
-      - uses: ./weftbase/.github/actions/workspace
-        with:
-          token: ${{ secrets.WEFT_CHECKOUT_TOKEN || github.token }}
-      - uses: actions/setup-go@v7
-        with:
-          go-version: stable
-          check-latest: true
-          cache-dependency-path: |
-            weftbase/go.sum
-            weft/**/go.sum
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3.14
-      - name: make studio-build
-        working-directory: weftbase
-        run: make studio-build
-      - name: make devtools-vite-check
-        working-directory: weftbase
-        run: make devtools-vite-check
+        run: make console-check

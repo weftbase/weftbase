@@ -12,7 +12,7 @@ import (
 // emptyIdentity: an identity key carried with an empty value is no
 // value (core.Metadata's rule — a session stamps its own weft.public_id
 // and pool lineage, "" when it has none). A run whose records and spans
-// say weft.public_id = "" has no public id: no panel scope lists it,
+// say weft.public_id = "" has no public id: no public id filter lists it,
 // its session row has none, and ResolvePublicID("") resolves nothing; a
 // weft.session.parent = "" is not in the row's meta.
 func emptyIdentity(open func(t *testing.T) obsdb.DB) func(*testing.T) {
@@ -60,13 +60,13 @@ func emptyIdentity(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	}
 }
 
-// sessionsScoped: SessionQuery.PublicID scopes the runs before the
+// sessionsFiltered: SessionQuery.PublicID filters the runs before the
 // grouping. Session s_col holds pub_a's weft turn and another app's
 // derived run colliding on the session id (gen_ai.conversation.id),
-// newer and heavier. Scoped to pub_a the session is one turn, pub_a's
+// newer and heavier. Filtered to pub_a the session is one turn, pub_a's
 // usage and last seen — the order and the cursor follow it — and Total
-// counts only sessions with a pub_a turn; unscoped, both runs count.
-func sessionsScoped(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+// counts only sessions with a pub_a turn; unfiltered, both runs count.
+func sessionsFiltered(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	return func(t *testing.T) {
 		db := open(t)
 		weftRun := func(id, session, pub string, shift time.Duration) []obsdb.Record {
@@ -101,13 +101,13 @@ func sessionsScoped(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			t.Fatal(err)
 		}
 
-		// Unscoped: the collision counts.
+		// Unfiltered: the collision counts.
 		all, err := db.Sessions(ctx(), obsdb.SessionQuery{})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if all.Total != 4 {
-			t.Errorf("unscoped total = %d, want 4 (s_col, s_a2, s_b, s_der)", all.Total)
+			t.Errorf("unfiltered total = %d, want 4 (s_col, s_a2, s_b, s_der)", all.Total)
 		}
 		var col obsdb.SessionRow
 		for _, s := range all.Sessions {
@@ -116,35 +116,35 @@ func sessionsScoped(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			}
 		}
 		if col.Turns != 2 || col.Usage.InputTokens != 510 || !col.LastSeen.Equal(at(40*time.Second)) {
-			t.Errorf("unscoped s_col = %+v, want 2 turns, input 510, last seen the derived run's", col)
+			t.Errorf("unfiltered s_col = %+v, want 2 turns, input 510, last seen the derived run's", col)
 		}
 
-		// Scoped to pub_a: one page.
-		scoped, err := db.Sessions(ctx(), obsdb.SessionQuery{PublicID: "pub_a"})
+		// Filtered to pub_a: one page.
+		filtered, err := db.Sessions(ctx(), obsdb.SessionQuery{PublicID: "pub_a"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if scoped.Total != 2 || len(scoped.Sessions) != 2 {
-			t.Fatalf("scoped page = %+v (total %d), want s_a2 and s_col", scoped.Sessions, scoped.Total)
+		if filtered.Total != 2 || len(filtered.Sessions) != 2 {
+			t.Fatalf("filtered page = %+v (total %d), want s_a2 and s_col", filtered.Sessions, filtered.Total)
 		}
-		if scoped.Sessions[0].ID != "s_a2" || scoped.Sessions[1].ID != "s_col" {
-			t.Errorf("scoped order = [%s %s], want [s_a2 s_col]: pub_a's last seen, not the derived run's",
-				scoped.Sessions[0].ID, scoped.Sessions[1].ID)
+		if filtered.Sessions[0].ID != "s_a2" || filtered.Sessions[1].ID != "s_col" {
+			t.Errorf("filtered order = [%s %s], want [s_a2 s_col]: pub_a's last seen, not the derived run's",
+				filtered.Sessions[0].ID, filtered.Sessions[1].ID)
 		}
-		sc := scoped.Sessions[1]
+		sc := filtered.Sessions[1]
 		if sc.Turns != 1 || sc.Usage.InputTokens != 10 || sc.Usage.OutputTokens != 2 ||
 			!sc.LastSeen.Equal(at(time.Second)) || !sc.FirstSeen.Equal(at(0)) ||
 			sc.PublicID != "pub_a" || sc.Agent != "conf" || sc.Status != obsdb.StatusSucceeded {
-			t.Errorf("scoped s_col = %+v, want 1 turn, input 10/2, seen at(0)..at(1s), pub_a, agent conf, succeeded", sc)
+			t.Errorf("filtered s_col = %+v, want 1 turn, input 10/2, seen at(0)..at(1s), pub_a, agent conf, succeeded", sc)
 		}
 
-		// Scoped, a page at a time: the cursor is pub_a's last seen.
+		// Filtered, a page at a time: the cursor is pub_a's last seen.
 		first, err := db.Sessions(ctx(), obsdb.SessionQuery{PublicID: "pub_a", Limit: 1})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if first.Total != 2 || len(first.Sessions) != 1 || first.Sessions[0].ID != "s_a2" || first.NextBefore == nil {
-			t.Fatalf("scoped first page = %+v (total %d), want s_a2 and a cursor", first.Sessions, first.Total)
+			t.Fatalf("filtered first page = %+v (total %d), want s_a2 and a cursor", first.Sessions, first.Total)
 		}
 		if !first.NextBefore.Equal(at(5*time.Second)) || first.NextBeforeID != "s_a2" {
 			t.Errorf("cursor = (%v, %s), want s_a2's at(5s)", first.NextBefore, first.NextBeforeID)
@@ -154,7 +154,7 @@ func sessionsScoped(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			t.Fatal(err)
 		}
 		if second.Total != 2 || len(second.Sessions) != 1 || second.Sessions[0].ID != "s_col" || second.Sessions[0].Turns != 1 {
-			t.Errorf("scoped second page = %+v (total %d), want s_col with 1 turn", second.Sessions, second.Total)
+			t.Errorf("filtered second page = %+v (total %d), want s_col with 1 turn", second.Sessions, second.Total)
 		}
 		if second.NextBefore == nil || !second.NextBefore.Equal(at(time.Second)) {
 			t.Errorf("second cursor = %v, want pub_a's at(1s), never the derived run's at(40s)", second.NextBefore)
@@ -167,7 +167,7 @@ func sessionsScoped(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			t.Errorf("pub_a + agent other = %+v (%v), want empty: the derived agent is not pub_a's", other, err)
 		}
 		// IDPrefix (U30.2, the ⌘K palette): bytes, no wildcard, no case
-		// folding, composing with the scope.
+		// folding, composing with the filter.
 		for _, c := range []struct {
 			q    obsdb.SessionQuery
 			want []string

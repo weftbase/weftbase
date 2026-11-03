@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -80,20 +79,6 @@ func TestRequestsRowCarriesRaw(t *testing.T) {
 	}
 	code, body := get(tok)
 	check("server token", code, body)
-	play, err := signPanelToken([]byte(tok), panelClaims{PublicID: "pub_a", Scope: scopePlayground, Exp: time.Now().Add(time.Hour)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	code, body = get(play)
-	check("playground token", code, body)
-	read, err := signPanelToken([]byte(tok), panelClaims{PublicID: "pub_a", Scope: scopeRead, Exp: time.Now().Add(time.Hour)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	code, body = get(read)
-	if code != http.StatusForbidden || !strings.Contains(body, `"hidden"`) || strings.Contains(body, "WIRE-BODY") {
-		t.Errorf("read token = %d %s; want 403 hidden without the wire body", code, body)
-	}
 }
 
 // seedRawGoldenRun is requests-raw.golden.json's run: step 0 retried

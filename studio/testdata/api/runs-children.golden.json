@@ -17,8 +17,6 @@
       "session_id": "",
       "public_id": "",
       "turn": 0,
-      "playground": false,
-      "experiment_id": "",
       "forked_from": "",
       "meta": {
         "cwd": "/tmp/demo"

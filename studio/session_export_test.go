@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 )
 
 // exportLines decodes a session export: each line's record kind, and
@@ -105,21 +104,12 @@ func TestSessionExport(t *testing.T) {
 	}
 }
 
-// TestSessionExportCapAndScope: past sessionExportTurnCap the file says
-// so (a truncated hole, cause response_cap); a panel token of another
-// public id is 403; a read-scoped token's export carries no mark
-// content.
-func TestSessionExportCapAndScope(t *testing.T) {
+// TestSessionExportCap: past sessionExportTurnCap the file says so (a
+// truncated hole, cause response_cap).
+func TestSessionExportCap(t *testing.T) {
 	defer func(n int) { sessionExportTurnCap = n }(sessionExportTurnCap)
 	sessionExportTurnCap = 2
 	h := Handler(DB(timelineDB(t)), Token("srv"))
-	tok := func(pub, scope string) string {
-		s, err := signPanelToken([]byte("srv"), panelClaims{PublicID: pub, Scope: scope, Exp: time.Now().Add(time.Hour)})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return s
-	}
 	code, _, body := getWith(t, h, "/studio/api/sessions/s_acme/export", "srv", "")
 	if code != http.StatusOK {
 		t.Fatalf("export: %d %s", code, body)
@@ -136,19 +126,6 @@ func TestSessionExportCapAndScope(t *testing.T) {
 	}
 	if !strings.Contains(body, `"record":"session_hole","hole":"truncated","cause":"response_cap"`) {
 		t.Errorf("capped export: no truncated hole: %s", body)
-	}
-	if code, _, _ := getWith(t, h, "/studio/api/sessions/s_acme/export", tok("pub_other", scopeRead), ""); code != http.StatusForbidden {
-		t.Errorf("another public id = %d, want 403", code)
-	}
-	code, _, body = getWith(t, h, "/studio/api/sessions/s_acme/export", tok("pub_acme", scopeRead), "")
-	if code != http.StatusOK || strings.Contains(body, "agent-7") || !strings.Contains(body, `"content_hidden":true`) {
-		t.Errorf("read token = %d, content leaked or not marked hidden: %s", code, body)
-	}
-	// A read token's turns carry the request block hidden, as the run
-	// export's jsonl does, and no request line.
-	kinds, _ = exportLines(t, body)
-	if slices.Contains(kinds, "request") || !strings.Contains(body, `"record":"badge","block":"requests","badge":"hidden"`) {
-		t.Errorf("read token: request lines %v or no hidden requests badge: %s", slices.Contains(kinds, "request"), body[:min(len(body), 600)])
 	}
 }
 
@@ -203,29 +180,5 @@ func TestSessionExportByteCap(t *testing.T) {
 	if !strings.Contains(body, `"record":"session_hole","hole":"truncated","cause":"response_cap","reason":"the export reached its 0 MiB cap: 4 turns after it`) ||
 		!strings.Contains(body, `12 marks after it are not in this file`) {
 		t.Errorf("capped export: no byte-cap holes: %s", body[strings.LastIndex(body, `"record":"run"`):])
-	}
-
-	// P9-pre-go-fix3: a panel token's export cut by bytes still says the
-	// marks its token does not see — the hidden hole the scope read
-	// counted before the first byte — though no mark line is written.
-	ht := Handler(DB(timelineDB(t)), Token("srv"))
-	panel, err := signPanelToken([]byte("srv"), panelClaims{PublicID: "pub_acme", Scope: scopePlayground, Exp: time.Now().Add(time.Hour)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	code, _, body = getWith(t, ht, "/studio/api/sessions/s_acme/export", panel, "")
-	if code != http.StatusOK {
-		t.Fatalf("panel export: %d %s", code, body)
-	}
-	kinds, lines = exportLines(t, body)
-	var hidden map[string]any
-	for _, l := range lines {
-		if l["record"] == "session_hole" && l["hole"] == "hidden" {
-			hidden = l
-		}
-	}
-	if slices.Contains(kinds, "session_mark") || hidden == nil || hidden["count"] != float64(1) || !strings.Contains(body, `"hole":"truncated","cause":"response_cap"`) {
-		t.Errorf("a panel token's byte-capped export: marks %v, hidden hole %v; want no mark, the byte cap's hole and hidden 1 (the foreign mark)",
-			slices.Contains(kinds, "session_mark"), hidden)
 	}
 }

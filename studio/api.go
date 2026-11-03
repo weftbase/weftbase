@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"net/http"
 	"slices"
 	"strconv"
@@ -44,10 +43,10 @@ func writeJSON(w http.ResponseWriter, r *http.Request, status int, v any) {
 }
 
 // writeError answers in the API's error shape. The reason is the
-// request's in Studio's server log
+// request's in the server log
 // (studio/internal/reqlog): a 5xx is one ERROR line naming it and the
 // request id, which a 5xx body carries too (request_id), so a user's
-// report meets its line in studio.log.
+// report meets its line in the server's log.
 func writeError(w http.ResponseWriter, r *http.Request, status int, code, msg string) {
 	reqlog.Refuse(r.Context(), code, msg)
 	type body struct {
@@ -64,45 +63,6 @@ func writeError(w http.ResponseWriter, r *http.Request, status int, code, msg st
 	}{b})
 }
 
-// maxBody bounds a JSON request body on the API (the playground,
-// debugger, fixture, experiment and panel-token routes): 4 MiB — a
-// run command carries an input and transcript edits, nothing larger.
-// Above it the route answers 413. Ingest has its own limit (S4.4).
-const maxBody = 4 << 20
-
-// decodeBody reads one JSON body into v under maxBody, answering the
-// client itself on failure: 413 for a body over the limit, 400 for
-// anything that does not decode. what names the body in the message.
-func decodeBody(w http.ResponseWriter, r *http.Request, what string, v any) bool {
-	return decodeWith(w, r, what, v, false)
-}
-
-// decodeStrict is decodeBody refusing a field v does not name (UX-D-27):
-// a misspelled key is a 400 that names it, never a default applied in
-// silence.
-func decodeStrict(w http.ResponseWriter, r *http.Request, what string, v any) bool {
-	return decodeWith(w, r, what, v, true)
-}
-
-func decodeWith(w http.ResponseWriter, r *http.Request, what string, v any, strict bool) bool {
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody))
-	if strict {
-		dec.DisallowUnknownFields()
-	}
-	err := dec.Decode(v)
-	if err == nil {
-		return true
-	}
-	var tooLarge *http.MaxBytesError
-	if errors.As(err, &tooLarge) {
-		writeError(w, r, http.StatusRequestEntityTooLarge, "bad_request",
-			what+": larger than the 4 MiB limit")
-		return false
-	}
-	badRequest(w, r, what+": "+err.Error())
-	return false
-}
-
 // notFound and badRequest keep call sites to one line each.
 func notFound(w http.ResponseWriter, r *http.Request, msg string) {
 	writeError(w, r, http.StatusNotFound, "not_found", msg)
@@ -114,19 +74,11 @@ func badRequest(w http.ResponseWriter, r *http.Request, msg string) {
 
 // dbError maps an obsdb error onto the API's error codes: unknown ids
 // are 404, everything else is a 500 that names the failure (loud over
-// silent, ADR 0010 §2.5's rule, carried over). A panel token lives in
-// a page, so its holder gets the code and the operation, never the
-// database's own error text (paths, SQL, hosts) — while Studio's server
-// log still names the real error (reqlog.Cause), so the operator's line
-// for that request id says what failed.
+// silent, ADR 0010 §2.5's rule, carried over).
 func dbError(w http.ResponseWriter, r *http.Request, noun, id string, err error) {
 	switch {
 	case errors.Is(err, obsdb.ErrNotFound):
 		notFound(w, r, "no "+noun+" "+id)
-	case idFrom(r).panel != nil:
-		writeError(w, r, http.StatusInternalServerError, "internal",
-			"read "+noun+" "+id+" failed")
-		reqlog.Cause(r.Context(), "read "+noun+" "+id+": "+err.Error())
 	default:
 		writeError(w, r, http.StatusInternalServerError, "internal",
 			"read "+noun+" "+id+": "+err.Error())
@@ -150,13 +102,11 @@ type runRow struct {
 	SessionID    string         `json:"session_id"`
 	PublicID     string         `json:"public_id"`
 	Turn         int            `json:"turn"`
-	Playground   bool           `json:"playground"`
-	ExperimentID string         `json:"experiment_id"`
 	ForkedFrom   string         `json:"forked_from"`
 	// SessionCompactions and DelegatedSessions are a session turn's
-	// marks on a conversation's runs list (U16, UX-B-30: the devtools
-	// panel's ⌗ and ↳ chips, read with the page so the panel needs no
-	// per-turn fetch): the session compaction markers filed under the
+	// marks on a conversation's runs list (U16, UX-B-30: the ⌗ and ↳
+	// chips, read with the page so a client needs no per-turn fetch):
+	// the session compaction markers filed under the
 	// turn (thread compacted after it — the session_events index,
 	// obsdb.SessionEventReader) and the sessions its calls delegated
 	// (SessionQuery.Parents' rows naming it as ParentRun). Only on a
@@ -284,13 +234,9 @@ type runRow struct {
 	// OwnUsage and DelegatedUsage split Usage (the core's roll-up, rule
 	// 13) where the run delegated (U30.2, UX-A-19: the runs list's
 	// "60/30 +60/30"): its own model calls' usage — Usage less its core
-	// Subagent children's — and theirs, summed over the children this
-	// identity reads (a panel token's out-of-scope child is in neither:
-	// own excludes it, delegated does not name it). Read time, from the
-	// children read the cost makes; both omitted on a run with no
-	// Subagent child, a running run, when that read failed, or where a
-	// panel token cannot see one of its Subagent children (usage − own −
-	// delegated would be that hidden subtree's figure, I4's rule).
+	// Subagent children's — and theirs, summed over its children. Read
+	// time, from the children read the cost makes; both omitted on a run
+	// with no Subagent child, a running run, or when that read failed.
 	OwnUsage       *core.Usage `json:"own_usage,omitempty"`
 	DelegatedUsage *core.Usage `json:"delegated_usage,omitempty"`
 	// Holes is set on a run document's children[] rows only (plan
@@ -317,8 +263,6 @@ func row(rec obsdb.RunRow) runRow {
 		SessionID:     rec.SessionID,
 		PublicID:      rec.PublicID,
 		Turn:          rec.Turn,
-		Playground:    rec.Playground,
-		ExperimentID:  rec.ExperimentID,
 		ForkedFrom:    rec.ForkedFrom,
 		ResumedFrom:   rec.ResumedFrom,
 		ResumedBy:     rec.ResumedBy,
@@ -442,14 +386,12 @@ type runPage struct {
 	// meta weft.session.parent: "delegated session") or another agent's
 	// Generate inside a handler — links, never parenthood: their usage
 	// is their own, in no figure of this run. In start order, the first
-	// callerLinkedCap (CallerLinkedMore: more were not listed); under a
-	// panel token its public id's alone, the rest counted in
-	// CallerLinkedHidden, never named. Absent when none;
+	// callerLinkedCap (CallerLinkedMore: more were not listed). Absent
+	// when none;
 	// CallerLinkedUnknown says the read failed (absent, the list would
 	// read as "none").
 	CallerLinked        []runRow `json:"caller_linked,omitempty"`
 	CallerLinkedMore    bool     `json:"caller_linked_more,omitempty"`
-	CallerLinkedHidden  int      `json:"caller_linked_hidden,omitempty"`
 	CallerLinkedUnknown bool     `json:"caller_linked_unknown,omitempty"`
 	// Decided is, on a parked run a resume names (resumed_by), each
 	// parked call's decision as that resume applied it; Resumes, on the
@@ -644,9 +586,7 @@ type transcript struct {
 // N's request carried (counts, range and hash, as the run page serves
 // compactions), null when the request carried the plain transcript.
 // The badge is "derived" when no request record placed the messages (a
-// run written before ADR 0028: the from_step cut rule did), "hidden"
-// with Messages null when a read-scoped panel token asks for a step
-// whose request carried a view (its messages are request content).
+// run written before ADR 0028: the from_step cut rule did).
 type transcriptAsOf struct {
 	transcript
 	Step        int            `json:"step"`
@@ -717,154 +657,6 @@ type spanEventDTO struct {
 
 type spansDoc struct {
 	Spans []spanDTO `json:"spans"`
-}
-
-// toolNameAttrs are the invoke_agent span's per-run tool overrides
-// (core's OnlyTools, ParkOn, ParkAllExcept): comma-joined tool names —
-// a slice of the catalog, which a read-scoped panel token does not
-// read. A named tool choice (weft.override.tool_choice "tool:<name>",
-// core's ToolChoiceNamed mode and the name) names one too.
-var toolNameAttrs = []string{"weft.override.tools", "weft.override.park_on", "weft.override.park_all_except"}
-
-const attrOverrideToolChoice = "weft.override.tool_choice"
-
-// namesTools says whether a span carries a tool name a read-scoped
-// panel token does not read.
-func namesTools(attrs map[string]any) bool {
-	for _, k := range toolNameAttrs {
-		if _, ok := attrs[k]; ok {
-			return true
-		}
-	}
-	tc, _ := attrs[attrOverrideToolChoice].(string)
-	return strings.HasPrefix(tc, string(core.ToolChoiceNamed)+":")
-}
-
-// spansFor is the spans the request's identity may read: all of them
-// for one that reads prompts (readsPrompts); for a read-scoped panel
-// token, copies without the tool names (toolNameAttrs, a named tool
-// choice cut to its mode) and without a stock span's system prompt
-// (withoutSystemPrompt, §9). Every route that serves spans goes through
-// it: spans, traces, the export.
-func spansFor(r *http.Request, list []obsdb.Span) []obsdb.Span {
-	if readsPrompts(r) {
-		return list
-	}
-	out := make([]obsdb.Span, len(list))
-	for i, sp := range list {
-		if a, ok := withoutSystemPrompt(sp.Attrs); ok {
-			sp.Attrs = a
-		}
-		sp.Events = withoutSystemEvents(sp.Events)
-		if namesTools(sp.Attrs) {
-			sp.Attrs = maps.Clone(sp.Attrs)
-			for _, k := range toolNameAttrs {
-				delete(sp.Attrs, k)
-			}
-			if tc, _ := sp.Attrs[attrOverrideToolChoice].(string); strings.HasPrefix(tc, string(core.ToolChoiceNamed)+":") {
-				sp.Attrs[attrOverrideToolChoice] = string(core.ToolChoiceNamed)
-			}
-		}
-		out[i] = sp
-	}
-	return out
-}
-
-// withoutSystemPrompt is a stock span's attributes without the system
-// prompt the GenAI conventions' content attributes carry
-// (docs/record-contract.md §9): gen_ai.system_instructions, the plain
-// gen_ai.prompt and gen_ai.content.prompt strings whole, the
-// system-role messages of gen_ai.input.messages (the whole value when it
-// does not parse — it may hold one) and the legacy indexed
-// gen_ai.prompt.N.* of a system-role slot. ok is false when there was
-// nothing to remove (attrs returned as is, never copied).
-func withoutSystemPrompt(attrs map[string]any) (map[string]any, bool) {
-	var drop []string
-	var input any
-	setInput := false
-	// The system instructions, and the plain prompt keys whole: their
-	// one string may carry the system prompt and cannot be split.
-	for _, k := range []string{"gen_ai.system_instructions", "gen_ai.prompt", "gen_ai.content.prompt"} {
-		if _, ok := attrs[k]; ok {
-			drop = append(drop, k)
-		}
-	}
-	if v, ok := attrs["gen_ai.input.messages"]; ok {
-		var msgs []map[string]any
-		raw, isStr := v.(string)
-		if !isStr {
-			b, _ := json.Marshal(v)
-			raw = string(b)
-		}
-		if err := json.Unmarshal([]byte(raw), &msgs); err != nil {
-			drop = append(drop, "gen_ai.input.messages")
-		} else {
-			kept := msgs[:0]
-			for _, m := range msgs {
-				if role, _ := m["role"].(string); role != "system" {
-					kept = append(kept, m)
-				}
-			}
-			if len(kept) != len(msgs) {
-				b, _ := json.Marshal(kept)
-				input, setInput = string(b), true
-			}
-		}
-	}
-	for k, v := range attrs {
-		rest, ok := strings.CutPrefix(k, "gen_ai.prompt.")
-		if !ok {
-			continue
-		}
-		n, field, ok := strings.Cut(rest, ".")
-		if ok && field == "role" && v == "system" {
-			for k2 := range attrs {
-				if strings.HasPrefix(k2, "gen_ai.prompt."+n+".") {
-					drop = append(drop, k2)
-				}
-			}
-		}
-	}
-	if len(drop) == 0 && !setInput {
-		return attrs, false
-	}
-	out := maps.Clone(attrs)
-	for _, k := range drop {
-		delete(out, k)
-	}
-	if setInput {
-		out["gen_ai.input.messages"] = input
-	}
-	return out, true
-}
-
-// withoutSystemEvents is a span's events without the system prompt they
-// may carry (docs/record-contract.md §9): the event-era
-// gen_ai.system.message and gen_ai.content.prompt events dropped whole
-// (one string, the system prompt in it or beside it), and every other
-// event's attributes through withoutSystemPrompt — a
-// gen_ai.client.inference.operation.details event carries the
-// conventions' gen_ai.system_instructions and gen_ai.input.messages as a
-// span does. The slice itself when nothing was removed.
-func withoutSystemEvents(evs []obsdb.SpanEvent) []obsdb.SpanEvent {
-	var out []obsdb.SpanEvent
-	changed := false
-	for _, ev := range evs {
-		switch ev.Name {
-		case "gen_ai.system.message", "gen_ai.content.prompt":
-			changed = true
-			continue
-		}
-		if a, ok := withoutSystemPrompt(ev.Attrs); ok {
-			ev.Attrs = a
-			changed = true
-		}
-		out = append(out, ev)
-	}
-	if !changed {
-		return evs
-	}
-	return out
 }
 
 func spans(in []obsdb.Span) spansDoc {
@@ -1026,7 +818,7 @@ type sessionsPage struct {
 }
 
 // sessionDoc is GET /api/sessions/{id}: the row and its own turns in
-// order; experiments hang off runs via forked_from. Delegated is the
+// order. Delegated is the
 // sessions it delegated (thread/pool children, SessionQuery.Parents,
 // U14): each a row with its lineage and its own cost, newest first, at
 // most delegatedCap (DelegatedMore past it), [] when none;
@@ -1042,11 +834,6 @@ type sessionDoc struct {
 	DelegatedMore    bool         `json:"delegated_more,omitempty"`
 	DelegatedUnknown bool         `json:"delegated_unknown,omitempty"`
 	DelegatedUsage   core.Usage   `json:"delegated_usage"`
-	// DelegatedHoles is the delegated block's holes (ADR 0028 §11's
-	// table): hidden, counted, when a panel token's scope left out
-	// sessions this one delegated (another public id's, or none) —
-	// never named, and the delegated cost then not known.
-	DelegatedHoles []stepHole `json:"delegated_holes,omitempty"`
 	delegatedSessionsFields
 }
 
@@ -1068,11 +855,6 @@ type delegatedSessionsFields struct {
 const (
 	delegatedCap     = 100
 	delegatedTreeCap = 500
-	// hiddenDelegatedPages bounds the pages of 500 one hiddenDelegated
-	// call reads for the hidden ids (P9-pre-go-fix6): the budget's worth
-	// and one more, the visible ones it skips past included — past it the
-	// count is a floor.
-	hiddenDelegatedPages = delegatedTreeCap/500 + 1
 )
 
 // publicResolution is GET /api/public/{public_id}: the public id is
@@ -1083,35 +865,8 @@ type publicResolution struct {
 
 // ── Handlers ───────────────────────────────────────────────────────
 
-// debugScope names what the debugger's write verbs may act on, only
-// when those verbs are registered: "own+runtime" while a connected
-// runtime registered runtime.Sessions (the app's own turns take
-// approvals and steer through it (cancel is refused), plan F4.1) or exposes an
-// agent built with runtime.Breakpoints() (breakpoints park the app's
-// own runs, F4.2), else the runtime-started runs alone.
-func (s *Server) debugScope() string {
-	for _, g := range s.groups {
-		if g.capability == "breakpoints" {
-			if s.runtimeSrv != nil && s.runtimeSrv.AnyOwnRuns() {
-				return debugScopeOwn
-			}
-			return debugScopeRuntime
-		}
-	}
-	return ""
-}
-
-// meta's debug_scope values.
-const (
-	debugScopeRuntime = "runtime-started runs"
-	debugScopeOwn     = "own+runtime"
-)
-
 // serveRuns answers api/runs (S4.2): agent, status, session,
-// public_id, playground, experiment_id (the runs one playground
-// experiment labelled weft.experiment.id: a filter that narrows, so any
-// identity may send it — a panel token's rows stay inside its public
-// id, which it scopes on top), parent ("" top-level only, "*" all, or a run
+// public_id, parent ("" top-level only, "*" all, or a run
 // id for its children), all (a boolean: true is parent=*, every run,
 // subagent children included — a parent id given beside it wins),
 // stopped_by (what ended the run, exact — has_tool_call:submit — or, a
@@ -1130,29 +885,20 @@ const (
 func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	query := obsdb.RunQuery{
-		Agent:        q.Get("agent"),
-		SessionID:    q.Get("session"),
-		PublicID:     q.Get("public_id"),
-		ExperimentID: q.Get("experiment_id"),
-		StoppedBy:    q.Get("stopped_by"),
-		ErrorType:    q.Get("error_type"),
-		IDPrefix:     q.Get("id_prefix"),
-		ParentRunID:  parentParam(q),
-		Meta:         tagParams(q),
+		Agent:       q.Get("agent"),
+		SessionID:   q.Get("session"),
+		PublicID:    q.Get("public_id"),
+		StoppedBy:   q.Get("stopped_by"),
+		ErrorType:   q.Get("error_type"),
+		IDPrefix:    q.Get("id_prefix"),
+		ParentRunID: parentParam(q),
+		Meta:        tagParams(q),
 	}
 	st, ok := statusParam(w, r, q)
 	if !ok {
 		return
 	}
 	query.Status = st
-	if v := q.Get("playground"); v != "" {
-		b, err := strconv.ParseBool(v)
-		if err != nil {
-			badRequest(w, r, "playground must be true or false")
-			return
-		}
-		query.Playground = &b
-	}
 	if v := q.Get("all"); v != "" {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
@@ -1190,9 +936,6 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 		}
 		query.Oldest = b
 	}
-	if !scopeRunsQuery(w, r, &query, q.Get("public_id")) {
-		return
-	}
 	limit, ok := limitParam(w, r, q)
 	if !ok {
 		return
@@ -1219,10 +962,9 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 	for _, rec := range page.Runs {
 		out.Runs = append(out.Runs, c.row(rec))
 	}
-	// The marks only on a page the request itself narrowed: a panel
-	// token's scope sets PublicID on every page (scopeRunsQuery).
+	// The marks only on a page the request narrowed to a conversation.
 	if q.Get("public_id") != "" || q.Get("session") != "" {
-		out.TurnMarksCapped = s.turnMarks(r.Context(), out.Runs, panelScope(r))
+		out.TurnMarksCapped = s.turnMarks(r.Context(), out.Runs)
 	}
 	// The cursor is the database's own: it knows whether the page was
 	// cut at its limit. Counting rows here cannot — a page may exceed
@@ -1259,13 +1001,12 @@ var turnMarkKinds = []string{obsdb.RecordCompaction, "interrupt"}
 // turnMarksSessions), its compaction markers and interrupt records
 // under the page's turns — one SessionEvents read with those kinds,
 // paged by offset while Total says more — and the sessions it
-// delegated, paged by cursor. sc, a panel token's scope, scopes
-// every read (the marks by the page's own turns, which it scoped). What it could not read is the returned hole (nil when
+// delegated, paged by cursor. What it could not read is the returned hole (nil when
 // none): a turn left unmarked is said, never a chip drawn wrong — past
 // a bound, or when a read fails (its turns' marks absent and counted in
 // the hole, the failure logged at Debug), on its first page or a later
 // one.
-func (s *Server) turnMarks(ctx context.Context, rows []runRow, sc readScope) *treeHole {
+func (s *Server) turnMarks(ctx context.Context, rows []runRow) *treeHole {
 	bySession := map[string][]int{}
 	var order []string
 	skipped := 0
@@ -1300,10 +1041,10 @@ func (s *Server) turnMarks(ctx context.Context, rows []runRow, sc readScope) *tr
 			}
 			read, total, failed := 0, 0, false
 			for range turnMarksPages {
-				page, err := er.SessionEvents(ctx, obsdb.SessionEventQuery{SessionID: sid, PublicID: sc.PublicID, RunIDs: ids,
+				page, err := er.SessionEvents(ctx, obsdb.SessionEventQuery{SessionID: sid, RunIDs: ids,
 					Kinds: turnMarkKinds, Offset: read, Limit: obsdb.MaxSessionEventLimit})
 				if err != nil {
-					slog.DebugContext(ctx, "studio: a page's turn marks could not be read", "session", sid, "err", err)
+					slog.DebugContext(ctx, "weftbase: a page's turn marks could not be read", "session", sid, "err", err)
 					failed = true
 					break
 				}
@@ -1323,7 +1064,7 @@ func (s *Server) turnMarks(ctx context.Context, rows []runRow, sc readScope) *tr
 			}
 		}
 	}
-	q := obsdb.SessionQuery{Parents: order, PublicID: sc.PublicID, Meta: sc.Tags, Limit: 500}
+	q := obsdb.SessionQuery{Parents: order, Limit: 500}
 	for p := 0; ; p++ {
 		if p == turnMarksPages {
 			// The delegated counts are floors: every listed turn's.
@@ -1332,7 +1073,7 @@ func (s *Server) turnMarks(ctx context.Context, rows []runRow, sc readScope) *tr
 		}
 		kids, err := s.db.Sessions(ctx, q)
 		if err != nil {
-			slog.DebugContext(ctx, "studio: a page's delegated sessions could not be read", "err", err)
+			slog.DebugContext(ctx, "weftbase: a page's delegated sessions could not be read", "err", err)
 			skipped += len(byID) // the delegated counts are floors, or absent
 			break
 		}
@@ -1499,9 +1240,6 @@ func (s *Server) serveRunRoutes(w http.ResponseWriter, r *http.Request) {
 // Run detail carries both) and the run's compactions (runPage). Events are deliberately not here — they
 // are paged (ADR 0018 §8).
 func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
-	if !s.scopeRunID(w, r, id) {
-		return
-	}
 	det, err := s.db.Run(r.Context(), id)
 	if err != nil {
 		dbError(w, r, "run", id, err)
@@ -1509,19 +1247,13 @@ func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 	}
 	c := s.coster(r.Context())
 	c.prime(det.ID, det.Children)
-	c.primeTrees(c.kids[det.ID]) // the scope's children (prime)
-	kids, hidden := c.visibleKids(det.ID)
-	doc := runDoc{runRow: c.row(det.RunRow), Children: s.childRows(r.Context(), c, kids)}
+	c.primeTrees(c.kids[det.ID])
+	doc := runDoc{runRow: c.row(det.RunRow), Children: s.childRows(r.Context(), c, c.kids[det.ID])}
 	doc.LogWarn, doc.LogError, doc.LogsCapped = s.logCounts(r.Context(), id)
 	holes, err := s.runHoles(r.Context(), det.RunRow)
 	if err != nil {
 		dbError(w, r, "run", id, err)
 		return
-	}
-	if hidden > 0 {
-		// A panel token's run document lists its public id's children
-		// only (inScope); the rest are one counted hole, never named.
-		holes = append(holes, hiddenChildrenHole(hidden, panelScope(r)))
 	}
 	doc.Holes = holes
 	comps, err := s.db.Compactions(r.Context(), id)
@@ -1548,14 +1280,13 @@ func (s *Server) runSummarizer(r *http.Request, rr obsdb.RunRow) *summarizerCost
 	if !ok || rr.SessionID == "" {
 		return nil
 	}
-	pub := panelScope(r).PublicID // the run's own marks: RunIDs is the tag scope's (the run is in it)
-	page, err := er.SessionEvents(r.Context(), obsdb.SessionEventQuery{SessionID: rr.SessionID, PublicID: pub,
+	page, err := er.SessionEvents(r.Context(), obsdb.SessionEventQuery{SessionID: rr.SessionID,
 		RunIDs: []string{rr.ID}, Limit: obsdb.MaxSessionEventLimit})
 	if err != nil {
-		slog.Default().DebugContext(r.Context(), "studio: a run's summarizer marks could not be read", "run", rr.ID, "err", err)
+		slog.Default().DebugContext(r.Context(), "weftbase: a run's summarizer marks could not be read", "run", rr.ID, "err", err)
 		return nil
 	}
-	mb := &markBuilder{sessionID: rr.SessionID, turns: map[string]int{}, pub: pub}
+	mb := &markBuilder{sessionID: rr.SessionID, turns: map[string]int{}}
 	at := core.ModelInfo{Provider: rr.Provider, Name: rr.Model}
 	var sum summarizerSum
 	for _, e := range page.Events {
@@ -1575,27 +1306,14 @@ func (s *Server) runSummarizer(r *http.Request, rr obsdb.RunRow) *summarizerCost
 
 // callerLinked fills a run page's caller_linked rows (U14): the runs
 // whose weft.caller.run.id names the run, oldest first, at most
-// callerLinkedCap; a panel token's public id's alone, read in its scope
-// (RunQuery.PublicID) so the page and caller_linked_more count what it
-// may see, the rest counted in caller_linked_hidden (the unscoped
-// total less the scoped one). The rows' subagent trees are primed
-// before they are priced: one children read per tree level, not one
-// per row.
+// callerLinkedCap. The rows' subagent trees are primed before they are
+// priced: one children read per tree level, not one per row.
 func (s *Server) callerLinked(ctx context.Context, c *coster, id string, out *runPage) {
-	sc := scopeOf(ctx)
-	q := obsdb.RunQuery{CallerRunID: id, ParentRunID: "*", PublicID: sc.PublicID, Meta: sc.Tags, Oldest: true, Limit: callerLinkedCap}
+	q := obsdb.RunQuery{CallerRunID: id, ParentRunID: "*", Oldest: true, Limit: callerLinkedCap}
 	page, err := s.db.Runs(ctx, q)
-	if err == nil && !sc.none() {
-		q.PublicID, q.Meta, q.Limit = "", nil, 1
-		var all obsdb.RunPage
-		if all, err = s.db.Runs(ctx, q); err == nil {
-			out.CallerLinkedHidden = max(all.Total-page.Total, 0)
-		}
-	}
 	if err != nil {
-		slog.DebugContext(ctx, "studio: a run's caller-linked runs could not be read", "run", id, "err", err)
+		slog.DebugContext(ctx, "weftbase: a run's caller-linked runs could not be read", "run", id, "err", err)
 		out.CallerLinkedUnknown = true
-		out.CallerLinkedHidden = 0
 		return
 	}
 	recs := page.Runs
@@ -1605,17 +1323,13 @@ func (s *Server) callerLinked(ctx context.Context, c *coster, id string, out *ru
 	out.CallerLinkedMore = page.Total > len(recs)
 	c.primeTrees(recs)
 	for _, rec := range recs {
-		if !inScope(sc, rec) { // the query's scope already; kept as the wall
-			out.CallerLinkedHidden++
-			continue
-		}
 		out.CallerLinked = append(out.CallerLinked, c.row(rec))
 	}
 }
 
 // childRows is a run document's children[] rows, each with its own
 // runHoles (plan A10) — the run page's and the export's; kids are the
-// coster's scoped ones (coster.visibleKids), never det.Children. A child whose
+// coster's primed ones, never det.Children. A child whose
 // holes cannot be read goes out without them: one unreadable child
 // never fails its parent's page.
 func (s *Server) childRows(ctx context.Context, c *coster, kids []obsdb.RunRow) []runRow {
@@ -1710,7 +1424,7 @@ func lostEvents(rec obsdb.RunRow, hasSpans bool) []badgeFields {
 //     (EventPage.Gaps) once the run is no longer running or settling —
 //     a live run's missing positions may still be in flight — and only
 //     where the root carries no count (the counted gap says them);
-//   - derived: a playground replay whose prefix no request record
+//   - derived: a replay whose prefix no request record
 //     placed — its weft.replay.view metadata (ADR 0029 §2) is derived
 //     or unknown (replayViewHole); never a child run, which inherits
 //     the mark but not the prefix.
@@ -1794,7 +1508,7 @@ func (s *Server) runHoles(ctx context.Context, rec obsdb.RunRow) ([]stepHole, er
 	return holes.list(), nil
 }
 
-// attrReplayView is weftbase/runtime's mark on a playground replay from a
+// attrReplayView is the runtime's mark on a replay from a
 // step > 0 (ADR 0029 §2): transcript | compacted:<index> | derived |
 // unknown — how its prefix knows what the source's model saw there.
 const attrReplayView = "weft.replay.view"
@@ -1824,8 +1538,8 @@ func replayViewHole(rec obsdb.RunRow) (reason, fix string) {
 		return "this replay's prefix was cut from the transcript at " + at + " (weft.replay.view = derived): no request record placed that step's messages, so a compaction view its model saw is not known",
 			"record the source with a current weft and content on, so a request record places every step (ADR 0028)"
 	case "unknown":
-		return "this replay's prefix is the transcript before " + at + " (weft.replay.view = unknown): the runtime could not read that step's records (Studio unreachable, content off, or a Studio without ?step=), so a compaction view its model saw may be missing",
-			"replay again with the runtime able to read the source's records: Studio reachable, content on, Studio upgraded"
+		return "this replay's prefix is the transcript before " + at + " (weft.replay.view = unknown): the runtime could not read that step's records (weftbase unreachable, content off, or a weftbase without ?step=), so a compaction view its model saw may be missing",
+			"replay again with the runtime able to read the source's records: weftbase reachable, content on, weftbase upgraded"
 	}
 	return "", ""
 }
@@ -1839,9 +1553,6 @@ func replayViewHole(rec obsdb.RunRow) (reason, fix string) {
 // running in the table, interrupted at read time — is finished in
 // effect, exactly as the store era served it).
 func (s *Server) serveRunEvents(w http.ResponseWriter, r *http.Request, id string) {
-	if !s.scopeRunID(w, r, id) {
-		return
-	}
 	q := r.URL.Query()
 	after := int64(0)
 	if v := q.Get("after"); v != "" {
@@ -1924,19 +1635,6 @@ func isDerivedID(id string) bool {
 // no events"), its fix naming the record contract.
 func derivedBadge() badgeFields { return badgeFor(obsdb.HoleDerived, obsdb.CauseStockSpans) }
 
-// refuseDerived answers 400 with derivedBadge: a route that needs what
-// a derived run never recorded (a transcript to replay or fixture).
-func refuseDerived(w http.ResponseWriter, r *http.Request, msg string) {
-	type errBody struct {
-		Code    string `json:"code"`
-		Message string `json:"message"`
-	}
-	writeJSON(w, r, http.StatusBadRequest, struct {
-		Error errBody `json:"error"`
-		badgeFields
-	}{Error: errBody{"bad_request", msg}, badgeFields: derivedBadge()})
-}
-
 // serveRunTranscript answers api/runs/{id}/transcript (S4.3): the
 // messages bodies, in order, one batch per messages record — the
 // replay-grade record of what the run saw and said (what replaces
@@ -1945,9 +1643,6 @@ func refuseDerived(w http.ResponseWriter, r *http.Request, msg string) {
 // the messages step N's model call carried (transcriptAsOf, ADR 0029);
 // a step the run never reached is 404, as steps/{n} answers it.
 func (s *Server) serveRunTranscript(w http.ResponseWriter, r *http.Request, id string) {
-	if !s.scopeRunID(w, r, id) {
-		return
-	}
 	step := -1
 	if q := r.URL.Query(); q.Has("step") {
 		n, err := strconv.Atoi(q.Get("step"))
@@ -2017,13 +1712,6 @@ func (s *Server) serveRunTranscript(w http.ResponseWriter, r *http.Request, id s
 	}
 	if sm.View != nil {
 		doc.CompactedAt = noteOf(*sm.View)
-		if !readsPrompts(r) {
-			// A view's messages are the request's content (the export's
-			// rule, export.go's compactionsBlock): a read-scoped panel
-			// token gets the counts and hash, the messages null under
-			// the hidden badge.
-			doc.Messages, doc.badgeFields = nil, badgeOf(obsdb.HoleHidden)
-		}
 	}
 	writeJSON(w, r, http.StatusOK, doc)
 }
@@ -2036,12 +1724,7 @@ func (s *Server) serveRunTranscript(w http.ResponseWriter, r *http.Request, id s
 // weft.parent.run.id chain and core's id rule, found from the run rows
 // and read by run id (obsdb.TreeReader.RunTreeSpans) — each keyed by
 // run_id + span_id with its run's parent_run_id, in start order, at
-// most obsdb.TreeSpanCap, with the tree's holes (treeSpansDoc). A
-// panel token reads the run's own spans and the descendants of its
-// public id (obsdb.TreeQuery.PublicID: cut, then scoped, then capped,
-// so a hidden run never takes a visible one's place under the cap):
-// the others are left out under a hidden hole, never a 403 for the
-// whole tree.
+// most obsdb.TreeSpanCap, with the tree's holes (treeSpansDoc).
 func (s *Server) serveRunSpans(w http.ResponseWriter, r *http.Request, id string) {
 	tree := false
 	if v := r.URL.Query().Get("tree"); v != "" {
@@ -2057,25 +1740,20 @@ func (s *Server) serveRunSpans(w http.ResponseWriter, r *http.Request, id string
 		writeError(w, r, http.StatusNotImplemented, "not_implemented", offSpansTree)
 		return
 	}
-	if !s.scopeRunID(w, r, id) {
-		return
-	}
 	if !tree {
 		list, err := s.db.RunSpans(r.Context(), id)
 		if err != nil {
 			dbError(w, r, "spans of run", id, err)
 			return
 		}
-		doc := spans(spansFor(r, list))
+		doc := spans(list)
 		for i := range doc.Spans {
 			doc.Spans[i].RunID = id
 		}
 		writeJSON(w, r, http.StatusOK, doc)
 		return
 	}
-	sc := panelScope(r)
-	q := obsdb.TreeQuery{RunID: id, PublicID: sc.PublicID, Meta: sc.Tags}
-	rt, err := tr.RunTreeSpans(r.Context(), q)
+	rt, err := tr.RunTreeSpans(r.Context(), obsdb.TreeQuery{RunID: id})
 	if err != nil {
 		dbError(w, r, "span tree of run", id, err)
 		return
@@ -2085,7 +1763,7 @@ func (s *Server) serveRunSpans(w http.ResponseWriter, r *http.Request, id string
 	for i, sp := range list {
 		plain[i] = sp.Span
 	}
-	doc := treeSpansDoc{Spans: spans(spansFor(r, plain)).Spans, Holes: []treeHole{}}
+	doc := treeSpansDoc{Spans: spans(plain).Spans, Holes: []treeHole{}}
 	for i := range doc.Spans {
 		doc.Spans[i].RunID, doc.Spans[i].ParentRunID = list[i].RunID, list[i].ParentRunID
 	}
@@ -2114,14 +1792,6 @@ func (s *Server) serveRunSpans(w http.ResponseWriter, r *http.Request, id string
 			Reason: missingRunsReason(rt.MissingCount, len(runs)), Fix: fix, Runs: runs, Count: rt.MissingCount,
 		})
 	}
-	if rt.Hidden {
-		doc.Holes = append(doc.Holes, treeHole{
-			Hole:   string(obsdb.HoleHidden),
-			Reason: hiddenTreeReason(rt.HiddenCount, sc),
-			Fix:    "open the tree with the server (dev) token",
-			Count:  rt.HiddenCount,
-		})
-	}
 	writeJSON(w, r, http.StatusOK, doc)
 }
 
@@ -2130,9 +1800,8 @@ func (s *Server) serveRunSpans(w http.ResponseWriter, r *http.Request, id string
 // obsdb.TreeSpanCap spans, and again, for a derived run, past the
 // trace's first obsdb.TreeTraceCap; not_recorded (cause no_spans, runs
 // naming the first obsdb.TreeMissingCap, count all of them) for
-// descendant runs with a row, no span and no longer running; hidden
-// for the runs a panel token's scope left out. Always a list, empty
-// when the tree is whole.
+// descendant runs with a row, no span and no longer running. Always a
+// list, empty when the tree is whole.
 type treeSpansDoc struct {
 	Spans []spanDTO  `json:"spans"`
 	Holes []treeHole `json:"holes"`
@@ -2233,10 +1902,7 @@ func (s *Server) serveTrace(w http.ResponseWriter, r *http.Request) {
 		notFound(w, r, "no trace "+id)
 		return
 	}
-	sd := spans(spansFor(r, list))
-	if !scopeSpans(w, r, sd.Spans) {
-		return
-	}
+	sd := spans(list)
 	ids, err := s.traceRunIDs(r.Context(), list)
 	if err != nil {
 		dbError(w, r, "trace", id, err)
@@ -2261,10 +1927,6 @@ func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	query := obsdb.SessionQuery{Agent: q.Get("agent"), PublicID: q.Get("public_id"), Q: strings.TrimSpace(q.Get("q")), Meta: tagParams(q),
 		IDPrefix: q.Get("id_prefix")} // U30.2: the ⌘K palette's lookup
-	var ok bool
-	if query.PublicID, query.Meta, ok = scopeQuery(w, r, query.PublicID, query.Meta, q.Get("public_id")); !ok {
-		return
-	}
 	if v := q.Get("before"); v != "" {
 		t, err := time.Parse(time.RFC3339, v)
 		if err != nil {
@@ -2322,19 +1984,9 @@ func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 		dbError(w, r, "sessions", "", err)
 		return
 	}
-	// A panel token's page is scoped in the query (SessionQuery.PublicID
-	// is a WHERE on the runs, before the grouping): each row's turns,
-	// usage, first/last seen and status, the order, Total and the
-	// cursor are its public id's runs alone — a run of another app
-	// sharing the session id (a colliding derived run) is in none of
-	// them (docs/record-contract.md §9). The cost walk reads the same
-	// scope — the query's public id, the panel token's or the server
-	// token's ?public_id= — so a row is one scope throughout: turns,
-	// usage and cost.
 	out := sessionsPage{Total: page.Total, Sessions: make([]sessionRow, 0, len(page.Sessions))}
-	scope := readScope{PublicID: query.PublicID, Tags: query.Meta}
 	for _, sr := range page.Sessions {
-		sc, _, runs := s.sessionCost(r.Context(), sr.ID, scope)
+		sc, _, runs := s.sessionCost(r.Context(), sr.ID)
 		srow := sessRow(sr)
 		srow.costFields = sc.fields()
 		srow.Derived = allDerived(runs)
@@ -2428,36 +2080,24 @@ func (s *Server) serveSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		notFound(w, r, "no such api route "+r.URL.Path)
 		return
 	}
-	pub := panelScope(r)
 	var det obsdb.SessionDetail
 	if er, ok := s.db.(obsdb.SessionEventReader); ok {
-		// The timeline's read (sessionScopeFor): a session no turn of
-		// which is stored still answers when its state log has marks —
+		// The timeline's read (sessionFor): a session no turn of which
+		// is stored still answers when its state log has marks —
 		// session-level records alone, every one held at Close — so the
-		// plain route agrees with its /timeline (P9-pre-web-fix2 10).
-		if det, ok = s.sessionScopeFor(w, r, er, id); !ok {
+		// plain route agrees with its /timeline.
+		if det, ok = s.sessionFor(w, r, er, id); !ok {
 			return
 		}
 	} else {
-		if !s.scopeSessionID(w, r, id) {
-			return
-		}
 		var err error
 		if det, err = s.db.Session(r.Context(), id); err != nil {
-			sessionReadError(w, r, id, err)
+			dbError(w, r, "session", id, err)
 			return
-		}
-		if !pub.none() {
-			// A panel token's session is its scope's turns (the
-			// runs list's rule): a run of another app sharing the
-			// session id — a derived run whose gen_ai.conversation.id
-			// collides — is neither listed nor summed
-			// (docs/record-contract.md §9). sessionScopeFor does the same.
-			s.scopeSessionDetail(r.Context(), &det, pub)
 		}
 	}
 	doc := sessionDoc{sessionRow: sessRow(det.SessionRow), Runs: make([]runRow, 0, len(det.Runs))}
-	sc, c, runs := s.sessionCost(r.Context(), id, pub)
+	sc, c, runs := s.sessionCost(r.Context(), id)
 	doc.costFields = sc.fields()
 	doc.Derived = allDerived(runs)
 	// The turn rows' children counts: every parent-linked run, as on
@@ -2467,13 +2107,12 @@ func (s *Server) serveSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		doc.Runs = append(doc.Runs, c.row(rr))
 	}
 	numberDerivedTurns(doc.Runs)
-	s.delegatedSessions(r.Context(), id, pub, &doc)
+	s.delegatedSessions(r.Context(), id, &doc)
 	writeJSON(w, r, http.StatusOK, doc)
 }
 
 // delegatedSessions fills a session document's delegated block (U14):
-// its direct delegated sessions as rows (SessionQuery.Parents, the
-// panel token's public id's alone — the list's scope), newest first,
+// its direct delegated sessions as rows (SessionQuery.Parents), newest first,
 // the first delegatedCap of them, and the usage and cost of every
 // session delegated under it, walked breadth first — one paged
 // Sessions read per tree level (Parents IN the level), never one per
@@ -2484,18 +2123,14 @@ func (s *Server) serveSessionRoutes(w http.ResponseWriter, r *http.Request) {
 // same reason). The direct level is paged whole, so a session
 // delegating more than delegatedCap still has every one of them in its
 // figures.
-func (s *Server) delegatedSessions(ctx context.Context, id string, pub readScope, doc *sessionDoc) {
+func (s *Server) delegatedSessions(ctx context.Context, id string, doc *sessionDoc) {
 	doc.Delegated = []sessionRow{}
 	seen := map[string]bool{id: true}
 	level := []string{id}
 	var parts []runCost
 	var why string
 	walked := 0
-	hidden := 0              // the sessions a panel token's scope left out, every level's
-	var hiddenFront []string // the last level's hidden sessions: their own delegated ones are hidden too
-	hiddenBudget := delegatedTreeCap
-	hiddenFloor := false // hiddenBudget ran out: hidden is a floor
-	allExact := true     // every visited session's own cost reported its cache split exact
+	allExact := true // every visited session's own cost reported its cache split exact
 	// price costs one level's sessions in one batched read and folds
 	// them into the figures, in the order the level listed them.
 	price := func(depth int, rows []obsdb.SessionRow) {
@@ -2506,7 +2141,7 @@ func (s *Server) delegatedSessions(ctx context.Context, id string, pub readScope
 		for i, sr := range rows {
 			ids[i] = sr.ID
 		}
-		costs := s.sessionCosts(ctx, ids, pub)
+		costs := s.sessionCosts(ctx, ids)
 		for _, sr := range rows {
 			sc := costs[sr.ID]
 			doc.DelegatedUsage = doc.DelegatedUsage.Add(sr.Usage)
@@ -2523,28 +2158,17 @@ walk:
 	for depth := 0; len(level) > 0; depth++ {
 		var next []string
 		var rows []obsdb.SessionRow
-		q := obsdb.SessionQuery{Parents: level, PublicID: pub.PublicID, Meta: pub.Tags, Limit: 500}
-		scopedTotal := -1 // this level's total in the request's scope, once read
+		q := obsdb.SessionQuery{Parents: level, Limit: 500}
 		for {
 			page, err := s.db.Sessions(ctx, q)
 			if err != nil {
-				slog.DebugContext(ctx, "studio: a session's delegated sessions could not be read", "session", id, "depth", depth, "err", err)
+				slog.DebugContext(ctx, "weftbase: a session's delegated sessions could not be read", "session", id, "depth", depth, "err", err)
 				if depth == 0 {
 					doc.DelegatedUnknown = true
 				}
 				why = fmt.Sprintf("the sessions delegated %d level(s) under this one could not be read; delegated_usage stops at the levels read", depth+1)
 				price(depth, rows)
 				break walk
-			}
-			if scopedTotal < 0 {
-				scopedTotal = page.Total
-				// The level's sessions the scope left out — a visible
-				// child's own delegated session under another public id
-				// as much as a direct one, and every session under a
-				// hidden one (P9-pre-web-fix3 F6).
-				n, front, floor := s.hiddenDelegated(ctx, id, level, hiddenFront, pub, scopedTotal, &hiddenBudget, seen)
-				hidden += n
-				hiddenFront, hiddenFloor = front, hiddenFloor || floor
 			}
 			if depth == 0 {
 				doc.DelegatedMore = page.Total > delegatedCap
@@ -2570,27 +2194,6 @@ walk:
 		}
 		price(depth, rows)
 		level = next
-	}
-	// Below the last visible level, the hidden sessions' own delegated
-	// sessions: counted, never read past their ids. A walk that stopped
-	// early (a failed read, the cap) leaves level set: its reason says
-	// so, and the hidden sessions below it are not counted — a panel
-	// token's hidden count is then a floor (P9-pre-go-fix6).
-	if len(level) > 0 && !pub.none() {
-		hiddenFloor = true
-	}
-	for len(level) == 0 && len(hiddenFront) > 0 {
-		n, front, floor := s.hiddenDelegated(ctx, id, nil, hiddenFront, pub, 0, &hiddenBudget, seen)
-		hidden += n
-		hiddenFront, hiddenFloor = front, hiddenFloor || floor
-	}
-	if hidden > 0 {
-		h := hiddenDelegatedHole(hidden, hiddenFloor, len(pub.Tags) > 0)
-		doc.DelegatedHoles = append(doc.DelegatedHoles, h)
-		if why != "" {
-			why += "; "
-		}
-		why += h.Reason
 	}
 	if len(parts) == 0 && why == "" {
 		zero := 0.0
@@ -2619,247 +2222,6 @@ walk:
 	doc.delegatedSessionsFields = out
 }
 
-// hiddenDelegated is how many sessions one level of id's delegated
-// tree a panel token's scope left out: the sessions level (the visible
-// sessions of the level above) and hiddenFront (its hidden ones)
-// delegated, less scopedTotal, level's children in the scope
-// (callerLinked's rule) — one Limit 1 read — and, when some are hidden,
-// their ids (pages of 500, the ids alone: never shown), the hidden
-// parents of the next level, at most *budget over the whole walk
-// (delegatedTreeCap) and hiddenDelegatedPages pages a call: past
-// either floor, the deeper levels not counted. The paging stops once
-// every hidden one of the level is found. A session under a hidden one
-// is hidden whatever its public id. seen is the walk's own: a hidden
-// id already in it (forged or cyclic lineage — weft.session.parent is
-// ingested) is not counted again, and every new one joins it. 0 for an
-// unscoped read, or when the unscoped read failed (logged; the walk's
-// own error says a failed scoped read).
-func (s *Server) hiddenDelegated(ctx context.Context, id string, level, hiddenFront []string, pub readScope, scopedTotal int, budget *int, seen map[string]bool) (n int, front []string, floor bool) {
-	parents := append(slices.Clone(level), hiddenFront...)
-	if pub.none() || scopedTotal < 0 || len(parents) == 0 {
-		return 0, nil, false
-	}
-	q := obsdb.SessionQuery{Parents: parents, Limit: 1}
-	all, err := s.db.Sessions(ctx, q)
-	if err != nil {
-		slog.DebugContext(ctx, "studio: a session's unscoped delegated count could not be read", "session", id, "err", err)
-		return 0, nil, false
-	}
-	total := max(all.Total-scopedTotal, 0)
-	if total == 0 {
-		return 0, nil, false
-	}
-	// A session in the scope: its row's public id — or, under a tag
-	// scope (I4), its id among the scoped read's, an unscoped row
-	// carrying no turn's tags.
-	inScope := func(sr obsdb.SessionRow) bool { return sr.PublicID == pub.PublicID }
-	if len(pub.Tags) > 0 {
-		ids, err := s.scopedSessionIDs(ctx, parents, pub)
-		if err != nil {
-			slog.DebugContext(ctx, "studio: a session's scoped delegated sessions could not be read", "session", id, "err", err)
-			return 0, nil, false
-		}
-		inScope = func(sr obsdb.SessionRow) bool { return ids[sr.ID] }
-	}
-	underHidden := make(map[string]bool, len(hiddenFront))
-	for _, h := range hiddenFront {
-		underHidden[h] = true
-	}
-	dup := 0 // hidden ids the walk had already seen: not counted again
-	q.Limit = 500
-	for pages := 0; ; pages++ {
-		if pages == hiddenDelegatedPages {
-			return total - dup, front, true
-		}
-		page, err := s.db.Sessions(ctx, q)
-		if err != nil {
-			slog.DebugContext(ctx, "studio: a session's hidden delegated sessions could not be read", "session", id, "err", err)
-			return total - dup, front, true
-		}
-		for _, sr := range page.Sessions {
-			if inScope(sr) && !underHidden[sr.ParentSession] {
-				continue
-			}
-			if seen[sr.ID] {
-				dup++
-			} else {
-				if *budget == 0 {
-					return total - dup, front, true
-				}
-				*budget--
-				seen[sr.ID] = true
-				front = append(front, sr.ID)
-			}
-			if len(front)+dup >= total {
-				return len(front), front, false
-			}
-		}
-		if page.NextBefore == nil || len(page.Sessions) == 0 {
-			return max(total-dup, len(front)), front, false
-		}
-		q.Before, q.BeforeID = *page.NextBefore, page.NextBeforeID
-	}
-}
-
-// scopedSessionIDs is the ids of the sessions parents delegated in
-// sc's scope, read in pages of 500 — at most hiddenDelegatedPages, as
-// the hidden walk's own reads.
-func (s *Server) scopedSessionIDs(ctx context.Context, parents []string, sc readScope) (map[string]bool, error) {
-	ids := map[string]bool{}
-	q := obsdb.SessionQuery{Parents: parents, PublicID: sc.PublicID, Meta: sc.Tags, Limit: 500}
-	for range hiddenDelegatedPages {
-		page, err := s.db.Sessions(ctx, q)
-		if err != nil {
-			return nil, err
-		}
-		for _, sr := range page.Sessions {
-			ids[sr.ID] = true
-		}
-		if page.NextBefore == nil || len(page.Sessions) == 0 {
-			break
-		}
-		q.Before, q.BeforeID = *page.NextBefore, page.NextBeforeID
-	}
-	return ids, nil
-}
-
-// hiddenDelegatedHole is the hidden hole of a session document whose
-// n delegated sessions a panel token's scope left out: counted, never
-// named — at least n (count_floor) when the hidden subtrees were more
-// than the walk counts.
-func hiddenDelegatedHole(n int, floor, tagged bool) stepHole {
-	if tagged {
-		// A tag-scoped token (I4-fix): a session listed only by a turn
-		// with its tags.
-		r := fmt.Sprintf("%d delegated sessions have no turn with your token's tags (or are of another public id): your token's access does not reach them, so they are left out and the delegated figures do not cover them", n)
-		if floor {
-			r = fmt.Sprintf("at least %d delegated sessions have no turn with your token's tags, or sit under one (past %d hidden ones the deeper levels are not counted): your token's access does not reach them, so they are left out and the delegated figures do not cover them", n, delegatedTreeCap)
-		}
-		return stepHole{Hole: string(obsdb.HoleHidden), Reason: r, Fix: "open the session with the server (dev) token", Count: n, CountFloor: floor}
-	}
-	r := fmt.Sprintf("%d delegated sessions carry another public id, or none: a panel token reads its own public id's sessions, so they are left out and the delegated figures do not cover them", n)
-	switch {
-	case floor:
-		r = fmt.Sprintf("at least %d delegated sessions carry another public id, or none, or sit under one (past %d hidden ones the deeper levels are not counted): a panel token reads its own public id's sessions, so they are left out and the delegated figures do not cover them", n, delegatedTreeCap)
-	case n == 1:
-		r = "1 delegated session carries another public id, or none: a panel token reads its own public id's sessions, so it is left out and the delegated figures do not cover it"
-	}
-	return stepHole{Hole: string(obsdb.HoleHidden), Reason: r, Fix: "open the session with the server (dev) token", Count: n, CountFloor: floor}
-}
-
-// panelScope is the request's panel token's read scope, the zero
-// scope for any other identity.
-func panelScope(r *http.Request) readScope {
-	return scopeOf(r.Context())
-}
-
-// withScope keeps the runs in sc (readScope.admits).
-func withScope(runs []obsdb.RunRow, sc readScope) []obsdb.RunRow {
-	out := make([]obsdb.RunRow, 0, len(runs))
-	for _, rr := range runs {
-		if sc.admits(rr) {
-			out = append(out, rr)
-		}
-	}
-	return out
-}
-
-// scopeSessionDetail narrows a session's detail to a panel token's
-// scope: its turns (withScope) and its row (scopedSessionRow).
-// The row's summarizer_usage is obsdb's over every run of the session
-// id; when a turn of another public id shares it (a colliding derived
-// run), the figure and its per-model split are re-read in pub's scope —
-// the session list's own query by id (SessionQuery.IDs, PublicID) — and
-// are absent when that read fails or finds nothing, never another
-// scope's.
-func (s *Server) scopeSessionDetail(ctx context.Context, det *obsdb.SessionDetail, pub readScope) {
-	all := len(det.Runs)
-	det.Runs = withScope(det.Runs, pub)
-	det.SessionRow = scopedSessionRow(det.SessionRow, det.Runs, pub)
-	if len(det.Runs) == all {
-		return
-	}
-	det.SummarizerUsage, det.SummarizerModels = core.Usage{}, nil
-	page, err := s.db.Sessions(ctx, obsdb.SessionQuery{IDs: []string{det.ID}, PublicID: pub.PublicID, Meta: pub.Tags, Limit: 1})
-	if err != nil {
-		return
-	}
-	for _, sr := range page.Sessions {
-		if sr.ID == det.ID {
-			det.SummarizerUsage, det.SummarizerModels = sr.SummarizerUsage, sr.SummarizerModels
-			return
-		}
-	}
-}
-
-// scopedSessionRow recomputes a session row over the turns a panel
-// token sees (turns, those in pub's scope only): obsdb's SessionRow is a
-// GROUP BY over every run of the session id, which a run of another
-// app can share. The same aggregates as the database's: the turn
-// count, first/last seen, summed usage, MAX(agent), and the newest
-// turn's status (by turn, then start), the newest titled turn's title
-// and the first turn's prompt preview and content-off mark. The
-// summarizer usage and its per-model split are row's, carried as is:
-// not turn aggregates (scopeSessionDetail re-reads them when row's
-// scope is wider than pub's).
-func scopedSessionRow(row obsdb.SessionRow, turns []obsdb.RunRow, pub readScope) obsdb.SessionRow {
-	out := obsdb.SessionRow{ID: row.ID, PublicID: pub.PublicID, SummarizerUsage: row.SummarizerUsage, SummarizerModels: row.SummarizerModels}
-	var newest, first, titled *obsdb.RunRow
-	later := func(a, b *obsdb.RunRow) bool { // a after b, by turn then start
-		return a.Turn > b.Turn || (a.Turn == b.Turn && a.Started.After(b.Started))
-	}
-	for i := range turns {
-		t := &turns[i]
-		if !pub.admits(*t) {
-			continue
-		}
-		out.Turns++
-		if t.PublicID > out.PublicID && pub.PublicID == "" {
-			out.PublicID = t.PublicID // MAX(public_id), the database's
-		}
-		out.Usage = out.Usage.Add(t.Usage)
-		if t.Agent > out.Agent {
-			out.Agent = t.Agent
-		}
-		if out.FirstSeen.IsZero() || t.Started.Before(out.FirstSeen) {
-			out.FirstSeen = t.Started
-		}
-		if t.LastSeen.After(out.LastSeen) {
-			out.LastSeen = t.LastSeen
-		}
-		if newest == nil || later(t, newest) {
-			newest = t
-		}
-		if first == nil || later(first, t) {
-			first = t
-		}
-		if t.Meta[obsdb.SessionTitleKey] != "" && (titled == nil || later(t, titled)) {
-			titled = t
-		}
-	}
-	if newest != nil {
-		out.Status = newest.Status
-	}
-	if first != nil {
-		out.FirstPrompt = first.PromptPreview
-		// Gated like lib/title.ts's contentOff: a first turn still
-		// running or settling may yet store its messages records.
-		out.ContentOff = obsdb.SessionContentOff(*first)
-	}
-	if titled != nil {
-		out.Title = titled.Meta[obsdb.SessionTitleKey]
-	}
-	// The turn facts (U16) over the same turns: the database's rule.
-	scoped := make([]obsdb.RunRow, 0, out.Turns)
-	for _, t := range turns {
-		if pub.admits(t) {
-			scoped = append(scoped, t)
-		}
-	}
-	obsdb.SessionTurnFacts(&out, scoped)
-	return out
-}
-
 // sessionPublicID is api/sessions/{id}/public_id's answer: the public
 // id the session was created with, or "" with the not_recorded badge
 // when no turn of it carries one.
@@ -2878,15 +2240,7 @@ type sessionPublicID struct {
 // several (core.Metadata, a non-Go OTLP app) answers the greatest,
 // unbadged — and may then disagree with api/public, which resolves a
 // public id to its newest session.
-// The dev token's alone: a panel token is scoped to one public id and
-// must not learn another's, so every panel token (read or playground,
-// its own session included) is 403 with the hidden badge before the
-// session is looked up — the refusal never says whether it exists.
 func (s *Server) serveSessionPublicID(w http.ResponseWriter, r *http.Request, id string) {
-	if idFrom(r).panel != nil {
-		refuseHiddenFor(w, r, "the session-to-public-id lookup answers the dev token only, never a panel token", obsdb.CauseDevTokenOnly)
-		return
-	}
 	det, err := s.db.Session(r.Context(), id)
 	if err != nil {
 		dbError(w, r, "session", id, err)
@@ -2900,16 +2254,12 @@ func (s *Server) serveSessionPublicID(w http.ResponseWriter, r *http.Request, id
 }
 
 // servePublic answers api/public/{public_id} (S4.3): the public id
-// resolves to its session — the panel's handle, never the internal
+// resolves to its session — the app's handle, never the internal
 // session id, is what a browser carries.
 func (s *Server) servePublic(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/public/")
 	if id == "" || strings.Contains(id, "/") {
 		notFound(w, r, "no such api route "+r.URL.Path)
-		return
-	}
-	if pid := idFrom(r).panel; pid != nil && id != pid.PublicID {
-		forbidden(w, r)
 		return
 	}
 	sid, err := s.db.ResolvePublicID(r.Context(), id)

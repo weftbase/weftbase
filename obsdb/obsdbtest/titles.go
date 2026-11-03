@@ -84,7 +84,7 @@ func sessionTitles(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			if det.Title != w[0] || det.FirstPrompt != w[1] || det.ContentOff != off[id] {
 				t.Errorf("Session: %s title, first prompt, content off = %q, %q, %v; want %q, %q, %v", id, det.Title, det.FirstPrompt, det.ContentOff, w[0], w[1], off[id])
 			}
-			// Scoped by public id (the panel's read): the same mark.
+			// Filtered by public id: the same mark.
 			sp, err := db.Sessions(ctx(), obsdb.SessionQuery{PublicID: pubs[id]})
 			if err != nil {
 				t.Fatal(err)

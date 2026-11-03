@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -13,19 +12,10 @@ import (
 
 	"github.com/weftbase/weftbase/obsdb"
 	"github.com/weftbase/weftbase/obsdb/sqlite"
-	"github.com/weftbase/weftbase/scope"
 )
 
 // The tag scope (U22: UX-D-05, UX-E-27, A5, user decision 2): tag.<k>=<v>
 // and flow= — the run's weft.flow — on the read API and the live stream.
-
-// TestFlowKeyIsScopes pins studio's flow key to the scope package's:
-// what scope.Header stamps is what flow= filters on.
-func TestFlowKeyIsScopes(t *testing.T) {
-	if flowKey != scope.FlowKey {
-		t.Fatalf("studio flowKey %q, scope.FlowKey %q", flowKey, scope.FlowKey)
-	}
-}
 
 // batchRun is one top-level run of the tag fixture: its public id
 // (maybe none), agent and metadata pairs.
@@ -277,92 +267,6 @@ func TestLiveTagResumeBackfillsTheBatch(t *testing.T) {
 	}
 }
 
-// Under a panel token a tag scope reads what the token already allows
-// (I4 constrains tokens by tag; U22 does not): the tag-only stream is
-// granted on the token's own public id, and its frames are the token's
-// public id's tagged runs alone; the server token's grant opens the
-// every-run tag stream. The grant binds the filter: a sig for one tag
-// does not open another.
-func TestLiveTagGrantUnderAPanelToken(t *testing.T) {
-	db, err := sqlite.Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	hub := obsdb.NewHub()
-	srv := New(DB(db), Live(hub), Token("srv"))
-	t.Cleanup(func() { _ = srv.Close() })
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-	tok, err := signPanelToken([]byte("srv"), panelClaims{PublicID: "pub_a", Scope: scopeRead, Exp: time.Now().Add(time.Hour)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	grant := func(bearer, body string) string {
-		t.Helper()
-		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/live-grant", strings.NewReader(body))
-		req.Header.Set("Authorization", "Bearer "+bearer)
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer func() { _ = resp.Body.Close() }()
-		var g struct {
-			Sig string `json:"sig"`
-		}
-		_ = json.NewDecoder(resp.Body).Decode(&g)
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("grant %s: %d", body, resp.StatusCode)
-		}
-		return g.Sig
-	}
-	open := func(query string) *http.Response {
-		t.Helper()
-		resp, err := http.Get(ts.URL + "/api/live" + query)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = resp.Body.Close() })
-		return resp
-	}
-	sig := grant(tok, `{"tag.arena.batch":"b1","kinds":"run"}`)
-	if resp := open("?tag.arena.batch=b2&kinds=run&sig=" + sig); resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("a b1 grant on a b2 stream: %d, want 401", resp.StatusCode)
-	}
-	panel := open("?tag.arena.batch=b1&kinds=run&sig=" + sig)
-	if panel.StatusCode != http.StatusOK {
-		t.Fatalf("panel tag stream: %d", panel.StatusCode)
-	}
-	server := open("?tag.arena.batch=b1&kinds=run&sig=" + grant("srv", `{"tag.arena.batch":"b1","kinds":"run"}`))
-	if server.StatusCode != http.StatusOK {
-		t.Fatalf("server tag stream: %d", server.StatusCode)
-	}
-	ctx := context.Background()
-	b1 := map[string]string{"arena.batch": "b1"}
-	hub.Publish(ctx, obsdb.RunFrame(obsdb.RunRow{ID: "r_other", PublicID: "pub_b", Meta: b1}))
-	hub.Publish(ctx, obsdb.RunFrame(obsdb.RunRow{ID: "r_mine_b2", PublicID: "pub_a", Meta: map[string]string{"arena.batch": "b2"}}))
-	hub.Publish(ctx, obsdb.RunFrame(obsdb.RunRow{ID: "r_mine", PublicID: "pub_a", Meta: b1}))
-	ids := func(resp *http.Response, n int) string {
-		var out []string
-		for _, f := range readSSE(t, resp, n, 5*time.Second) {
-			var d struct {
-				Run struct {
-					ID string `json:"id"`
-				} `json:"run"`
-			}
-			_ = json.Unmarshal([]byte(f.data), &d)
-			out = append(out, d.Run.ID)
-		}
-		return strings.Join(out, " ")
-	}
-	if got := ids(panel, 1); got != "r_mine" {
-		t.Errorf("the panel token's tag stream: %q, want r_mine (its public id's tagged run)", got)
-	}
-	if got := ids(server, 2); got != "r_other r_mine" {
-		t.Errorf("the server token's tag stream: %q, want r_other r_mine", got)
-	}
-}
-
 // U22-fix 1: agent= beside another selector narrows it — a panel
 // scoped pub_1;agent=director opens public_id + agent and gets only
 // that agent's runs of the conversation (record frames by their own
@@ -401,29 +305,5 @@ func TestLiveAgentNarrowsAnotherSelector(t *testing.T) {
 	}
 	if strings.Join(got, " ") != "run:r_d record:r_d2" {
 		t.Errorf("public_id=pub_1&agent=director saw %v, want run:r_d record:r_d2", got)
-	}
-}
-
-// U22-fix 6: the grant's stream names each filter pair as two
-// elements, so "a=b" → "c" and "a" → "b=c" are different streams, and
-// an agent filter differs from a tag named agent.
-func TestLiveStreamBindsTheFilterUnambiguously(t *testing.T) {
-	kinds := map[string]bool{"run": true}
-	sel := obsdb.Selector{PublicID: "pub_1"}
-	seen := map[string]string{}
-	for name, s := range map[string][]byte{
-		"a=b → c":       liveStream(sel, kinds, map[string]string{"a=b": "c"}, ""),
-		"a → b=c":       liveStream(sel, kinds, map[string]string{"a": "b=c"}, ""),
-		"tag agent → x": liveStream(sel, kinds, map[string]string{"agent": "x"}, ""),
-		"agent x":       liveStream(sel, kinds, nil, "x"),
-		"none":          liveStream(sel, kinds, nil, ""),
-	} {
-		if prev, dup := seen[string(s)]; dup {
-			t.Errorf("%s and %s bind the same stream %s", prev, name, s)
-		}
-		seen[string(s)] = name
-	}
-	if got := string(liveStream(sel, kinds, nil, "")); got != `["public_id","pub_1","run"]` {
-		t.Errorf("an unfiltered stream = %s, want the stream as before", got)
 	}
 }

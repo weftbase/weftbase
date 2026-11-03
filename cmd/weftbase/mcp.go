@@ -58,7 +58,7 @@ const mcpInstructions = `weftbase mcp is READ-ONLY: it reads a weft Studio's rec
 	`empty, zero, false and null fields omitted, hashes cut to 12 characters, cost reasons said once in cost_reasons — ` +
 	`full=true gives the route's JSON as served. A cut output says so in a final note (raise max_bytes or narrow the query). ` +
 	`Badges and holes ("not_recorded", "stripped", "hidden", "gap", ...) mean the data is absent for that reason — never empty. ` +
-	`A 403 means this token may not read that (a read-only panel token).`
+	`A 403 means this token may not read that.`
 
 // mcpTool is one registered tool: its name and the paths it reads,
 // for the usage text and the tests.
@@ -69,7 +69,7 @@ type mcpTool struct {
 // mcpTools is the tool table, in the order --help and the docs list it.
 var mcpTools = []mcpTool{
 	{"explain_failure", "run + steps + children + transcript", "why a run failed (or how it ended): status, error, the first error anywhere in the run (its steps, its child runs), every step and child in a digest, decisions, holes, this run's last assistant text"},
-	{"runs", "GET /api/runs", "list runs, newest first (agent, status, session, public_id, experiment_id, error_class, all, parent, limit, before cursor)"},
+	{"runs", "GET /api/runs", "list runs, newest first (agent, status, session, public_id, error_class, all, parent, limit, before cursor)"},
 	{"search", "GET /api/search", "find runs by text (prompt, answer, error, tool names) and filters (since/until, model, min_tokens, min_cost, error_class, sort); the error_class facet"},
 	{"stats", "GET /api/stats", "numbers across runs grouped by agent, model, tool, error_type or step: runs, failures, tokens, cost, latency, retries, denials (since, agent, tag, public_id)"},
 	{"run", "GET /api/runs/{id}", "one run's row: status, error, steps, usage, cost, children, holes"},
@@ -78,7 +78,7 @@ var mcpTools = []mcpTool{
 	{"events", "GET /api/runs/{id}/events", "the run's durable event stream, paged (after, limit)"},
 	{"tools", "GET /api/runs/{id}/tools", "the tool catalogs the run offered the model"},
 	{"diff", "GET /api/diff", "two runs compared step by step (what changed, what is not comparable)"},
-	{"export", "GET /api/runs/{id}/export", "the whole run as one document: json, jsonl or otlp (not wefttest)"},
+	{"export", "GET /api/runs/{id}/export", "the whole run as one document: json, jsonl or otlp"},
 	{"sessions", "GET /api/sessions", "list thread sessions"},
 	{"session", "GET /api/sessions/{id}", "one session with its turns"},
 	{"logs", "GET /api/runs/{id}/logs", "the app's own log lines under a run's spans (severity, from, limit)"},
@@ -86,10 +86,8 @@ var mcpTools = []mcpTool{
 	{"trace", "GET /api/traces/{id}", "one trace's spans by trace id, weft or stock OTel, compact"},
 	{"transcript", "GET /api/runs/{id}/transcript", "a run's messages, input and its own; step=N adds what step N's model call carried"},
 	{"live", "GET /api/runs?status=running", "the runs running now, compact rows (a snapshot, not the stream)"},
-	{"agents", "GET /api/manifest", "the agents Studio knows: manifests (instructions, tools, options) and their sources"},
-	{"experiments", "GET /api/experiments", "the playground's saved experiments, or one with its command and runs (id)"},
-	{"runtimes", "GET /api/runtimes", "the connected runtimes: agents, breakpoints, connected or not"},
-	{"meta", "GET /api/meta", "what this Studio is and can do: versions, capabilities, debug_scope, retention"},
+	{"agents", "GET /api/manifest", "the agents weftbase knows: manifests (instructions, tools, options) and their sources"},
+	{"meta", "GET /api/meta", "what this server is and can do: versions, capabilities, retention"},
 }
 
 // mcpToolTable is the tool list as --help prints it.
@@ -395,7 +393,7 @@ func newMCPServerLink(link *studioLink, log *slog.Logger) *sdk.Server {
 		m.explainFailure)
 	addTool(srv, "runs", `List runs, newest first (GET /api/runs): one compact row per run with status, error, steps, usage, cost (full=true: the route's rows). `+
 		`Top-level runs only unless all=true or parent=<run id>. Filter by agent, status (running|succeeded|failed|interrupted), `+
-		`session, public_id, experiment_id, error_class (a class string from search's error_class facet). Page with before + before_id `+
+		`session, public_id, error_class (a class string from search's error_class facet). Page with before + before_id `+
 		`from the answer's next_before/next_before_id. For text or a time window use search.`,
 		m.runs)
 	addTool(srv, "search", `Find runs by text and filters (GET /api/search): q terms are case-insensitive substrings of the prompt, `+
@@ -407,8 +405,8 @@ func newMCPServerLink(link *studioLink, log *slog.Logger) *sdk.Server {
 	addTool(srv, "stats", `Numbers across runs (GET /api/stats): by=agent|model|tool|error_type|step, one row per group with runs, failed, `+
 		`failure_rate, calls, tokens, cost, duration_ms and ttft_ms {p50, p95, n}, retry_rate, denials (agent groups: delegated, what `+
 		`their subagents spent; runs_query, the search query listing the group's runs). Window: since (RFC 3339 or 90m/24h/7d back, `+
-		`default 24h), until. Filters: agent, tag {k: v}, public_id, parent (* default: every run; "" top-level), playground, `+
-		`experiment_id, status. Compact rows: each group's 24-bucket series left out (full=true: as served). 404 when the database `+
+		`default 24h), until. Filters: agent, tag {k: v}, public_id, parent (* default: every run; "" top-level), `+
+		`status. Compact rows: each group's 24-bucket series left out (full=true: as served). 404 when the database `+
 		`cannot aggregate (see meta).`,
 		m.stats)
 	addTool(srv, "run", `One run's row (GET /api/runs/{id}): status, err, steps, stop_reason, usage, cost, its subagent children, `+
@@ -420,23 +418,21 @@ func newMCPServerLink(link *studioLink, log *slog.Logger) *sdk.Server {
 		m.step)
 	addTool(srv, "request", `The exact model input (GET /api/runs/{id}/requests): one row per model-call attempt with the system prompt, `+
 		`tool catalog, params and the messages it carried by reference; step narrows to one step. transcript=true (with step) `+
-		`also returns GET /api/runs/{id}/transcript?step=N: the messages step N's model call carried. `+
-		`Refused (403) to a read-only panel token.`,
+		`also returns GET /api/runs/{id}/transcript?step=N: the messages step N's model call carried.`,
 		m.request)
 	addTool(srv, "events", `The run's durable event stream (GET /api/runs/{id}/events): run_start, step_start, tool_start/finish, `+
 		`step_finish, run_finish, … in order. Paged: pass after=<next_after> from the previous answer until next_after is absent. `+
 		`run_terminal (the route's done) says the run has ended, not that this is the last page.`,
 		m.events)
 	addTool(srv, "tools", `The tool catalogs the run offered the model, by hash (GET /api/runs/{id}/tools): names, descriptions, `+
-		`input schemas. Refused (403) to a read-only panel token.`,
+		`input schemas.`,
 		m.tools)
 	addTool(srv, "diff", `Compare two runs step by step (GET /api/diff?a=&b=): per step ordinal what changed (system, tool_calls, `+
 		`tool_results, text, usage) and what is not comparable (unknown), with a summary {changed_steps, first_changed}. `+
 		`Use for "what differs between the good run and the bad one".`,
 		m.diff)
 	addTool(srv, "export", `The whole run as one document (GET /api/runs/{id}/export): format json (default), jsonl or otlp. `+
-		`Large: usually cut by max_bytes — prefer run/step/request for questions. The wefttest format is a zip of replay `+
-		`fixtures and is not offered here: run "weftbase export <id> --wefttest dir" in a terminal.`,
+		`Large: usually cut by max_bytes — prefer run/step/request for questions.`,
 		m.export)
 	addTool(srv, "sessions", `List thread sessions (GET /api/sessions), newest first: agent and public_id filter, before + before_id page. Compact rows (full=true: as served).`,
 		m.sessions)
@@ -445,8 +441,7 @@ func newMCPServerLink(link *studioLink, log *slog.Logger) *sdk.Server {
 		`when equal to turn_defaults; prompt_preview 80 runes; cost reasons once with their row ids; full=true: as served).`,
 		m.session)
 	addTool(srv, "logs", `The app's own log lines under a run's spans (GET /api/runs/{id}/logs): time order, severity at or above `+
-		`(trace|debug|info|warn|error|fatal), paged with from=<next_from>. A run without the slog bridge answers a not_recorded hole naming otel.Slog(). `+
-		`Refused (403) to a read-only panel token.`,
+		`(trace|debug|info|warn|error|fatal), paged with from=<next_from>. A run without the slog bridge answers a not_recorded hole naming otel.Slog().`,
 		m.logs)
 	addTool(srv, "spans", `A run's spans (GET /api/runs/{id}/spans), compact: name, start_ms / dur_ms from the first span, status, `+
 		`model, tokens, tool, step, attempt and error attributes (content left out; full=true: as served). tree=true adds every `+
@@ -461,18 +456,11 @@ func newMCPServerLink(link *studioLink, log *slog.Logger) *sdk.Server {
 	addTool(srv, "live", `The runs running now (GET /api/runs?status=running&all=1): a snapshot in compact rows, subagent children included; `+
 		`call again to see it move (the /api/live stream is not an MCP answer).`,
 		m.live)
-	addTool(srv, "agents", `The agents this Studio knows (GET /api/manifest): each agent's manifest — instructions, tools, options — `+
-		`and where it came from (weft.json or a runtime's registration). A 404 means no manifest is loaded.`,
+	addTool(srv, "agents", `The agents this server knows (GET /api/manifest): each agent's manifest — instructions, tools, options — `+
+		`and where it came from (weft.json). A 404 means no manifest is loaded.`,
 		m.agents)
-	addTool(srv, "experiments", `The playground's experiments (GET /api/experiments, or /api/experiments/{id} with id): `+
-		`each saved command (engine, overrides, edits), its runs and their outcomes. 404 when the playground is off (see meta).`,
-		m.experiments)
-	addTool(srv, "runtimes", `The runtimes Studio knows (GET /api/runtimes): each app process that linked to Studio — connected, `+
-		`restored (listed from the database after a Studio restart, waiting for its app) or gone (disconnected; forgettable) — `+
-		`its agents and breakpoints — is a breakpoint why a run parked? 404 when the playground is off (see meta).`,
-		m.runtimes)
-	addTool(srv, "meta", `What this Studio is and can do (GET /api/meta): versions, database kind, capabilities and capabilities_off `+
-		`(why one is off), debug_scope, retention, pricing source. Call when a tool answers 404/403 to see whether the route exists.`,
+	addTool(srv, "meta", `What this server is and can do (GET /api/meta): versions, database kind, capabilities and capabilities_off `+
+		`(why one is off), retention, pricing source. Call when a tool answers 404/403 to see whether the route exists.`,
 		m.meta)
 	return srv
 }
@@ -506,17 +494,16 @@ type mcpRunIn struct {
 }
 
 type mcpRunsIn struct {
-	Agent        string `json:"agent,omitempty" jsonschema:"only this agent's runs"`
-	Status       string `json:"status,omitempty" jsonschema:"running, succeeded, failed, interrupted, parked (an open park: pending calls, no resume) or cancelled (a failed run whose context ended); any other word is a 400"`
-	Session      string `json:"session,omitempty" jsonschema:"only this thread session's runs"`
-	PublicID     string `json:"public_id,omitempty" jsonschema:"only this public id's runs"`
-	ExperimentID string `json:"experiment_id,omitempty" jsonschema:"only this playground experiment's runs"`
-	Parent       string `json:"parent,omitempty" jsonschema:"this run's subagent children instead of top-level runs"`
-	All          bool   `json:"all,omitempty" jsonschema:"every run, subagent children included"`
-	Limit        int    `json:"limit,omitempty" jsonschema:"page size (Studio's default when 0)"`
-	Before       string `json:"before,omitempty" jsonschema:"the previous answer's next_before (RFC 3339): the next page"`
-	BeforeID     string `json:"before_id,omitempty" jsonschema:"the previous answer's next_before_id, with before"`
-	ErrorClass   string `json:"error_class,omitempty" jsonschema:"only failures of this class (exact: a class string from search's facets.error_class)"`
+	Agent      string `json:"agent,omitempty" jsonschema:"only this agent's runs"`
+	Status     string `json:"status,omitempty" jsonschema:"running, succeeded, failed, interrupted, parked (an open park: pending calls, no resume) or cancelled (a failed run whose context ended); any other word is a 400"`
+	Session    string `json:"session,omitempty" jsonschema:"only this thread session's runs"`
+	PublicID   string `json:"public_id,omitempty" jsonschema:"only this public id's runs"`
+	Parent     string `json:"parent,omitempty" jsonschema:"this run's subagent children instead of top-level runs"`
+	All        bool   `json:"all,omitempty" jsonschema:"every run, subagent children included"`
+	Limit      int    `json:"limit,omitempty" jsonschema:"page size (Studio's default when 0)"`
+	Before     string `json:"before,omitempty" jsonschema:"the previous answer's next_before (RFC 3339): the next page"`
+	BeforeID   string `json:"before_id,omitempty" jsonschema:"the previous answer's next_before_id, with before"`
+	ErrorClass string `json:"error_class,omitempty" jsonschema:"only failures of this class (exact: a class string from search's facets.error_class)"`
 	mcpFull
 	mcpBound
 }
@@ -574,7 +561,7 @@ type mcpDiffIn struct {
 
 type mcpExportIn struct {
 	ID     string `json:"id" jsonschema:"the run id"`
-	Format string `json:"format,omitempty" jsonschema:"json (default), jsonl or otlp; wefttest is not offered over MCP"`
+	Format string `json:"format,omitempty" jsonschema:"json (default), jsonl or otlp"`
 	mcpBound
 }
 
@@ -633,8 +620,6 @@ func notFoundHint(path string) string {
 		return " — find session ids with sessions"
 	case strings.HasPrefix(path, "/api/traces/"):
 		return " — a run row's trace_id (the run tool) names its trace"
-	case strings.HasPrefix(path, "/api/experiments/"):
-		return " — find experiment ids with experiments"
 	}
 	return " — meta says whether this Studio serves the route"
 }
@@ -755,7 +740,6 @@ func (m *mcpReader) runs(ctx context.Context, _ *sdk.CallToolRequest, in mcpRuns
 	setStr(q, "status", in.Status)
 	setStr(q, "session", in.Session)
 	setStr(q, "public_id", in.PublicID)
-	setStr(q, "experiment_id", in.ExperimentID)
 	setStr(q, "parent", in.Parent)
 	if in.All {
 		q.Set("all", "1")
@@ -1084,8 +1068,6 @@ func (m *mcpReader) export(ctx context.Context, _ *sdk.CallToolRequest, in mcpEx
 	case "":
 		format = "json"
 	case "json", "jsonl", "otlp":
-	case "wefttest":
-		return nil, nil, errors.New(`format wefttest is a zip of replay fixtures, not offered over MCP: run "weftbase export <id> --wefttest dir" in a terminal`)
 	default:
 		return nil, nil, fmt.Errorf("format must be json, jsonl or otlp, got %q", format)
 	}

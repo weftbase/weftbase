@@ -19,8 +19,7 @@ const (
 // The conventions' message content keys on a model-call span: the
 // current family (semconv v1.41.0) and the legacy ones (OpenLLMetry's
 // indexed gen_ai.prompt.N.* / gen_ai.completion.N.*, the plain and the
-// event-era keys) — the families Studio's chat view reads
-// (studio/web/src/lib/genai.ts genaiChat).
+// event-era keys) — the families a chat view reads.
 const (
 	attrSystemInstructions = "gen_ai.system_instructions"
 	attrInputMessages      = "gen_ai.input.messages"
@@ -106,9 +105,9 @@ const (
 	// notRunParentMissing: GenAI spans whose parent span is not stored
 	// (yet): their agent span — or the span between — has not arrived,
 	// or was recorded by a service that does not export here.
-	notRunParentMissing = "its agent span has not arrived: a GenAI span's parent span is not stored here (yet) — exported later, dropped, or recorded by a service that does not export to this Studio (docs/record-contract.md §9)"
+	notRunParentMissing = "its agent span has not arrived: a GenAI span's parent span is not stored here (yet) — exported later, dropped, or recorded by a service that does not export to this weftbase server (docs/record-contract.md §9)"
 	// notRunParentMissingFix is notRunParentMissing's fix.
-	notRunParentMissingFix = "wait for the batch that carries the parent (a BatchSpanProcessor exports a parent after its children), or export the parent's service to this Studio too"
+	notRunParentMissingFix = "wait for the batch that carries the parent (a BatchSpanProcessor exports a parent after its children), or export the parent's service to this weftbase server too"
 	// notRunNoGenAI: a trace with no GenAI span at all.
 	notRunNoGenAI = "no GenAI span: nothing in the trace carries gen_ai.operation.name invoke_agent, chat or execute_tool (docs/record-contract.md §9)"
 	// notRunNoGenAIFix is notRunNoGenAI's fix.

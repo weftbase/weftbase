@@ -1,4 +1,4 @@
-// Command pricinggen writes Studio's default pricing table,
+// Command pricinggen writes weftbase's default pricing table,
 // studio/pricing.json, from studio/internal/pricingdata (plan A5). It
 // runs from studio/pricing.go's go:generate line; the output depends on
 // the table alone, so a second run changes nothing.

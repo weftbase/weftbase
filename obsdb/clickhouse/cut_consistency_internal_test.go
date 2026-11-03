@@ -2,18 +2,13 @@ package clickhouse
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"net/http"
-	"net/http/httptest"
-	"net/url"
 	"slices"
 	"sort"
 	"testing"
 	"time"
 
 	"github.com/weftbase/weftbase/obsdb"
-	"github.com/weftbase/weftbase/studio"
 )
 
 // TestCutConsistency (P9-pre-go-fix4) closes the retention cut's class:
@@ -37,9 +32,7 @@ import (
 //
 // Every read — Run, Runs (top-level, all, SessionID, CallerRunID,
 // IDPrefix), Search, ChildRuns, RunTreeSpans, Sessions, Session,
-// ResolvePublicID, CountLogs, and Studio's routes over them (runs,
-// search, runs/{id} and its children[] and caller_linked, ?tree=1,
-// sessions, sessions/{id}, public/{id}, traces' root_run) — agrees: a
+// ResolvePublicID and CountLogs — agrees: a
 // cut run is in none of them, a kept run in every one that lists it.
 // The cut child's descendants are out of cc_e's tree, by either link,
 // though their own rows are kept (they open on their own). A cut
@@ -331,173 +324,6 @@ func TestCutConsistency(t *testing.T) {
 	}
 	if _, err := db.ResolvePublicID(ctx, "pub_gone"); !errors.Is(err, obsdb.ErrNotFound) {
 		t.Errorf("ResolvePublicID(pub_gone) = %v, want not found", err)
-	}
-
-	// Studio's routes over the same reads, setup A on loopback.
-	srv := studio.New(studio.DB(db))
-	t.Cleanup(func() { _ = srv.Close() })
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-	get := func(path string, into any) int {
-		t.Helper()
-		resp, err := http.Get(ts.URL + path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer func() { _ = resp.Body.Close() }()
-		if into != nil && resp.StatusCode == http.StatusOK {
-			if err := json.NewDecoder(resp.Body).Decode(into); err != nil {
-				t.Fatalf("GET %s: %v", path, err)
-			}
-		}
-		return resp.StatusCode
-	}
-	type idRow struct {
-		ID string `json:"id"`
-	}
-	ids := func(rows []idRow) []string {
-		out := []string{}
-		for _, r := range rows {
-			out = append(out, r.ID)
-		}
-		sort.Strings(out)
-		return out
-	}
-	routeList := func(path string, want ...string) {
-		t.Helper()
-		var page struct {
-			Runs  []idRow `json:"runs"`
-			Total int     `json:"total"`
-		}
-		if code := get(path, &page); code != http.StatusOK {
-			t.Fatalf("GET %s = %d", path, code)
-		}
-		sort.Strings(want)
-		if got := ids(page.Runs); !slices.Equal(got, want) {
-			t.Errorf("GET %s = %v, want %v", path, got, want)
-		}
-	}
-	routeList("/api/runs?all=1&limit=100", kept...)
-	routeList("/api/runs", topLevel...)
-	routeList("/api/runs?status=parked&all=1", parkedRuns...)
-	routeList("/api/runs?status=parked", parkedRuns...)
-	routeList("/api/search?status=parked&all=1", parkedRuns...)
-	routeList("/api/runs?session=s_cc&all=1", "s_cc-t2")
-	routeList("/api/runs?id_prefix="+url.QueryEscape("cc_e/1/")+"&all=1", byRow, byID)
-	routeList("/api/search?all=1&limit=100", kept...)
-	for _, id := range cut {
-		if code := get("/api/runs/"+url.PathEscape(id), nil); code != http.StatusNotFound {
-			t.Errorf("GET /api/runs/%s = %d, want 404 (cut)", id, code)
-		}
-		if code := get("/api/runs/"+url.PathEscape(id)+"/spans?tree=1", nil); code != http.StatusNotFound {
-			t.Errorf("GET /api/runs/%s/spans?tree=1 = %d, want 404 (cut)", id, code)
-		}
-	}
-	var doc struct {
-		Children     []idRow `json:"children"`
-		CallerLinked []idRow `json:"caller_linked"`
-	}
-	if code := get("/api/runs/"+root, &doc); code != http.StatusOK {
-		t.Fatalf("GET /api/runs/%s = %d", root, code)
-	}
-	if got := ids(doc.Children); !slices.Equal(got, []string{kidKept}) {
-		t.Errorf("GET /api/runs/%s children = %v, want [%s]", root, got, kidKept)
-	}
-	if got := ids(doc.CallerLinked); !slices.Equal(got, []string{callKept}) {
-		t.Errorf("GET /api/runs/%s caller_linked = %v, want [%s]", root, got, callKept)
-	}
-	for _, id := range parkedRuns {
-		var pdoc struct {
-			Pending   int             `json:"pending"`
-			ResumedBy string          `json:"resumed_by"`
-			Decided   json.RawMessage `json:"decided"`
-		}
-		if code := get("/api/runs/"+id, &pdoc); code != http.StatusOK {
-			t.Fatalf("GET /api/runs/%s = %d", id, code)
-		}
-		if pdoc.Pending == 0 || pdoc.ResumedBy != "" || pdoc.Decided != nil {
-			t.Errorf("GET /api/runs/%s: pending %d, resumed_by %q, decided %s; want parked, no resumer, no decided block",
-				id, pdoc.Pending, pdoc.ResumedBy, pdoc.Decided)
-		}
-	}
-	var treeDoc struct {
-		Spans []struct {
-			RunID string `json:"run_id"`
-		} `json:"spans"`
-	}
-	if code := get("/api/runs/"+root+"/spans?tree=1", &treeDoc); code != http.StatusOK {
-		t.Fatalf("GET /api/runs/%s/spans?tree=1 = %d", root, code)
-	}
-	routeRuns := map[string]bool{}
-	for _, s := range treeDoc.Spans {
-		routeRuns[s.RunID] = true
-	}
-	if got := sortedKeys(routeRuns); !slices.Equal(got, []string{root, kidKept}) {
-		t.Errorf("GET /api/runs/%s/spans?tree=1 runs = %v, want [%s %s]", root, got, root, kidKept)
-	}
-	var sessions struct {
-		Sessions []idRow `json:"sessions"`
-		Total    int     `json:"total"`
-	}
-	if code := get("/api/sessions", &sessions); code != http.StatusOK || !slices.Equal(ids(sessions.Sessions), []string{"s_cc", "s_pk"}) || sessions.Total != 2 {
-		t.Errorf("GET /api/sessions = %d %v (total %d), want [s_cc s_pk]", code, ids(sessions.Sessions), sessions.Total)
-	}
-	type awaitDoc struct {
-		ID       string   `json:"id"`
-		Status   string   `json:"status"`
-		Pending  int      `json:"pending"`
-		Resumes  int      `json:"resumes"`
-		Outcomes []string `json:"outcomes"`
-	}
-	var awaiting struct {
-		Sessions []awaitDoc `json:"sessions"`
-		Total    int        `json:"total"`
-	}
-	if code := get("/api/sessions?awaiting=1", &awaiting); code != http.StatusOK || awaiting.Total != 1 || len(awaiting.Sessions) != 1 {
-		t.Errorf("GET /api/sessions?awaiting=1 = %d %+v, want s_pk alone", code, awaiting)
-	} else if a := awaiting.Sessions[0]; a.ID != "s_pk" || a.Status != "parked" || a.Pending != 1 || a.Resumes != 0 || !slices.Equal(a.Outcomes, []string{"parked"}) {
-		t.Errorf("GET /api/sessions?awaiting=1 row = %+v, want s_pk parked, pending 1, outcomes [parked]", a)
-	}
-	var succ struct {
-		Sessions []idRow `json:"sessions"`
-	}
-	if code := get("/api/sessions?status=succeeded", &succ); code != http.StatusOK || !slices.Equal(ids(succ.Sessions), []string{"s_cc"}) {
-		t.Errorf("GET /api/sessions?status=succeeded = %d %v, want [s_cc]: s_pk's newest kept turn is a park", code, ids(succ.Sessions))
-	}
-	var pk awaitDoc
-	if code := get("/api/sessions/s_pk", &pk); code != http.StatusOK || pk.Status != "parked" || pk.Pending != 1 || !slices.Equal(pk.Outcomes, []string{"parked"}) {
-		t.Errorf("GET /api/sessions/s_pk = %d %+v, want parked, pending 1, outcomes [parked]", code, pk)
-	}
-	var sdoc struct {
-		Runs []idRow `json:"runs"`
-	}
-	if code := get("/api/sessions/s_cc", &sdoc); code != http.StatusOK || !slices.Equal(ids(sdoc.Runs), []string{"s_cc-t2"}) {
-		t.Errorf("GET /api/sessions/s_cc = %d %v, want the kept turn alone", code, ids(sdoc.Runs))
-	}
-	for _, path := range []string{"/api/sessions/s_gone", "/api/sessions/conv_cc_cut", "/api/public/pub_gone"} {
-		if code := get(path, nil); code != http.StatusNotFound {
-			t.Errorf("GET %s = %d, want 404 (every turn cut)", path, code)
-		}
-	}
-	if code := get("/api/public/pub_s", nil); code != http.StatusOK {
-		t.Errorf("GET /api/public/pub_s = %d, want 200", code)
-	}
-	var traces struct {
-		Traces []struct {
-			TraceID string `json:"trace_id"`
-			RootRun *idRow `json:"root_run"`
-		} `json:"traces"`
-	}
-	if code := get("/api/traces?limit=100", &traces); code != http.StatusOK {
-		t.Fatalf("GET /api/traces = %d", code)
-	}
-	for _, tr := range traces.Traces {
-		if tr.RootRun != nil && slices.Contains(cut, tr.RootRun.ID) {
-			t.Errorf("trace %s: root_run %s is cut, want it absent", tr.TraceID, tr.RootRun.ID)
-		}
-		if tr.TraceID == stockTr && tr.RootRun != nil {
-			t.Errorf("the derived run's trace: root_run %+v, want none (cut)", tr.RootRun)
-		}
 	}
 
 	// The clock back: every run opens again — the cut is the read's.

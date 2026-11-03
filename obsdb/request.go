@@ -28,7 +28,7 @@ const (
 )
 
 // Holes returns the closed table in its order: the one list a badge
-// renderer (Studio's TypeScript twin included) is checked against.
+// renderer is checked against.
 func Holes() []Hole {
 	return []Hole{
 		HoleTruncated, HoleStripped, HoleRedacted, HoleMaxTokens, HoleInterrupted,
@@ -39,9 +39,8 @@ func Holes() []Hole {
 // HoleNote is a badge's one-line reason and, where one exists, its
 // one-line fix ("" when the hole has none: a redaction is by design,
 // a derived value has nothing to repair) — ADR 0028 §11's table in
-// words, the one source both Studio surfaces render (its golden,
-// studio/testdata/holes.golden.json, is what Studio's TypeScript table
-// is checked against). A reader that knows more (a step's own gap, a
+// words, the one source every surface renders (its golden,
+// holes.golden.json, is what a client's table is checked against). A reader that knows more (a step's own gap, a
 // run built from spans) says so in its own reason and keeps this fix.
 // An unknown hole has neither.
 func HoleNote(h Hole) (reason, fix string) {
@@ -71,20 +70,20 @@ const (
 	CauseLogCap HoleCause = "log_cap"
 	// CauseNoPublicID: the session's turns carry no weft.public_id —
 	// a thread session created without thread.PublicID, or an app that
-	// never stamped one (not_recorded: Studio's
-	// GET /api/sessions/{id}/public_id).
+	// never stamped one (not_recorded: the session-to-public-id
+	// lookup).
 	CauseNoPublicID HoleCause = "no_public_id"
-	// CauseDevTokenOnly: the route answers the dev (server) token and
-	// setup A's open API only; a panel token, scoped to one public id,
-	// may not learn another (hidden: the session-to-public-id lookup).
+	// CauseDevTokenOnly: the route answers a server-wide credential
+	// only; a credential scoped to one public id may not learn another
+	// (hidden: the session-to-public-id lookup).
 	CauseDevTokenOnly HoleCause = "dev_token_only"
-	// CauseNotServed: the Studio asked serves no request record (its
+	// CauseNotServed: the server asked serves no request record (its
 	// requests capability is off, or it predates the record), so the
 	// run's request, prompt and tools records were not read — the run
-	// may hold them (not_recorded: the panel's Request tab).
+	// may hold them (not_recorded: the Request tab).
 	CauseNotServed HoleCause = "not_served"
 	// CauseResponseCap: the route bounds how much one response reads
-	// (Studio's GET /api/diff compares a bounded number of steps), and
+	// (a diff compares a bounded number of steps), and
 	// the run holds more than it read (truncated: nothing was lost; the
 	// rest is a read away).
 	CauseResponseCap HoleCause = "response_cap"
@@ -145,8 +144,8 @@ func MetadataCapReason(n int64) string {
 
 // queueFix is the knob every gap's fix names (UX-A-41): the destination
 // queue the records waited in, the dev-only wait, the app's own WARN
-// and the counter Studio heard.
-const queueFix = "raise the destination's queue: otel.QueueSize(n) (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev (or otel.DevMode()); the app's WARN \"weft/otel: destination queue full\" names it, weftbase doctor the drops (weft.records.dropped)"
+// and the counter the server heard.
+const queueFix = "raise the destination's queue: otel.QueueSize(n) (the server destination's default 16,384), or otel.Blocking() under WEFT_ENV=dev (or otel.DevMode()); the app's WARN \"weft/otel: destination queue full\" names it, weftbase doctor the drops (weft.records.dropped)"
 
 // HoleCauses lists the causes the table words, in order.
 func HoleCauses() []HoleCause {
@@ -168,8 +167,8 @@ var causeNotes = map[Hole]map[HoleCause]holeNote{
 			"run under WEFT_ENV=dev (or otel.DevMode()) with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)",
 		},
 		CauseNotServed: {
-			"this Studio does not serve the request record (no requests capability): the run may hold one",
-			"use a Studio that serves it (upgrade it, or enable the requests group)",
+			"this weftbase server does not serve the request record (no requests capability): the run may hold one",
+			"use a weftbase server that serves it (upgrade it, or enable the requests group)",
 		},
 		CauseNoLogger: {
 			"the app exported spans only: they arrived, none of its records did — no events, transcript or request records",
@@ -198,8 +197,8 @@ var causeNotes = map[Hole]map[HoleCause]holeNote{
 	},
 	HoleHidden: {
 		CauseDevTokenOnly: {
-			"a panel token reads its one public id, never a session's: this route answers the dev token only",
-			"ask with the server (dev) token, or use the public id the panel token was minted for",
+			"a credential scoped to one public id reads that public id, never a session's: this route answers a server-wide credential only",
+			"ask with a server-wide credential, or use the public id the credential was issued for",
 		},
 	},
 	HoleTruncated: {
@@ -225,12 +224,12 @@ var causeNotes = map[Hole]map[HoleCause]holeNote{
 // stockSpansFix is the derived badge's fix (cause stock_spans): what a
 // Python or TypeScript developer sets on the spans — the levers a stock
 // producer has — and where weft's own records come from.
-const stockSpansFix = "stock OTel GenAI spans carry no weft events or request records: set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true for the messages and tool arguments (Studio reads them from the span attributes) and gen_ai.conversation.id on the invoke_agent span for a session; weft's own records need a weft SDK (Go today)"
+const stockSpansFix = "stock OTel GenAI spans carry no weft events or request records: set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true for the messages and tool arguments (weftbase reads them from the span attributes) and gen_ai.conversation.id on the invoke_agent span for a session; weft's own records need a weft SDK (Go today)"
 
 // HoleNoteFor is HoleNote for a hole whose cause the reader knows: the
 // cause's own reason and fix where the table words it, HoleNote(h)
 // otherwise (CauseDefault included). The one table for every surface
-// (run page, panel, export).
+// (run page, export).
 func HoleNoteFor(h Hole, cause HoleCause) (reason, fix string) {
 	if n, ok := causeNotes[h][cause]; ok {
 		return n.reason, n.fix
@@ -272,8 +271,8 @@ var holeNotes = map[Hole]holeNote{
 		"",
 	},
 	HoleHidden: {
-		"your token's access does not reach this: a read-only panel token reads no system prompt or tool catalog",
-		"use a playground token",
+		"your credential's access does not reach this: a read-only credential reads no system prompt or tool catalog",
+		"use a credential that may read it",
 	},
 	HoleCompacted: {
 		"the model saw a compacted view: compaction replaced part of the transcript for this request",

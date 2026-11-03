@@ -2,7 +2,6 @@ package studio
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -42,11 +41,8 @@ func usageLimitRuns() []statsRun {
 
 // TestUsageLimitOneFacetOneMatrix is U24.2's Done line through the real
 // routes: the seven usage-limit failures are one error_class facet of 7,
-// the class filters /api/search to exactly them, and one matrix over the
-// seven — each row its own source run from its own failing step, the
-// models as variants, a pass predicate — saves and reads back whole
-// (no cell is run: the live cells are never run in a test). The facet
-// page is the golden the runs list's facet test reads.
+// and the class filters /api/search to exactly them. The facet page is
+// the golden the runs list's facet test reads.
 func TestUsageLimitOneFacetOneMatrix(t *testing.T) {
 	db, err := sqlite.Open(":memory:")
 	if err != nil {
@@ -58,7 +54,7 @@ func TestUsageLimitOneFacetOneMatrix(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	h := Handler(DB(db), Playground(true))
+	h := Handler(DB(db))
 	code, _, body := get(t, h, "/studio/api/search?status=failed&agent=researcher")
 	if code != http.StatusOK {
 		t.Fatalf("search: %d %s", code, body)
@@ -71,55 +67,5 @@ func TestUsageLimitOneFacetOneMatrix(t *testing.T) {
 	ids, total, _ := searchIDs(t, h, "/studio/api/search?status=failed&agent=researcher&error_class="+url.QueryEscape(usageClass))
 	if total != 7 || len(ids) != 7 {
 		t.Fatalf("search?error_class=<usage limit> = %v (total %d), want the 7 runs", ids, total)
-	}
-
-	// One matrix over the seven: rows = source runs, each from its own
-	// failing step (lib/matrix.ts's failingStep reads "at step N").
-	type input struct {
-		Key         string `json:"key"`
-		SourceRunID string `json:"source_run_id"`
-		FromStep    int    `json:"from_step"`
-	}
-	inputs := []input{}
-	for i, id := range ids {
-		var n int
-		if _, err := fmt.Sscanf(strings.TrimPrefix(id, "ul_"), "%d", &n); err != nil {
-			t.Fatal(err)
-		}
-		inputs = append(inputs, input{Key: fmt.Sprint(i + 1), SourceRunID: id, FromStep: n % 3})
-	}
-	def, _ := json.Marshal(map[string]any{
-		"id": "ux-C-cheapest", "name": "cheapest model passing", "agent": "researcher",
-		"variants": []map[string]any{
-			{"key": "glm-5.3-flash", "overrides": map[string]any{"model": "zai/glm-5.3-flash"}, "engine": "live"},
-			{"key": "kimi-k2.6", "overrides": map[string]any{"model": "kimi/kimi-k2.6"}, "engine": "live"},
-		},
-		"inputs":         inputs,
-		"engine":         "live",
-		"pass_predicate": `status = succeeded AND answer ~ /\d+ units/`,
-	})
-	if code, _, b := post(t, h, "/studio/api/experiments", "application/json", string(def)); code != http.StatusOK {
-		t.Fatalf("save the matrix: %d %s", code, b)
-	}
-	code, _, body = get(t, h, "/studio/api/experiments/ux-C-cheapest")
-	if code != http.StatusOK {
-		t.Fatalf("read the matrix: %d %s", code, body)
-	}
-	var got struct {
-		Inputs []struct {
-			SourceRunID string `json:"source_run_id"`
-			FromStep    *int   `json:"from_step"`
-		} `json:"inputs"`
-		PassPredicate string `json:"pass_predicate"`
-		RunCount      int    `json:"run_count"`
-	}
-	decode(t, body, &got)
-	if len(got.Inputs) != 7 || got.PassPredicate != `status = succeeded AND answer ~ /\d+ units/` || got.RunCount != 0 {
-		t.Fatalf("matrix = %+v, want 7 rows, the predicate verbatim and no run", got)
-	}
-	for i, in := range got.Inputs {
-		if in.SourceRunID != inputs[i].SourceRunID || in.FromStep == nil || *in.FromStep != inputs[i].FromStep {
-			t.Errorf("row %d = %+v, want %s from step %d", i, in, inputs[i].SourceRunID, inputs[i].FromStep)
-		}
 	}
 }

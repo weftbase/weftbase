@@ -188,7 +188,7 @@ func TestCollectorShapeInserts(t *testing.T) {
 
 	// The rows landed, and the materialized views turned the
 	// collector-shaped rows into the weft tables' rows — a stock
-	// collector feeds Studio.
+	// collector feeds weftbase.
 	var spans, logs uint64
 	if err := conn.QueryRow(ctx, "SELECT count() FROM otel_traces").Scan(&spans); err != nil || spans != 1 {
 		t.Fatalf("otel_traces rows = %d, err %v", spans, err)

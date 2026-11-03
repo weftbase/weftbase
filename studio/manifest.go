@@ -6,37 +6,22 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
-	"time"
-
-	linkruntime "github.com/weftbase/weftbase/studio/runtime"
 )
 
-// api/manifest (plan B4): the agents Studio knows, from two sources —
-// the weft.json passed to Manifest(...) and the manifests runtimes
-// registered with (studio/runtime remembers each by (service,
-// manifest hash), in memory). The file wins when configured; without
-// one the registered manifests serve, live ones first. Either way the
-// response's sources array lists every source, each registered one
-// marked live (a connected runtime holds it now) or not (remembered
-// from a runtime that is gone) — never a remembered one shown as live.
+// api/manifest: the agents this server knows, from the weft.json
+// passed to Manifest(...). The response carries a sources array naming
+// the file and each agent's own hash.
 
-// Manifest source kinds.
-const (
-	manifestSourceFile    = "file"
-	manifestSourceRuntime = "runtime"
-)
+// manifestSourceFile is the one manifest source kind: the weft.json.
+const manifestSourceFile = "file"
 
-// Why a capability is off: the option that turns it on and the CLI
-// flag that turns it off (meta.capabilities_off).
+// Why a capability is off (meta.capabilities_off).
 const (
-	offPlayground = "the playground is off: turn it on with studio.Playground(true); weftbase dev --no-playground turns it off"
-	offIngest     = "OTLP ingest is off: studio.NoIngest() turned it off"
-	offAuth       = "no server token to sign panel tokens with: turn it on with studio.Token(tok); weftbase dev always sets one"
-	offHandoff    = "no Token: panel tokens do not exist here, so there is none to hand off from: turn it on with studio.Token(tok); weftbase dev always sets one"
-	offSearch     = "the database cannot search: its obsdb.DB does not implement obsdb.Searcher (obsdb/sqlite and obsdb/clickhouse both do)"
-	offSpansTree  = "the database cannot read a run tree: its obsdb.DB does not implement obsdb.TreeReader (obsdb/sqlite and obsdb/clickhouse both do); GET /api/runs/{id}/spans?tree=1 answers 501"
-	offStats      = "the database cannot aggregate: its obsdb.DB does not implement obsdb.Aggregator (obsdb/sqlite and obsdb/clickhouse both do); GET /api/stats and the error_class facet and filter are off"
-	offTimeline   = "the database cannot read a session's state log: its obsdb.DB does not implement obsdb.SessionEventReader (obsdb/sqlite and obsdb/clickhouse both do); GET /api/sessions/{id}/timeline and /entries answer 501"
+	offIngest    = "OTLP ingest is off: the NoIngest option turned it off"
+	offSearch    = "the database cannot search: its obsdb.DB does not implement obsdb.Searcher (obsdb/sqlite and obsdb/clickhouse both do)"
+	offSpansTree = "the database cannot read a run tree: its obsdb.DB does not implement obsdb.TreeReader (obsdb/sqlite and obsdb/clickhouse both do); GET /api/runs/{id}/spans?tree=1 answers 501"
+	offStats     = "the database cannot aggregate: its obsdb.DB does not implement obsdb.Aggregator (obsdb/sqlite and obsdb/clickhouse both do); GET /api/stats and the error_class facet and filter are off"
+	offTimeline  = "the database cannot read a session's state log: its obsdb.DB does not implement obsdb.SessionEventReader (obsdb/sqlite and obsdb/clickhouse both do); GET /api/sessions/{id}/timeline and /entries answer 501"
 )
 
 // optionalCapabilities is every capability a route group registers
@@ -44,36 +29,18 @@ const (
 // when it is absent — the one table capabilitiesOff reads (a test
 // checks every optional group has an entry).
 var optionalCapabilities = map[string]string{
-	"playground":       offPlayground,
-	"runtimes":         offPlayground,
-	"breakpoints":      offPlayground,
-	"steer":            offPlayground,
-	"cancel":           offPlayground,
-	"preview":          offPlayground,
-	"target_check":     offPlayground,
-	"runtime_forget":   offPlayground,
-	"run_commands":     offPlayground,
-	"ingest":           offIngest,
-	"auth":             offAuth,
-	"panel_token_tags": offAuth,
-	"handoff":          offHandoff,
-	"search":           offSearch,
-	"manifests":        offManifests,
-	"spans_tree":       offSpansTree,
-	"timeline":         offTimeline,
-	"stats":            offStats,
+	"ingest":     offIngest,
+	"search":     offSearch,
+	"manifests":  offManifests,
+	"spans_tree": offSpansTree,
+	"timeline":   offTimeline,
+	"stats":      offStats,
 }
 
 // manifestSourceView is one entry of api/manifest's sources.
 type manifestSourceView struct {
-	Source       string `json:"source"` // file | runtime
+	Source       string `json:"source"` // file
 	ManifestHash string `json:"manifest_hash"`
-	// The registered source's identity and liveness; absent for the
-	// file.
-	Service      string     `json:"service,omitempty"`
-	Live         *bool      `json:"live,omitempty"`
-	RegisteredAt *time.Time `json:"registered_at,omitempty"`
-	RuntimeID    string     `json:"runtime_id,omitempty"`
 	// Agents names the source's agents with each one's own hash (the
 	// weft.manifest.hash its runs carry).
 	Agents []manifestAgentView `json:"agents"`
@@ -84,18 +51,8 @@ type manifestAgentView struct {
 	ManifestHash string `json:"manifest_hash"`
 }
 
-// registeredManifests is the runtime link's remembered manifests; none
-// without the playground.
-func (s *Server) registeredManifests() []linkruntime.ManifestSource {
-	if s.runtimeSrv == nil {
-		return nil
-	}
-	return s.runtimeSrv.Manifests()
-}
-
-// manifestSources lists every source: the file first, then the
-// registered ones (live first, newest first).
-func (s *Server) manifestSources(reg []linkruntime.ManifestSource) []manifestSourceView {
+// manifestSources lists every source: the file, when configured.
+func (s *Server) manifestSources() []manifestSourceView {
 	out := []manifestSourceView{}
 	if len(s.manifest) > 0 {
 		sum := sha256.Sum256(s.manifest)
@@ -107,110 +64,22 @@ func (s *Server) manifestSources(reg []linkruntime.ManifestSource) []manifestSou
 		}
 		out = append(out, v)
 	}
-	for _, m := range reg {
-		live, at := m.Live, m.RegisteredAt
-		v := manifestSourceView{
-			Source: manifestSourceRuntime, ManifestHash: m.ManifestHash,
-			Service: m.Service, Live: &live, RegisteredAt: &at, RuntimeID: m.RuntimeID,
-			Agents: make([]manifestAgentView, 0, len(m.Agents)),
-		}
-		for _, a := range m.Agents {
-			v.Agents = append(v.Agents, manifestAgentView{a.Name, a.ManifestHash})
-		}
-		out = append(out, v)
-	}
 	return out
 }
 
-// registeredAgents merges the registered manifests into one agent
-// list. Each (service, agent name) contributes once, from the first
-// source that has it in Manifests' order — a live manifest before a
-// remembered one, the newest before the older — so a service's older
-// builds do not repeat its agents. Two services whose agents share a
-// name but differ both stay (deduplicated by the agent's own hash):
-// one service's prompt never stands in for another's.
-func registeredAgents(reg []linkruntime.ManifestSource) (version int, agents []linkruntime.ManifestAgent) {
-	seen := map[[2]string]bool{}   // (service, name)
-	listed := map[[2]string]bool{} // (name, hash)
-	version = 1
-	for i, m := range reg {
-		if i == 0 && m.Version != 0 {
-			version = m.Version
-		}
-		for _, a := range m.Agents {
-			if seen[[2]string{m.Service, a.Name}] {
-				continue
-			}
-			seen[[2]string{m.Service, a.Name}] = true
-			if listed[[2]string{a.Name, a.ManifestHash}] {
-				continue
-			}
-			listed[[2]string{a.Name, a.ManifestHash}] = true
-			agents = append(agents, a)
-		}
-	}
-	return version, agents
-}
-
-// withHash prepends the agent's own manifest hash to its manifest
-// object, so a reader matches each card to the sources holding that
-// exact version (two services may register different agents under one
-// name).
-func withHash(entry json.RawMessage, hash string) json.RawMessage {
-	body := bytes.TrimSpace(entry)
-	if len(body) < 2 || body[0] != '{' {
-		return entry
-	}
-	h, _ := json.Marshal(hash)
-	out := append([]byte(`{"manifest_hash":`), h...)
-	if rest := bytes.TrimSpace(body[1:]); len(rest) > 0 && rest[0] != '}' {
-		out = append(out, ',')
-	}
-	return append(out, body[1:]...)
-}
-
 // serveManifest answers api/manifest: the file manifest with sources
-// added, else the registered manifests merged, else 404 saying why.
+// added, else 404 saying why.
 func (s *Server) serveManifest(w http.ResponseWriter, r *http.Request) {
-	// The manifest carries every agent's system prompt, which a
-	// read-scoped panel token's page does not get (serveRuntimes strips
-	// the same field for it): only an identity that may start
-	// experiments reads it — the file's and the registered ones alike.
-	// The panel asks for it (the Request tab's first-step diff) only
-	// under a token that reads prompts; a read-scoped one never asks.
-	if !readsPrompts(r) {
-		refuseHidden(w, r, "the manifest carries the agents' system prompts: a read-scoped panel token does not read it")
+	if len(s.manifest) == 0 {
+		notFound(w, r, "no manifest: no weft.json configured (the Manifest option, or weftbase dev --manifest)")
 		return
 	}
-	reg := s.registeredManifests()
-	sources := s.manifestSources(reg)
-	// Each agent's proposed instructions (plan F6, proposals.go) ride
-	// its entry as "proposed", beside the registered "instructions".
-	props := s.proposals.snapshot()
-	if len(s.manifest) > 0 {
-		writeRaw(w, r, withSources(fileWithProposals(s.manifest, props), sources))
-		return
-	}
-	if len(reg) == 0 {
-		why := "no manifest: no weft.json configured (studio.Manifest, or weftbase dev --manifest) and no runtime has registered"
-		if s.runtimeSrv == nil {
-			why = "no manifest: no weft.json configured (studio.Manifest, or weftbase dev --manifest), and " + offPlayground + ", so no runtime can register one"
-		}
-		notFound(w, r, why)
-		return
-	}
-	version, agents := registeredAgents(reg)
-	entries := registeredWithProposals(agents, props)
-	writeJSON(w, r, http.StatusOK, struct {
-		Version int                  `json:"weft"`
-		Agents  []json.RawMessage    `json:"agents"`
-		Sources []manifestSourceView `json:"sources"`
-	}{version, entries, sources})
+	writeRaw(w, r, withSources(s.manifest, s.manifestSources()))
 }
 
 // withSources splices "sources" into the file manifest as its last key,
 // the file's own bytes kept verbatim before it (a file that has a
-// sources key already is re-encoded with Studio's in its place). A file that is not a
+// sources key already is re-encoded with the server's in its place). A file that is not a
 // JSON object is returned as given (manifest_check reports the parse
 // error).
 func withSources(manifest []byte, sources []manifestSourceView) []byte {
@@ -223,7 +92,7 @@ func withSources(manifest []byte, sources []manifestSourceView) []byte {
 		return manifest
 	}
 	if _, clash := obj["sources"]; clash {
-		// The file has a sources key of its own: Studio's replaces it
+		// The file has a sources key of its own: the server's replaces it
 		// (one key, never a duplicate), re-encoded through the map.
 		obj["sources"] = b
 		if out, err := json.Marshal(obj); err == nil {
@@ -253,21 +122,13 @@ func writeRaw(w http.ResponseWriter, r *http.Request, body []byte) {
 }
 
 // checkedManifest is what manifest_check compares runs with: the file's
-// agents, else the registered agents /api/manifest serves. source is
-// "" when there is neither.
-func (s *Server) checkedManifest(reg []linkruntime.ManifestSource) (source string, hashes []agentHash, err error) {
-	if len(s.manifest) > 0 {
-		hashes, err := manifestAgentHashes(s.manifest)
-		return manifestSourceFile, hashes, err
-	}
-	if len(reg) == 0 {
+// agents. source is "" when there is none.
+func (s *Server) checkedManifest() (source string, hashes []agentHash, err error) {
+	if len(s.manifest) == 0 {
 		return "", nil, nil
 	}
-	_, agents := registeredAgents(reg)
-	for _, a := range agents {
-		hashes = append(hashes, agentHash{a.Name, a.ManifestHash})
-	}
-	return manifestSourceRuntime, hashes, nil
+	hashes, err = manifestAgentHashes(s.manifest)
+	return manifestSourceFile, hashes, err
 }
 
 // capabilitiesOff names each optional capability this server does not

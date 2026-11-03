@@ -15,10 +15,7 @@ import (
 //	GET /api/runs/{id}/requests?step=&from=&limit=&refs=1
 //	GET /api/runs/{id}/tools
 //
-// Both carry the system prompt or the tool catalog, so a read-scoped
-// panel token is refused them (403 with badge "hidden"), as it is the
-// manifest; a playground-scoped token, the server token and setup A's
-// loopback API read them. Every hole is a badge from ADR 0028 §11's
+// Every hole is a badge from ADR 0028 §11's
 // closed table (obsdb.Hole) with a reason and, where one exists, a fix:
 // a run written before the record reads not_recorded, a content-off
 // run's catalogs read stripped — never an empty pane without a word.
@@ -90,8 +87,7 @@ type requestRow struct {
 // headers stripped and named, each body capped at 256 KiB — or null
 // with raw_badge not_recorded (cause raw_off) and its reason and fix
 // when the run holds none for the attempt. The export keeps the plain
-// requestRow: wire bodies are served here alone. A read-scoped panel
-// token never reaches it: the route refuses it (mayReadPrompts).
+// requestRow: wire bodies are served here alone.
 type requestWire struct {
 	requestRow
 	Raw       *obsdb.RawRecord `json:"raw"`
@@ -180,27 +176,6 @@ func missingHole(err error) obsdb.Hole {
 	return obsdb.HoleGap
 }
 
-// readsPrompts says whether the request's identity may read system
-// prompts and tool catalogs (the manifest, a run's requests and tools):
-// everyone but a read-scoped panel token — the server token, setup A's
-// loopback API and a playground-scoped panel token.
-func readsPrompts(r *http.Request) bool {
-	p := idFrom(r).panel
-	return p == nil || p.Scope == scopePlayground
-}
-
-// mayReadPrompts refuses a read-scoped panel token on a route that
-// carries system prompts or tool catalogs (readsPrompts): 403 in the
-// error shape, with the hidden badge so the panel renders the hole
-// rather than an error.
-func mayReadPrompts(w http.ResponseWriter, r *http.Request) bool {
-	if readsPrompts(r) {
-		return true
-	}
-	refuseHidden(w, r, "the request record carries the system prompt and the tool catalog: a read-scoped panel token does not read it")
-	return false
-}
-
 // serveRunRequests answers api/runs/{id}/requests?step=&from=&limit=&refs=1:
 // one page of the run's request records in index order. step keeps one
 // step's attempts; from is the first index (next_from feeds straight
@@ -208,9 +183,6 @@ func mayReadPrompts(w http.ResponseWriter, r *http.Request) bool {
 // the prompt and catalog its hashes name, each distinct hash read once
 // per response.
 func (s *Server) serveRunRequests(w http.ResponseWriter, r *http.Request, id string) {
-	if !mayReadPrompts(w, r) || !s.scopeRunID(w, r, id) {
-		return
-	}
 	q := r.URL.Query()
 	var query obsdb.RequestQuery
 	if v := q.Get("step"); v != "" {
@@ -359,9 +331,6 @@ func (rs *resolver) catalog(hash string, stripped bool) (any, error) {
 // content-off destination dropped them) or gap (dropped in transit); a
 // run whose requests offered no tools is an empty list, unbadged.
 func (s *Server) serveRunTools(w http.ResponseWriter, r *http.Request, id string) {
-	if !mayReadPrompts(w, r) || !s.scopeRunID(w, r, id) {
-		return
-	}
 	ctx := r.Context()
 	det, err := s.db.Run(ctx, id)
 	if err != nil {

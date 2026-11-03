@@ -26,7 +26,7 @@ import (
 
 //go:generate go run ./internal/pricinggen -o pricing.json
 
-// Cost (plan A5): Studio prices usage at read time from a pricing table
+// Cost (plan A5): the server prices usage at read time from a pricing table
 // — never stored, never sent anywhere, nothing fetched. The table is a
 // plain JSON file; the default ships in the repo with the day its rates
 // were read (pricing.json, generated from internal/pricingdata), and an
@@ -89,7 +89,7 @@ import (
 // models: a sixth and more read as one last element "(+n)".
 //
 // A scripted model — every model of the wefttest provider, and the
-// playground's scripted engine (weftbase/runtime + scripted) — that no row
+// runtime's scripted engine — that no row
 // of the table matches is priced by a built-in
 // rule: an exact $0 (cost_known true, cache "exact") with cost_badge
 // "scripted". Nothing bills it; the rule is Go code, not a pricing.json
@@ -104,7 +104,7 @@ import (
 // invoke_agent span: nothing recorded its usage).
 //
 // Run rows (lists, documents, children, search hits, live frames,
-// experiment runs, the export) and a step's children[] add
+// the export) and a step's children[] add
 // delegated_cost_usd / delegated_cost_known / delegated_cost_reason. A
 // run's usage includes its core Subagent children's (rule 13: the core
 // rolls them up) — the runs whose id is <run id>/<step>/<call> — so
@@ -162,7 +162,7 @@ type ModelPrice struct {
 	Reasoning   *float64 `json:"reasoning,omitempty"`
 }
 
-// Pricing sets the table Studio prices usage with (plan A5). Without
+// Pricing sets the table the server prices usage with (plan A5). Without
 // it, New reads the file WEFT_PRICING names (LoadPricing; a file that
 // does not load panics at New, naming the path and the field), else
 // uses DefaultPricing. The table replaces the default whole.
@@ -191,7 +191,7 @@ var (
 	defaultPricingVal  PricingTable
 )
 
-// DefaultPricing is the table Studio ships: pricing.json, generated
+// DefaultPricing is the table weftbase ships: pricing.json, generated
 // from the vendors' public list prices on its Dated day. Nothing is
 // fetched — a newer price arrives with a newer weft, or with an
 // override file.
@@ -199,7 +199,7 @@ func DefaultPricing() PricingTable {
 	defaultPricingOnce.Do(func() {
 		t, err := parsePricing(defaultPricingJSON, "pricing.json (embedded)")
 		if err != nil {
-			panic("studio: " + err.Error()) // pinned by TestDefaultPricingLoads
+			panic("weftbase: " + err.Error()) // pinned by TestDefaultPricingLoads
 		}
 		t.source = pricingDefault
 		defaultPricingVal = t
@@ -352,7 +352,7 @@ func resolvePricing(c *config) {
 	if file := os.Getenv("WEFT_PRICING"); file != "" {
 		t, err := LoadPricing(file)
 		if err != nil {
-			panic("studio: WEFT_PRICING: " + err.Error())
+			panic("weftbase: WEFT_PRICING: " + err.Error())
 		}
 		c.pricing = &t
 		return
@@ -396,7 +396,7 @@ func (t *PricingTable) lookup(provider, model string) (ModelPrice, bool) {
 var scriptedProviders = map[string]bool{"wefttest": true}
 
 // scripted says provider/model is a scripted model nothing bills: the
-// scriptedProviders' models and the playground's scripted engine
+// scriptedProviders' models and the runtime's scripted engine
 // (runtime/scripted.go's ModelInfo{Provider: "weft/runtime", Name:
 // "scripted"}).
 func scripted(provider, model string) bool {
@@ -453,11 +453,9 @@ type costFields struct {
 	// UnpricedModels are the provider/model pairs without a price
 	// behind the figure, deduped in order (absent when none).
 	UnpricedModels []string `json:"unpriced_models,omitempty"`
-	// CostPartial is an unknown set figure's known part (a session's,
-	// an experiment's; UX-H-07): the parts priced, of how many, and
-	// their sum — what the devtools panel's header draws as "≥ $x · k
-	// of n turns priced" from its turns, so Studio's set rows say the
-	// same figure. Absent on a known figure, on a single run's, and
+	// CostPartial is an unknown set figure's known part (a session's;
+	// UX-H-07): the parts priced, of how many, and their sum — "≥ $x · k
+	// of n turns priced". Absent on a known figure, on a single run's, and
 	// when no part is priced.
 	CostPartial *costPartial `json:"cost_partial,omitempty"`
 }
@@ -630,16 +628,6 @@ type coster struct {
 	// figures and counts read not known, never read one at a time.
 	capped map[string]bool
 	primed int // child rows primeTrees read so far
-	// scope is the request's panel token scope (scopeOf), the zero
-	// scope for any other identity. Under it, kids holds each run's children inScope
-	// only — every count, children list and delegated figure read from
-	// the coster is the token's — and hidden counts the rest, per run;
-	// hiddenUsage sums the hidden core Subagent children's usage, which
-	// the run's own figure still takes out (the core rolled it in).
-	scope       readScope
-	hidden      map[string]int
-	hiddenSubs  map[string]int
-	hiddenUsage map[string]core.Usage
 }
 
 // runCost is one run's own and delegated figures.
@@ -647,8 +635,8 @@ type runCost struct {
 	own, delegated cost
 	id             string // the run's, named in a tally's reason
 	// split says the usage below is known: the children were read and
-	// the run has a core Subagent child (or one out of scope); ownUsage
-	// is the run's usage less theirs, delUsage its in-scope Subagent
+	// the run has a core Subagent child; ownUsage
+	// is the run's usage less theirs, delUsage its Subagent
 	// children's summed (each already its whole subtree's, rule 13).
 	split              bool
 	ownUsage, delUsage core.Usage
@@ -660,41 +648,15 @@ func (rc runCost) total() (float64, bool) {
 }
 
 func (s *Server) coster(ctx context.Context) *coster {
-	return &coster{ctx: ctx, db: s.db, table: s.pricing, kids: map[string][]obsdb.RunRow{}, memo: map[string]runCost{}, partKids: map[string]bool{}, capped: map[string]bool{},
-		scope: scopeOf(ctx), hidden: map[string]int{}, hiddenSubs: map[string]int{}, hiddenUsage: map[string]core.Usage{}}
+	return &coster{ctx: ctx, db: s.db, table: s.pricing, kids: map[string][]obsdb.RunRow{}, memo: map[string]runCost{}, partKids: map[string]bool{}, capped: map[string]bool{}}
 }
 
-// prime records a run's children already read (a run document's),
-// cut to the coster's scope (scopeKids): the rest are counted, never
-// kept.
+// prime records a run's children already read (a run document's).
 func (c *coster) prime(id string, kids []obsdb.RunRow) {
 	if kids == nil {
 		kids = []obsdb.RunRow{}
 	}
-	visible, n := scopeKids(c.scope, kids)
-	c.kids[id] = visible
-	delete(c.hidden, id)
-	delete(c.hiddenSubs, id)
-	delete(c.hiddenUsage, id)
-	if n == 0 {
-		return
-	}
-	c.hidden[id] = n
-	var u core.Usage
-	for _, k := range subagents(id, kids) {
-		if !inScope(c.scope, k) {
-			c.hiddenSubs[id]++
-			u = u.Add(k.Usage)
-		}
-	}
-	c.hiddenUsage[id] = u
-}
-
-// visibleKids is a primed run's children in the coster's scope and the
-// count of the rest (prime): a run document's children[] and its
-// hidden hole.
-func (c *coster) visibleKids(id string) ([]obsdb.RunRow, int) {
-	return c.kids[id], c.hidden[id]
+	c.kids[id] = kids
 }
 
 // primeTrees reads the subagent trees of a page of runs before they are
@@ -727,7 +689,7 @@ func (c *coster) primeTrees(recs []obsdb.RunRow) {
 			n += len(k)
 		}
 		if errors.Is(err, obsdb.ErrChildRunsCapped) || (err == nil && c.primed+n > primeChildCap) {
-			slog.DebugContext(c.ctx, "studio: a page's subagent trees hold too many child runs to read: their cost and counts are not known",
+			slog.DebugContext(c.ctx, "weftbase: a page's subagent trees hold too many child runs to read: their cost and counts are not known",
 				"cap", primeChildCap, "runs", len(ids))
 			for _, id := range ids {
 				c.capped[id] = true
@@ -735,7 +697,7 @@ func (c *coster) primeTrees(recs []obsdb.RunRow) {
 			return
 		}
 		if err != nil {
-			slog.DebugContext(c.ctx, "studio: a page's subagent children could not be read at once; reading them per run", "err", err)
+			slog.DebugContext(c.ctx, "weftbase: a page's subagent children could not be read at once; reading them per run", "err", err)
 			return
 		}
 		c.primed += n
@@ -775,7 +737,7 @@ func (c *coster) primeChildren(recs []obsdb.RunRow) {
 		kids, err = tr.ChildRuns(c.ctx, ids)
 	}
 	if !ok || err != nil {
-		slog.DebugContext(c.ctx, "studio: a set's child runs could not be read: their counts are unknown", "err", err)
+		slog.DebugContext(c.ctx, "weftbase: a set's child runs could not be read: their counts are unknown", "err", err)
 		for _, id := range ids {
 			c.partKids[id] = true
 		}
@@ -839,7 +801,7 @@ func (c *coster) cost(rec obsdb.RunRow) runCost {
 func (c *coster) compute(rec obsdb.RunRow) runCost {
 	all, err := c.children(rec.ID)
 	if err != nil {
-		slog.DebugContext(c.ctx, "studio: a run's subagent children could not be read: its cost is not known", "run", rec.ID, "err", err)
+		slog.DebugContext(c.ctx, "weftbase: a run's subagent children could not be read: its cost is not known", "run", rec.ID, "err", err)
 		why := "the run's subagent children could not be read, so its own usage cannot be told from theirs"
 		if errors.Is(err, errChildrenCapped) {
 			why = "the run's subagent children are past the " + strconv.Itoa(obsdb.ChildRunsCap) + " child runs one read takes, so its own usage cannot be told from theirs"
@@ -860,21 +822,11 @@ func (c *coster) compute(rec obsdb.RunRow) runCost {
 		kc.id = k.ID
 		parts = append(parts, kc)
 	}
-	// A child outside a panel token's scope (prime) is out of every
-	// figure but the own split: its usage is still the core's roll-up.
-	own = sub(own, c.hiddenUsage[rec.ID])
 	// The cause is carried: one child whose figure is unknown (running,
 	// its end never arrived, its children unreadable) makes the
 	// delegated figure unknown, not unpriced.
 	del := tally(parts, "child run", true)
-	if n := c.hiddenSubs[rec.ID]; n > 0 {
-		del = scopeCutDelegated(del, n, len(c.scope.Tags) > 0)
-	}
-	// The split is served only when every Subagent child is in scope: a
-	// child out of a panel token's scope makes usage − own − delegated
-	// its hidden subtree's figure (I4's rule), and the delegated cost is
-	// unknown there already.
-	split := len(subs) > 0 && c.hiddenSubs[rec.ID] == 0
+	split := len(subs) > 0
 	if why := usagePending(rec); why != "" {
 		// A running run carries no usage yet: no split to show.
 		return runCost{own: cost{badge: costUnknown, reason: why, cache: cacheOf(own)}, delegated: del}
@@ -893,7 +845,7 @@ func (c *coster) compute(rec obsdb.RunRow) runCost {
 // "run"). nested counts each part's own subagents as runs of the set (a
 // run's delegated figure covers every descendant); without it a part is
 // one run, unknown or unpriced by its whole bill (a session's turn, an
-// experiment's run).
+// set's run).
 func tally(parts []runCost, noun string, nested bool) cost {
 	out := cost{known: true}
 	for _, p := range parts {
@@ -938,7 +890,7 @@ func tally(parts []runCost, noun string, nested bool) cost {
 	if out.unknown > 0 {
 		out.badge = costUnknown
 		// A subagent's reason names the child (one run of a tree the
-		// page does not list); a session's or an experiment's names
+		// page does not list); a session's names
 		// none — its turns are the rows beside it (UX-B-27).
 		why := out.cause
 		if nested {
@@ -963,29 +915,6 @@ func tally(parts []runCost, noun string, nested bool) cost {
 		out.reason += ": no price for " + strings.Join(capModels(out.models), ", ")
 	}
 	return out
-}
-
-// scopeCutDelegated is a delegated figure (tally's, over the subagent
-// runs in scope) once n more were left out by a panel token's scope
-// (coster.prime): not known — the token reads no part of their bill —
-// counted, the hidden runs never named; a reason the visible parts had
-// follows the scope's.
-func scopeCutDelegated(del cost, n int, tagged bool) cost {
-	del.runs += n
-	del.unknown += n
-	del.known, del.usd, del.badge = false, 0, costUnknown
-	why := fmt.Sprintf("%d of %d child runs carry another public id, or none: a panel token does not read their cost", n, del.runs)
-	if tagged { // a tag-scoped token (I4-fix)
-		why = fmt.Sprintf("%d of %d child runs are without your token's tags (or of another public id): your token's access does not reach their cost", n, del.runs)
-	}
-	if del.reason != "" {
-		why += "; " + del.reason
-	}
-	del.reason = why
-	if del.why == "" {
-		del.why, del.cause = why, why
-	}
-	return del
 }
 
 // subagents is the core Subagent children among a run's parent-linked
@@ -1088,18 +1017,12 @@ func tooManyRuns() cost {
 // top-level turn, a thread/pool child session's run (its parent run is
 // in the parent's session), and another agent's Generate inside a tool
 // handler (linked but never rolled up, so no other figure carries it).
-// The coster it returns is primed with that tree for the turn rows.
-// scope, when set (a panel token's), keeps only the runs in it (its
-// public id, its tags) — the runs list's rule (scopeRunsQuery): a run of another app
-// that shares the session id (a derived run's gen_ai.conversation.id)
-// is never priced into a panel token's session. The runs it read come
-// back too, for a panel token's session row: nil when the walk failed
-// or passed its bound (the row cannot be scoped), non-nil and maybe
-// empty when it read the whole set.
-func (s *Server) sessionCost(ctx context.Context, id string, scope readScope) (cost, *coster, []obsdb.RunRow) {
+// The coster it returns is primed with that tree for the turn rows. The
+// runs it read come back too: nil when the walk failed or passed its
+// bound, non-nil and maybe empty when it read the whole set.
+func (s *Server) sessionCost(ctx context.Context, id string) (cost, *coster, []obsdb.RunRow) {
 	c := s.coster(ctx)
-	f := false
-	q := obsdb.RunQuery{SessionID: id, PublicID: scope.PublicID, Meta: scope.Tags, ParentRunID: "*", Playground: &f, Limit: 500}
+	q := obsdb.RunQuery{SessionID: id, ParentRunID: "*", Limit: 500}
 	runs := []obsdb.RunRow{} // non-nil: a whole walk, even of no run
 	total := 0
 	for pages := 0; ; pages++ {
@@ -1115,7 +1038,7 @@ func (s *Server) sessionCost(ctx context.Context, id string, scope readScope) (c
 		}
 		page, err := s.db.Runs(ctx, q)
 		if err != nil {
-			slog.DebugContext(ctx, "studio: a session's runs could not be read to price it", "session", id, "err", err)
+			slog.DebugContext(ctx, "weftbase: a session's runs could not be read to price it", "session", id, "err", err)
 			return cost{badge: costUnknown, reason: "the session's runs could not be read"}, c, nil
 		}
 		if pages == 0 && page.Total > sessionCostPages*500 {
@@ -1137,8 +1060,7 @@ func (s *Server) sessionCost(ctx context.Context, id string, scope readScope) (c
 const sessionCostBatch = 50
 
 // sessionCosts is sessionCost for several sessions at once: their runs
-// in batched paged reads (RunQuery.SessionIDs; the same filters, pub's
-// scope when set), each session's set priced by setCost on a coster of
+// in batched paged reads (RunQuery.SessionIDs), each session's set priced by setCost on a coster of
 // its own — what sessionCost answers per session, a read per page of a
 // batch rather than per session. A batch holds sessionCostBatch
 // sessions; one whose runs pass sessionCostPages × 500 (its first
@@ -1152,13 +1074,13 @@ const sessionCostBatch = 50
 // alone past the bound, or one whose read fails, is unknown with
 // sessionCost's reason; once the budget is spent the sessions not yet
 // priced are unknown with costReadBudget's.
-func (s *Server) sessionCosts(ctx context.Context, ids []string, scope readScope) map[string]cost {
+func (s *Server) sessionCosts(ctx context.Context, ids []string) map[string]cost {
 	out := make(map[string]cost, len(ids))
 	n := sessionCostReads(len(ids))
 	budget := &readBudget{left: n, total: n}
 	for len(ids) > 0 {
 		n := min(sessionCostBatch, len(ids))
-		s.priceSessionBatch(ctx, ids[:n], scope, out, budget)
+		s.priceSessionBatch(ctx, ids[:n], out, budget)
 		ids = ids[n:]
 	}
 	return out
@@ -1184,9 +1106,8 @@ func costReadBudget(reads int) cost {
 // priceSessionBatch prices one batch of sessionCosts into out, halving
 // it when its runs pass sessionCost's bound, each read taken from
 // budget; with the budget spent the batch's sessions are unknown.
-func (s *Server) priceSessionBatch(ctx context.Context, ids []string, scope readScope, out map[string]cost, budget *readBudget) {
-	f := false
-	q := obsdb.RunQuery{SessionIDs: ids, PublicID: scope.PublicID, Meta: scope.Tags, ParentRunID: "*", Playground: &f, Limit: 500}
+func (s *Server) priceSessionBatch(ctx context.Context, ids []string, out map[string]cost, budget *readBudget) {
+	q := obsdb.RunQuery{SessionIDs: ids, ParentRunID: "*", Limit: 500}
 	bySession := make(map[string][]obsdb.RunRow, len(ids))
 	read, total := 0, 0
 	for pages := 0; ; pages++ {
@@ -1199,7 +1120,7 @@ func (s *Server) priceSessionBatch(ctx context.Context, ids []string, scope read
 			if read >= total {
 				break
 			}
-			s.splitSessionBatch(ctx, ids, scope, out, budget)
+			s.splitSessionBatch(ctx, ids, out, budget)
 			return
 		}
 		if budget.left <= 0 {
@@ -1211,14 +1132,14 @@ func (s *Server) priceSessionBatch(ctx context.Context, ids []string, scope read
 		budget.left--
 		page, err := s.db.Runs(ctx, q)
 		if err != nil {
-			slog.DebugContext(ctx, "studio: delegated sessions' runs could not be read to price them", "sessions", len(ids), "err", err)
+			slog.DebugContext(ctx, "weftbase: delegated sessions' runs could not be read to price them", "sessions", len(ids), "err", err)
 			for _, id := range ids {
 				out[id] = cost{badge: costUnknown, reason: "the session's runs could not be read"}
 			}
 			return
 		}
 		if pages == 0 && page.Total > sessionCostPages*500 {
-			s.splitSessionBatch(ctx, ids, scope, out, budget)
+			s.splitSessionBatch(ctx, ids, out, budget)
 			return
 		}
 		for _, r := range page.Runs {
@@ -1242,18 +1163,18 @@ func (s *Server) priceSessionBatch(ctx context.Context, ids []string, scope read
 
 // splitSessionBatch is priceSessionBatch past the bound: two halves
 // read again, or one session's tooManyRuns.
-func (s *Server) splitSessionBatch(ctx context.Context, ids []string, scope readScope, out map[string]cost, budget *readBudget) {
+func (s *Server) splitSessionBatch(ctx context.Context, ids []string, out map[string]cost, budget *readBudget) {
 	if len(ids) == 1 {
 		out[ids[0]] = tooManyRuns()
 		return
 	}
 	half := len(ids) / 2
-	s.priceSessionBatch(ctx, ids[:half], scope, out, budget)
-	s.priceSessionBatch(ctx, ids[half:], scope, out, budget)
+	s.priceSessionBatch(ctx, ids[:half], out, budget)
+	s.priceSessionBatch(ctx, ids[half:], out, budget)
 }
 
 // setCost is the bill of a set of runs read whole — a session's, an
-// experiment's — with their subagent children among them: each root's
+// set's — with their subagent children among them: each root's
 // own + delegated, where a root is every run of the set that is not a
 // core Subagent child of another run in it. It primes c with the tree,
 // so pricing the roots costs no children reads. noun names a root in
@@ -1288,12 +1209,12 @@ func (c *coster) setCost(runs []obsdb.RunRow, noun string) cost {
 	out.cache = cacheOf(usage)
 	switch {
 	case len(parts) > 0 && allScripted:
-		// Every root a scripted model's — the playground's scripted
+		// Every root a scripted model's — the scripted
 		// engine reports zero usage, so this precedes the zero case:
 		// the set's $0 is exact too.
 		out.badge, out.reason, out.cache = costScripted, scriptedReason, cacheExact
 	case usage == (core.Usage{}):
-		// No usage at all (a run-less experiment): a $0 that nothing
+		// No usage at all (a run-less set): a $0 that nothing
 		// can have overstated, so no cache note.
 		out.cache = cacheExact
 	}

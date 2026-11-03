@@ -15,7 +15,7 @@ import (
 // children of many runs at once. Both first-party backends implement
 // it and the obsdbtest conformance table holds them to the same
 // answers; a backend that does not is a database without the tree —
-// Studio then leaves its spans_tree capability off, says why, and
+// the server then leaves its spans_tree capability off, says why, and
 // reads each run's children one run at a time.
 type TreeReader interface {
 	// RunTreeSpans returns the spans of the run and of every run that
@@ -34,10 +34,10 @@ type TreeReader interface {
 	// names the run it belongs to and that run's parent: the key a
 	// reader draws one run's spans under another's by is (RunID,
 	// SpanID). ErrNotFound for an unknown run; empty, not an error, for
-	// a run with no span stored. TreeQuery.PublicID and Meta scope the
-	// answer (a panel token's): the cut, then the scope, then
-	// the cap, so a run the scope leaves out never takes a visible
-	// run's place under the cap (RunTree.Hidden).
+	// a run with no span stored. TreeQuery.PublicID and Meta filter the
+	// answer: the cut, then the filter, then the cap, so a run the
+	// filter leaves out never takes a visible run's place under the
+	// cap (RunTree.Hidden).
 	RunTreeSpans(ctx context.Context, q TreeQuery) (RunTree, error)
 	// ChildRuns returns the direct children (RunRow.ParentRunID) of each
 	// of the parent ids, in one read per call however many ids it names
@@ -54,16 +54,16 @@ type TreeReader interface {
 type TreeQuery struct {
 	// RunID is the tree's root run.
 	RunID string
-	// PublicID, when not "", scopes the tree to one public id (a panel
-	// token's, U9.1-fix): the root run's spans stay, and a descendant
+	// PublicID, when not "", filters the tree to one public id
+	// (U9.1-fix): the root run's spans stay, and a descendant
 	// run stays when its row and each of its spans carry PublicID and
 	// its parent run stays; any other descendant is left out with its
 	// whole subtree, unnamed but counted (RunTree.Hidden, HiddenCount). The
 	// backend leaves the rows' outsiders out of its span read, and the
 	// cap counts the visible spans alone.
 	PublicID string
-	// Meta, when not empty, scopes the tree to the runs carrying every
-	// pair (a tag-scoped panel token's, I4) by PublicID's rule: a
+	// Meta, when not empty, filters the tree to the runs carrying every
+	// pair (I4) by PublicID's rule: a
 	// descendant run stays when its row's metadata and each of its spans'
 	// attributes carry every pair — run metadata rides every weft span
 	// verbatim — and its parent run stays. With PublicID both apply.
@@ -103,7 +103,7 @@ func (q TreeQuery) admitsSpan(attrs map[string]any) bool {
 
 // TreeSpanCap bounds the spans one RunTreeSpans answer holds: 10,000,
 // the first in start order. A tree with more is cut there and says so
-// (RunTree.Truncated; Studio's truncated hole, cause response_cap):
+// (RunTree.Truncated; the truncated hole, cause response_cap):
 // each child run's own tree is a read away.
 const TreeSpanCap = 10_000
 

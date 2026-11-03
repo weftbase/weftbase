@@ -18,7 +18,7 @@ import (
 // case-insensitive substring scans over the stored records — and the
 // obsdbtest conformance table holds them to the same answers. A
 // backend that does not implement it is a database that cannot search:
-// Studio then leaves its search capability off and says why.
+// the server then leaves its search capability off and says why.
 type Searcher interface {
 	// Search answers the runs SearchQuery matches, sorted as it asks,
 	// with Total counting the whole match. NextBefore and NextBeforeID
@@ -27,9 +27,9 @@ type Searcher interface {
 }
 
 // SearchQuery selects runs for Search. Its RunQuery carries the
-// filters /api/runs reads — agent, status, session, public id (the
-// panel token's scope), parent, playground, experiment, metadata — with
-// the same meaning, so a scope applied to one applies to the other;
+// filters a runs list reads — agent, status, session, public id,
+// parent, metadata — with the same meaning, so a filter applied to one
+// applies to the other;
 // RunQuery.Before and BeforeID are not read (a search pages by Offset)
 // and RunQuery.Limit is the page size (0 = 50, max 500).
 //
@@ -77,7 +77,7 @@ const (
 )
 
 // ErrInvalidSearch is returned by ParseSearch and Search for a query
-// outside the grammar or its bounds; Studio answers it 400.
+// outside the grammar or its bounds; the server answers it 400.
 var ErrInvalidSearch = errors.New("obsdb: invalid search")
 
 // ParseSearch splits search text into its terms: whitespace separates

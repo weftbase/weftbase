@@ -46,13 +46,13 @@ func manifests(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		// Nanoseconds included: a backend that floors them fails.
 		first := time.Unix(0, 1790845923120000123).UTC()
 		if err := ms.PutManifest(ctx(), obsdb.StoredManifest{Hash: hash, Body: []byte(manifestBody),
-			Source: obsdb.ManifestSourceRuntime, FirstSeen: first}); err != nil {
+			Source: obsdb.ManifestSourceFile, FirstSeen: first}); err != nil {
 			t.Fatal(err)
 		}
 		// The second write of a stored hash changes nothing: the first
 		// row's source and time stay.
 		if err := ms.PutManifest(ctx(), obsdb.StoredManifest{Hash: hash, Body: []byte(manifestBody),
-			Source: obsdb.ManifestSourceFile, FirstSeen: first.Add(time.Hour)}); err != nil {
+			Source: "", FirstSeen: first.Add(time.Hour)}); err != nil {
 			t.Fatal(err)
 		}
 		check := func(when string) {
@@ -61,8 +61,8 @@ func manifests(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			if err != nil || !found {
 				t.Fatalf("Manifest %s = found %v, %v; want it", when, found, err)
 			}
-			if string(m.Body) != manifestBody || m.Hash != hash || m.Source != obsdb.ManifestSourceRuntime || !m.FirstSeen.Equal(first) {
-				t.Errorf("Manifest %s = %q %q %q %v; want the first write verbatim (%q, runtime, %v)",
+			if string(m.Body) != manifestBody || m.Hash != hash || m.Source != obsdb.ManifestSourceFile || !m.FirstSeen.Equal(first) {
+				t.Errorf("Manifest %s = %q %q %q %v; want the first write verbatim (%q, file, %v)",
 					when, m.Hash, m.Body, m.Source, m.FirstSeen, manifestBody, first)
 			}
 		}

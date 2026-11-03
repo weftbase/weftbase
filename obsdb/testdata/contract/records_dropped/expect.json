@@ -1,6 +1,6 @@
 {
   "case": "records_dropped",
-  "description": "the tool_calls run from a destination that had lost 3 records: weft.records.dropped 3 on its run_start and run_finish records (record contract §4; the run has no heartbeat — heartbeats are never stored). The count is ingest health's (Studio keeps the largest per service.name): it is not caller metadata, so meta omits it, and no row field or hole reads it — the row is tool_calls' own",
+  "description": "the tool_calls run from a destination that had lost 3 records: weft.records.dropped 3 on its run_start and run_finish records (record contract §4; the run has no heartbeat — heartbeats are never stored). The count is ingest health's (the server keeps the largest per service.name): it is not caller metadata, so meta omits it, and no row field or hole reads it — the row is tool_calls' own",
   "runs": [
     {
       "id": "a1100000000000000000000000000001",

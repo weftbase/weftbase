@@ -54,13 +54,11 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("DerivedSweep", derivedSweep(open))
 	t.Run("Traces", traces(open))
 	t.Run("TracesBigTie", tracesBigTie(open))
-	t.Run("TracesScopedPaging", tracesScopedPaging(open))
 	t.Run("NotFound", notFound(open))
-	t.Run("Experiments", experiments(open))
 	t.Run("PipelineSpellings", pipelineSpellings(open))
 	t.Run("PagingTies", pagingTies(open))
 	t.Run("SessionPaging", sessionPaging(open))
-	t.Run("SessionsScoped", sessionsScoped(open))
+	t.Run("SessionsFiltered", sessionsFiltered(open))
 	t.Run("SessionTitles", sessionTitles(open))
 	t.Run("SessionTurnFacts", sessionTurnFacts(open))
 	t.Run("EmptyIdentity", emptyIdentity(open))
@@ -93,8 +91,6 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("LastSeenAfter", lastSeenAfter(open))
 	t.Run("Vacuum", vacuum(open))
 	t.Run("CloseRace", closeRace(open))
-	t.Run("Commands", commandsTable(open))
-	t.Run("CommandsPrune", commandsPrune(open))
 	t.Run("Manifests", manifests(open))
 	t.Run("RunTree", runTree(open))
 	t.Run("SessionEvents", sessionEvents(open))
@@ -1004,7 +1000,7 @@ func stoppedBy(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		}
 		b := obsdb.Batch{
 			Spans: []obsdb.Span{
-				span("r_cancel", 2, '1', map[string]any{"weft.run.stopped_by": "canceled", "weft.cancel.cause": "studio.cancel"}),
+				span("r_cancel", 2, '1', map[string]any{"weft.run.stopped_by": "canceled", "weft.cancel.cause": "app.cancel"}),
 				span("r_limit", 2, '2', map[string]any{"weft.run.stopped_by": "usage_limit"}),
 				span("r_both", 1, '3', map[string]any{"weft.run.stopped_by": "has_tool_call:submit"}),
 				span("r_span", 1, '4', map[string]any{"weft.run.stopped_by": "has_tool_call:lookup,refund"}),
@@ -1022,7 +1018,7 @@ func stoppedBy(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			id, by, cause string
 			status        obsdb.Status
 		}{
-			{"r_cancel", "canceled", "studio.cancel", obsdb.StatusFailed},
+			{"r_cancel", "canceled", "app.cancel", obsdb.StatusFailed},
 			{"r_limit", "usage_limit", "", obsdb.StatusFailed},
 			{"r_both", "has_tool_call:submit", "", obsdb.StatusSucceeded},
 			{"r_span", "has_tool_call:lookup,refund", "", obsdb.StatusSucceeded},
@@ -1194,8 +1190,6 @@ func sessions(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		write("s_conf-t1", 1, true, nil)
 		write("s_conf-t2", 2, true, nil)
 		write("s2-t1", 1, true, map[string]any{"weft.session.id": "s2", "weft.public_id": "pub2"})
-		// An experiment on s1: excluded from the session's turns.
-		write("s_conf-x", 3, true, map[string]any{"weft.playground": true})
 		page, err := db.Sessions(ctx(), obsdb.SessionQuery{})
 		if err != nil {
 			t.Fatal(err)
@@ -1223,7 +1217,7 @@ func sessions(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			t.Fatal(err)
 		}
 		if len(det.Runs) != 2 || det.Runs[0].ID != "s_conf-t1" || det.Runs[1].ID != "s_conf-t2" {
-			t.Errorf("s_conf turns = %+v (ordered by turn, experiments excluded)", det.Runs)
+			t.Errorf("s_conf turns = %+v (ordered by turn)", det.Runs)
 		}
 		if _, err := db.Session(ctx(), "nope"); !errors.Is(err, obsdb.ErrNotFound) {
 			t.Errorf("unknown session err = %v", err)
@@ -1591,184 +1585,33 @@ func notFound(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	}
 }
 
-// experiments pins the saved-experiment rows (WEFT-PLAYGROUND §10.4,
-// PQ4) every backend must serve: an upsert keeps the id and refreshes
-// the definition, the list reads newest-first, a missing id is
-// ErrNotFound, and RunQuery.ExperimentID selects the runs the
-// experiment's commands labelled.
-func experiments(open func(t *testing.T) obsdb.DB) func(t *testing.T) {
-	return func(t *testing.T) {
-		ctx := context.Background()
-		db := open(t)
-		defer func() { _ = db.Close() }()
-
-		fromStep, rowStep := 2, 4
-		e := obsdb.Experiment{
-			ID: "exp_1", Name: "tracking-link prompt", Agent: "acme-support",
-			Variants: []obsdb.ExperimentVariant{
-				{Key: "A", Overrides: json.RawMessage(`{}`)},
-				{Key: "B", Overrides: json.RawMessage(`{"instructions":"new"}`), Engine: "scripted", SideEffects: "park"},
-			},
-			Inputs: []obsdb.ExperimentInput{
-				{Key: "1", SourceRunID: "s_1-t1"},
-				{Key: "2", Text: "angry user"},
-				// A multi-source row with its own step (UX-C-37).
-				{Key: "3", SourceRunID: "s_2-t1", FromStep: &rowStep},
-			},
-			// The pass predicate (D8): stored and returned verbatim.
-			PassPredicate: `status = succeeded AND answer ~ /\d+ units/`,
-			ExperimentCommand: obsdb.ExperimentCommand{
-				Engine: "live", SideEffects: "substitute", Thread: "fork", FromStep: &fromStep,
-				SourceRunID:     "s_1-t1",
-				TranscriptEdits: json.RawMessage(`[{"kind":"tool_result","step":1,"call_id":"c0","content":"edited"}]`),
-			},
-		}
-		if err := db.SaveExperiment(ctx, e); err != nil {
-			t.Fatal(err)
-		}
-		e.Name = "tracking-link prompt v2"
-		if err := db.SaveExperiment(ctx, e); err != nil {
-			t.Fatal(err)
-		}
-
-		got, err := db.Experiment(ctx, "exp_1")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got.Name != "tracking-link prompt v2" || got.Agent != "acme-support" {
-			t.Errorf("experiment = %+v, want the refreshed definition", got)
-		}
-		if got.PassPredicate != e.PassPredicate {
-			t.Errorf("pass predicate = %q, want %q verbatim", got.PassPredicate, e.PassPredicate)
-		}
-		if len(got.Variants) != 2 || got.Variants[1].Key != "B" || string(got.Variants[1].Overrides) != `{"instructions":"new"}` {
-			t.Errorf("variants = %+v, want the wire shapes verbatim", got.Variants)
-		}
-		if len(got.Inputs) != 3 || got.Inputs[1].Text != "angry user" || got.Inputs[0].FromStep != nil ||
-			got.Inputs[2].FromStep == nil || *got.Inputs[2].FromStep != 4 || got.Inputs[2].SourceRunID != "s_2-t1" {
-			t.Errorf("inputs = %+v, want each row's own step kept", got.Inputs)
-		}
-		// The rest of the command, kept as sent (plan F5.1): the modes,
-		// the step, the source, the edits verbatim, the variant's own
-		// modes.
-		c := got.ExperimentCommand
-		if c.Engine != "live" || c.SideEffects != "substitute" || c.Thread != "fork" || c.FromStep == nil || *c.FromStep != 2 ||
-			c.SourceRunID != "s_1-t1" || string(c.TranscriptEdits) != string(e.TranscriptEdits) {
-			t.Errorf("command = %+v, want the saved command verbatim", c)
-		}
-		if v := got.Variants[1]; v.Engine != "scripted" || v.SideEffects != "park" || v.Thread != "" {
-			t.Errorf("variant B modes = %+v, want scripted, park and the experiment's thread", v)
-		}
-
-		// An older experiment (saved before exp_1's updates) sorts
-		// behind it.
-		older := obsdb.Experiment{ID: "exp_0", Name: "older"}
-		if err := db.SaveExperiment(ctx, older); err != nil {
-			t.Fatal(err)
-		}
-		if err := db.SaveExperiment(ctx, older); err != nil {
-			t.Fatal(err)
-		}
-		if err := db.SaveExperiment(ctx, e); err != nil { // exp_1's refresh is newest
-			t.Fatal(err)
-		}
-		list, err := db.Experiments(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(list) != 2 || list[0].ID != "exp_1" {
-			t.Errorf("list = %+v, want the newest update first", list)
-		}
-		if len(list) == 2 && (list[0].Thread != "fork" || list[1].Engine != "" || list[1].FromStep != nil) {
-			t.Errorf("list commands = %+v / %+v, want exp_1's and none for exp_0", list[0].ExperimentCommand, list[1].ExperimentCommand)
-		}
-
-		if _, err := db.Experiment(ctx, "exp_nope"); !errors.Is(err, obsdb.ErrNotFound) {
-			t.Errorf("missing experiment err = %v, want ErrNotFound", err)
-		}
-
-		// The runs of one experiment: labelled with its id, excluded
-		// from the others'.
-		writeRun(ctx, t, db, "r_exp1", "exp_1")
-		writeRun(ctx, t, db, "r_exp2", "exp_2")
-		page, err := db.Runs(ctx, obsdb.RunQuery{ExperimentID: "exp_1", ParentRunID: "*"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(page.Runs) != 1 || page.Runs[0].ID != "r_exp1" {
-			t.Errorf("experiment runs = %+v, want exactly r_exp1", page.Runs)
-		}
-		if page.Runs[0].ExperimentID != "exp_1" || !page.Runs[0].Playground {
-			t.Errorf("run row = %+v, want the experiment id and the playground flag", page.Runs[0])
-		}
-	}
-}
-
-// writeRun lands one minimal playground run row labelled with the
-// experiment, through the ordinary write path (the record helper's
-// shapes; the extra attrs carry the experiment identity the row keeps).
-func writeRun(ctx context.Context, t *testing.T, db obsdb.DB, runID, experiment string) {
-	t.Helper()
-	extra := map[string]any{
-		"weft.playground":    true,
-		"weft.experiment.id": experiment,
-	}
-	start := record(runID, "event", "run_start", 0, `{"type":"run_start","id":"`+runID+`"}`, extra)
-	finish := record(runID, "event", "run_finish", 1, `{"type":"run_finish","run_id":"`+runID+`"}`, extra)
-	finish.Time = at(2 * time.Second)
-	if err := db.Write(ctx, obsdb.Batch{Records: []obsdb.Record{start, finish}}); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // pipelineSpellings pins the attribute spellings the real pipeline
-// produces, not the ones a fixture would hand-build: weft.turn and
-// weft.playground travel as run metadata, and the core renders every
-// metadata value as a string attribute — "2" and "true". A backend
-// reading only the typed spellings reports turn 0 on every row and
-// lists every playground run as a session turn.
+// produces, not the ones a fixture would hand-build: weft.turn travels
+// as run metadata, and the core renders every metadata value as a
+// string attribute — "2". A backend reading only the typed spelling
+// reports turn 0 on every row.
 func pipelineSpellings(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	return func(t *testing.T) {
 		db := open(t)
-		write := func(id string, extra map[string]any) {
-			if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{
-				record(id, "event", "run_start", 0, `{"type":"run_start","id":"`+id+`"}`, extra),
-				record(id, "event", "run_finish", 1, `{"type":"run_finish","run_id":"`+id+`","steps":1}`, extra),
-			}}); err != nil {
-				t.Fatal(err)
-			}
+		if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{
+			record("s_conf-t2", "event", "run_start", 0, `{"type":"run_start","id":"s_conf-t2"}`, map[string]any{"weft.turn": "2"}),
+			record("s_conf-t2", "event", "run_finish", 1, `{"type":"run_finish","run_id":"s_conf-t2","steps":1}`, map[string]any{"weft.turn": "2"}),
+		}}); err != nil {
+			t.Fatal(err)
 		}
-		write("s_conf-t2", map[string]any{"weft.turn": "2"})
-		write("pg_1", map[string]any{"weft.turn": "3", "weft.playground": "true", "weft.experiment.id": "exp_1"})
 		turn, err := db.Run(ctx(), "s_conf-t2")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if turn.Turn != 2 || turn.Playground {
-			t.Errorf("turn row = turn %d, playground %v; want 2, false", turn.Turn, turn.Playground)
-		}
-		pg, err := db.Run(ctx(), "pg_1")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !pg.Playground || pg.Turn != 3 || pg.ExperimentID != "exp_1" {
-			t.Errorf("playground row = playground %v, turn %d, experiment %q; want true, 3, exp_1",
-				pg.Playground, pg.Turn, pg.ExperimentID)
-		}
-		yes := true
-		page, err := db.Runs(ctx(), obsdb.RunQuery{Playground: &yes})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(page.Runs) != 1 || page.Runs[0].ID != "pg_1" {
-			t.Errorf("Playground filter = %d runs, want exactly pg_1", len(page.Runs))
+		if turn.Turn != 2 {
+			t.Errorf("turn row = turn %d, want 2", turn.Turn)
 		}
 		det, err := db.Session(ctx(), "s_conf")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if det.Turns != 1 || len(det.Runs) != 1 || det.Runs[0].ID != "s_conf-t2" {
-			t.Errorf("session = %d turns, runs %+v; want the one real turn (the playground run excluded)", det.Turns, det.Runs)
+		if det.Turns != 1 || len(det.Runs) != 1 || det.Runs[0].ID != "s_conf-t2" || det.Runs[0].Turn != 2 {
+			t.Errorf("session = %d turns, runs %+v; want the one turn, turn 2", det.Turns, det.Runs)
 		}
 	}
 }
@@ -2573,15 +2416,12 @@ func sessionUncapped(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 }
 
 // readErrorIsNotNotFound: a read that failed is not "no such id" —
-// callers branch on ErrNotFound (SaveExperiment's first save, Studio's
-// 404), so a cancelled or broken read must surface as itself.
+// callers branch on ErrNotFound (a read route's 404), so a cancelled or
+// broken read must surface as itself.
 func readErrorIsNotNotFound(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	return func(t *testing.T) {
 		db := open(t)
 		if err := db.Write(ctx(), obsdb.Batch{Records: finishedRun("c1")}); err != nil {
-			t.Fatal(err)
-		}
-		if err := db.SaveExperiment(ctx(), obsdb.Experiment{ID: "exp"}); err != nil {
 			t.Fatal(err)
 		}
 		dead, cancel := context.WithCancel(ctx())
@@ -2604,8 +2444,6 @@ func readErrorIsNotNotFound(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		check("Session", err)
 		_, err = db.ResolvePublicID(dead, "pub_conf")
 		check("ResolvePublicID", err)
-		_, err = db.Experiment(dead, "exp")
-		check("Experiment", err)
 	}
 }
 
@@ -2628,36 +2466,32 @@ func filterCombinations(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		}
 		write("f-top-done", true, nil)
 		write("f-top-live", false, map[string]any{"gen_ai.agent.name": "other"})
-		write("f-pg", true, map[string]any{"weft.playground": "true", "weft.experiment.id": "e1"})
+		write("f-pub", true, map[string]any{"weft.public_id": "pub_two"})
 		write("f-kid", true, map[string]any{"weft.parent.run.id": "f-top-done", "weft.session.id": ""})
 		if err := db.Write(ctx(), obsdb.Batch{Spans: []obsdb.Span{invokeSpan("f-bad", 2, map[string]any{"weft.session.id": "s_other"})}}); err != nil {
 			t.Fatal(err)
 		}
-		yes, no := true, false
 		for _, c := range []struct {
 			name string
 			q    obsdb.RunQuery
 			want []string
 		}{
-			{"default", obsdb.RunQuery{}, []string{"f-bad", "f-pg", "f-top-done", "f-top-live"}},
-			{"all", obsdb.RunQuery{ParentRunID: "*"}, []string{"f-bad", "f-kid", "f-pg", "f-top-done", "f-top-live"}},
+			{"default", obsdb.RunQuery{}, []string{"f-bad", "f-pub", "f-top-done", "f-top-live"}},
+			{"all", obsdb.RunQuery{ParentRunID: "*"}, []string{"f-bad", "f-kid", "f-pub", "f-top-done", "f-top-live"}},
 			{"parent", obsdb.RunQuery{ParentRunID: "f-top-done"}, []string{"f-kid"}},
-			{"succeeded", obsdb.RunQuery{Status: obsdb.StatusSucceeded}, []string{"f-pg", "f-top-done"}},
-			{"succeeded all", obsdb.RunQuery{Status: obsdb.StatusSucceeded, ParentRunID: "*"}, []string{"f-kid", "f-pg", "f-top-done"}},
+			{"succeeded", obsdb.RunQuery{Status: obsdb.StatusSucceeded}, []string{"f-pub", "f-top-done"}},
+			{"succeeded all", obsdb.RunQuery{Status: obsdb.StatusSucceeded, ParentRunID: "*"}, []string{"f-kid", "f-pub", "f-top-done"}},
 			{"running", obsdb.RunQuery{Status: obsdb.StatusRunning}, []string{"f-top-live"}},
 			{"failed", obsdb.RunQuery{Status: obsdb.StatusFailed}, []string{"f-bad"}},
 			{"interrupted", obsdb.RunQuery{Status: obsdb.StatusInterrupted}, nil},
-			{"playground", obsdb.RunQuery{Playground: &yes}, []string{"f-pg"}},
-			{"not playground", obsdb.RunQuery{Playground: &no, Status: obsdb.StatusSucceeded}, []string{"f-top-done"}},
-			{"agent", obsdb.RunQuery{Agent: "conf", ParentRunID: "*"}, []string{"f-bad", "f-kid", "f-pg", "f-top-done"}},
+			{"agent", obsdb.RunQuery{Agent: "conf", ParentRunID: "*"}, []string{"f-bad", "f-kid", "f-pub", "f-top-done"}},
 			{"agent other", obsdb.RunQuery{Agent: "other"}, []string{"f-top-live"}},
-			{"session", obsdb.RunQuery{SessionID: "s_conf"}, []string{"f-pg", "f-top-done", "f-top-live"}},
+			{"session", obsdb.RunQuery{SessionID: "s_conf"}, []string{"f-pub", "f-top-done", "f-top-live"}},
 			{"session other", obsdb.RunQuery{SessionID: "s_other", Status: obsdb.StatusFailed}, []string{"f-bad"}},
-			{"public", obsdb.RunQuery{PublicID: "pub_conf", Playground: &no}, []string{"f-bad", "f-top-done", "f-top-live"}},
-			{"experiment", obsdb.RunQuery{ExperimentID: "e1", Status: obsdb.StatusSucceeded}, []string{"f-pg"}},
-			{"meta", obsdb.RunQuery{Meta: map[string]string{"tenant": "conftest"}, Agent: "conf"}, []string{"f-pg", "f-top-done"}},
+			{"public", obsdb.RunQuery{PublicID: "pub_conf"}, []string{"f-bad", "f-top-done", "f-top-live"}},
+			{"meta", obsdb.RunQuery{Meta: map[string]string{"tenant": "conftest"}, Agent: "conf"}, []string{"f-pub", "f-top-done"}},
 			{"everything", obsdb.RunQuery{Agent: "conf", SessionID: "s_conf", PublicID: "pub_conf", ParentRunID: "*",
-				Status: obsdb.StatusSucceeded, Playground: &no, Meta: map[string]string{"tenant": "conftest"}}, []string{"f-top-done"}},
+				Status: obsdb.StatusSucceeded, Meta: map[string]string{"tenant": "conftest"}}, []string{"f-top-done"}},
 		} {
 			page, err := db.Runs(ctx(), c.q)
 			if err != nil {

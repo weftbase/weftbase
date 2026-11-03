@@ -15,7 +15,9 @@ import (
 // obsdb_migrations — the schema's own table, so one SQLite file can also
 // hold thread's sessions (each module owns its migrations table). A file
 // whose recorded version is ahead of this binary's highest fails Open
-// with ErrNewerSchema: never run nothing and say nothing.
+// with ErrNewerSchema: never run nothing and say nothing. A file written
+// before the schema was squashed into 0001 (its obsdb_migrations has no
+// epoch column) fails Open with ErrPredatesRebuild.
 
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
@@ -42,24 +44,10 @@ var migrations = func() map[int]string {
 	return out
 }()
 
-// postMigrations are Go steps a migration runs after its SQL, in the
-// same transaction: what SQL alone cannot derive (0004's search index
-// over the runs already stored reads message bodies the way the writer
-// does). from is the version the file held when this Open began (0 for
-// a new file): a step whose work depends on what an older writer left
-// (0026's) reads it.
-var postMigrations = map[int]func(tx *sql.Tx, from int) error{
-	4:  anyFrom(backfillSearch),
-	22: anyFrom(backfillRunlessSessionEvents),
-	23: anyFrom(backfillSpanStats),
-	26: rederiveStock,
-}
-
-// anyFrom is a post-migration step whose work does not depend on the
-// version the file was opened at.
-func anyFrom(step func(*sql.Tx) error) func(*sql.Tx, int) error {
-	return func(tx *sql.Tx, _ int) error { return step(tx) }
-}
+// schemaEpoch marks the obsdb_migrations rows of the squashed history
+// (0001 holds the whole schema): a file whose table lacks the column was
+// written by the history before it.
+const schemaEpoch = "rebuild"
 
 func highestMigration() int {
 	versions := sortedVersions()
@@ -80,22 +68,36 @@ func sortedVersions() []int {
 
 // ErrNewerSchema is returned by Open when the file's obsdb_migrations
 // is ahead of this binary's highest migration: a database written by a
-// newer weft fails loudly instead of silently ignoring tables it does
+// newer weftbase fails loudly instead of silently ignoring tables it does
 // not know.
 var ErrNewerSchema = errors.New("sqlite: database schema is newer than this obsdb")
 
+// ErrPredatesRebuild is returned by Open for a file written before the
+// schema was squashed (an obsdb_migrations without the epoch column):
+// there is no upgrade path from it.
+var ErrPredatesRebuild = errors.New("sqlite: this database predates the rebuild; start a fresh data dir")
+
 // migrate applies pending migrations, each in its own transaction, and
-// refuses a schema ahead of this binary. The first migration creates
-// obsdb_migrations itself; every later one runs inside it.
+// refuses a schema ahead of this binary or from before the rebuild.
 func migrate(db *sql.DB) error {
-	var current sql.NullInt64
-	if err := db.QueryRow(`SELECT MAX(version) FROM obsdb_migrations`).Scan(&current); err != nil {
-		// 0001 creates the table; a fresh or pre-obsdb file has none.
-		if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS obsdb_migrations (
-			version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
+	var hasTable, hasEpoch int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'obsdb_migrations'`).Scan(&hasTable); err != nil {
+		return err
+	}
+	if hasTable == 1 {
+		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('obsdb_migrations') WHERE name = 'epoch'`).Scan(&hasEpoch); err != nil {
 			return err
 		}
-		current.Valid = false
+		if hasEpoch == 0 {
+			return ErrPredatesRebuild
+		}
+	} else if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS obsdb_migrations (
+			version INTEGER PRIMARY KEY, epoch TEXT NOT NULL, applied_at TEXT NOT NULL)`); err != nil {
+		return err
+	}
+	var current sql.NullInt64
+	if err := db.QueryRow(`SELECT MAX(version) FROM obsdb_migrations`).Scan(&current); err != nil {
+		return err
 	}
 	if current.Valid && int(current.Int64) > highestMigration() {
 		return fmt.Errorf("%w: file has migration %d, this binary knows up to %d",
@@ -130,18 +132,8 @@ func migrate(db *sql.DB) error {
 			_ = tx.Rollback()
 			return fmt.Errorf("sqlite: migration %s: %w", migrations[v], err)
 		}
-		if post := postMigrations[v]; post != nil {
-			from := 0
-			if current.Valid {
-				from = int(current.Int64)
-			}
-			if err := post(tx, from); err != nil {
-				_ = tx.Rollback()
-				return fmt.Errorf("sqlite: migration %s: %w", migrations[v], err)
-			}
-		}
-		if _, err := tx.Exec(`INSERT INTO obsdb_migrations (version, applied_at) VALUES (?, ?)`,
-			v, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		if _, err := tx.Exec(`INSERT INTO obsdb_migrations (version, epoch, applied_at) VALUES (?, ?, ?)`,
+			v, schemaEpoch, time.Now().UTC().Format(time.RFC3339)); err != nil {
 			_ = tx.Rollback()
 			return err
 		}

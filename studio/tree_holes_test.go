@@ -3,7 +3,6 @@ package studio
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -60,55 +59,6 @@ func treeTestSpan(trace, spanID, runID, parentRun, pub string, base time.Time, m
 	return obsdb.Span{TraceID: trace, SpanID: spanID, Name: "invoke_agent a", Kind: 1,
 		Start: at, End: at.Add(time.Millisecond), StatusCode: 1, Service: "svc",
 		Attrs: attrs, Resource: map[string]any{"service.name": "svc"}}
-}
-
-// TestAuthMatrixTreeScopeCap (U9.1-fix2): a panel token's tree is cut
-// to its scope before the cap — a hidden child's 10,001 spans neither
-// make the visible tree truncated nor push a visible span out (and so
-// never say how large the hidden run is); the server token reads the
-// whole tree and is truncated.
-func TestAuthMatrixTreeScopeCap(t *testing.T) {
-	const serverTok = "srv-token"
-	srv := New(Open(t.TempDir()+"/treecap.db"), Token(serverTok))
-	t.Cleanup(func() { _ = srv.Close() })
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-
-	const (
-		trace  = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeee1"
-		root   = "cap_root"
-		theirs = "cap_root/0/c_theirs"
-		mine   = "cap_root/0/c_mine"
-	)
-	now := time.Now().UTC()
-	spans := []obsdb.Span{treeTestSpan(trace, "0a00000000000001", root, "", "pub_a", now, 0)}
-	for i := range obsdb.TreeSpanCap + 1 {
-		spans = append(spans, treeTestSpan(trace, fmt.Sprintf("0b%014x", i), theirs, root, "pub_b", now, 1))
-	}
-	spans = append(spans, treeTestSpan(trace, "0c00000000000001", mine, root, "pub_a", now, 5))
-	if err := srv.db.Write(context.Background(), obsdb.Batch{Spans: spans}); err != nil {
-		t.Fatal(err)
-	}
-	seedRun(t, srv.db, root, "pub_a", "", "", nil)
-	tok, err := signPanelToken([]byte(serverTok), panelClaims{PublicID: "pub_a", Scope: scopePlayground, Exp: time.Now().Add(time.Hour)})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	code, d, body := getTree(t, ts.URL, root, tok)
-	if code != http.StatusOK || len(d.Spans) != 2 || d.Spans[0].RunID != root || d.Spans[1].RunID != mine {
-		t.Fatalf("pub_a's tree = %d, %d spans, want 200 with root's and mine's: %.400s", code, len(d.Spans), body)
-	}
-	if len(d.Holes) != 1 || d.Holes[0].Hole != string(obsdb.HoleHidden) {
-		t.Errorf("pub_a's tree holes = %+v, want hidden alone (no truncated: the visible tree fits)", d.Holes)
-	}
-	if strings.Contains(body, theirs) || strings.Contains(body, "pub_b") {
-		t.Errorf("pub_a's tree names the hidden run")
-	}
-	code, d, _ = getTree(t, ts.URL, root, serverTok)
-	if code != http.StatusOK || len(d.Spans) != obsdb.TreeSpanCap || len(d.Holes) != 1 || d.Holes[0].Hole != string(obsdb.HoleTruncated) {
-		t.Errorf("the server token's tree = %d, %d spans, holes %+v; want truncated at the cap", code, len(d.Spans), d.Holes)
-	}
 }
 
 // TestTreeRunningChildNotMissing (U9.1-fix2): a child with a row and no
@@ -169,7 +119,7 @@ func (g goldenTreeDB) ChildRuns(ctx context.Context, ids []string) (map[string][
 // TS mirror's test, src/lib/spans-tree.test.ts, reads the same file):
 // a span with run_id and parent_run_id, and the holes — truncated
 // (the span cap and a derived run's trace cap), not_recorded/no_spans
-// with runs and count (the list capped), hidden.
+// with runs and count (the list capped).
 func TestSpansTreeGolden(t *testing.T) {
 	db, err := sqlite.Open(t.TempDir() + "/treegolden.db")
 	if err != nil {
@@ -184,7 +134,7 @@ func TestSpansTreeGolden(t *testing.T) {
 			{Span: treeTestSpan("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeee3", "0f00000000000002", "tg_root/0/call_a", "tg_root", "", base, 1),
 				RunID: "tg_root/0/call_a", ParentRunID: "tg_root"},
 		},
-		Truncated: true, TraceTruncated: true, Hidden: true, HiddenCount: 3,
+		Truncated: true, TraceTruncated: true,
 		Missing:      []obsdb.TreeRun{{ID: "tg_root/1/call_b", ParentRunID: "tg_root", Started: base}},
 		MissingCount: 101,
 	}
@@ -201,30 +151,10 @@ func TestSpansTreeGolden(t *testing.T) {
 	for _, h := range d.Holes {
 		kinds = append(kinds, h.Hole+":"+h.Cause)
 	}
-	if got, want := strings.Join(kinds, ","), "truncated:response_cap,truncated:response_cap,not_recorded:no_spans,hidden:"; got != want {
+	if got, want := strings.Join(kinds, ","), "truncated:response_cap,truncated:response_cap,not_recorded:no_spans"; got != want {
 		t.Errorf("holes = %s, want %s", got, want)
 	}
 	if h := d.Holes[2]; h.Count != 101 || len(h.Runs) != 1 || !strings.Contains(h.Reason, "the first 1 by start are named") {
 		t.Errorf("no_spans hole = %+v, want count 101, one run named, the reason saying so", h)
-	}
-	if h := d.Holes[3]; h.Count != 3 || !strings.HasPrefix(h.Reason, "3 runs of this tree carry ") {
-		t.Errorf("hidden hole = %+v, want count 3, the reason saying so", h)
-	}
-}
-
-// TestHiddenHoleReasonsCount (P8-pre-web #2): the hidden holes' reasons
-// say their count in the right number, and the hole carries it.
-func TestHiddenHoleReasonsCount(t *testing.T) {
-	if got := hiddenChildrenHole(1, readScope{}); !strings.HasPrefix(got.Reason, "1 child run carries ") || !strings.HasSuffix(got.Reason, "so it is left out") || got.Count != 1 {
-		t.Errorf("hiddenChildrenHole(1, readScope{}) = %+v, want \"1 child run carries … so it is left out\", count 1", got)
-	}
-	if got := hiddenChildrenHole(2, readScope{}); !strings.HasPrefix(got.Reason, "2 child runs carry ") || !strings.HasSuffix(got.Reason, "so they are left out") || got.Count != 2 {
-		t.Errorf("hiddenChildrenHole(2) = %+v, want \"2 child runs carry … so they are left out\", count 2", got)
-	}
-	if got := hiddenTreeReason(1, readScope{}); !strings.HasPrefix(got, "1 run of this tree carries ") {
-		t.Errorf("hiddenTreeReason(1, readScope{}) = %q, want \"1 run of this tree carries …\"", got)
-	}
-	if got := hiddenTreeReason(3, readScope{}); !strings.HasPrefix(got, "3 runs of this tree carry ") {
-		t.Errorf("hiddenTreeReason(3, readScope{}) = %q, want \"3 runs of this tree carry …\"", got)
 	}
 }
