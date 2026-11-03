@@ -16,6 +16,7 @@ import type {
   Step,
   Trace,
 } from "./types"
+import { argsSha256 } from "./args-hash"
 
 const NOW = Date.now()
 const MIN = 60_000
@@ -214,7 +215,7 @@ function makeSteps(
         request: { id: "INV-2291" },
         response: {
           ok: true,
-          result: { id: "INV-2291", amount: 129, currency: "EUR" },
+          result: { id: "INV-2291", amount: 129, currency: "USD" },
         },
         ...(isSub ? { child_run_id: `${runId}/${i}/0` } : {}),
       })
@@ -229,10 +230,10 @@ function makeSteps(
       status: "waiting",
       offset_ms: t,
       duration_ms: null,
-      summary: "€129.00 to customer #4471",
+      summary: "$129.00 to customer #4471",
       usage: null,
       cost: null,
-      request: { customer_id: 4471, amount: 129, currency: "EUR" },
+      request: { customer_id: 4471, amount: 129, currency: "USD" },
       response: null,
       approval_id: `apr_${runId.slice(4)}`,
     })
@@ -331,7 +332,7 @@ function makeRuns(): Run[] {
         },
         {
           role: "tool",
-          text: '{"id":"INV-2291","amount":129,"currency":"EUR"}',
+          text: '{"id":"INV-2291","amount":129,"currency":"USD"}',
         },
         ...(status === "succeeded"
           ? [
@@ -361,7 +362,7 @@ export const APPROVALS: Approval[] = (() => {
               customer_id: 4471,
               invoice: "INV-2291",
               amount: 129.0,
-              currency: "EUR",
+              currency: "USD",
               reason: "duplicate charge",
             }
           : {
@@ -378,10 +379,10 @@ export const APPROVALS: Approval[] = (() => {
         requested_at: r.started_at,
         summary:
           tool === "issue_refund"
-            ? "Refund €129.00 to customer #4471 for a duplicate charge on INV-2291."
+            ? "Refund $129.00 to customer #4471 for a duplicate charge on INV-2291."
             : "Write 12 extracted invoice lines to the invoices table.",
         args,
-        args_sha256: hex(64),
+        args_sha256: argsSha256(args),
         decided_at: null,
         decided_by: null,
         reason: null,
@@ -400,9 +401,13 @@ export const APPROVALS: Approval[] = (() => {
       tenant: r.tenant,
       status: i === 2 ? "denied" : "approved",
       requested_at: r.started_at,
-      summary: `Refund €${(40 + i * 17).toFixed(2)} to customer #${4400 + i}.`,
-      args: { customer_id: 4400 + i, amount: 40 + i * 17, currency: "EUR" },
-      args_sha256: hex(64),
+      summary: `Refund $${(40 + i * 17).toFixed(2)} to customer #${4400 + i}.`,
+      args: { customer_id: 4400 + i, amount: 40 + i * 17, currency: "USD" },
+      args_sha256: argsSha256({
+        customer_id: 4400 + i,
+        amount: 40 + i * 17,
+        currency: "USD",
+      }),
       decided_at: r.started_at,
       decided_by: "[Operator name]",
       reason: i === 2 ? "Outside the 30-day window." : null,

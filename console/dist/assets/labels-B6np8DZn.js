@@ -1,0 +1,1 @@
+import{k as e}from"./index-Bo28XRVx.js";import{t}from"./jsx-runtime-DyZJNswf.js";var n=t(),r=[`dev`,`staging`,`prod`];function i({label:t,version:r}){return(0,n.jsxs)(e,{variant:`outline`,size:`tag`,className:`gap-1 font-mono`,children:[t,r&&(0,n.jsx)(`span`,{className:`text-subtle-foreground`,children:r})]})}export{i as n,r as t};
