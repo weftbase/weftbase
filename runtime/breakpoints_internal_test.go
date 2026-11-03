@@ -93,7 +93,9 @@ func TestBreakpointParkDecisionIsTheAppsDecision(t *testing.T) {
 		// content-off).
 		d := thread.Approve(callID)
 		d.Who = "devtools"
-		turn, err := s.Decide(ctx, d)
+		// The runtime's class (approvedByRuntime), as a relaying app
+		// would name it: TestSessionsDecisionIsTheAppsDecision.
+		turn, err := s.Decide(thread.WithApprovedBy(ctx, approvedByRuntime), d)
 		if err != nil {
 			t.Fatal(err)
 		}

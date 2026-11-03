@@ -934,10 +934,12 @@ func parkAndDecideBy(t *testing.T, breakpoint bool, decide func(s *thread.Sessio
 
 // TestSessionsDecisionIsTheAppsDecision is the acting path's identity
 // golden: a parked turn approved through runtime.Sessions resumes
-// exactly as one the app approved itself with s.Decide — the same
-// events, the same entries (who decided aside), the same run metadata
-// and the same weft.* span attributes. Whatever the runtime adds on the
-// way (a context value, a metadata key) shows up here.
+// exactly as one the app approved itself with s.Decide under the
+// runtime's approval class — the same events, the same entries (who
+// decided aside), the same run metadata and the same weft.* span
+// attributes. Whatever else the runtime adds on the way (a context
+// value, a metadata key) shows up here; the class itself must
+// (weft.tool.approved_by "runtime", never the door's "user").
 func TestSessionsDecisionIsTheAppsDecision(t *testing.T) {
 	ctx := context.Background()
 	own := parkAndDecide(t, func(s *thread.Session, _ *thread.Turn, callID string) *thread.Turn {
@@ -949,7 +951,11 @@ func TestSessionsDecisionIsTheAppsDecision(t *testing.T) {
 		// content-off).
 		d := thread.Approve(callID)
 		d.Who = "devtools"
-		turn, err := s.Decide(ctx, d)
+		// The runtime names the channel the decision came by — Studio
+		// or the panel, over the runtime link — as the approval class
+		// (thread.WithApprovedBy): an app relaying the same decision
+		// would name it the same way.
+		turn, err := s.Decide(thread.WithApprovedBy(ctx, approvedByRuntime), d)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -973,6 +979,20 @@ func TestSessionsDecisionIsTheAppsDecision(t *testing.T) {
 	})
 	if len(own.Spans) == 0 || len(own.Metadata) != 2 {
 		t.Fatalf("nothing recorded: %+v", own)
+	}
+	// The resumed call's execute_tool span says who let it run: the
+	// runtime (a decision relayed from Studio or the panel), never the
+	// session door's "user" — the class every other runtime decision
+	// path reports (the playground's, ephemeral or fork).
+	approvedBy := ""
+	for _, sp := range viaRuntime.Spans {
+		if strings.HasPrefix(sp, "execute_tool ") && strings.Contains(sp, "weft.tool.approved_by=") {
+			approvedBy = sp
+		}
+	}
+	if !strings.Contains(approvedBy, "weft.tool.approved_by="+approvedByRuntime+" ") &&
+		!strings.HasSuffix(approvedBy, "weft.tool.approved_by="+approvedByRuntime) {
+		t.Errorf("the resumed call's span does not name approved_by %q: %q", approvedByRuntime, approvedBy)
 	}
 	for name, pair := range map[string][2]any{
 		"events": {own.Events, viaRuntime.Events}, "entries": {own.Entries, viaRuntime.Entries},

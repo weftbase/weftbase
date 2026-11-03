@@ -95,3 +95,13 @@ knows no Studio):
   accepted.
 
 The `@weftgo/devtools` npm package keeps its name.
+
+### Fixed
+
+- `runtime`: a decision Studio or the panel sends for an app's own
+  turn (`runtime.Sessions`) is reported as
+  `weft.tool.approved_by` `runtime` on the resumed call's
+  `execute_tool` span, as the playground's decisions already were — it
+  read `user`, the class of the app's own `Session.Decide`, so a trace
+  could not tell a decision relayed from an external UI from the app's.
+  The fork path no longer sets a `Via` the session overwrites.

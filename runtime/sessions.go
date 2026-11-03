@@ -122,7 +122,13 @@ func (l *link) dispatchSession(ctx context.Context, sc sessionCommand) {
 	case verbDecide:
 		d := decisionOf(sc)
 		var turn *thread.Turn
-		turn, err = s.Decide(actx, d)
+		// The decision came over the runtime link — from Studio or the
+		// panel, never from the app's own code — and the resumed call's
+		// execute_tool span says so: weft.tool.approved_by "runtime",
+		// the class every runtime decision path reports (the
+		// playground's, executor.go), where a plain Decide reads "user"
+		// (record contract §3). Who the decider was is d.Who.
+		turn, err = s.Decide(thread.WithApprovedBy(actx, approvedByRuntime), d)
 		if turn != nil {
 			finalRun = turn.RunID() // the resume: the session's next turn, the app's run
 		}

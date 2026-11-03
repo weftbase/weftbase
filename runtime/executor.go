@@ -1278,7 +1278,11 @@ func (l *link) resume(ctx context.Context, pr *parkedRun, parkedRunID, runID, co
 			default: // resolve
 				td = thread.Resolve(d.CallID, d.Content)
 			}
-			td.Who, td.Via = d.Actor, "playground"
+			// Who is the decider the command carried. Via is the
+			// session's to fill (thread's Decide records "user" whatever
+			// the caller writes), so none is set here: the channel rides
+			// the approval class below.
+			td.Who = d.Actor
 			ds = append(ds, td)
 		}
 		// The fork's approvals name the playground as their provenance,
@@ -1331,8 +1335,11 @@ func (l *link) resume(ctx context.Context, pr *parkedRun, parkedRunID, runID, co
 	return status, runID, errText
 }
 
-// approvedByRuntime is weft.tool.approved_by on a call the playground
-// approved on a runtime-started run (record contract §3).
+// approvedByRuntime is weft.tool.approved_by on a call approved over
+// the runtime link (record contract §3): the playground's, on a
+// runtime-started run (ephemeral or fork), and Studio's or the panel's
+// on an app's own turn (sessions.go) — a decision relayed by the
+// runtime, never the app's own "user".
 const approvedByRuntime = "runtime"
 
 // runOptions composes the run exactly as §5.2's snippet does: the
