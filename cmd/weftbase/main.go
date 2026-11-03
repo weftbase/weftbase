@@ -165,7 +165,7 @@
 //
 // # weftbase dev -- command
 //
-// `weftbase dev [flags] -- command args…` (plan B1.2; weft's `weft dev`)
+// `weftbase dev [flags] -- command args…` (plan B1.2)
 // is Studio alone (in-process: the same flags, the same port policy)
 // plus the app — the command after "--" (go run ., go run ./cmd/app; a
 // "--" with no command, or --watch / --no-watch without "--", is a

@@ -65,7 +65,7 @@ func TestBareDoctorFindsAddrStudio(t *testing.T) {
 	}
 
 	from := "weftbase: Studio " + url + " (discovery file " + file + ")\n"
-	out, errb, code := weft("doctor")
+	out, errb, code := weftbase("doctor")
 	if code != 0 || errb != from {
 		t.Errorf("bare weftbase doctor = exit %d, stderr %q, want %q\n%s", code, errb, from, out)
 	}
@@ -82,14 +82,14 @@ func TestBareDoctorFindsAddrStudio(t *testing.T) {
 			t.Errorf("doctor output lacks %q:\n%s", want, out)
 		}
 	}
-	if _, errb, code := weft("runs"); code != 0 || !strings.HasPrefix(errb, from) || !strings.Contains(errb, "no runs match") {
+	if _, errb, code := weftbase("runs"); code != 0 || !strings.HasPrefix(errb, from) || !strings.Contains(errb, "no runs match") {
 		t.Errorf("bare weftbase runs = exit %d, stderr %q", code, errb)
 	}
 	tok, err := os.ReadFile(db + ".token")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out, errb, code := weft("open", "--with-token"); code != 0 || out != url+"/#token="+strings.TrimSpace(string(tok))+"\n" || errb != from {
+	if out, errb, code := weftbase("open", "--with-token"); code != 0 || out != url+"/#token="+strings.TrimSpace(string(tok))+"\n" || errb != from {
 		t.Errorf("bare weftbase open --with-token = exit %d %q %q, want the root signed in", code, out, errb)
 	}
 	b, err := newClient(url, strings.TrimSpace(string(tok))).get(context.Background(), "/api/meta", nil)
@@ -101,7 +101,7 @@ func TestBareDoctorFindsAddrStudio(t *testing.T) {
 	}
 
 	// The second Studio on the same file: refused, exit 1, the first named.
-	_, errb, code = weft("dev", "--db", "sqlite://"+db)
+	_, errb, code = weftbase("dev", "--db", "sqlite://"+db)
 	if want := "weftbase: studio already running at " + url + " (pid " + strconv.Itoa(os.Getpid()) + ") on " + db + ":"; code != 1 || !strings.HasPrefix(errb, want) {
 		t.Errorf("second weftbase dev = exit %d %q, want %q…", code, errb, want)
 	}

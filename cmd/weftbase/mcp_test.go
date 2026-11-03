@@ -842,7 +842,7 @@ func TestMCPPanelToken(t *testing.T) {
 func TestMCPCommand(t *testing.T) {
 	t.Setenv("WEFTBASE_URL", "")
 	t.Setenv("WEFTBASE_TOKEN", "")
-	_, errb, code := weft("mcp", "-h")
+	_, errb, code := weftbase("mcp", "-h")
 	for _, tool := range mcpTools {
 		if !strings.Contains(errb, "  "+tool.name+" ") {
 			t.Errorf("mcp -h lacks %s", tool.name)
@@ -852,10 +852,10 @@ func TestMCPCommand(t *testing.T) {
 		!strings.Contains(errb, "claude mcp add weft -- weftbase mcp --url http://127.0.0.1:7331") {
 		t.Errorf("mcp -h = exit %d\n%s", code, errb)
 	}
-	if _, errb, code := weft("mcp", "--read-only=false"); code != 2 || !strings.Contains(errb, "no write mode") {
+	if _, errb, code := weftbase("mcp", "--read-only=false"); code != 2 || !strings.Contains(errb, "no write mode") {
 		t.Errorf("--read-only=false = exit %d %q", code, errb)
 	}
-	if _, errb, code := weft("mcp", "extra"); code != 2 || !strings.Contains(errb, "mcp takes no arguments") {
+	if _, errb, code := weftbase("mcp", "extra"); code != 2 || !strings.Contains(errb, "mcp takes no arguments") {
 		t.Errorf("an argument = exit %d %q", code, errb)
 	}
 	// No Studio answering /api/meta: it serves anyway (an MCP client
