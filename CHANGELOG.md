@@ -118,3 +118,13 @@ The `@weftgo/devtools` npm package keeps its name.
   `user.id`, `session.id`, `gen_ai.*` — 400). Such a token read no run,
   while the traces list and the live stream, which match span
   attributes, served it that key's spans and records.
+- `obsdb/clickhouse`: a run's metadata (`RunRow.Meta`, the tag
+  filters, tag-scoped panel tokens, session titles) is the union of its
+  rows' pairs, as on SQLite. It was one row's map (`max(Meta)`), so a
+  row carrying other pairs — a tool span with only
+  `weft.session.title` — could drop the caller's tenant tag from the
+  run, and a tag-scoped token then lost the run. Migration 0034 adds
+  `MetaKV` (`maxMap`, filled from each row's `Meta`) and replaces the
+  tag index `idx_meta` with `idx_meta_kv`; on a key two rows carry with
+  different values the greater value wins. Runs merged before the
+  upgrade keep the one map that merge kept.
