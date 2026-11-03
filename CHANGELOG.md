@@ -105,3 +105,11 @@ The `@weftgo/devtools` npm package keeps its name.
   read `user`, the class of the app's own `Session.Decide`, so a trace
   could not tell a decision relayed from an external UI from the app's.
   The fork path no longer sets a `Via` the session overwrites.
+- `studio`: a decision, steer or cancel on an app's own turn goes to a
+  connected runtime that registered the run's agent at the run's
+  `weft.manifest.hash` when one is connected — a run is pinned to the
+  version it ran under — and to the newest-seen runtime of the service
+  only when none is. It went to the newest-seen runtime of the service
+  always, so during a rolling deploy a turn parked on the old version
+  resumed on the new one. `RuntimeServer.SessionsRuntime` takes the
+  run's agent and manifest hash.

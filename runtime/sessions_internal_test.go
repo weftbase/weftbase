@@ -238,7 +238,7 @@ func TestSessionWireShape(t *testing.T) {
 	if got, ok := rs.Registration(rtID); !ok || !got.Sessions {
 		t.Fatalf("Studio's copy of the registration: %+v (ok %v), want sessions: true", got, ok)
 	}
-	if id, ok := rs.SessionsRuntime(serviceName()); !ok || id != rtID {
+	if id, ok := rs.SessionsRuntime(serviceName(), "", ""); !ok || id != rtID {
 		t.Fatalf("SessionsRuntime(%q) = %q %v, want %q", serviceName(), id, ok, rtID)
 	}
 	sent := full

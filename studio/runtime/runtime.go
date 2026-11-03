@@ -1657,24 +1657,40 @@ func (rs *RuntimeServer) EnqueueApproval(runtimeID string, d ApprovalDecision) (
 
 // SessionsRuntime names the connected runtime of service that
 // registered runtime.Sessions — the one an app-owned run of that
-// service is acted on through (the newest seen when several are). ok is
-// false when none is connected: the app's turns are then read-only.
-// An empty service matches no runtime: a run whose records name no
-// service cannot be told apart from another app's.
-func (rs *RuntimeServer) SessionsRuntime(service string) (string, bool) {
+// service is acted on through. A run is pinned to the version it ran
+// under: among several such runtimes (a rolling deploy's two versions)
+// the one registering the run's agent under the run's manifest hash
+// (weft.manifest.hash) takes it, the newest seen of those; only when
+// none registers that version does the newest seen of the service take
+// it — the redeploy that left no old process resumes on the new code,
+// and the resumed run's own manifest_hash says so. ok is false when
+// none is connected: the app's turns are then read-only. An empty
+// service matches no runtime: a run whose records name no service
+// cannot be told apart from another app's.
+func (rs *RuntimeServer) SessionsRuntime(service, agent, manifestHash string) (string, bool) {
 	if service == "" {
 		return "", false
 	}
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
-	best, bestSeen := "", time.Time{}
+	best, bestSeen, bestPinned := "", time.Time{}, false
 	for id, c := range rs.runtimes {
 		if c.feed == nil || !c.reg.Sessions || c.reg.Service != service {
 			continue
 		}
-		if best == "" || c.lastSeen.After(bestSeen) || (c.lastSeen.Equal(bestSeen) && id < best) {
-			best, bestSeen = id, c.lastSeen
+		pinned := false
+		if a, ok := c.reg.Agent(agent); ok && manifestHash != "" && a.Hash() == manifestHash {
+			pinned = true
 		}
+		switch {
+		case best == "", pinned && !bestPinned:
+		case pinned != bestPinned:
+			continue
+		case c.lastSeen.After(bestSeen), c.lastSeen.Equal(bestSeen) && id < best:
+		default:
+			continue
+		}
+		best, bestSeen, bestPinned = id, c.lastSeen, pinned
 	}
 	return best, best != ""
 }

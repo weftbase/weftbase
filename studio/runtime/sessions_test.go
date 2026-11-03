@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -33,7 +34,7 @@ func TestSessionCommand(t *testing.T) {
 	if rs.AnySessions() {
 		t.Error("AnySessions with no stream open")
 	}
-	if _, ok := rs.SessionsRuntime("acme-api"); ok {
+	if _, ok := rs.SessionsRuntime("acme-api", "", ""); ok {
 		t.Error("SessionsRuntime picked a runtime holding no stream")
 	}
 	_, closePlain := subscribe(t, rs, ts.URL, "rt_plain", "")
@@ -46,11 +47,11 @@ func TestSessionCommand(t *testing.T) {
 	if !rs.AnySessions() {
 		t.Error("AnySessions = false with rt_sess connected")
 	}
-	if id, ok := rs.SessionsRuntime("acme-api"); !ok || id != "rt_sess" {
+	if id, ok := rs.SessionsRuntime("acme-api", "", ""); !ok || id != "rt_sess" {
 		t.Errorf("SessionsRuntime(acme-api) = %q %v, want rt_sess", id, ok)
 	}
 	for _, service := range []string{"", "nope"} {
-		if id, ok := rs.SessionsRuntime(service); ok {
+		if id, ok := rs.SessionsRuntime(service, "", ""); ok {
 			t.Errorf("SessionsRuntime(%q) = %q, want none", service, id)
 		}
 	}
@@ -109,6 +110,54 @@ func TestSessionCommand(t *testing.T) {
 	} {
 		if _, err := rs.EnqueueSession(c.runtime, SessionCommand{CommandID: c.id, Verb: VerbCancel}); !errors.Is(err, c.want) {
 			t.Errorf("EnqueueSession(%s, %q) = %v, want %v", c.runtime, c.id, err, c.want)
+		}
+	}
+}
+
+// TestSessionsRuntimePrefersTheRunsVersion: a run parked on one version
+// of the service is decided through a runtime of that version when one
+// is connected — its agent registered under the run's manifest hash —
+// even while a newer process of the service (a rolling deploy's next
+// version) was seen later. Only when no connected runtime registers the
+// run's version does the newest of the service take it, as before (the
+// redeploy that left no old process).
+func TestSessionsRuntimePrefersTheRunsVersion(t *testing.T) {
+	// A clock that moves only when the test moves it: rt_v2 is seen
+	// after rt_v1, and no keep-alive ping reorders the two.
+	var (
+		clockMu sync.Mutex
+		clock   = time.Date(2026, 11, 3, 9, 0, 0, 0, time.UTC)
+	)
+	rs := New(func(rs *RuntimeServer) {
+		rs.now = func() time.Time { clockMu.Lock(); defer clockMu.Unlock(); return clock }
+	})
+	tick := func() { clockMu.Lock(); clock = clock.Add(time.Second); clockMu.Unlock() }
+	ts := httptest.NewServer(mux(rs))
+	defer ts.Close()
+
+	v1 := regBody("rt_v1")
+	v1.Sessions = true
+	v1.Agents[0].ManifestHash = "hash_v1"
+	v2 := regBody("rt_v2")
+	v2.Sessions = true
+	v2.Agents[0].ManifestHash = "hash_v2"
+	register(t, mux(rs), v1)
+	_, close1 := subscribe(t, rs, ts.URL, "rt_v1", "")
+	defer close1()
+	tick() // rt_v2 is the newest seen
+	register(t, mux(rs), v2)
+	_, close2 := subscribe(t, rs, ts.URL, "rt_v2", "")
+	defer close2()
+
+	for _, c := range []struct{ agent, hash, want string }{
+		{"acme-support", "hash_v1", "rt_v1"},
+		{"acme-support", "hash_v2", "rt_v2"},
+		{"acme-support", "hash_gone", "rt_v2"}, // no runtime of that version: the newest
+		{"other-agent", "hash_v1", "rt_v2"},    // another agent's hash pins nothing
+		{"acme-support", "", "rt_v2"},          // a run with no manifest hash recorded
+	} {
+		if id, ok := rs.SessionsRuntime("acme-api", c.agent, c.hash); !ok || id != c.want {
+			t.Errorf("SessionsRuntime(acme-api, %s, %s) = %q %v, want %s", c.agent, c.hash, id, ok, c.want)
 		}
 	}
 }

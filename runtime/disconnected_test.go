@@ -54,7 +54,7 @@ func TestStoppedAppTurnReadsDisconnected(t *testing.T) {
 
 	shutdown() // the app is killed: its link stops
 	deadline := time.Now().Add(5 * time.Second)
-	for _, ok := e.srv.Runtime().SessionsRuntime(agentService(t, e)); ok; _, ok = e.srv.Runtime().SessionsRuntime(agentService(t, e)) {
+	for _, ok := e.srv.Runtime().SessionsRuntime(agentService(t, e), "", ""); ok; _, ok = e.srv.Runtime().SessionsRuntime(agentService(t, e), "", "") {
 		if time.Now().After(deadline) {
 			t.Fatal("the stopped link still reads connected")
 		}

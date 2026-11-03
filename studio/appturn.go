@@ -55,12 +55,14 @@ func refuseAppOwned(w http.ResponseWriter, r *http.Request, msg, fix string) {
 
 // appTurnRuntime names the runtime an app-owned run is acted on
 // through: a connected runtime of the run's service that registered
-// runtime.Sessions, the run a turn of a thread session with a public id
+// runtime.Sessions — one registering the run's agent at the run's
+// manifest hash first (SessionsRuntime: a run is pinned to its
+// version) — the run a turn of a thread session with a public id
 // (what the app's resolver is asked by). Otherwise it answers the 403
 // and reports false. The caller has already checked the identity may
 // act and the run is inside its scope.
 func (s *Server) appTurnRuntime(w http.ResponseWriter, r *http.Request, rs *linkruntime.RuntimeServer, row obsdb.RunRow) (string, bool) {
-	runtimeID, ok := rs.SessionsRuntime(row.Service)
+	runtimeID, ok := rs.SessionsRuntime(row.Service, row.Agent, row.ManifestHash)
 	if !ok {
 		msg, fix := s.appRefusal(r, rs, row)
 		refuseAppOwned(w, r, msg, fix)
