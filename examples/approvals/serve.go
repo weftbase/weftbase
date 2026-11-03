@@ -17,8 +17,8 @@ package main
 // landing page carries the panel's script tag scoped to the session's
 // public id. The link opens only under WEFT_ENV=dev:
 //
-//	WEFT_ENV=dev go run ./thread/examples/approvals -serve 127.0.0.1:7331
-//	weftbase dev -- go run ./thread/examples/approvals -serve 127.0.0.1:8080
+//	WEFT_ENV=dev go run ./examples/approvals -serve 127.0.0.1:7331
+//	weftbase dev -- go run ./examples/approvals -serve 127.0.0.1:8080
 //	# open the address, ask "deploy to prod", and decide it in the panel
 //
 // Under weftbase dev the runs are exported to that Studio as well (its

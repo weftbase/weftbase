@@ -1610,8 +1610,8 @@ same block under the same gate, in the same words, the 403's lifetime
 included (`parity.test.ts`). Studio's other capability-gated pages
 (traces, live, experiments, playground, compare) say a failed meta read
 as `could not read the Studio's capabilities: …`, never that the
-capability is off. The demo is `thread/examples/approvals -serve`:
-`WEFT_ENV=dev go run ./thread/examples/approvals -serve 127.0.0.1:7331`,
+capability is off. The demo is `examples/approvals -serve`:
+`WEFT_ENV=dev go run ./examples/approvals -serve 127.0.0.1:7331`,
 ask "deploy to prod", decide it in the panel docked on the page; a
 restart over the same `-dir` resumes the session stored under its
 public id (one public id, one session), and a serve whose cached Session
