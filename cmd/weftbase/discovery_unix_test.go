@@ -3,7 +3,6 @@
 package main
 
 import (
-	"net/http"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -21,27 +20,19 @@ func TestServerStopsOnSIGHUP(t *testing.T) {
 	dir := discoveryDir(t)
 	base := freeBase(t, 1)
 	var out syncBuffer
-	done := make(chan error, 1)
+	done := make(chan int, 1)
 	go func() {
-		done <- serveWith("sqlite://"+filepath.Join(t.TempDir(), "weft.db"), want{addr: loop(base), span: 1}, "tok", &out, afterBoot{})
+		done <- run([]string{"dev", "--addr", loop(base), "--data", t.TempDir()}, &out, &out)
 	}()
-	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		if resp, err := http.Get("http://" + loop(base) + "/api/meta"); err == nil {
-			_ = resp.Body.Close()
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("weftbase never served: %s", out.String())
-		}
-	}
+	waitServing(t, loop(base), done, &out)
 	if _, err := os.Stat(filepath.Join(dir, discovery.FileName)); err != nil {
 		t.Fatalf("no discovery file while serving: %v", err)
 	}
 	signalSelf(t, syscall.SIGHUP)
 	select {
-	case err := <-done:
-		if err != nil {
-			t.Errorf("serve after SIGHUP: %v", err)
+	case code := <-done:
+		if code != 0 {
+			t.Errorf("dev after SIGHUP: exit %d", code)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("serve never returned after SIGHUP")

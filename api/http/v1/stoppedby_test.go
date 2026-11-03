@@ -13,7 +13,7 @@ import (
 // TestStoppedByOnTheRunRow pins U3.2's API half: every run row (list,
 // search, the run document) carries stopped_by from its run_finish, and
 // cancel_cause beside it, both omitted when empty; ?stopped_by= filters
-// /api/runs and /api/search exactly, or by prefix for a value ending in
+// /v1/runs and /v1/search exactly, or by prefix for a value ending in
 // ':' (docs/record-contract.md §6).
 func TestStoppedByOnTheRunRow(t *testing.T) {
 	db, err := sqlite.Open(":memory:")
@@ -52,23 +52,23 @@ func TestStoppedByOnTheRunRow(t *testing.T) {
 		return strings.Join(out, ",")
 	}
 	for path, want := range map[string]string{
-		"/weftbase/api/runs":                                   "r_plain=,r_steps=step_count_is:2,r_submit=has_tool_call:submit",
-		"/weftbase/api/runs?stopped_by=has_tool_call:":         "r_submit=has_tool_call:submit",
-		"/weftbase/api/runs?stopped_by=has_tool_call:submit":   "r_submit=has_tool_call:submit",
-		"/weftbase/api/runs?stopped_by=step_count_is:2":        "r_steps=step_count_is:2",
-		"/weftbase/api/runs?stopped_by=has_tool_call":          "",
-		"/weftbase/api/search?stopped_by=has_tool_call:":       "r_submit=has_tool_call:submit",
-		"/weftbase/api/search?stopped_by=step_count_is:2&q=do": "r_steps=step_count_is:2",
+		"/weftbase/v1/runs":                                        "r_plain=,r_steps=step_count_is:2,r_submit=has_tool_call:submit",
+		"/weftbase/v1/runs?stopped_by=has_tool_call:":              "r_submit=has_tool_call:submit",
+		"/weftbase/v1/runs?stopped_by=has_tool_call:submit":        "r_submit=has_tool_call:submit",
+		"/weftbase/v1/runs?stopped_by=step_count_is:2":             "r_steps=step_count_is:2",
+		"/weftbase/v1/runs?stopped_by=has_tool_call":               "",
+		"/weftbase/v1/runs?sort=started&stopped_by=has_tool_call:": "r_submit=has_tool_call:submit",
+		"/weftbase/v1/runs?stopped_by=step_count_is:2&q=do":        "r_steps=step_count_is:2",
 	} {
 		if got := ids(path); got != want {
 			t.Errorf("GET %s = %q, want %q", path, got, want)
 		}
 	}
-	_, _, body := get(t, h, "/weftbase/api/runs/r_submit")
+	_, _, body := get(t, h, "/weftbase/v1/runs/r_submit")
 	if !strings.Contains(body, `"stopped_by":"has_tool_call:submit"`) {
 		t.Errorf("run document lacks stopped_by: %s", body)
 	}
-	_, _, body = get(t, h, "/weftbase/api/runs/r_plain")
+	_, _, body = get(t, h, "/weftbase/v1/runs/r_plain")
 	if strings.Contains(body, `"stopped_by"`) {
 		t.Errorf("run document of a run with none carries stopped_by: %s", body)
 	}

@@ -16,7 +16,7 @@ import (
 
 // The step-aligned diff (plan E3, E3.1):
 //
-//	GET /api/diff?a=<run id>&b=<run id>
+//	GET /v1/diff?a=<run id>&b=<run id>
 //
 // Two runs, aligned by the SOURCE's step ordinal (decision 8: the
 // ordinal is the step's id everywhere, here the alignment key; A8,
@@ -37,7 +37,7 @@ import (
 // compared with the re-run — a change there is a change (first_changed
 // too); a source the server cannot read leaves those rows not compared
 // (every column unknown). Each step assembled
-// exactly as GET /api/runs/{id}/steps/{n} assembles it (assembleStep),
+// exactly as GET /v1/runs/{id}/steps/{n} assembles it (assembleStep),
 // then compared field by field: the system prompt (by hash when both
 // sides have one), the tool calls as name(args) with the arguments
 // canonicalised (sorted keys), the tool results (content and is_error,
@@ -86,7 +86,7 @@ type diffAlign struct {
 	BFrom  int    `json:"b_from"`
 }
 
-// diffDoc is GET /api/diff.
+// diffDoc is GET /v1/diff.
 type diffDoc struct {
 	A diffRun `json:"a"`
 	B diffRun `json:"b"`
@@ -189,12 +189,12 @@ type diffToolResult struct {
 	IsError bool   `json:"is_error"`
 }
 
-// serveDiff answers GET /api/diff?a=&b=.
+// serveDiff answers GET /v1/diff?a=&b=.
 func (s *Server) serveDiff(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	a, b := q.Get("a"), q.Get("b")
 	if a == "" || b == "" {
-		badRequest(w, r, "a and b must both name a run: /api/diff?a=<run id>&b=<run id>")
+		badRequest(w, r, "a and b must both name a run: /v1/diff?a=<run id>&b=<run id>")
 		return
 	}
 	ra, err := s.diffSteps(r, a)

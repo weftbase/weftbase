@@ -15,7 +15,7 @@ import (
 
 // The aggregates (obsdb.Aggregator; UX plan D7, A4, A2) over the
 // span_stats rollup (migration 0023): Stats joins the runs a query
-// keeps — runWhere, the /api/runs filters, the window on started_ns —
+// keeps — runWhere, the /v1/runs filters, the window on started_ns —
 // to their rollup rows and lets SQLite group them; ErrorCounts groups
 // the search match's error texts. The record contract's numbers are
 // computed in SQL once, at ingest (spanStatsInsert), never parsed out

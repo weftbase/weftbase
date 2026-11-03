@@ -105,7 +105,7 @@ type ModelPrice struct {
 	Reasoning   *float64 `json:"reasoning,omitempty"`
 }
 
-// Table sources, as api/meta and the settings route report them.
+// Table sources, as /v1/meta and the settings route report them.
 const (
 	SourceDefault = "default" // the shipped pricing.json
 	SourceFile    = "file"    // WEFT_PRICING / --pricing (LoadPricing)

@@ -19,15 +19,21 @@ weft's own `AGENTS.md` maps the framework.
 |---|---|---|
 | `client/ulid`, `client/discovery`, `client/exporter`, `client/rest` | L0 | ids, the dev discovery file, the OTLP destination (`Remote`, `Install`), the `/v1` client |
 | `store` | L1 | `Tx`, `Runner`, error kinds, the migration runner |
-| `tenant` | L1 | the `Scope` (project, env, tenant); `NewScope` only from `authz` and `tenant/...` |
+| `store/sqlite` | L3 | the control store on one SQLite file (`BEGIN IMMEDIATE`, `AfterCommit`, migrations) |
+| `tenant`, `tenant/keys` | L1 | the `Scope` (project, env, tenant); `NewScope` only from `authz` and `tenant/...`; API keys (`wb_<sk\|rk\|pk\|wk>_<env>_…`, hashed, audited) |
 | `events` | L1 | the outbox: `Emit` in the change's transaction, relay, hub |
 | `obsdb` (+ `sqlite`, `clickhouse`, `obsdbtest`) | L1 | the trace store and its conformance suite |
 | `internal/...` | L1 | dblock, listen, doctor, reqlog, httpx, release, termsafe, weftsrc |
 | `observe/ingest`, `observe/cost`, `observe/local` | L2 | OTLP ingest at `/otlp/v1/*`, pricing, the in-process sink |
-| `authz`, `registry`, `queue`, `sessions`, `approvals`, `audit`, `budgets`, `webhooks`, `worker` | L2 | domains (landing per `REBUILD-TODO.md`) |
-| `store/sqlite`, `store/postgres` | L3 | control-store backends |
-| `api/http/v1`, `api/mcp`, `console` | L4 | the API, the MCP tools, the embedded Console |
-| `weftbase` (root), `cmd/weftbase`, `examples`, `scripts` | L5 | kernel, CLI, tooling |
+| `authz` | L2 | credential → `Principal` + `Scope` (bearer key, then the `wb_session` cookie, then `Open`), `Can(principal, action)`, Console sign-in links and sessions |
+| `registry`, `queue`, `sessions`, `approvals`, `audit`, `budgets`, `webhooks`, `worker` | L2 | domains (landing per `REBUILD-TODO.md`) |
+| `store/postgres` | L3 | the Stage 1 control-store backend (later) |
+| `api/http` (package `httpapi`) | L4 | the router: request ids, CORS, guards, authentication, `authz.Can` per route from one table, `/healthz` `/readyz` `/metrics`, Console sign-in, the Console at `/` |
+| `api/http/v1` | L4 | the `/v1` read handlers, streams and `/otlp/v1/*` ingest, each route with its action (`Routes`, `IngestRoutes`) |
+| `api/openapi/v1.yaml` | — | the `/v1` contract; `make api-check` tests it against the route table |
+| `api/mcp`, `console` | L4 | the MCP tools, the embedded Console |
+| `weftbase` (root) | L5 | the kernel: `New(opts…)`, `Handler`, `Run`, `Shutdown`, `Ready`, roles; opens the stores under the data dir and holds their locks |
+| `cmd/weftbase`, `examples`, `scripts` | L5 | CLI, examples, tooling |
 
 ## Rules
 
@@ -49,6 +55,7 @@ weft's own `AGENTS.md` maps the framework.
 make check        # build, vet, race tests in both modules, layering, vocabulary
 make test         # race tests, both modules
 make layering     # the import checks
+make api-check    # the OpenAPI spec against the route table
 ```
 
 ClickHouse: `WEFT_CLICKHOUSE_DSN=clickhouse://default:weft@127.0.0.1:9000/default go test -race ./obsdb/clickhouse/...`.

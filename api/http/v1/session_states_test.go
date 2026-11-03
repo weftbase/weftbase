@@ -14,7 +14,7 @@ import (
 // The sessions list's states (U16; UX-B-15, UX-B-16, UX-B-28): a row
 // carries its newest turn's open park (pending), its outcome strip and
 // its failed / ended counts (obsdb.SessionTurnFacts), and
-// /api/sessions filters by awaiting, failed, compacted, lineage and
+// /v1/sessions filters by awaiting, failed, compacted, lineage and
 // since — a
 // malformed value a 400 naming the parameter.
 func TestSessionStatesAndFilters(t *testing.T) {
@@ -26,7 +26,7 @@ func TestSessionStatesAndFilters(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	seedRun(t, db, "s_park-t1", "pub_p", "s_park", `{"type":"run_finish","run_id":"s_park-t1","usage":{"input_tokens":1,"output_tokens":1},"steps":1,"pending":[{"id":"c1"}]}`, nil)
 	seedRun(t, db, "s_plain-t1", "pub_q", "s_plain", "", nil)
-	srv := New(DB(db), Token(serverTok))
+	srv := New(DB(db))
 	t.Cleanup(func() { _ = srv.Close() })
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
@@ -52,7 +52,7 @@ func TestSessionStatesAndFilters(t *testing.T) {
 		return page.Sessions
 	}
 	byID := map[string]row{}
-	for _, r := range list("/api/sessions") {
+	for _, r := range list("/v1/sessions") {
 		byID[r.ID] = r
 	}
 	// The row's status is the newest turn's outcome — ?status='s rule,
@@ -67,36 +67,36 @@ func TestSessionStatesAndFilters(t *testing.T) {
 	if p := byID["s_plain"]; p.Pending != 0 || !slices.Equal(p.Outcomes, []string{"succeeded"}) {
 		t.Errorf("s_plain = %+v; want no pending, outcomes [succeeded]", p)
 	}
-	if got := list("/api/sessions?awaiting=1"); len(got) != 1 || got[0].ID != "s_park" {
+	if got := list("/v1/sessions?awaiting=1"); len(got) != 1 || got[0].ID != "s_park" {
 		t.Errorf("awaiting=1 = %+v; want s_park alone", got)
 	}
-	if got := list("/api/sessions?failed=true"); len(got) != 0 {
+	if got := list("/v1/sessions?failed=true"); len(got) != 0 {
 		t.Errorf("failed=true = %+v; want none", got)
 	}
 	// status= is the newest turn's outcome, the session page's word: a
 	// parked newest turn is not succeeded (P9-pre-web-fix).
-	if got := list("/api/sessions?status=succeeded"); len(got) != 1 || got[0].ID != "s_plain" {
+	if got := list("/v1/sessions?status=succeeded"); len(got) != 1 || got[0].ID != "s_plain" {
 		t.Errorf("status=succeeded = %+v; want s_plain alone", got)
 	}
-	if got := list("/api/sessions?status=failed"); len(got) != 0 {
+	if got := list("/v1/sessions?status=failed"); len(got) != 0 {
 		t.Errorf("status=failed = %+v; want none", got)
 	}
-	if got := list("/api/sessions?compacted=1"); len(got) != 0 {
+	if got := list("/v1/sessions?compacted=1"); len(got) != 0 {
 		t.Errorf("compacted=1 = %+v; want none", got)
 	}
-	if got := list("/api/sessions?lineage=fork"); len(got) != 0 {
+	if got := list("/v1/sessions?lineage=fork"); len(got) != 0 {
 		t.Errorf("lineage=fork = %+v; want none", got)
 	}
 	for _, q := range []string{"awaiting=maybe", "failed=2", "compacted=x", "status=parked", "status=nope", "lineage=cousin", "since=yesterday"} {
-		if code, out := b4Do(t, http.MethodGet, ts.URL+"/api/sessions?"+q, serverTok, ""); code != http.StatusBadRequest {
+		if code, out := b4Do(t, http.MethodGet, ts.URL+"/v1/sessions?"+q, serverTok, ""); code != http.StatusBadRequest {
 			t.Errorf("?%s = %d %s; want 400", q, code, out)
 		}
 	}
 	// The session document carries the same facts.
-	code, out := b4Do(t, http.MethodGet, ts.URL+"/api/sessions/s_park", serverTok, "")
+	code, out := b4Do(t, http.MethodGet, ts.URL+"/v1/sessions/s_park", serverTok, "")
 	var doc row
 	if code != http.StatusOK || json.Unmarshal([]byte(out), &doc) != nil || doc.Pending != 1 {
-		t.Errorf("GET /api/sessions/s_park = %d %s; want pending 1", code, out)
+		t.Errorf("GET /v1/sessions/s_park = %d %s; want pending 1", code, out)
 	}
 }
 

@@ -13,7 +13,7 @@ import (
 
 // The run's app logs (plan A7):
 //
-//	GET /api/runs/{id}/logs?from=&limit=&severity=
+//	GET /v1/runs/{id}/logs?from=&limit=&severity=
 //
 // The non-weft log records of the run's traces — the app's own slog or
 // OTel Logs API lines — attributed to the run through the spans they
@@ -40,7 +40,7 @@ type logRow struct {
 	SpanID         string         `json:"span_id,omitempty"`
 }
 
-// logsPage is GET /api/runs/{id}/logs. NextFrom is the next page's
+// logsPage is GET /v1/runs/{id}/logs. NextFrom is the next page's
 // from (the last index + 1) when the page is full; absent on the last
 // page. A run whose logs cannot be attributed (it has no span) carries
 // the not_recorded badge beside an empty list.
@@ -112,7 +112,7 @@ const (
 	logsNoBridgeFix    = "bridge slog: otel.Install(…, otel.Slog()), or log through slog.New(otel.SlogHandler(h))"
 )
 
-// serveRunLogs answers api/runs/{id}/logs?from=&limit=&severity=: one
+// serveRunLogs answers /v1/runs/{id}/logs?from=&limit=&severity=: one
 // page of the run's app logs in time order. from is the first index
 // (next_from feeds straight back in); limit 0 = 100, max 1000;
 // severity keeps the records at or above a level (trace, debug, info,

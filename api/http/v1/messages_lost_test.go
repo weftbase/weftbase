@@ -24,7 +24,7 @@ func TestMessagesLostFixture(t *testing.T) {
 			h := srv.Handler()
 			ingestFile(t, h, "/weftbase/otlp/v1/traces", "../../../obsdb/testdata/contract/"+c.name+"/traces.json")
 			ingestFile(t, h, "/weftbase/otlp/v1/logs", "../../../obsdb/testdata/contract/"+c.name+"/logs.json")
-			_, _, runs := get(t, h, "/weftbase/api/runs")
+			_, _, runs := get(t, h, "/weftbase/v1/runs")
 			var list struct {
 				Runs []struct {
 					ID string `json:"id"`
@@ -34,7 +34,7 @@ func TestMessagesLostFixture(t *testing.T) {
 			if len(list.Runs) != 1 {
 				t.Fatalf("runs = %s, want one", runs)
 			}
-			_, _, body := get(t, h, "/weftbase/api/runs/"+list.Runs[0].ID)
+			_, _, body := get(t, h, "/weftbase/v1/runs/"+esc(list.Runs[0].ID))
 			var doc holesDoc
 			decode(t, body, &doc)
 			_, fix := obsdb.HoleNoteFor(obsdb.HoleGap, obsdb.CauseMessagesLost)

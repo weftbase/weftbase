@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -43,7 +42,7 @@ func TestFileManifestIsStored(t *testing.T) {
 	hash := obsdb.ManifestHash(file) // one agent: the file is its document
 	seedRun(t, db, "r_mf", "", "", "", map[string]any{"weft.manifest.hash": hash})
 	h := srv.Handler()
-	code, _, body := get(t, h, "/weftbase/api/manifests/"+hash)
+	code, _, body := get(t, h, "/weftbase/v1/manifests/"+hash)
 	var got storedManifestView
 	decode(t, body, &got)
 	if code != http.StatusOK || got.Source != obsdb.ManifestSourceFile || !sameJSON(t, got.Manifest, string(file)) || got.CurrentManifestHash != hash {
@@ -52,7 +51,7 @@ func TestFileManifestIsStored(t *testing.T) {
 	var run struct {
 		ManifestAvailable bool `json:"manifest_available"`
 	}
-	_, _, rb := get(t, h, "/weftbase/api/runs/r_mf")
+	_, _, rb := get(t, h, "/weftbase/v1/runs/r_mf")
 	decode(t, rb, &run)
 	if !run.ManifestAvailable {
 		t.Errorf("run r_mf = %s; want manifest_available", rb)
@@ -63,7 +62,7 @@ func TestFileManifestIsStored(t *testing.T) {
 	if _, err := db.Sweep(context.Background(), time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if code, _, body := get(t, h, "/weftbase/api/manifests/"+hash); code != http.StatusOK {
+	if code, _, body := get(t, h, "/weftbase/v1/manifests/"+hash); code != http.StatusOK {
 		t.Errorf("after DeleteRun and Sweep: %d %s; manifests are kept forever", code, body)
 	}
 }
@@ -75,35 +74,12 @@ type noManifests struct {
 	obsdb.Searcher
 }
 
-// TestManifestsCapabilityFollowsTheDB (U27-fix): a database that is not
-// an obsdb.ManifestStore registers no GET /api/manifests/{hash} and
-// /api/meta reports the capability off with its reason — search, which
-// the wrapper keeps, stays on; over sqlite the capability is on.
-func TestManifestsCapabilityFollowsTheDB(t *testing.T) {
+// TestManifestsFollowTheDB (U27-fix): over a database that is not an
+// obsdb.ManifestStore, GET /v1/manifests/{hash} answers 501.
+func TestManifestsFollowTheDB(t *testing.T) {
 	fx := fixtureDB(t)
 	h := Handler(DB(noManifests{fx, fx.(obsdb.Searcher)}))
-	_, _, body := get(t, h, "/weftbase/api/meta")
-	var meta struct {
-		Capabilities    []string          `json:"capabilities"`
-		CapabilitiesOff map[string]string `json:"capabilities_off"`
-	}
-	decode(t, body, &meta)
-	if slices.Contains(meta.Capabilities, "manifests") || !slices.Contains(meta.Capabilities, "search") {
-		t.Errorf("capabilities = %v, want search and no manifests over a DB that stores none", meta.Capabilities)
-	}
-	if meta.CapabilitiesOff["manifests"] != offManifests {
-		t.Errorf("capabilities_off = %v, want manifests: %q", meta.CapabilitiesOff, offManifests)
-	}
-	if _, off := meta.CapabilitiesOff["search"]; off {
-		t.Errorf("capabilities_off = %v, want search on", meta.CapabilitiesOff)
-	}
-	if code, _, _ := get(t, h, "/weftbase/api/manifests/"+strings.Repeat("a", 64)); code != http.StatusNotFound {
-		t.Errorf("GET /api/manifests/{hash} over a DB that stores none = %d, want 404", code)
-	}
-	_, _, body = get(t, Handler(DB(fixtureDB(t))), "/weftbase/api/meta")
-	meta.Capabilities, meta.CapabilitiesOff = nil, nil
-	decode(t, body, &meta)
-	if _, off := meta.CapabilitiesOff["manifests"]; off || !slices.Contains(meta.Capabilities, "manifests") {
-		t.Errorf("meta over sqlite = %s, want manifests on", body)
+	if code, _, _ := get(t, h, "/weftbase/v1/manifests/"+strings.Repeat("a", 64)); code != http.StatusNotImplemented {
+		t.Errorf("GET /v1/manifests/{hash} over a DB that stores none = %d, want 501", code)
 	}
 }

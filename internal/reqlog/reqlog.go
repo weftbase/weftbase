@@ -23,13 +23,13 @@
 // proxy every client arrives from the proxy's address, so they share
 // one remote and one limit. 5xx lines are never limited.
 //
-// Two route classes: OTLP ingest under /otlp/, and the REST API (/v1/,
-// and /api/ while the read routes still live there), whose 4xx answers
-// are the caller's own business and are not logged.
+// Two route classes: OTLP ingest under /otlp/, and the REST API (/v1/
+// and the router's own routes), whose 4xx answers are the caller's
+// own business and are not logged.
 //
 // The logger also counts the ingest batches (POSTs under /otlp/) it saw
 // accepted and refused, with the last refusal and its time (Ingest):
-// /api/meta's ingest section.
+// GET /v1/meta's ingest section and /metrics.
 package reqlog
 
 import (

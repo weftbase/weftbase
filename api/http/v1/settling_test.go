@@ -34,7 +34,7 @@ func TestRootBeforeRecords(t *testing.T) {
 		Events []posEvent `json:"events"`
 		Done   bool       `json:"done"`
 	}
-	code, _, body := get(t, h, "/weftbase/api/runs/r_ok/events")
+	code, _, body := get(t, h, "/weftbase/v1/runs/r_ok/events")
 	if code != http.StatusOK {
 		t.Fatalf("events: %d %s", code, body)
 	}
@@ -43,7 +43,7 @@ func TestRootBeforeRecords(t *testing.T) {
 		t.Errorf("events of a settling run = done, want the tail followed: %s", body)
 	}
 	var doc holesDoc
-	_, _, body = get(t, h, "/weftbase/api/runs/r_ok")
+	_, _, body = get(t, h, "/weftbase/v1/runs/r_ok")
 	decode(t, body, &doc)
 	if doc.Status != "succeeded" {
 		t.Errorf("settling run status = %s, want succeeded (from its root)", doc.Status)
@@ -61,7 +61,7 @@ func TestRootBeforeRecords(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	_, _, body = get(t, h, "/weftbase/api/runs/r_ok/events")
+	_, _, body = get(t, h, "/weftbase/v1/runs/r_ok/events")
 	page.Events, page.Done = nil, false
 	decode(t, body, &page)
 	if !page.Done || len(page.Events) != 2 {
@@ -108,13 +108,13 @@ func TestTailLostAndSpansOnly(t *testing.T) {
 	}
 
 	var run holesDoc
-	_, _, body := get(t, h, "/weftbase/api/runs/r_ok")
+	_, _, body := get(t, h, "/weftbase/v1/runs/r_ok")
 	decode(t, body, &run)
 	if run.Status != "succeeded" || !has(run, obsdb.HoleGap, tailReason, tailFix) {
 		t.Errorf("tail-lost run = %s %+v, want succeeded with gap in tail_lost's words", run.Status, run.Holes)
 	}
 	var step holesDoc
-	code, _, body := get(t, h, "/weftbase/api/runs/r_ok/steps/0")
+	code, _, body := get(t, h, "/weftbase/v1/runs/r_ok/steps/0")
 	if code != http.StatusOK {
 		t.Fatalf("step 0: %d %s", code, body)
 	}
@@ -125,14 +125,14 @@ func TestTailLostAndSpansOnly(t *testing.T) {
 	var page struct {
 		Done bool `json:"done"`
 	}
-	_, _, body = get(t, h, "/weftbase/api/runs/r_ok/events")
+	_, _, body = get(t, h, "/weftbase/v1/runs/r_ok/events")
 	decode(t, body, &page)
 	if !page.Done {
 		t.Errorf("events of a root-ended run past the window: done false, want done")
 	}
 
 	step = holesDoc{}
-	code, _, body = get(t, h, "/weftbase/api/runs/r_spans/steps/0")
+	code, _, body = get(t, h, "/weftbase/v1/runs/r_spans/steps/0")
 	if code != http.StatusOK {
 		t.Fatalf("spans-only step 0: %d %s", code, body)
 	}
@@ -148,7 +148,7 @@ func TestTailLostAndSpansOnly(t *testing.T) {
 	var reqs struct {
 		Badge, Reason, Fix string
 	}
-	_, _, body = get(t, h, "/weftbase/api/runs/r_spans/requests")
+	_, _, body = get(t, h, "/weftbase/v1/runs/r_spans/requests")
 	decode(t, body, &reqs)
 	if reqs.Badge != string(obsdb.HoleNotRecorded) || reqs.Reason != noLogger || reqs.Fix != noLoggerFix {
 		t.Errorf("spans-only requests = %+v, want not_recorded in no_logger's words", reqs)
@@ -183,7 +183,7 @@ func TestSettlingServed(t *testing.T) {
 		Status   string `json:"status"`
 		Settling bool   `json:"settling"`
 	}
-	_, _, body := get(t, h, "/weftbase/api/runs/r_ok")
+	_, _, body := get(t, h, "/weftbase/v1/runs/r_ok")
 	decode(t, body, &doc)
 	if doc.Status != "succeeded" || !doc.Settling {
 		t.Errorf("run doc = %s settling %v, want succeeded and settling: %s", doc.Status, doc.Settling, body)
@@ -194,7 +194,7 @@ func TestSettlingServed(t *testing.T) {
 			Settling bool   `json:"settling"`
 		} `json:"runs"`
 	}
-	_, _, body = get(t, h, "/weftbase/api/runs")
+	_, _, body = get(t, h, "/weftbase/v1/runs")
 	decode(t, body, &list)
 	if len(list.Runs) != 2 {
 		t.Fatalf("runs = %s, want two rows", body)
@@ -213,7 +213,7 @@ func TestSettlingServed(t *testing.T) {
 			Reason string `json:"reason"`
 		} `json:"messages_in"`
 	}
-	code, _, body := get(t, h, "/weftbase/api/runs/r_fail/steps/0")
+	code, _, body := get(t, h, "/weftbase/v1/runs/r_fail/steps/0")
 	if code != http.StatusOK {
 		t.Fatalf("failed step 0: %d %s", code, body)
 	}
@@ -231,7 +231,7 @@ func TestSettlingServed(t *testing.T) {
 	// Finding 3: a settling step whose chat span arrived and request
 	// record not yet names no gap in its Messages-in pane.
 	step.holesDoc, step.MessagesIn.Badge = holesDoc{}, ""
-	code, _, body = get(t, h, "/weftbase/api/runs/r_ok/steps/0")
+	code, _, body = get(t, h, "/weftbase/v1/runs/r_ok/steps/0")
 	if code != http.StatusOK {
 		t.Fatalf("settling step 0: %d %s", code, body)
 	}
@@ -251,7 +251,7 @@ func TestSettlingServed(t *testing.T) {
 	if err := db.Write(context.Background(), obsdb.Batch{Spans: []obsdb.Span{stale}}); err != nil {
 		t.Fatal(err)
 	}
-	_, _, body = get(t, h, "/weftbase/api/runs/r_sub")
+	_, _, body = get(t, h, "/weftbase/v1/runs/r_sub")
 	if strings.Contains(string(body), `"settling"`) {
 		t.Errorf("run doc past the window carries settling: %s", body)
 	}
@@ -278,7 +278,7 @@ func TestTailLostAndCounterGap(t *testing.T) {
 	}
 	h := Handler(DB(db))
 	var doc holesDoc
-	_, _, body := get(t, h, "/weftbase/api/runs/r_ok")
+	_, _, body := get(t, h, "/weftbase/v1/runs/r_ok")
 	decode(t, body, &doc)
 	tailReason, _ := obsdb.HoleNoteFor(obsdb.HoleGap, obsdb.CauseTailLost)
 	var gap string
@@ -333,7 +333,7 @@ func TestFailedRootPastWindow(t *testing.T) {
 				holesDoc
 				Settling bool `json:"settling"`
 			}
-			_, _, body := get(t, h, "/weftbase/api/runs/r_fail")
+			_, _, body := get(t, h, "/weftbase/v1/runs/r_fail")
 			decode(t, body, &doc)
 			if doc.Status != "failed" || doc.Settling {
 				t.Errorf("run = %s settling %v, want failed and settled: %s", doc.Status, doc.Settling, body)
@@ -341,7 +341,7 @@ func TestFailedRootPastWindow(t *testing.T) {
 			var page struct {
 				Done bool `json:"done"`
 			}
-			_, _, body = get(t, h, "/weftbase/api/runs/r_fail/events")
+			_, _, body = get(t, h, "/weftbase/v1/runs/r_fail/events")
 			decode(t, body, &page)
 			if !page.Done {
 				t.Errorf("events of a failed run = not done, want done at once (one answer with settling false): %s", body)
@@ -365,7 +365,7 @@ func TestFailedRootPastWindow(t *testing.T) {
 				t.Errorf("run holes = %+v, want %s", doc.Holes, c.hole)
 			}
 			var step holesDoc
-			_, _, body = get(t, h, "/weftbase/api/runs/r_fail/steps/0")
+			_, _, body = get(t, h, "/weftbase/v1/runs/r_fail/steps/0")
 			decode(t, body, &step)
 			if step.Status != stepError {
 				t.Errorf("step 0 = %s, want error", step.Status)
@@ -419,7 +419,7 @@ func TestCounterGapWaitsForSettling(t *testing.T) {
 				holesDoc
 				Settling bool `json:"settling"`
 			}
-			_, _, body := get(t, h, "/weftbase/api/runs/r_ok")
+			_, _, body := get(t, h, "/weftbase/v1/runs/r_ok")
 			decode(t, body, &doc)
 			if doc.Settling != c.settling {
 				t.Fatalf("settling = %v, want %v (test bug): %s", doc.Settling, c.settling, body)

@@ -15,7 +15,7 @@ import (
 
 // The conversation export (UX-B-29):
 //
-//	GET /api/sessions/{id}/export?format=jsonl
+//	GET /v1/sessions/{id}/export?format=jsonl
 //
 // A session as one JSON-lines download, read from obsdb's tables and
 // nothing else (the run export's rule: data, never a write), streamed:
@@ -27,7 +27,7 @@ import (
 //     agent, its turn count and its state-log marks (what the file can
 //     hold, before either cap);
 //   - every turn's run export, oldest turn first, exactly as
-//     GET /api/runs/{id}/export?format=jsonl writes it (each turn's
+//     GET /v1/runs/{id}/export?format=jsonl writes it (each turn's
 //     lines begin with its own "run" record, so a reader groups the
 //     lines after it under that turn) — at most sessionExportTurnCap
 //     turns;
@@ -135,7 +135,7 @@ func (st *sessionStream) fits(n int) bool { return st.bytes+n <= sessionExportBy
 func byteCapHole(what string, left int) stepHole {
 	return stepHole{Hole: string(obsdb.HoleTruncated), Cause: string(obsdb.CauseResponseCap),
 		Reason: fmt.Sprintf("the export reached its %d MiB cap: %d %s after it are not in this file — nothing was lost", sessionExportByteCap>>20, left, what),
-		Fix:    "export the later turns one by one: GET /api/runs/{id}/export?format=jsonl; page the marks: GET /api/sessions/{id}/entries",
+		Fix:    "export the later turns one by one: GET /v1/runs/{id}/export?format=jsonl; page the marks: GET /v1/sessions/{id}/entries",
 		Count:  left}
 }
 
@@ -147,10 +147,10 @@ func readFailedHole(what string, err error) stepHole {
 		Fix:    "export again"}
 }
 
-// serveSessionExport answers GET /api/sessions/{id}/export?format=jsonl.
+// serveSessionExport answers GET /v1/sessions/{id}/export?format=jsonl.
 func (s *Server) serveSessionExport(w http.ResponseWriter, r *http.Request, id string) {
 	if f := r.URL.Query().Get("format"); f != "" && f != "jsonl" {
-		badRequest(w, r, "format must be jsonl: a session exports as JSON lines — its turns' run exports in turn order, then its state log; a single turn's json, otlp or wefttest export is GET /api/runs/{id}/export")
+		badRequest(w, r, "format must be jsonl: a session exports as JSON lines — its turns' run exports in turn order, then its state log; a single turn's json, otlp or wefttest export is GET /v1/runs/{id}/export")
 		return
 	}
 	ctx := r.Context()
@@ -196,7 +196,7 @@ func (s *Server) serveSessionExport(w http.ResponseWriter, r *http.Request, id s
 	if len(turns) > sessionExportTurnCap {
 		holes = append(holes, stepHole{Hole: string(obsdb.HoleTruncated), Cause: string(obsdb.CauseResponseCap),
 			Reason: fmt.Sprintf("the session has %d turns; this export carries the first %d — nothing was lost", len(det.Runs), sessionExportTurnCap),
-			Fix:    "export the later turns one by one: GET /api/runs/{id}/export?format=jsonl",
+			Fix:    "export the later turns one by one: GET /v1/runs/{id}/export?format=jsonl",
 			Count:  len(det.Runs) - sessionExportTurnCap})
 		turns = turns[:sessionExportTurnCap]
 	}

@@ -24,7 +24,7 @@ import (
 // unavailable and internal. The DTOs below are the contract, written
 // by hand (ADR 0018: obsdb's rows carry no tags of their own; events,
 // usage and model info marshal through the core's own codecs).
-// web/src/lib/api.ts mirrors these types, and testdata/api/*.golden.json
+// The OpenAPI contract (api/openapi/v1.yaml) describes these types, and testdata/v1/*.golden.json
 // pins the bytes on both sides.
 
 // Events paging (ADR 0018 §8): constants for the endpoint.
@@ -90,7 +90,7 @@ type runRow struct {
 	// turn (thread compacted after it — the session_events index,
 	// obsdb.SessionEventReader) and the sessions its calls delegated
 	// (SessionQuery.Parents' rows naming it as ParentRun). Only on a
-	// /api/runs page the request narrowed by public_id or session (at
+	// /v1/runs page the request narrowed by public_id or session (at
 	// most turnMarksSessions sessions read: past it, the page's
 	// turn_marks_capped hole); each absent when 0 or not read.
 	SessionCompactions int `json:"session_compactions,omitempty"`
@@ -292,7 +292,7 @@ func row(rec obsdb.RunRow) runRow {
 // core reports repaired arguments) and tap_panics (observer panics the
 // run contained, weft.tap.panics). log_warn / log_error count the
 // app's own log records under the run's spans by severity — read time,
-// on the run document only (GET /api/runs/{id}), never a list row —
+// on the run document only (GET /v1/runs/{id}), never a list row —
 // and logs_capped says the count stopped at the reader's cap
 // (obsdb.MaxLogCandidates WARN-or-above lines): both are floors, drawn
 // "≥".
@@ -334,7 +334,7 @@ type runsPage struct {
 	TurnMarksCapped *treeHole `json:"turn_marks_capped,omitempty"`
 }
 
-// runDoc is GET /api/runs/{id}: the row and the subagent children
+// runDoc is GET /v1/runs/{id}: the row and the subagent children
 // (obsdb's RunDetail). Events are deliberately not here — they are
 // paged (ADR 0018 §8); the UI loads each child's events lazily.
 //
@@ -347,7 +347,7 @@ type runDoc struct {
 	Holes    []stepHole `json:"holes"`
 }
 
-// runPage is what GET /api/runs/{id} serves: the run document and the
+// runPage is what GET /v1/runs/{id} serves: the run document and the
 // compactions its records name (ADR 0028 §8, obsdb.DB.Compactions) —
 // [] for a run that never compacted, and for every run written before
 // A9: the record is optional, so its absence is no hole. The export's
@@ -357,7 +357,7 @@ type runPage struct {
 	runDoc
 	Compactions []runCompaction `json:"compactions"`
 	// ManifestAvailable: the run's manifest_hash resolves in the
-	// manifest store — GET /api/manifests/{manifest_hash} answers the
+	// manifest store — GET /v1/manifests/{manifest_hash} answers the
 	// configuration it ran with (U27). Absent when it does not.
 	ManifestAvailable bool `json:"manifest_available,omitempty"`
 	// CallerLinked is the runs started from this run's tool calls that
@@ -557,7 +557,7 @@ type transcript struct {
 	Batches []transcriptBatch `json:"batches"`
 }
 
-// transcriptAsOf is api/runs/{id}/transcript?step=N (ADR 0029): the
+// transcriptAsOf is /v1/runs/{id}/transcript?step=N (ADR 0029): the
 // bare route's batches, then the messages step N's model call carried
 // — the record's truth, assembled by obsdb.MessagesAsOf, and the replay
 // prefix for from_step N > 0. (from_step 0 re-runs step 0's PrepareStep
@@ -620,9 +620,9 @@ type spanDTO struct {
 	Service       string         `json:"service"`
 	Attrs         map[string]any `json:"attrs"`
 	Events        []spanEventDTO `json:"events"`
-	// RunID is the run the span belongs to: on api/runs/{id}/spans the
+	// RunID is the run the span belongs to: on /v1/runs/{id}/spans the
 	// run's (every span), with ?tree=1 each descendant's own; absent on
-	// api/traces/{id}, whose spans' weft.run.id is in attrs.
+	// /v1/traces/{id}, whose spans' weft.run.id is in attrs.
 	// ParentRunID is that run's parent, on ?tree=1 only, absent when
 	// none is known. A tree's spans are keyed by run_id + span_id.
 	RunID       string `json:"run_id,omitempty"`
@@ -797,7 +797,7 @@ type sessionsPage struct {
 	NextBeforeID *string `json:"next_before_id"`
 }
 
-// sessionDoc is GET /api/sessions/{id}: the row and its own turns in
+// sessionDoc is GET /v1/sessions/{id}: the row and its own turns in
 // order. Delegated is the
 // sessions it delegated (thread/pool children, SessionQuery.Parents,
 // U14): each a row with its lineage and its own cost, newest first, at
@@ -837,7 +837,7 @@ const (
 	delegatedTreeCap = 500
 )
 
-// publicResolution is GET /api/public/{public_id}: the public id is
+// publicResolution is GET /v1/public/{public_id}: the public id is
 // the browser-safe handle; this is where it becomes a session.
 type publicResolution struct {
 	SessionID string `json:"session_id"`
@@ -845,7 +845,7 @@ type publicResolution struct {
 
 // ── Handlers ───────────────────────────────────────────────────────
 
-// serveRuns answers api/runs (S4.2): agent, status, session,
+// serveRuns answers /v1/runs (S4.2): agent, status, session,
 // public_id, parent ("" top-level only, "*" all, or a run
 // id for its children), all (a boolean: true is parent=*, every run,
 // subagent children included — a parent id given beside it wins),
@@ -922,7 +922,7 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 	}
 	query.Limit = limit
 	if class := q.Get("error_class"); class != "" {
-		// A failure class (/api/search's facet value): its texts among
+		// A failure class (/v1/runs?q= (search)'s facet value): its texts among
 		// the runs the other filters keep (capability stats).
 		sq := obsdb.SearchQuery{RunQuery: query}
 		if _, ok := s.errorClasses(w, r, &sq, class, false); !ok {
@@ -1104,7 +1104,7 @@ func capHole(n int) *treeHole {
 	}
 }
 
-// statusParam is the one status parser of /api/runs and /api/search
+// statusParam is the one status parser of /v1/runs and /v1/runs?q= (search)
 // (I3, issue 003): "" any; a word of obsdb.StatusWords — the derived
 // four and the read-time parked and cancelled, which the backends map
 // onto stored columns (docs/record-contract.md §6); anything else a 400
@@ -1183,40 +1183,7 @@ func limitParam(w http.ResponseWriter, r *http.Request, q map[string][]string) (
 	return n, true
 }
 
-// serveRunRoutes dispatches the /api/runs/ subtree: run documents and
-// the sub-routes the groups registered (addRunRoute, addRunItemRoute)
-// — paged events, transcript, spans, requests, tools and one step.
-// Everything after /api/runs/ is the run id, slashes included — a
-// subagent's child id is <parent>/<step>/<callID> (the core's
-// childRunID), and its page is a full run page (B7). An unknown id still answers 404 — from
-// the database, naming the run.
-func (s *Server) serveRunRoutes(w http.ResponseWriter, r *http.Request) {
-	rest := strings.TrimPrefix(r.URL.Path, "/api/runs/")
-	if rest == "" {
-		notFound(w, r, "no such api route "+r.URL.Path)
-		return
-	}
-	for _, sub := range s.runRoutes {
-		if sub.item != nil {
-			i := strings.LastIndexByte(rest, '/')
-			if i < 0 {
-				continue
-			}
-			if id, ok := strings.CutSuffix(rest[:i], "/"+sub.ext); ok && id != "" && rest[i+1:] != "" {
-				sub.item(w, r, id, rest[i+1:])
-				return
-			}
-			continue
-		}
-		if id, ok := strings.CutSuffix(rest, "/"+sub.ext); ok && id != "" {
-			sub.serve(w, r, id)
-			return
-		}
-	}
-	s.serveRun(w, r, rest)
-}
-
-// serveRun answers api/runs/{id}: the row, the child runs (obsdb's
+// serveRun answers /v1/runs/{id}: the row, the child runs (obsdb's
 // Run detail carries both) and the run's compactions (runPage). Events are deliberately not here — they
 // are paged (ADR 0018 §8).
 func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
@@ -1524,7 +1491,7 @@ func replayViewHole(rec obsdb.RunRow) (reason, fix string) {
 	return "", ""
 }
 
-// serveRunEvents answers api/runs/{id}/events?after=&limit=: one page
+// serveRunEvents answers /v1/runs/{id}/events?after=&limit=: one page
 // of the run's durable event stream, 0-based positions. `after` is the
 // first position returned (next_after feeds straight back in); -1 and
 // 0 both read from the start (-1 is the documented default for "the
@@ -1615,7 +1582,7 @@ func isDerivedID(id string) bool {
 // no events"), its fix naming the record contract.
 func derivedBadge() badgeFields { return badgeFor(obsdb.HoleDerived, obsdb.CauseStockSpans) }
 
-// serveRunTranscript answers api/runs/{id}/transcript (S4.3): the
+// serveRunTranscript answers /v1/runs/{id}/transcript (S4.3): the
 // messages bodies, in order, one batch per messages record — the
 // replay-grade record of what the run saw and said (what replaces
 // the store's result document; the fold takes finished text from
@@ -1696,7 +1663,7 @@ func (s *Server) serveRunTranscript(w http.ResponseWriter, r *http.Request, id s
 	writeJSON(w, r, http.StatusOK, doc)
 }
 
-// serveRunSpans answers api/runs/{id}/spans (S4.3): the run's timed
+// serveRunSpans answers /v1/runs/{id}/spans (S4.3): the run's timed
 // spans — the chat calls, tool executions and the invoke_agent span
 // itself, with times — each with run_id the run's. With tree=1 (U9.1,
 // capability spans_tree: obsdb.TreeReader) the spans of every
@@ -1775,7 +1742,7 @@ func (s *Server) serveRunSpans(w http.ResponseWriter, r *http.Request, id string
 	writeJSON(w, r, http.StatusOK, doc)
 }
 
-// treeSpansDoc is api/runs/{id}/spans?tree=1: the tree's spans and its
+// treeSpansDoc is /v1/runs/{id}/spans?tree=1: the tree's spans and its
 // holes (U9.1-fix) — truncated (cause response_cap) past
 // obsdb.TreeSpanCap spans, and again, for a derived run, past the
 // trace's first obsdb.TreeTraceCap; not_recorded (cause no_spans, runs
@@ -1814,7 +1781,7 @@ func missingRunsReason(n, named int) string {
 	return out
 }
 
-// traceDoc is api/traces/{trace_id}'s body: the trace's spans, the runs
+// traceDoc is /v1/traces/{trace_id}'s body: the trace's spans, the runs
 // they make — run_ids, the weft runs their weft.run.id names and the
 // runs derived from stock GenAI spans (docs/record-contract.md §9,
 // obsdb.DeriveStockRuns: otel-<trace>-<root span>), sorted; [] for
@@ -1861,16 +1828,11 @@ func (s *Server) traceRunIDs(ctx context.Context, list []obsdb.Span) ([]string, 
 	return out, nil
 }
 
-// serveTrace answers api/traces/{trace_id} (S4.3): any trace, weft or
+// serveTrace answers /v1/traces/{trace_id} (S4.3): any trace, weft or
 // not — a stock OTel application's spans pass through obsdb whole,
 // which is the polyglot promise — with the runs they make and, when
 // none, why (traceDoc).
-func (s *Server) serveTrace(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(r.URL.Path, "/api/traces/")
-	if id == "" {
-		notFound(w, r, "no such api route "+r.URL.Path)
-		return
-	}
+func (s *Server) serveTrace(w http.ResponseWriter, r *http.Request, id string) {
 	list, err := s.db.Trace(r.Context(), id)
 	if err != nil {
 		dbError(w, r, "trace", id, err)
@@ -1895,7 +1857,7 @@ func (s *Server) serveTrace(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusOK, doc)
 }
 
-// serveSessions answers api/sessions (S4.2): public_id and agent
+// serveSessions answers /v1/sessions (S4.2): public_id and agent
 // filters, awaiting / failed / compacted / status / lineage / since
 // (obsdb.SessionQuery's turn-state filters, U16), q (obsdb.SessionQuery.Q: every term in the title, the first
 // turn's prompt, the id, the public id or the agent), tag.<k>=<v>
@@ -1998,7 +1960,7 @@ func allDerived(runs []obsdb.RunRow) bool {
 // turns 1..n by start order (a tie by id; UX-H-35): a derived run has
 // no thread turn (its row reads 0, docs/record-contract.md §9), so the
 // session page would list every one as turn 0. Presentation only:
-// the run's own row (/api/runs/{id}) keeps 0, nothing is stored, and a
+// the run's own row (/v1/runs/{id}) keeps 0, nothing is stored, and a
 // turn a thread numbered keeps its number. In a mixed session (a
 // thread's turns beside derived ones sharing its id) the derived turns
 // are numbered after the thread's highest (U33.2-fix), never on top of
@@ -2023,43 +1985,11 @@ func numberDerivedTurns(rows []runRow) {
 	}
 }
 
-// sessionSubRoute is one GET /api/sessions/{id}/<ext> sub-route.
-type sessionSubRoute struct {
-	ext   string
-	serve func(http.ResponseWriter, *http.Request, string)
-}
-
-// sessionSubRoutes is serveSessionRoutes' table: what follows a
-// session id. One table, so the auth matrix's completeness check
-// (TestAuthMatrix) enumerates the same sub-routes the dispatch serves.
-// A session id carries no slash, so at most one suffix matches.
-func (s *Server) sessionSubRoutes() []sessionSubRoute {
-	return []sessionSubRoute{
-		{"public_id", s.serveSessionPublicID},
-		{"timeline", s.serveSessionTimeline},
-		{"entries", s.serveSessionEntries},
-		{"export", s.serveSessionExport}, // UX-B-29, session_export.go
-	}
-}
-
-// serveSessionRoutes dispatches /api/sessions/{id}: the thread's turns
-// in order (obsdb's SessionDetail); /api/sessions/{id}/public_id is the
-// reverse of api/public (serveSessionPublicID); /timeline and /entries
-// are the session's state log (timeline.go, U12.2); /export the whole
-// conversation as JSON lines (session_export.go). Session ids carry no
-// slash, so the sub-route shadows none.
-func (s *Server) serveSessionRoutes(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
-	for _, sub := range s.sessionSubRoutes() {
-		if sid, ok := strings.CutSuffix(id, "/"+sub.ext); ok && sid != "" && !strings.Contains(sid, "/") {
-			sub.serve(w, r, sid)
-			return
-		}
-	}
-	if id == "" || strings.Contains(id, "/") {
-		notFound(w, r, "no such api route "+r.URL.Path)
-		return
-	}
+// serveSession answers GET /v1/sessions/{id}: the thread's turns in
+// order (obsdb's SessionDetail). Its sub-resources are public_id (the
+// reverse of /v1/public/{id}), timeline and entries (the session's
+// state log, timeline.go) and export (session_export.go).
+func (s *Server) serveSession(w http.ResponseWriter, r *http.Request, id string) {
 	var det obsdb.SessionDetail
 	if er, ok := s.db.(obsdb.SessionEventReader); ok {
 		// The timeline's read (sessionFor): a session no turn of which
@@ -2202,7 +2132,7 @@ walk:
 	doc.delegatedSessionsFields = out
 }
 
-// sessionPublicID is api/sessions/{id}/public_id's answer: the public
+// sessionPublicID is /v1/sessions/{id}/public_id's answer: the public
 // id the session was created with, or "" with the not_recorded badge
 // when no turn of it carries one.
 type sessionPublicID struct {
@@ -2211,14 +2141,14 @@ type sessionPublicID struct {
 	badgeFields
 }
 
-// serveSessionPublicID answers api/sessions/{id}/public_id (plan C4):
-// the reverse of api/public — the weft.public_id the session's turns
+// serveSessionPublicID answers /v1/sessions/{id}/public_id (plan C4):
+// the reverse of /v1/public — the weft.public_id the session's turns
 // carry (thread.PublicID at Create stamps one value on every turn).
 // The public id is MAX(weft.public_id) over the session's top-level
 // turns (obsdb's SessionRow.PublicID, the sessions?public_id= filter's
 // value): one value per thread session; a session whose turns carry
 // several (core.Metadata, a non-Go OTLP app) answers the greatest,
-// unbadged — and may then disagree with api/public, which resolves a
+// unbadged — and may then disagree with /v1/public, which resolves a
 // public id to its newest session.
 func (s *Server) serveSessionPublicID(w http.ResponseWriter, r *http.Request, id string) {
 	det, err := s.db.Session(r.Context(), id)
@@ -2233,15 +2163,10 @@ func (s *Server) serveSessionPublicID(w http.ResponseWriter, r *http.Request, id
 	writeJSON(w, r, http.StatusOK, out)
 }
 
-// servePublic answers api/public/{public_id} (S4.3): the public id
+// servePublic answers /v1/public/{public_id} (S4.3): the public id
 // resolves to its session — the app's handle, never the internal
 // session id, is what a browser carries.
-func (s *Server) servePublic(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(r.URL.Path, "/api/public/")
-	if id == "" || strings.Contains(id, "/") {
-		notFound(w, r, "no such api route "+r.URL.Path)
-		return
-	}
+func (s *Server) servePublic(w http.ResponseWriter, r *http.Request, id string) {
 	sid, err := s.db.ResolvePublicID(r.Context(), id)
 	if err != nil {
 		dbError(w, r, "public id", id, err)
@@ -2250,7 +2175,7 @@ func (s *Server) servePublic(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusOK, publicResolution{SessionID: sid})
 }
 
-// dbKind names the database's backend for api/meta, best effort: the
+// dbKind names the database's backend for /v1/meta, best effort: the
 // dynamic type's full name ("*sqlite.DB" → "sqlite", anything else
 // carrying "mem" → "memory", the hosted backend → "clickhouse"), else
 // its bare type name.

@@ -27,7 +27,7 @@ import (
 // TestSessionTimelineFromARealRun (U12.2's done line): acme-support's
 // session — the arena's thread.support-approvals shape — driven through
 // a real thread session and a Local pipeline into SQLite, read back
-// through GET /api/sessions/{id}/timeline: the six turns in order, the
+// through GET /v1/sessions/{id}/timeline: the six turns in order, the
 // marks in order under the runs they concern (each request and decision
 // under the run that parked its call, the approve-always grant under
 // it too, the label under the last turn), on their lanes; then every
@@ -127,7 +127,7 @@ func TestSessionTimelineFromARealRun(t *testing.T) {
 		}
 		return doc, string(b)
 	}
-	doc, body := fetch("/api/sessions/" + sid + "/timeline")
+	doc, body := fetch("/v1/sessions/" + sid + "/timeline")
 	var tl struct {
 		Turns []struct {
 			RunID string `json:"run_id"`
@@ -170,7 +170,7 @@ func TestSessionTimelineFromARealRun(t *testing.T) {
 	if len(tl.Marks) > 1 && (tl.Marks[1].Content["who"] != "agent-7" || tl.Marks[1].Content["reason"] != "need a photo of the damage") {
 		t.Errorf("the deny's content = %v, want who and reason (Local is content on)", tl.Marks[1].Content)
 	}
-	entries, _ := fetch("/api/sessions/" + sid + "/entries?limit=3")
+	entries, _ := fetch("/v1/sessions/" + sid + "/entries?limit=3")
 	for _, c := range []struct {
 		golden string
 		doc    any
@@ -184,7 +184,7 @@ func TestSessionTimelineFromARealRun(t *testing.T) {
 		{"session-timeline.golden.json", doc, []string{".marks[].run_id=<nil>", ".marks[].turn=<nil>", ".holes[]", ".marks[].fields.", ".summarizer", ".turns[].summarizer"}},
 		{"session-entries.golden.json", entries, []string{".holes[]", ".entries[].fields."}},
 	} {
-		b, err := os.ReadFile(filepath.Join("testdata", "api", c.golden))
+		b, err := os.ReadFile(filepath.Join("testdata", "v1", c.golden))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -214,7 +214,7 @@ func TestSessionTimelineFromARealRun(t *testing.T) {
 		}
 	}
 	// The tag filter (D6) finds the session by its WithRunMetadata tag.
-	_, list := fetch("/api/sessions?tag.arena.batch=b_u122")
+	_, list := fetch("/v1/sessions?tag.arena.batch=b_u122")
 	if !strings.Contains(list, `"id":"`+sid+`"`) || !strings.Contains(list, `"total":1`) {
 		t.Errorf("sessions?tag.arena.batch=b_u122 = %s, want the session", list)
 	}

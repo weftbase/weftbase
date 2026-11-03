@@ -17,8 +17,8 @@ import (
 // market-analyst. The child session's turn carries weft.caller.* — not
 // weft.parent.* — so it is no child run of the lead's turn but its
 // caller-linked run; its session exists (the run page's "session …"
-// link resolves), is listed by /api/sessions with its lineage, and is
-// listed under the lead's session (/api/sessions/{lead}.delegated),
+// link resolves), is listed by /v1/sessions with its lineage, and is
+// listed under the lead's session (/v1/sessions/{lead}.delegated),
 // whose own usage and cost stay its own turn's and whose
 // delegated_usage / delegated_sessions_cost_* carry the child's.
 func TestPoolChildSession(t *testing.T) {
@@ -75,7 +75,7 @@ func TestPoolChildSession(t *testing.T) {
 		Meta         map[string]string `json:"meta"`
 		Status       string            `json:"status"`
 	}
-	getUntil(t, ts, "/api/runs/"+childRun, &row, func() bool { return row.Status == "succeeded" })
+	getUntil(t, ts, "/v1/runs/"+esc(childRun), &row, func() bool { return row.Status == "succeeded" })
 	if row.ParentRunID != "" || row.CallerRunID != res.ID || row.CallerCallID != "d1" {
 		t.Errorf("child run link: parent %q, caller (%q, %q); want no parent, caller (%s, d1)",
 			row.ParentRunID, row.CallerRunID, row.CallerCallID, res.ID)
@@ -98,7 +98,7 @@ func TestPoolChildSession(t *testing.T) {
 			CallerCallID string `json:"caller_call_id"`
 		} `json:"caller_linked"`
 	}
-	getUntil(t, ts, "/api/runs/"+res.ID, &leadRun, func() bool { return len(leadRun.CallerLinked) == 1 })
+	getUntil(t, ts, "/v1/runs/"+esc(res.ID), &leadRun, func() bool { return len(leadRun.CallerLinked) == 1 })
 	if len(leadRun.Children) != 0 || leadRun.CallerLinked[0].ID != childRun ||
 		leadRun.CallerLinked[0].SessionID != childSession || leadRun.CallerLinked[0].CallerCallID != "d1" {
 		t.Errorf("lead run: children %+v, caller_linked %+v; want no child and %s (session %s, call d1)",
@@ -121,18 +121,18 @@ func TestPoolChildSession(t *testing.T) {
 		sess
 		Runs []struct{ ID string } `json:"runs"`
 	}
-	getUntil(t, ts, "/api/sessions/"+childSession, &child, func() bool { return len(child.Runs) == 1 })
+	getUntil(t, ts, "/v1/sessions/"+childSession, &child, func() bool { return len(child.Runs) == 1 })
 	if child.ID != childSession || child.Agent != "market-analyst" || child.Turns != 1 || child.Runs[0].ID != childRun ||
 		child.ParentSession != s.ID() || child.ParentTurn != 1 || child.ParentCall != "d1" || child.ParentRun != res.ID {
 		t.Errorf("child session = %+v, want market-analyst, one turn %s, lineage %s t1 call d1 run %s", child, childRun, s.ID(), res.ID)
 	}
 
-	// /api/sessions lists both sessions, the child's with its lineage.
+	// /v1/sessions lists both sessions, the child's with its lineage.
 	var list struct {
 		Total    int    `json:"total"`
 		Sessions []sess `json:"sessions"`
 	}
-	getUntil(t, ts, "/api/sessions", &list, func() bool { return list.Total == 2 })
+	getUntil(t, ts, "/v1/sessions", &list, func() bool { return list.Total == 2 })
 	var listed *sess
 	for i := range list.Sessions {
 		if list.Sessions[i].ID == childSession {
@@ -140,7 +140,7 @@ func TestPoolChildSession(t *testing.T) {
 		}
 	}
 	if listed == nil || listed.ParentSession != s.ID() || listed.ParentTurn != 1 || listed.ParentCall != "d1" {
-		t.Errorf("/api/sessions = %+v, want the child session %s listed with lineage %s t1 call d1", list.Sessions, childSession, s.ID())
+		t.Errorf("/v1/sessions = %+v, want the child session %s listed with lineage %s t1 call d1", list.Sessions, childSession, s.ID())
 	}
 
 	// The lead's session: its own turn alone, the child under delegated.
@@ -152,7 +152,7 @@ func TestPoolChildSession(t *testing.T) {
 		DelegatedCost  *float64              `json:"delegated_sessions_cost_usd"`
 		DelegatedKnown bool                  `json:"delegated_sessions_cost_known"`
 	}
-	getUntil(t, ts, "/api/sessions/"+s.ID(), &parent, func() bool { return len(parent.Delegated) == 1 })
+	getUntil(t, ts, "/v1/sessions/"+s.ID(), &parent, func() bool { return len(parent.Delegated) == 1 })
 	if len(parent.Runs) != 1 || parent.Runs[0].ID != res.ID || parent.Usage.InputTokens != 20 || usd(parent.CostUSD) != "0.04" {
 		t.Errorf("lead session: runs %+v, usage %+v, cost %s; want its own turn %s alone, 20 in, $0.04", parent.Runs, parent.Usage, usd(parent.CostUSD), res.ID)
 	}

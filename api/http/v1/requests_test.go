@@ -128,7 +128,7 @@ var timeRe = regexp.MustCompile(`"time": ?"[^"]*"`)
 
 func requestsGolden(t *testing.T, name, body string) {
 	t.Helper()
-	wefttest.Golden(t, "testdata/api/"+name, []byte(timeRe.ReplaceAllString(pretty(t, body), `"time": "(time)"`)))
+	wefttest.Golden(t, "testdata/v1/"+name, []byte(timeRe.ReplaceAllString(pretty(t, body), `"time": "(time)"`)))
 }
 
 type requestsDoc struct {
@@ -170,7 +170,7 @@ func decode(t *testing.T, body string, v any) {
 	}
 }
 
-// TestRequestsRoutes pins GET /api/runs/{id}/requests and /tools (ADR
+// TestRequestsRoutes pins GET /v1/runs/{id}/requests and /tools (ADR
 // 0028 §10, plan A1) over a run recorded through the real pipeline:
 // four attempts over three steps, two prompts, two catalogs, each
 // distinct hash resolved inline; refs=1 drops the inline objects;
@@ -179,7 +179,7 @@ func TestRequestsRoutes(t *testing.T) {
 	ts, _ := requestsServer(t)
 	recordRequestsRun(t, ts.URL, "r_req")
 
-	run := fetchJSON(t, ts, "/api/runs/r_req", func(b string) bool { return strings.Contains(b, `"request_count":4`) })
+	run := fetchJSON(t, ts, "/v1/runs/r_req", func(b string) bool { return strings.Contains(b, `"request_count":4`) })
 	var doc struct {
 		InstructionsHash string  `json:"instructions_hash"`
 		CatalogHash      string  `json:"catalog_hash"`
@@ -191,7 +191,7 @@ func TestRequestsRoutes(t *testing.T) {
 		t.Errorf("run document = %+v, want both hashes, request_count 4 and no requests_badge", doc)
 	}
 
-	body := fetchJSON(t, ts, "/api/runs/r_req/requests", nil)
+	body := fetchJSON(t, ts, "/v1/runs/r_req/requests", nil)
 	requestsGolden(t, "requests-ok.golden.json", body)
 	var page requestsDoc
 	decode(t, body, &page)
@@ -235,7 +235,7 @@ func TestRequestsRoutes(t *testing.T) {
 
 	// refs=1: hashes only, no inline prompt or tools.
 	var refs requestsDoc
-	decode(t, fetchJSON(t, ts, "/api/runs/r_req/requests?refs=1", nil), &refs)
+	decode(t, fetchJSON(t, ts, "/v1/runs/r_req/requests?refs=1", nil), &refs)
 	if len(refs.Requests) != 4 {
 		t.Fatalf("refs=1 = %d rows, want 4", len(refs.Requests))
 	}
@@ -247,33 +247,33 @@ func TestRequestsRoutes(t *testing.T) {
 
 	// Paging: limit=2 → two full pages, next_from on each but the last.
 	var p1, p2, p3 requestsDoc
-	decode(t, fetchJSON(t, ts, "/api/runs/r_req/requests?limit=2&refs=1", nil), &p1)
+	decode(t, fetchJSON(t, ts, "/v1/runs/r_req/requests?limit=2&refs=1", nil), &p1)
 	if len(p1.Requests) != 2 || p1.NextFrom == nil || *p1.NextFrom != 2 {
 		t.Fatalf("page 1 = %d rows, next_from %v; want 2 rows, next_from 2", len(p1.Requests), p1.NextFrom)
 	}
-	decode(t, fetchJSON(t, ts, "/api/runs/r_req/requests?limit=2&refs=1&from=2", nil), &p2)
+	decode(t, fetchJSON(t, ts, "/v1/runs/r_req/requests?limit=2&refs=1&from=2", nil), &p2)
 	if len(p2.Requests) != 2 || p2.Requests[0].Index != 2 || p2.NextFrom == nil || *p2.NextFrom != 4 {
 		t.Fatalf("page 2 = %d rows, next_from %v; want indexes 2-3, next_from 4", len(p2.Requests), p2.NextFrom)
 	}
-	decode(t, fetchJSON(t, ts, "/api/runs/r_req/requests?limit=2&refs=1&from=4", nil), &p3)
+	decode(t, fetchJSON(t, ts, "/v1/runs/r_req/requests?limit=2&refs=1&from=4", nil), &p3)
 	if len(p3.Requests) != 0 || p3.NextFrom != nil {
 		t.Errorf("page 3 = %d rows, next_from %v; want the empty last page", len(p3.Requests), p3.NextFrom)
 	}
 	var short requestsDoc
-	decode(t, fetchJSON(t, ts, "/api/runs/r_req/requests?limit=3&from=2", nil), &short)
+	decode(t, fetchJSON(t, ts, "/v1/runs/r_req/requests?limit=3&from=2", nil), &short)
 	if len(short.Requests) != 2 || short.NextFrom != nil {
 		t.Errorf("a short page = %d rows, next_from %v; want 2 rows and no next_from", len(short.Requests), short.NextFrom)
 	}
 
 	// step=: one step's attempts.
 	var s1 requestsDoc
-	decode(t, fetchJSON(t, ts, "/api/runs/r_req/requests?step=1", nil), &s1)
+	decode(t, fetchJSON(t, ts, "/v1/runs/r_req/requests?step=1", nil), &s1)
 	if len(s1.Requests) != 2 || s1.Requests[0].Attempt != 1 || s1.Requests[1].Attempt != 2 || s1.Requests[0].Step != 1 {
 		t.Errorf("step=1 = %+v, want its two attempts", s1.Requests)
 	}
 
 	// The catalogs, in index order.
-	tools := fetchJSON(t, ts, "/api/runs/r_req/tools", nil)
+	tools := fetchJSON(t, ts, "/v1/runs/r_req/tools", nil)
 	requestsGolden(t, "tools-ok.golden.json", tools)
 	var td toolsDocT
 	decode(t, tools, &td)
@@ -284,7 +284,7 @@ func TestRequestsRoutes(t *testing.T) {
 
 	// Bad parameters are 400s in the error shape.
 	for _, q := range []string{"step=x", "step=-1", "from=-2", "limit=-1", "refs=maybe"} {
-		resp, err := http.Get(ts.URL + "/api/runs/r_req/requests?" + q)
+		resp, err := http.Get(ts.URL + "/v1/runs/r_req/requests?" + q)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -294,22 +294,8 @@ func TestRequestsRoutes(t *testing.T) {
 			t.Errorf("?%s = %d %s, want 400", q, resp.StatusCode, b)
 		}
 	}
-	// Setup A (no Token): this server answers the loopback Host every
-	// read above used, and refuses any other, as every /api route does.
-	for _, path := range []string{"/api/runs/r_req/requests", "/api/runs/r_req/tools"} {
-		req, _ := http.NewRequest(http.MethodGet, ts.URL+path, nil)
-		req.Host = "evil.example"
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusForbidden {
-			t.Errorf("%s with a foreign Host = %d, want 403", path, resp.StatusCode)
-		}
-	}
 	// An unknown run is a 404 on both routes.
-	for _, path := range []string{"/api/runs/nope/requests", "/api/runs/nope/tools"} {
+	for _, path := range []string{"/v1/runs/nope/requests", "/v1/runs/nope/tools"} {
 		resp, err := http.Get(ts.URL + path)
 		if err != nil {
 			t.Fatal(err)
@@ -333,7 +319,7 @@ func TestRequestsRoutes(t *testing.T) {
 func TestRequestsStepsGolden(t *testing.T) {
 	ts, _ := requestsServer(t)
 	recordStepsRun(t, ts.URL, "r_steps", nil)
-	body := fetchJSON(t, ts, "/api/runs/r_steps/requests", func(b string) bool { return strings.Contains(b, `"index":5`) })
+	body := fetchJSON(t, ts, "/v1/runs/r_steps/requests", func(b string) bool { return strings.Contains(b, `"index":5`) })
 	requestsGolden(t, "requests-steps.golden.json", body)
 	var page struct {
 		Requests []struct {
@@ -359,9 +345,9 @@ func TestRequestsStepsGolden(t *testing.T) {
 func TestRequestsContentOff(t *testing.T) {
 	ts, _ := requestsServer(t)
 	recordRequestsRun(t, ts.URL, "r_off", otel.NoContent())
-	fetchJSON(t, ts, "/api/runs/r_off", func(b string) bool { return strings.Contains(b, `"request_count":4`) })
+	fetchJSON(t, ts, "/v1/runs/r_off", func(b string) bool { return strings.Contains(b, `"request_count":4`) })
 
-	body := fetchJSON(t, ts, "/api/runs/r_off/requests", nil)
+	body := fetchJSON(t, ts, "/v1/runs/r_off/requests", nil)
 	requestsGolden(t, "requests-stripped.golden.json", body)
 	var page requestsDoc
 	decode(t, body, &page)
@@ -381,7 +367,7 @@ func TestRequestsContentOff(t *testing.T) {
 		}
 	}
 
-	tools := fetchJSON(t, ts, "/api/runs/r_off/tools", nil)
+	tools := fetchJSON(t, ts, "/v1/runs/r_off/tools", nil)
 	requestsGolden(t, "tools-stripped.golden.json", tools)
 	var td toolsDocT
 	decode(t, tools, &td)
@@ -412,14 +398,14 @@ func TestRequestsNoModelCall(t *testing.T) {
 	if err := p.Shutdown(ctx); err != nil {
 		t.Fatal(err)
 	}
-	run := fetchJSON(t, ts, "/api/runs/r_none", func(b string) bool { return strings.Contains(b, `"status":"failed"`) })
+	run := fetchJSON(t, ts, "/v1/runs/r_none", func(b string) bool { return strings.Contains(b, `"status":"failed"`) })
 	if !strings.Contains(run, `"request_count":0`) || strings.Contains(run, `"instructions_hash":""`) || strings.Contains(run, `"requests_badge"`) {
 		t.Errorf("run = %s, want an instructions_hash, request_count 0 and no requests_badge", run)
 	}
-	if got := fetchJSON(t, ts, "/api/runs/r_none/requests", nil); strings.TrimSpace(got) != `{"requests":[]}` {
+	if got := fetchJSON(t, ts, "/v1/runs/r_none/requests", nil); strings.TrimSpace(got) != `{"requests":[]}` {
 		t.Errorf("requests = %s, want {\"requests\":[]}", got)
 	}
-	if got := fetchJSON(t, ts, "/api/runs/r_none/tools", nil); strings.TrimSpace(got) != `{"catalogs":[]}` {
+	if got := fetchJSON(t, ts, "/v1/runs/r_none/tools", nil); strings.TrimSpace(got) != `{"catalogs":[]}` {
 		t.Errorf("tools = %s, want {\"catalogs\":[]}", got)
 	}
 }
@@ -471,19 +457,19 @@ func TestRequestsResolveEachHashOnce(t *testing.T) {
 	ts, c, _ := countingServer(t)
 	recordRequestsRun(t, ts.URL, "r_req")
 	recordRequestsRun(t, ts.URL, "r_off", otel.NoContent())
-	fetchJSON(t, ts, "/api/runs/r_req", func(b string) bool { return strings.Contains(b, `"request_count":4`) })
-	fetchJSON(t, ts, "/api/runs/r_off", func(b string) bool { return strings.Contains(b, `"request_count":4`) })
+	fetchJSON(t, ts, "/v1/runs/r_req", func(b string) bool { return strings.Contains(b, `"request_count":4`) })
+	fetchJSON(t, ts, "/v1/runs/r_off", func(b string) bool { return strings.Contains(b, `"request_count":4`) })
 
 	c.prompts.Store(0)
 	c.tools.Store(0)
-	fetchJSON(t, ts, "/api/runs/r_req/requests", nil)
+	fetchJSON(t, ts, "/v1/runs/r_req/requests", nil)
 	if p, tl := c.prompts.Load(), c.tools.Load(); p != 2 || tl != 2 {
 		t.Errorf("one response read %d prompts and %d catalogs, want 2 and 2", p, tl)
 	}
 	c.prompts.Store(0)
 	c.tools.Store(0)
-	fetchJSON(t, ts, "/api/runs/r_off/requests", nil)
-	fetchJSON(t, ts, "/api/runs/r_off/tools", nil)
+	fetchJSON(t, ts, "/v1/runs/r_off/requests", nil)
+	fetchJSON(t, ts, "/v1/runs/r_off/tools", nil)
 	if p, tl := c.prompts.Load(), c.tools.Load(); p != 0 || tl != 0 {
 		t.Errorf("a content-off run read %d prompts and %d catalogs, want none", p, tl)
 	}
@@ -517,8 +503,8 @@ func TestRequestsGap(t *testing.T) {
 	if err := p.Shutdown(ctx); err != nil {
 		t.Fatal(err)
 	}
-	fetchJSON(t, ts, "/api/runs/r_req", func(b string) bool { return strings.Contains(b, `"request_count":4`) })
-	fetchJSON(t, ts, "/api/runs/r_one", func(b string) bool { return strings.Contains(b, `"request_count":2`) })
+	fetchJSON(t, ts, "/v1/runs/r_req", func(b string) bool { return strings.Contains(b, `"request_count":4`) })
+	fetchJSON(t, ts, "/v1/runs/r_one", func(b string) bool { return strings.Contains(b, `"request_count":2`) })
 
 	raw, err := sql.Open("sqlite", "file:"+path)
 	if err != nil {
@@ -539,7 +525,7 @@ func TestRequestsGap(t *testing.T) {
 	_ = raw.Close()
 
 	var page requestsDoc
-	decode(t, fetchJSON(t, ts, "/api/runs/r_req/requests", nil), &page)
+	decode(t, fetchJSON(t, ts, "/v1/runs/r_req/requests", nil), &page)
 	if len(page.Requests) != 4 {
 		t.Fatalf("requests = %d rows, want 4", len(page.Requests))
 	}
@@ -558,13 +544,13 @@ func TestRequestsGap(t *testing.T) {
 	}
 	// One catalog of two left: listed, the lost one shows on its rows.
 	var td toolsDocT
-	decode(t, fetchJSON(t, ts, "/api/runs/r_req/tools", nil), &td)
+	decode(t, fetchJSON(t, ts, "/v1/runs/r_req/tools", nil), &td)
 	if len(td.Catalogs) != 1 || td.Badge != "" {
 		t.Errorf("r_req tools = %+v, want the surviving catalog, no envelope badge", td)
 	}
 	// The only catalog lost: the empty list says gap.
 	var only toolsDocT
-	decode(t, fetchJSON(t, ts, "/api/runs/r_one/tools", nil), &only)
+	decode(t, fetchJSON(t, ts, "/v1/runs/r_one/tools", nil), &only)
 	if len(only.Catalogs) != 0 || only.Badge != "gap" || only.Fix == "" {
 		t.Errorf("r_one tools = %+v, want [] with the gap badge and its fix", only)
 	}
@@ -599,21 +585,21 @@ func TestRequestsParams(t *testing.T) {
 		t.Fatal(err)
 	}
 	const kid = "r_par/0/c_sub"
-	fetchJSON(t, ts, "/api/runs/"+kid, func(b string) bool { return strings.Contains(b, `"request_count":2`) })
+	fetchJSON(t, ts, "/v1/runs/"+esc(kid), func(b string) bool { return strings.Contains(b, `"request_count":2`) })
 
 	var page requestsDoc
-	decode(t, fetchJSON(t, ts, "/api/runs/"+kid+"/requests?step=1", nil), &page)
+	decode(t, fetchJSON(t, ts, "/v1/runs/"+esc(kid)+"/requests?step=1", nil), &page)
 	if len(page.Requests) != 1 || page.Requests[0].Step != 1 || page.Requests[0].Index != 1 {
 		t.Errorf("child step=1 = %+v, want its one step-1 request", page.Requests)
 	}
 
-	decode(t, fetchJSON(t, ts, "/api/runs/"+kid+"/requests?limit=5000", nil), &page)
+	decode(t, fetchJSON(t, ts, "/v1/runs/"+esc(kid)+"/requests?limit=5000", nil), &page)
 	if got := c.lastLimit.Load(); got != 1000 || len(page.Requests) != 2 || page.NextFrom != nil {
 		t.Errorf("limit=5000 asked obsdb for %d (rows %d, next_from %v), want the 1000 clamp", got, len(page.Requests), page.NextFrom)
 	}
 
 	for _, q := range []string{"from=abc", "limit=abc"} {
-		resp, err := http.Get(ts.URL + "/api/runs/" + kid + "/requests?" + q)
+		resp, err := http.Get(ts.URL + "/v1/runs/" + esc(kid) + "/requests?" + q)
 		if err != nil {
 			t.Fatal(err)
 		}

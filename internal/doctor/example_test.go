@@ -3,28 +3,35 @@ package doctor_test
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 
-	v1 "github.com/weftbase/weftbase/api/http/v1"
+	"github.com/weftbase/weftbase"
 	"github.com/weftbase/weftbase/internal/doctor"
 )
 
-// ExampleRun checks a server with nothing connected to it: one line
-// per check, each read from its /api/meta. No discovery file names it
-// (an embedded server writes none): that line warns.
+// ExampleRun checks a node with nothing connected to it (an Open one:
+// no key needed on loopback): one line per check, each read from its
+// /v1/meta and /readyz. No discovery file names it (an embedded node
+// writes none): that line warns.
 func ExampleRun() {
 	dir, _ := os.MkdirTemp("", "doctor")
 	defer func() { _ = os.RemoveAll(dir) }()
-	srv := v1.New(v1.Open(filepath.Join(dir, "weft.db")))
-	defer func() { _ = srv.Close() }()
-	ts := httptest.NewServer(srv.Handler())
+	app, err := weftbase.New(weftbase.DataDir(filepath.Join(dir, "data")), weftbase.Open(),
+		weftbase.Logger(slog.New(slog.DiscardHandler)))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer func() { _ = app.Shutdown(context.Background()) }()
+	ts := httptest.NewServer(app.Handler())
 	defer ts.Close()
 
 	var out strings.Builder
-	err := doctor.Run(context.Background(), &out, doctor.Target{URL: ts.URL})
+	err = doctor.Run(context.Background(), &out, doctor.Target{URL: ts.URL})
 	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
 		if f := strings.Fields(line); !strings.HasPrefix(line, " ") {
 			fmt.Println(f[0], f[1])
@@ -33,7 +40,8 @@ func ExampleRun() {
 	fmt.Println("err:", err)
 	// Output:
 	// ok server
-	// ok token
+	// ok key
+	// ok ready
 	// warn discovery
 	// ok db
 	// ok content

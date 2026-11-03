@@ -128,7 +128,7 @@ func TestRunDocSummarizer(t *testing.T) {
 	h := Handler(DB(timelineDB(t)))
 	read := func(id string) runPage {
 		t.Helper()
-		code, _, body := get(t, h, "/weftbase/api/runs/"+id)
+		code, _, body := get(t, h, "/weftbase/v1/runs/"+esc(id))
 		if code != http.StatusOK {
 			t.Fatalf("run %s: %d %s", id, code, body)
 		}
@@ -164,10 +164,10 @@ func TestSummarizerPricedAtTheSpansModel(t *testing.T) {
 	if err := db.Write(context.Background(), obsdb.Batch{Records: []obsdb.Record{foreign}, Spans: []obsdb.Span{span}}); err != nil {
 		t.Fatal(err)
 	}
-	h := Handler(DB(db), Token("srv"))
+	h := Handler(DB(db))
 	figure := func(bearer string) string {
 		t.Helper()
-		code, _, body := getWith(t, h, "/weftbase/api/sessions/s_acme/timeline", bearer, "")
+		code, _, body := getWith(t, h, "/weftbase/v1/sessions/s_acme/timeline", bearer, "")
 		if code != http.StatusOK {
 			t.Fatalf("timeline: %d %s", code, body)
 		}

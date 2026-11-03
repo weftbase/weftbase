@@ -44,7 +44,7 @@ var runNorm = regexp.MustCompile(`"(last_seen|trace_id)": ?"[^"]*"`)
 func TestRunCompactionsView(t *testing.T) {
 	ts, _ := requestsServer(t)
 	recordStepsRun(t, ts.URL, "r_steps", nil)
-	body := fetchJSON(t, ts, "/api/runs/r_steps", func(b string) bool {
+	body := fetchJSON(t, ts, "/v1/runs/r_steps", func(b string) bool {
 		return strings.Contains(b, `"request_count":6`) && strings.Contains(b, `"id":"r_steps/1/c_sub"`)
 	})
 	stepGolden(t, "run-compacted.golden.json", runNorm.ReplaceAllString(body, `"$1":"(norm)"`))
@@ -58,7 +58,7 @@ func TestRunCompactionsView(t *testing.T) {
 			Hash  string `json:"hash"`
 		} `json:"compaction"`
 	}
-	decode(t, fetchJSON(t, ts, "/api/runs/r_steps/steps/2", nil), &step)
+	decode(t, fetchJSON(t, ts, "/v1/runs/r_steps/steps/2", nil), &step)
 	if len(doc.Compactions) != 1 || step.Compaction == nil {
 		t.Fatalf("compactions = %+v (step 2's block %+v), want the one view", doc.Compactions, step.Compaction)
 	}
@@ -71,8 +71,8 @@ func TestRunCompactionsView(t *testing.T) {
 	if strings.Contains(body, "summary: the order was looked up") {
 		t.Errorf("the run document inlines the view's body: %s", body)
 	}
-	stepGolden(t, "events-compacted.golden.json", fetchJSON(t, ts, "/api/runs/r_steps/events?limit=1000", nil))
-	stepGolden(t, "transcript-compacted.golden.json", fetchJSON(t, ts, "/api/runs/r_steps/transcript", nil))
+	stepGolden(t, "events-compacted.golden.json", fetchJSON(t, ts, "/v1/runs/r_steps/events?limit=1000", nil))
+	stepGolden(t, "transcript-compacted.golden.json", fetchJSON(t, ts, "/v1/runs/r_steps/transcript", nil))
 }
 
 // TestRunCompactionsSession (plan A9.2): thread's session marker
@@ -117,7 +117,7 @@ func TestRunCompactionsSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	run := s.ID() + "-t2"
-	body := fetchJSON(t, ts, "/api/runs/"+run, func(b string) bool { return strings.Contains(b, `"scope":"session"`) })
+	body := fetchJSON(t, ts, "/v1/runs/"+esc(run), func(b string) bool { return strings.Contains(b, `"scope":"session"`) })
 	// The marker's hash is over the compaction entry as thread wrote it,
 	// its timestamp included: normalized (its length is checked below).
 	norm := regexp.MustCompile(`"hash":"[0-9a-f]{64}"`).ReplaceAllString(runNorm.ReplaceAllString(body, `"$1":"(norm)"`), `"hash":"(hash)"`)
@@ -137,7 +137,7 @@ func TestRunCompactionsSession(t *testing.T) {
 	var first struct {
 		Compactions []runCompactionT `json:"compactions"`
 	}
-	decode(t, fetchJSON(t, ts, "/api/runs/"+s.ID()+"-t1", nil), &first)
+	decode(t, fetchJSON(t, ts, "/v1/runs/"+esc(s.ID())+"-t1", nil), &first)
 	if first.Compactions == nil || len(first.Compactions) != 0 {
 		t.Errorf("turn 1's compactions = %+v, want [] (none filed under it)", first.Compactions)
 	}

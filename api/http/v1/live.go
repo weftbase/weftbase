@@ -14,7 +14,7 @@ import (
 	"github.com/weftbase/weftbase/obsdb"
 )
 
-// The live stream (S4.5): GET /api/live, SSE. Frames carry the hub's
+// The live stream (S4.5): GET /v1/runs/stream, SSE. Frames carry the hub's
 // Seq as the SSE id — the resume cursor — and the client dedups on
 // (run, kind, pos), which is what makes at-least-once publishing safe.
 
@@ -385,20 +385,6 @@ func liveKinds(q map[string][]string) (map[string]bool, error) {
 	return kinds, nil
 }
 
-// liveAllowed refuses the all selector (every run on one stream) to
-// anyone but the server token and the open loopback API (db.path's
-// rule, mayReadDBPath). A stream a metadata filter stands alone in is
-// all, filtered, and passes as agent= alone would: the filter narrows
-// the frames.
-func liveAllowed(s *Server, w http.ResponseWriter, r *http.Request, sel obsdb.Selector, filterOnly bool) bool {
-	if filterOnly || !sel.All || mayReadDBPath(s, r) {
-		return true
-	}
-	writeError(w, r, http.StatusForbidden, "forbidden",
-		"the all selector streams every run: it needs the server token, or no token and a loopback Host")
-	return false
-}
-
 // serveLive streams the live lane over SSE (S4.5).
 func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 	sel, err := liveSelector(map[string][]string(r.URL.Query()))
@@ -408,7 +394,6 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 	}
 	reqMeta := liveMeta(r.URL.Query())
 	filter := newLiveFilter(reqMeta, liveAgent(r.URL.Query(), sel))
-	filterOnly := sel == (obsdb.Selector{})
 	sel = resolveLive(sel)
 	kinds, err := liveKinds(map[string][]string(r.URL.Query()))
 	if err != nil {
@@ -427,10 +412,6 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		after = n
-	}
-
-	if !liveAllowed(s, w, r, sel, filterOnly) {
-		return
 	}
 
 	if _, ok := w.(http.Flusher); !ok {

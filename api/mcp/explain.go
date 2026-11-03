@@ -781,7 +781,7 @@ func problemLines(lines []string) int {
 	return n
 }
 
-// lastAssistantText reads GET /api/runs/{id}/transcript's batches and
+// lastAssistantText reads GET /v1/runs/{id}/transcript's batches and
 // returns the last assistant message's text among the run's own output
 // batches (input false); nil when none has text. The input batches are
 // what the run was given — on a thread turn the earlier turns, their

@@ -9,74 +9,66 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/weftbase/weftbase/client/discovery"
+	"github.com/weftbase/weftbase/authz"
 	"github.com/weftbase/weftbase/internal/release"
 	"github.com/weftbase/weftbase/obsdb"
 	"github.com/weftbase/weftbase/observe/ingest"
 )
 
-// api/meta: what this server is and how it is wired, computed from
-// the server's own state, never hard-coded. Every line `weftbase
-// doctor` prints reads one of these fields — the doctor computes
-// nothing the server does not serve.
+// GET /v1/meta: what this server is and who is asking, computed from
+// the server's own state, never hard-coded. `weftbase doctor` reads its
+// checks from here and /readyz.
 
-// metaDoc is api/meta's body.
+// metaDoc is GET /v1/meta's body.
 type metaDoc struct {
 	WeftVersion string `json:"weft_version"`
 	// ServerVersion is weftbase's own release (internal/release).
 	ServerVersion string `json:"server_version"`
-	DB            metaDB `json:"db"`
-	Title         string `json:"title"`
-	HasManifest   bool   `json:"has_manifest"`
-	IngestOpen    bool   `json:"ingest_open"`
+	// Capabilities are the optional features this deployment has on:
+	// ingest (the ingest role), clickhouse (the trace store), and later
+	// workers, approvals and tenants. Never null.
+	Capabilities []string `json:"capabilities"`
+	// Principal is who is asking and the scope it acts in.
+	Principal metaPrincipal `json:"principal"`
 	// Ingest is the ingest health (U5): the services whose heartbeats
 	// and run brackets reported records their destination lost on the
-	// way here.
-	Ingest             *ingest.Report `json:"ingest,omitempty"`
-	InterruptedAfterMs int64          `json:"interrupted_after_ms"`
-	Capabilities       []string       `json:"capabilities"`
-	// CapabilitiesOff names each capability an option left off, with
-	// the option (and CLI flag) that did (plan B4): the UI's empty
-	// states say it. Omitted when nothing is off.
-	CapabilitiesOff map[string]string `json:"capabilities_off,omitempty"`
-	// AuthRequired is whether a Token is configured: the API then reads
-	// the bearer; false is the open, loopback-only API.
-	AuthRequired bool `json:"auth_required"`
-	// LiveAll is whether this caller may open /api/live?all=1 (every
-	// run on one stream, the Live page): db.path's rule (mayReadDBPath)
-	// — the server token, or no token and a loopback Host. Always
-	// present.
-	LiveAll bool        `json:"live_all"`
-	Content metaContent `json:"content"`
-	// Pricing is the table the server prices usage with (plan A5): its
-	// source (default | file | option), the override file's path under
-	// db.path's rule, its date and its row count.
-	Pricing metaPricing `json:"pricing"`
-	// Retention is Retain's duration as a Go duration string
-	// ("720h0m0s"); null: none configured (the default — everything is
-	// kept). The key is always present.
+	// way here, and the batches this node accepted and refused.
+	Ingest *ingest.Report `json:"ingest,omitempty"`
+	// Pricing summarizes the table usage is priced with.
+	Pricing            metaPricing `json:"pricing"`
+	DB                 metaDB      `json:"db"`
+	InterruptedAfterMs int64       `json:"interrupted_after_ms"`
+	Content            metaContent `json:"content"`
+	// Retention is the trace retention as a Go duration string
+	// ("720h0m0s"); null: none configured. The key is always present.
 	Retention *string `json:"retention"`
 	// ManifestCheck compares the manifest (weft.json) with the
 	// manifest hash each agent's latest stored run recorded. Null
 	// without a manifest.
 	ManifestCheck *metaManifest `json:"manifest_check"`
-	// PID is the serving process's id (the CLI's "weftbase already
-	// running at … (pid 1234), reusing"). Under db.path's rule
-	// (mayReadDBPath) — loopback with no Token, or the server token —
-	// and omitted for anyone else.
+	// PID is the serving process's id, for a caller allowed the host's
+	// details (hostDetails); omitted for anyone else.
 	PID int `json:"pid,omitempty"`
-	// DiscoveryFile is the discovery file apps find this server through
-	// (DiscoveryFile: the one `weftbase dev` wrote), while it names this
-	// process; omitted when there is none (embedded, or
-	// WEFTBASE_DISCOVERY=off) and, under db.path's rule, to anyone else (a
-	// local path).
-	DiscoveryFile string `json:"discovery_file,omitempty"`
 }
 
-// metaDB names the database. Kind is everyone's; Path and Size only
-// the caller's who could open the file anyway — a loopback request
-// with no Token configured, or the server token — and are omitted,
-// never nulled, for anyone else (an AllowOrigins host). Both are omitted for a database with
+// metaPrincipal is meta's "who am I".
+type metaPrincipal struct {
+	Kind       string    `json:"kind"`
+	ID         string    `json:"id"`
+	KeyKind    string    `json:"key_kind,omitempty"`
+	Scope      metaScope `json:"scope"`
+	AllTenants bool      `json:"all_tenants"`
+}
+
+type metaScope struct {
+	Project string `json:"project"`
+	Env     string `json:"env"`
+	Tenant  string `json:"tenant"`
+}
+
+// metaDB names the trace database. Kind is everyone's; Path and Size
+// only a caller's allowed the host's details (hostDetails), omitted,
+// never nulled, for anyone else. Both are omitted for a database with
 // no file (":memory:", ClickHouse).
 type metaDB struct {
 	Kind string `json:"kind"`
@@ -138,7 +130,7 @@ type metaManifest struct {
 	Error string `json:"error,omitempty"`
 }
 
-// Content marks api/meta reports (content.latest.mark).
+// Content marks /v1/meta reports (content.latest.mark).
 const (
 	contentIngestAsReceived = "as_received"
 	markFull                = "full"
@@ -161,20 +153,19 @@ var contentNotes = map[string][2]string{
 	markUnmarked: {"the latest run carries no content mark: no events stored, a weft older than the mark, or a non-weft exporter", ""},
 }
 
-// serveMeta answers api/meta.
+// serveMeta answers GET /v1/meta.
 func (s *Server) serveMeta(w http.ResponseWriter, r *http.Request) {
+	p, sc, _ := authz.From(r.Context())
 	doc := metaDoc{
-		WeftVersion:        weftVersion(),
-		ServerVersion:      release.Version,
+		WeftVersion:   weftVersion(),
+		ServerVersion: release.Version,
+		Capabilities:  append([]string{}, s.capabilities...),
+		Principal: metaPrincipal{
+			Kind: string(p.Kind), ID: p.ID, KeyKind: string(p.KeyKind), AllTenants: p.AllTenants,
+			Scope: metaScope{Project: sc.Project(), Env: sc.Env(), Tenant: sc.Tenant()},
+		},
 		DB:                 metaDB{Kind: dbKind(s.db)},
-		Title:              s.title,
-		HasManifest:        len(s.manifest) > 0,
-		IngestOpen:         !s.noIngest && s.ingestToken == "",
 		InterruptedAfterMs: obsdb.InterruptedAfter.Milliseconds(),
-		Capabilities:       s.capabilityList(),
-		CapabilitiesOff:    s.capabilitiesOff(),
-		AuthRequired:       s.token != "",
-		LiveAll:            mayReadDBPath(s, r),
 		Content:            s.latestContent(r.Context()),
 		Pricing:            s.metaPricing(r),
 		ManifestCheck:      s.manifestCheck(r.Context()),
@@ -183,40 +174,24 @@ func (s *Server) serveMeta(w http.ResponseWriter, r *http.Request) {
 		r := s.retain.String()
 		doc.Retention = &r
 	}
-	if mayReadDBPath(s, r) {
+	if hostDetails(r) {
 		doc.DB.Path, doc.DB.Size = dbFile(s.db)
 		doc.PID = os.Getpid()
-		doc.DiscoveryFile = s.discoveryFile()
 	}
 	ingest := s.ingestHealth.Snapshot()
-	if s.reqs != nil {
-		ingest = ingest.WithCounts(s.reqs.Ingest())
+	if s.ingestCounts != nil {
+		ingest = ingest.WithCounts(s.ingestCounts())
 	}
 	doc.Ingest = &ingest
 	writeJSON(w, r, http.StatusOK, doc)
 }
 
-// discoveryFile is DiscoveryFile's path while the file there names this
-// process, "" otherwise.
-func (s *Server) discoveryFile() string {
-	if s.discovery == "" {
-		return ""
-	}
-	if info, err := discovery.Read(s.discovery); err != nil || info.PID != os.Getpid() {
-		return ""
-	}
-	return s.discovery
-}
-
-// mayReadDBPath is the db.path/db.size/pid rule (and live_all's, the
-// /api/live all selector's): the server token, or no Token configured
-// and a loopback Host (the open API's guard, without the AllowOrigins
-// widening).
-func mayReadDBPath(s *Server, r *http.Request) bool {
-	if idFrom(r).server {
-		return true
-	}
-	return s.token == "" && isLoopbackName(hostOnly(r.Host))
+// hostDetails is whether the caller may see the host's details — file
+// paths, sizes, the pid: a principal allowed settings.read (a secret
+// key, an operator, the Local principal).
+func hostDetails(r *http.Request) bool {
+	p, _, ok := authz.From(r.Context())
+	return ok && authz.Can(p, authz.SettingsRead).Allow
 }
 
 // dbFile is the database's file and its size on disk (the WAL sidecar
@@ -279,7 +254,7 @@ func (s *Server) latestContent(ctx context.Context) metaContent {
 // text meta reports.
 func metaReadFailed(what string, err error) string {
 	msg := what + ": " + err.Error()
-	slog.Warn("weftbase: api/meta: "+what, "err", err)
+	slog.Warn("weftbase: /v1/meta: "+what, "err", err)
 	return msg
 }
 

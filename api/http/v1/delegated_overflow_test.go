@@ -58,7 +58,7 @@ func TestDelegatedOverflow(t *testing.T) {
 		CostReason     string                `json:"delegated_sessions_cost_reason"`
 	}
 	var doc sessionDocBody
-	getUntil(t, ts, "/api/sessions/s_lead", &doc, func() bool { return true })
+	getUntil(t, ts, "/v1/sessions/s_lead", &doc, func() bool { return true })
 	if len(doc.Delegated) != delegatedCap || !doc.DelegatedMore {
 		t.Errorf("delegated rows = %d, more %v; want %d and more", len(doc.Delegated), doc.DelegatedMore, delegatedCap)
 	}
@@ -71,7 +71,7 @@ func TestDelegatedOverflow(t *testing.T) {
 		CallerLinked     []struct{ ID string } `json:"caller_linked"`
 		CallerLinkedMore bool                  `json:"caller_linked_more"`
 	}
-	getUntil(t, ts, "/api/runs/s_lead-t1", &run, func() bool { return true })
+	getUntil(t, ts, "/v1/runs/s_lead-t1", &run, func() bool { return true })
 	if len(run.CallerLinked) != callerLinkedCap || !run.CallerLinkedMore ||
 		run.CallerLinked[0].ID != "s_c000-t1" || run.CallerLinked[callerLinkedCap-1].ID != fmt.Sprintf("s_c%03d-t1", callerLinkedCap-1) {
 		t.Errorf("caller_linked = %d rows (more %v); want the oldest %d in start order, s_c000-t1 first", len(run.CallerLinked), run.CallerLinkedMore, callerLinkedCap)
@@ -86,7 +86,7 @@ func TestDelegatedOverflow(t *testing.T) {
 		})
 	}
 	var capped sessionDocBody
-	getUntil(t, ts, "/api/sessions/s_lead", &capped, func() bool { return true })
+	getUntil(t, ts, "/v1/sessions/s_lead", &capped, func() bool { return true })
 	wantCap := fmt.Sprintf("too many to price at read time; delegated_usage counts the first %d sessions", delegatedTreeCap)
 	if capped.CostKnown || capped.CostUSD != nil || !strings.Contains(capped.CostReason, wantCap) {
 		t.Errorf("past the tree cap: cost %v known %v reason %q; want unknown, the cap named and the usage a floor (%q)", capped.CostUSD, capped.CostKnown, capped.CostReason, wantCap)
@@ -102,7 +102,7 @@ func TestDelegatedOverflow(t *testing.T) {
 	fts := httptest.NewServer(fsrv.Handler())
 	t.Cleanup(fts.Close)
 	var failed sessionDocBody
-	getUntil(t, fts, "/api/sessions/s_lead", &failed, func() bool { return true })
+	getUntil(t, fts, "/v1/sessions/s_lead", &failed, func() bool { return true })
 	wantFail := "the sessions delegated 2 level(s) under this one could not be read; delegated_usage stops at the levels read"
 	if failed.CostKnown || failed.CostUSD != nil || !strings.Contains(failed.CostReason, wantFail) {
 		t.Errorf("a failed level: cost %v known %v reason %q; want unknown, %q", failed.CostUSD, failed.CostKnown, failed.CostReason, wantFail)
@@ -150,12 +150,12 @@ func TestDelegatedReadsPerLevel(t *testing.T) {
 		CostKnown      bool       `json:"delegated_sessions_cost_known"`
 	}
 	reads.Store(0)
-	getUntil(t, ts, "/api/sessions/s_lead", &doc, func() bool { return true })
+	getUntil(t, ts, "/v1/sessions/s_lead", &doc, func() bool { return true })
 	if doc.DelegatedUsage.InputTokens != n+1 || !doc.CostKnown {
 		t.Errorf("delegated figures = %+v known %v, want %d in, known", doc.DelegatedUsage, doc.CostKnown, n+1)
 	}
 	if got := reads.Load(); got > 10 {
-		t.Errorf("GET /api/sessions/s_lead made %d Runs reads; want a few per tree level, not one per delegated session (%d)", got, n+1)
+		t.Errorf("GET /v1/sessions/s_lead made %d Runs reads; want a few per tree level, not one per delegated session (%d)", got, n+1)
 	}
 	// P9-pre-go-fix2: a level past one batch's budget. 400 sessions × 30
 	// turns, 12,000 runs: 8 batches of 50 × 1,500 runs, 4 pages each
@@ -350,7 +350,7 @@ func delegatedWide(t *testing.T, sessions, turns int, maxReads int64) {
 		CostReason     string     `json:"delegated_sessions_cost_reason"`
 	}
 	reads.Store(0)
-	getUntil(t, ts, "/api/sessions/s_lead", &doc, func() bool { return true })
+	getUntil(t, ts, "/v1/sessions/s_lead", &doc, func() bool { return true })
 	if !doc.CostKnown || doc.DelegatedUsage.InputTokens != int64(sessions*turns) {
 		t.Errorf("delegated figures = usage %+v known %v reason %q; want %d in, known", doc.DelegatedUsage, doc.CostKnown, doc.CostReason, sessions*turns)
 	}
@@ -363,7 +363,7 @@ func delegatedWide(t *testing.T, sessions, turns int, maxReads int64) {
 		}
 	}
 	if got := reads.Load(); got > maxReads {
-		t.Errorf("GET /api/sessions/s_lead made %d Runs reads; want a few per batch, not one per session (%d)", got, sessions)
+		t.Errorf("GET /v1/sessions/s_lead made %d Runs reads; want a few per batch, not one per session (%d)", got, sessions)
 	}
 }
 
@@ -431,13 +431,13 @@ func TestDelegatedCache(t *testing.T) {
 		Cache          string                       `json:"delegated_sessions_cache"`
 	}
 	var mixed body
-	getUntil(t, ts, "/api/sessions/s_mixed", &mixed, func() bool { return true })
+	getUntil(t, ts, "/v1/sessions/s_mixed", &mixed, func() bool { return true })
 	if len(mixed.Delegated) != 2 || mixed.DelegatedUsage.CachedInputTokens != 4 || mixed.Cache != cacheNotReported {
 		t.Errorf("one exact, one not_reported: rows %+v, usage %+v, cache %q; want 2 rows, the split summed, %q",
 			mixed.Delegated, mixed.DelegatedUsage, mixed.Cache, cacheNotReported)
 	}
 	var clean body
-	getUntil(t, ts, "/api/sessions/s_clean", &clean, func() bool { return true })
+	getUntil(t, ts, "/v1/sessions/s_clean", &clean, func() bool { return true })
 	if clean.Cache != cacheExact {
 		t.Errorf("every delegated session exact: cache %q, want %q", clean.Cache, cacheExact)
 	}

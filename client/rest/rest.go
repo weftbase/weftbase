@@ -3,9 +3,10 @@
 // StatusError. `weftbase runs`, `open`, `export`, `doctor` and the MCP
 // tool set (api/mcp) read through it.
 //
-// It is hand-written for now and serves the read routes under /api/; a
-// later step generates it from the /v1 OpenAPI contract
-// (api/openapi/v1.yaml). It imports the standard library only.
+// It is hand-written for now over the /v1 read routes; a later step
+// generates it from the /v1 OpenAPI contract (api/openapi/v1.yaml). It
+// imports the standard library only. The token is an API key
+// (wb_sk_…), sent as the bearer.
 package rest
 
 import (
@@ -164,22 +165,15 @@ func printable(s string) string {
 	}, s)
 }
 
-// RunPath is /api/runs/<id>: a run id may carry slashes (a subagent's
-// child id), escaped the way the Console escapes them.
-func RunPath(id string) string { return "/api/runs/" + url.PathEscape(id) }
+// RunPath is /v1/runs/<id>: a run id may carry slashes (a subagent's
+// child id), percent-encoded; the server decodes the segment once.
+func RunPath(id string) string { return "/v1/runs/" + url.PathEscape(id) }
 
-// PageLink is a Console page, <base><page>, the token in the fragment
-// when there is one (the Console adopts it; a fragment never reaches a
-// server or a Referer).
-func PageLink(base, page, token string) string {
-	link := base + page
-	if token != "" {
-		link += "#token=" + url.QueryEscape(token)
-	}
-	return link
-}
+// PageLink is a Console page, <base><page>. It carries no credential:
+// the Console signs in with a one-time link (`weftbase dev` prints one).
+func PageLink(base, page string) string { return base + page }
 
 // RunLink is a run's page in the Console, <base>/runs/<id>.
-func RunLink(base, id, token string) string {
-	return PageLink(base, "/runs/"+url.PathEscape(id), token)
+func RunLink(base, id string) string {
+	return PageLink(base, "/runs/"+url.PathEscape(id))
 }

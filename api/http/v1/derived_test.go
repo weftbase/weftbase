@@ -72,7 +72,7 @@ func TestDerivedRunRoutes(t *testing.T) {
 	h := derivedFixture(t)
 
 	// The list: both runs, marked, requests_badge derived.
-	code, _, body := get(t, h, "/weftbase/api/runs")
+	code, _, body := get(t, h, "/weftbase/v1/runs")
 	if code != http.StatusOK {
 		t.Fatalf("runs: %d %s", code, body)
 	}
@@ -97,7 +97,7 @@ func TestDerivedRunRoutes(t *testing.T) {
 	}
 
 	// The run page: the row, its one hole, no children.
-	code, _, body = get(t, h, "/weftbase/api/runs/"+derivedOK)
+	code, _, body = get(t, h, "/weftbase/v1/runs/"+esc(derivedOK))
 	if code != http.StatusOK {
 		t.Fatalf("run: %d %s", code, body)
 	}
@@ -115,7 +115,7 @@ func TestDerivedRunRoutes(t *testing.T) {
 	golden(t, "run-derived.golden.json", body)
 
 	// Events and transcript: empty, badged — never an empty pane.
-	_, _, body = get(t, h, "/weftbase/api/runs/"+derivedOK+"/events")
+	_, _, body = get(t, h, "/weftbase/v1/runs/"+esc(derivedOK)+"/events")
 	var ev struct {
 		Events []any `json:"events"`
 		Done   bool  `json:"done"`
@@ -126,7 +126,7 @@ func TestDerivedRunRoutes(t *testing.T) {
 		t.Errorf("events = %s, want none, done, badged derived", body)
 	}
 	golden(t, "events-derived.golden.json", body)
-	_, _, body = get(t, h, "/weftbase/api/runs/"+derivedOK+"/transcript")
+	_, _, body = get(t, h, "/weftbase/v1/runs/"+esc(derivedOK)+"/transcript")
 	var tr struct {
 		Batches []any `json:"batches"`
 		badged
@@ -136,7 +136,7 @@ func TestDerivedRunRoutes(t *testing.T) {
 		t.Errorf("transcript = %s, want no batch, badged derived", body)
 	}
 	golden(t, "transcript-derived.golden.json", body)
-	code, _, body = get(t, h, "/weftbase/api/runs/"+derivedOK+"/transcript?step=1")
+	code, _, body = get(t, h, "/weftbase/v1/runs/"+esc(derivedOK)+"/transcript?step=1")
 	var refused badged
 	decode(t, body, &refused)
 	if code != http.StatusConflict || !refused.derived() {
@@ -144,7 +144,7 @@ func TestDerivedRunRoutes(t *testing.T) {
 	}
 
 	// The waterfall: the real spans, the reader's step and seq on them.
-	_, _, body = get(t, h, "/weftbase/api/runs/"+derivedOK+"/spans")
+	_, _, body = get(t, h, "/weftbase/v1/runs/"+esc(derivedOK)+"/spans")
 	var sp struct {
 		Spans []struct {
 			Name  string         `json:"name"`
@@ -165,7 +165,7 @@ func TestDerivedRunRoutes(t *testing.T) {
 
 	// Requests and tools: empty, badged derived.
 	for _, route := range []string{"requests", "tools"} {
-		code, _, body = get(t, h, "/weftbase/api/runs/"+derivedOK+"/"+route)
+		code, _, body = get(t, h, "/weftbase/v1/runs/"+esc(derivedOK)+"/"+route)
 		var b badged
 		decode(t, body, &b)
 		if code != http.StatusOK || !b.derived() {
@@ -174,17 +174,17 @@ func TestDerivedRunRoutes(t *testing.T) {
 	}
 
 	// Search: by error text, by model; sessions: the conversation.
-	_, _, body = get(t, h, "/weftbase/api/search?q=cancelled")
+	_, _, body = get(t, h, "/weftbase/v1/runs?q=cancelled")
 	decode(t, body, &list)
 	if list.Total != 1 || list.Runs[0].ID != derivedFail || !list.Runs[0].Derived {
 		t.Errorf("search q=cancelled = %s, want the failed derived run", body)
 	}
-	_, _, body = get(t, h, "/weftbase/api/search?model=gpt-5&agent=support")
+	_, _, body = get(t, h, "/weftbase/v1/runs?model=gpt-5&agent=support")
 	decode(t, body, &list)
 	if list.Total != 2 {
 		t.Errorf("search model+agent = %s, want both", body)
 	}
-	_, _, body = get(t, h, "/weftbase/api/sessions")
+	_, _, body = get(t, h, "/weftbase/v1/sessions")
 	var sessions struct {
 		Sessions []struct {
 			ID    string `json:"id"`
@@ -195,7 +195,7 @@ func TestDerivedRunRoutes(t *testing.T) {
 	if len(sessions.Sessions) != 1 || sessions.Sessions[0].ID != "conv_7f3a" || sessions.Sessions[0].Turns != 2 {
 		t.Errorf("sessions = %s, want conv_7f3a with its two turns", body)
 	}
-	code, _, body = get(t, h, "/weftbase/api/sessions/conv_7f3a")
+	code, _, body = get(t, h, "/weftbase/v1/sessions/conv_7f3a")
 	if code != http.StatusOK || !strings.Contains(body, derivedOK) || !strings.Contains(body, derivedFail) {
 		t.Errorf("session conv_7f3a = %d %s, want both runs", code, body)
 	}
@@ -205,7 +205,7 @@ func TestDerivedRunRoutes(t *testing.T) {
 // every block spans cannot fill.
 func TestDerivedExport(t *testing.T) {
 	h := derivedFixture(t)
-	code, _, body := get(t, h, "/weftbase/api/runs/"+derivedOK+"/export?format=json")
+	code, _, body := get(t, h, "/weftbase/v1/runs/"+esc(derivedOK)+"/export?format=json")
 	if code != http.StatusOK {
 		t.Fatalf("export json: %d %s", code, body)
 	}
@@ -229,7 +229,7 @@ func TestDerivedExport(t *testing.T) {
 		t.Errorf("export holes = %+v, want the one derived hole", x.Holes)
 	}
 	for _, f := range []string{"jsonl", "otlp"} {
-		if code, _, body := get(t, h, "/weftbase/api/runs/"+derivedOK+"/export?format="+f); code != http.StatusOK {
+		if code, _, body := get(t, h, "/weftbase/v1/runs/"+esc(derivedOK)+"/export?format="+f); code != http.StatusOK {
 			t.Errorf("export %s = %d %s", f, code, body)
 		}
 	}
@@ -240,7 +240,7 @@ func TestDerivedExport(t *testing.T) {
 // side has is still missing; each derived side's one hole is derived.
 func TestDerivedDiff(t *testing.T) {
 	h := derivedFixture(t)
-	code, _, body := get(t, h, "/weftbase/api/diff?a="+derivedOK+"&b="+derivedFail)
+	code, _, body := get(t, h, "/weftbase/v1/diff?a="+derivedOK+"&b="+derivedFail)
 	if code != http.StatusOK {
 		t.Fatalf("diff: %d %s", code, body)
 	}
@@ -271,7 +271,7 @@ func TestDerivedDiff(t *testing.T) {
 	// Against a weft run too: unknown, never changed.
 	ingestFile(t, h, "/weftbase/otlp/v1/traces", "../../../obsdb/testdata/contract/plain/traces.json")
 	ingestFile(t, h, "/weftbase/otlp/v1/logs", "../../../obsdb/testdata/contract/plain/logs.json")
-	_, _, runs := get(t, h, "/weftbase/api/runs")
+	_, _, runs := get(t, h, "/weftbase/v1/runs")
 	var list struct {
 		Runs []struct {
 			ID      string `json:"id"`
@@ -288,7 +288,7 @@ func TestDerivedDiff(t *testing.T) {
 	if weft == "" {
 		t.Fatalf("no weft run after ingesting plain: %s", runs)
 	}
-	_, _, body = get(t, h, "/weftbase/api/diff?a="+weft+"&b="+derivedFail)
+	_, _, body = get(t, h, "/weftbase/v1/diff?a="+weft+"&b="+derivedFail)
 	decode(t, body, &d)
 	if len(d.Steps) == 0 || len(d.Steps[0].Changes) != 0 || !slices.Equal(d.Steps[0].Unknown, all) {
 		t.Errorf("weft vs derived = %s, want step 0 all unknown, unchanged", body)
@@ -305,7 +305,7 @@ func TestDerivedNoTwinForWeftRuns(t *testing.T) {
 		h := srv.Handler()
 		ingestFile(t, h, "/weftbase/otlp/v1/traces", "../../../obsdb/testdata/contract/"+c+"/traces.json")
 		ingestFile(t, h, "/weftbase/otlp/v1/logs", "../../../obsdb/testdata/contract/"+c+"/logs.json")
-		_, _, body := get(t, h, "/weftbase/api/runs?all=1")
+		_, _, body := get(t, h, "/weftbase/v1/runs?all=1")
 		var list struct {
 			Total int `json:"total"`
 		}
@@ -337,7 +337,7 @@ func TestDerivedSteps(t *testing.T) {
 		in, out int64
 		calls   int
 	}{{"0", 812, 41, 1}, {"1", 905, 37, 0}} {
-		code, _, body := get(t, h, "/weftbase/api/runs/"+derivedOK+"/steps/"+c.n)
+		code, _, body := get(t, h, "/weftbase/v1/runs/"+esc(derivedOK)+"/steps/"+c.n)
 		if code != http.StatusOK {
 			t.Fatalf("steps/%s: %d %s", c.n, code, body)
 		}
@@ -393,7 +393,7 @@ func TestDerivedSteps(t *testing.T) {
 	}
 	// The failed run's one step: its chat span ended ok, the run failed —
 	// the last step reads error, as a weft run's would.
-	_, _, body := get(t, h, "/weftbase/api/runs/"+derivedFail+"/steps/0")
+	_, _, body := get(t, h, "/weftbase/v1/runs/"+esc(derivedFail)+"/steps/0")
 	if !strings.Contains(body, `"status":"error"`) {
 		t.Errorf("failed run's steps/0 = %s, want status error", body)
 	}
@@ -475,7 +475,7 @@ func TestDerivedStepsNameOnly(t *testing.T) {
 		"empty operation":        stockVariant(t, func(k string) bool { return k == "gen_ai.operation.name" || k == "gen_ai.tool.call.id" }, true),
 	} {
 		h := variantFixture(t, body)
-		_, _, row := get(t, h, "/weftbase/api/runs/"+derivedOK)
+		_, _, row := get(t, h, "/weftbase/v1/runs/"+esc(derivedOK))
 		if !strings.Contains(row, `"steps":2`) || !strings.Contains(row, `"input_tokens":1717`) {
 			t.Errorf("%s: run row = %s, want 2 steps, 1717 input", name, row)
 		}
@@ -485,7 +485,7 @@ func TestDerivedStepsNameOnly(t *testing.T) {
 			calls   int
 			started bool
 		}{{"0", 812, 1, true}, {"1", 905, 0, true}} {
-			_, _, body := get(t, h, "/weftbase/api/runs/"+derivedOK+"/steps/"+c.n)
+			_, _, body := get(t, h, "/weftbase/v1/runs/"+esc(derivedOK)+"/steps/"+c.n)
 			var st struct {
 				Started  *string `json:"started"`
 				Finished *string `json:"finished"`
@@ -549,7 +549,7 @@ func noUsageCostUnknown(t *testing.T, h http.Handler) {
 		return c.CostUSD == nil && !c.CostKnown && c.CostBadge == "unknown" && strings.Contains(c.CostReason, "no (or zero) usage")
 	}
 	for _, p := range []string{"/runs/" + derivedOK, "/runs/" + derivedFail, "/runs/" + derivedOK + "/steps/0", "/runs/" + derivedOK + "/steps/1"} {
-		_, _, body := get(t, h, "/weftbase/api"+p)
+		_, _, body := get(t, h, "/weftbase/v1"+p)
 		var c costed
 		decode(t, body, &c)
 		if !unknown(c) {
@@ -565,7 +565,7 @@ func TestDerivedStepsNoContent(t *testing.T) {
 	h := variantFixture(t, stockVariant(t, func(k string) bool {
 		return strings.HasPrefix(k, "gen_ai.tool.call.a") || strings.HasPrefix(k, "gen_ai.tool.call.r")
 	}, false))
-	_, _, body := get(t, h, "/weftbase/api/runs/"+derivedOK+"/steps/0")
+	_, _, body := get(t, h, "/weftbase/v1/runs/"+esc(derivedOK)+"/steps/0")
 	var st struct {
 		ToolCalls []struct {
 			Args   json.RawMessage  `json:"args"`
@@ -608,7 +608,7 @@ func TestDerivedTraceRuns(t *testing.T) {
 		{agentTrace, []string{noconv}, ""},
 		{chatTrace, []string{}, "model or tool calls only: no invoke_agent span opens a run"},
 	} {
-		code, _, body := get(t, h, "/weftbase/api/traces/"+c.trace)
+		code, _, body := get(t, h, "/weftbase/v1/traces/"+c.trace)
 		if code != http.StatusOK {
 			t.Fatalf("traces/%s: %d %s", c.trace, code, body)
 		}
@@ -625,7 +625,7 @@ func TestDerivedTraceRuns(t *testing.T) {
 		}
 	}
 	// The list: the derived runs in run_ids, the chat-only trace none.
-	_, _, body := get(t, h, "/weftbase/api/traces")
+	_, _, body := get(t, h, "/weftbase/v1/traces")
 	var page struct {
 		Traces []struct {
 			TraceID string   `json:"trace_id"`
@@ -648,7 +648,7 @@ func TestDerivedTraceRuns(t *testing.T) {
 		t.Errorf("traces list run_ids = %v", got)
 	}
 	// The conversation-id-less agent has a run page: derived, no session.
-	code, _, body := get(t, h, "/weftbase/api/runs/"+noconv)
+	code, _, body := get(t, h, "/weftbase/v1/runs/"+esc(noconv))
 	var run struct {
 		Derived   bool   `json:"derived"`
 		SessionID string `json:"session_id"`
@@ -690,7 +690,7 @@ func TestDerivedTraceRootRun(t *testing.T) {
 	srv := New(DB(db))
 	t.Cleanup(func() { _ = srv.Close() })
 	h := srv.Handler()
-	_, _, body := get(t, h, "/weftbase/api/traces")
+	_, _, body := get(t, h, "/weftbase/v1/traces")
 	var page struct {
 		Traces []struct {
 			RunIDs  []string `json:"run_ids"`
@@ -727,7 +727,7 @@ func TestDerivedSessionMarkedAndNumbered(t *testing.T) {
 			Derived bool   `json:"derived"`
 		} `json:"sessions"`
 	}
-	_, _, body := get(t, h, "/weftbase/api/sessions")
+	_, _, body := get(t, h, "/weftbase/v1/sessions")
 	decode(t, body, &list)
 	if len(list.Sessions) != 1 || !list.Sessions[0].Derived {
 		t.Errorf("sessions = %s, want conv_7f3a marked derived", body)
@@ -736,7 +736,7 @@ func TestDerivedSessionMarkedAndNumbered(t *testing.T) {
 		Derived bool   `json:"derived"`
 		Runs    []turn `json:"runs"`
 	}
-	_, _, body = get(t, h, "/weftbase/api/sessions/conv_7f3a")
+	_, _, body = get(t, h, "/weftbase/v1/sessions/conv_7f3a")
 	decode(t, body, &doc)
 	got := map[string]int{}
 	for _, r := range doc.Runs {
@@ -746,7 +746,7 @@ func TestDerivedSessionMarkedAndNumbered(t *testing.T) {
 		t.Errorf("session = derived %v, turns %v; want derived, %s turn 1 (10:00), %s turn 2 (10:01)", doc.Derived, got, derivedOK, derivedFail)
 	}
 	var run turn
-	_, _, body = get(t, h, "/weftbase/api/runs/"+derivedOK)
+	_, _, body = get(t, h, "/weftbase/v1/runs/"+esc(derivedOK))
 	decode(t, body, &run)
 	if run.Turn != 0 {
 		t.Errorf("run row turn = %d, want the record's 0 (the numbering is the session page's)", run.Turn)

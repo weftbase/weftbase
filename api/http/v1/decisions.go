@@ -14,7 +14,7 @@ import (
 )
 
 // The decisions a resume applied (U13.2; UX-B-03, UX-H-17, UX-S3-04):
-// GET /api/runs/{id} serves, on a parked run a resume names
+// GET /v1/runs/{id} serves, on a parked run a resume names
 // (resumed_by), `decided` — each parked call's outcome as that resume
 // applied it — and, on the resume itself (resumed_from), `resumes`: the
 // same calls, the card the run page draws before step 0.

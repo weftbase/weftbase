@@ -31,7 +31,7 @@ func TestRunsTurnMarksEndedBy(t *testing.T) {
 	ingestFile(t, h, "/weftbase/otlp/v1/traces", "../../../obsdb/testdata/contract/thread_busy/traces.json")
 	ingestFile(t, h, "/weftbase/otlp/v1/logs", "../../../obsdb/testdata/contract/thread_busy/logs.json")
 	const sid = "01K00000000000000000000001"
-	_, _, body := get(t, h, "/weftbase/api/runs?session="+sid)
+	_, _, body := get(t, h, "/weftbase/v1/runs?session="+sid)
 	var page struct {
 		Runs   []row           `json:"runs"`
 		Capped json.RawMessage `json:"turn_marks_capped"`
@@ -116,7 +116,7 @@ func TestRunsTurnMarksPastTheCaps(t *testing.T) {
 		t.Fatal(err)
 	}
 	const serverTok = "srv-token"
-	srv := New(DB(db), Token(serverTok))
+	srv := New(DB(db))
 	t.Cleanup(func() { _ = srv.Close() })
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
@@ -140,7 +140,7 @@ func TestRunsTurnMarksPastTheCaps(t *testing.T) {
 		}
 		return p
 	}
-	big := read(serverTok, "/api/runs?session=s_big")
+	big := read(serverTok, "/v1/runs?session=s_big")
 	if len(big.Runs) != 2 {
 		t.Fatalf("s_big's page = %+v; want its two turns", big.Runs)
 	}
@@ -153,7 +153,7 @@ func TestRunsTurnMarksPastTheCaps(t *testing.T) {
 	if big.Capped != nil {
 		t.Errorf("s_big's page capped: %+v", big.Capped)
 	}
-	wide := read(serverTok, fmt.Sprintf("/api/runs?public_id=pub_many&limit=%d", many))
+	wide := read(serverTok, fmt.Sprintf("/v1/runs?public_id=pub_many&limit=%d", many))
 	marked := 0
 	for _, r := range wide.Runs {
 		marked += r.SessionCompactions
@@ -186,7 +186,7 @@ func TestRunsTurnMarksReadFails(t *testing.T) {
 	seedRun(t, db, "s_f-t1", "pub_f", "s_f", "", nil)
 	seedRun(t, db, "s_f-t2", "pub_f", "s_f", "", map[string]any{"weft.turn": "2"})
 	h := Handler(DB(failEvents{db}))
-	_, _, body := get(t, h, "/weftbase/api/runs?session=s_f")
+	_, _, body := get(t, h, "/weftbase/v1/runs?session=s_f")
 	var page struct {
 		Runs   []json.RawMessage `json:"runs"`
 		Capped *treeHole         `json:"turn_marks_capped"`

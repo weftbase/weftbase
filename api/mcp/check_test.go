@@ -74,8 +74,8 @@ func TestMCPLiveCheck(t *testing.T) {
 
 	// 2. A real server on a free loopback port.
 	addr := freeAddr(t)
-	db := filepath.Join(scratch, "weft.db")
-	server := exec.Command(bin, "dev", "--db", "sqlite://"+db, "--addr", addr)
+	data := filepath.Join(scratch, "data")
+	server := exec.Command(bin, "dev", "--data", data, "--addr", addr)
 	server.Dir, server.Env = home, env // discovery on: it writes scratch/run/weft/dev.json
 	var devOut syncBuffer
 	server.Stdout, server.Stderr = &devOut, &devOut
@@ -105,8 +105,8 @@ func TestMCPLiveCheck(t *testing.T) {
 		}
 	}()
 	base := "http://" + addr
-	token := waitServer(t, ctx, base, db+".token", exited, &devOut)
-	say("weftbase %s (db %s, dev token from <db>.token, never printed)", base, "sqlite://<scratch>/weft.db")
+	token := waitServer(t, ctx, base, filepath.Join(data, "bootstrap.key"), exited, &devOut)
+	say("weftbase %s (data <scratch>/data, the bootstrap key from <data>/bootstrap.key, never printed)", base)
 	if _, err := os.Stat(filepath.Join(run, "weftbase", "dev.json")); err != nil {
 		t.Fatalf("the scratch server wrote no discovery file in the scratch XDG_RUNTIME_DIR: %v", err)
 	}
@@ -332,7 +332,7 @@ func TestMCPLiveCheck(t *testing.T) {
 	say("weftbase mcp (no flags; discovery file): initialize ok, server %s", cs2.InitializeResult().ServerInfo.Name)
 	call(cs2, "meta", nil, "Server at "+base+": capabilities ")
 	_ = cs2.Close()
-	if s := mcpErr2.String(); strings.Contains(s, token) || !strings.Contains(s, "for the server at "+base+" (token from the discovery file)") {
+	if s := mcpErr2.String(); strings.Contains(s, token) || !strings.Contains(s, "for the weftbase server at "+base+" (token from the discovery file)") {
 		t.Errorf("no-flag weftbase mcp stderr %q: want the server %s with the token from the discovery file, never the token", s, base)
 	}
 
@@ -373,7 +373,7 @@ func mcpCheckEnv(scratch, home string) []string {
 	for _, kv := range os.Environ() {
 		k, _, _ := strings.Cut(kv, "=")
 		switch k {
-		case "WEFTBASE_URL", "WEFTBASE_TOKEN", "WEFTBASE_DISCOVERY", "WEFTBASE_DB", "WEFT_MANIFEST",
+		case "WEFTBASE_URL", "WEFTBASE_TOKEN", "WEFTBASE_DISCOVERY", "WEFTBASE_DB", "WEFTBASE_DATA", "WEFT_MANIFEST",
 			"WEFTBASE_ADDR", "WEFT_RETAIN", "WEFT_PRICING", "XDG_RUNTIME_DIR", "XDG_CACHE_HOME", "HOME":
 			continue
 		}
@@ -421,25 +421,25 @@ func freeAddr(t *testing.T) string {
 	return addr
 }
 
-// waitServer waits for the dev token file and an authorised /api/meta,
+// waitServer waits for the bootstrap key file and an authorised /v1/meta,
 // failing at once with the server's output when the process exits.
 func waitServer(t *testing.T, ctx context.Context, base, tokenFile string, exited <-chan struct{}, out *syncBuffer) string {
 	t.Helper()
 	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(50 * time.Millisecond) {
 		select {
 		case <-exited:
-			t.Fatalf("weftbase dev exited before it answered %s/api/meta:\n%s", base, out.String())
+			t.Fatalf("weftbase dev exited before it answered %s/v1/meta:\n%s", base, out.String())
 		default:
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("no server answered %s/api/meta within 30s", base)
+			t.Fatalf("no server answered %s/v1/meta within 30s", base)
 		}
 		b, err := os.ReadFile(tokenFile)
 		if err != nil {
 			continue
 		}
 		tok := strings.TrimSpace(string(b))
-		if _, err := rest.New(base, tok).Get(ctx, "/api/meta", nil); err == nil {
+		if _, err := rest.New(base, tok).Get(ctx, "/v1/meta", nil); err == nil {
 			return tok
 		}
 	}

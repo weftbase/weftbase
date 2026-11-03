@@ -13,14 +13,14 @@ import (
 	"github.com/weftbase/weftbase/obsdb"
 )
 
-// GET /api/stats (UX plan A4, D7; UX-E-25, UX-A-14): numbers across
+// GET /v1/stats (UX plan A4, D7; UX-E-25, UX-A-14): numbers across
 // runs — runs, failures, tokens, cost, latency, TTFT, retries, denials —
 // grouped by agent, model, tool, error type or step, with a series
 // over the window for sparklines. Read through the database's
 // obsdb.Aggregator (SQLite's span_stats rollup written at ingest,
 // ClickHouse's native GROUP BY); capability "stats", present when the
-// database aggregates — which also turns on /api/search's error_class
-// facet and the error_class filter on /api/search and /api/runs.
+// database aggregates — which also turns on /v1/runs?q= (search)'s error_class
+// facet and the error_class filter on /v1/runs?q= (search) and /v1/runs.
 //
 // The parameters:
 //
@@ -29,14 +29,14 @@ import (
 //	            until (90m, 24h, 7d); default 24h
 //	until       the window's end, RFC 3339; default now
 //	agent       the agent's name, exact
-//	tag.<k>=<v> metadata matches, /api/runs' meaning
-//	public_id   /api/runs' meaning
+//	tag.<k>=<v> metadata matches, /v1/runs' meaning
+//	public_id   /v1/runs' meaning
 //	parent      "*" (the default: every run, subagent children
 //	            included — each counted under its own agent) | "" the
 //	            top-level runs | a run id its children. Note the
-//	            default differs from /api/runs', which lists the
+//	            default differs from /v1/runs', which lists the
 //	            top-level runs: a group's runs_query says all=1
-//	status      /api/runs' status words (default: any); an unknown
+//	status      /v1/runs' status words (default: any); an unknown
 //	            value is 400, as since, until and by are
 //
 // since and until must lie in 1678..2262 (Unix nanoseconds), else 400.
@@ -83,7 +83,7 @@ import (
 //	                    a call can be in several groups' delegated, so
 //	                    never sum delegated across groups)
 //	runs_query          agent and error_type groups with a key: the
-//	                    /api/search query string (all=1, the window as
+//	                    /v1/runs?q= (search) query string (all=1, the window as
 //	                    since/until, every filter read) whose total is
 //	                    the group's runs — what a card links to
 //
@@ -127,7 +127,7 @@ type statsGroup struct {
 	// Delegated is by=agent's: what the agent's subagents spent for it
 	// (obsdb.StatsGroup.Delegated), beside its own figures above.
 	Delegated *statsDelegated `json:"delegated,omitempty"`
-	// RunsQuery is the /api/search query string whose total is this
+	// RunsQuery is the /v1/runs?q= (search) query string whose total is this
 	// group's runs (agent and error_type groups with a key; absent
 	// otherwise — no runs filter reproduces a model's, tool's or step's).
 	RunsQuery string `json:"runs_query,omitempty"`
@@ -155,18 +155,6 @@ type statsBucket struct {
 	FailedCalls  int64 `json:"failed_calls"`
 	InputTokens  int64 `json:"input_tokens"`
 	OutputTokens int64 `json:"output_tokens"`
-}
-
-// statsGroupRoute is the stats capability's group (registered when the
-// database is an obsdb.Aggregator).
-func statsGroupRoute() routeGroup {
-	return routeGroup{
-		name:       "stats",
-		capability: "stats",
-		register: func(mux *http.ServeMux, s *Server) {
-			mux.HandleFunc("GET /api/stats", s.serveStats)
-		},
-	}
 }
 
 // windowSince reads since: RFC 3339, or a duration back from until —
@@ -203,7 +191,7 @@ func (s *Server) serveStats(w http.ResponseWriter, r *http.Request) {
 	if _, set := q["parent"]; set {
 		query.ParentRunID = parentParam(q)
 	}
-	// /api/runs' other filters, its words and its defaults — any status.
+	// /v1/runs' other filters, its words and its defaults — any status.
 	if query.Status, ok = statusParam(w, r, q); !ok {
 		return
 	}
@@ -352,7 +340,7 @@ func (s *Server) priceModels(models []obsdb.ModelUsage, usage core.Usage) cost {
 	return out
 }
 
-// runsQueryOf is a run-level group's /api/search query string — its
+// runsQueryOf is a run-level group's /v1/runs?q= (search) query string — its
 // key and every filter the stats query read, the window as since/until
 // on the start — whose total is the group's runs; "" for a group no
 // runs filter reproduces (model, tool, step; an unnamed agent, a

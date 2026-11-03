@@ -186,7 +186,7 @@ func statsFixtureDB(t *testing.T) obsdb.DB {
 	return db
 }
 
-// TestStatsGoldens pins GET /api/stats' shape, one golden per by, over
+// TestStatsGoldens pins GET /v1/stats' shape, one golden per by, over
 // the arena-shaped fixture: researcher's unpriced zai model reads
 // unknown (never $0), director's haiku priced, orders' scripted model
 // an exact $0; the retry give-up's three attempts and the 429 under
@@ -194,14 +194,14 @@ func statsFixtureDB(t *testing.T) obsdb.DB {
 func TestStatsGoldens(t *testing.T) {
 	h := Handler(DB(statsFixtureDB(t)))
 	for _, by := range []string{"agent", "model", "tool", "error_type", "step"} {
-		code, _, body := get(t, h, "/weftbase/api/stats?by="+by+"&"+statsWindow)
+		code, _, body := get(t, h, "/weftbase/v1/stats?by="+by+"&"+statsWindow)
 		if code != http.StatusOK {
 			t.Fatalf("stats?by=%s: %d %s", by, code, body)
 		}
 		golden(t, "stats-"+strings.ReplaceAll(by, "_", "-")+".golden.json", body)
 	}
 	// The numbers the Agents page reads, spot-checked.
-	_, _, body := get(t, h, "/weftbase/api/stats?by=agent&"+statsWindow)
+	_, _, body := get(t, h, "/weftbase/v1/stats?by=agent&"+statsWindow)
 	for _, want := range []string{
 		`"key":"researcher","runs":5,"failed":3,"failure_rate":0.6`,
 		`"unpriced_models":["zai/glm-5.3-flash"]`,
@@ -245,14 +245,14 @@ func TestStatsRoute(t *testing.T) {
 		{"by=agent&since=999999999d", http.StatusBadRequest, "since must be"},
 		{"by=agent&status=failed&" + statsWindow, http.StatusOK, `"key":"researcher","runs":3,"failed":3`},
 	} {
-		code, _, body := get(t, h, "/weftbase/api/stats?"+c.path)
+		code, _, body := get(t, h, "/weftbase/v1/stats?"+c.path)
 		if code != c.code || !strings.Contains(body, c.want) {
 			t.Errorf("stats?%s = %d %s, want %d with %s", c.path, code, body, c.code, c.want)
 		}
 	}
 	// A tool group has no model usage: no cost, said so; DENIED is a
 	// denial, not a failure.
-	_, _, body := get(t, h, "/weftbase/api/stats?by=tool&"+statsWindow)
+	_, _, body := get(t, h, "/weftbase/v1/stats?by=tool&"+statsWindow)
 	for _, want := range []string{`"key":"refund","runs":1,"failed":0,"failure_rate":0,"calls":1,"failed_calls":0`,
 		`"cost_usd":null,"cost_known":false,"cost_badge":"unknown","cost_reason":"tool calls carry no model usage to price"`,
 		`"retry_rate":null,"denials":1`} {
@@ -261,19 +261,15 @@ func TestStatsRoute(t *testing.T) {
 		}
 	}
 	checkRunsQueries(t, h)
-	// The meta capability.
-	if _, _, meta := get(t, h, "/weftbase/api/meta"); !strings.Contains(meta, `"stats"`) {
-		t.Errorf("meta without the stats capability: %s", meta)
-	}
 }
 
 // TestErrorClassFacet is the Done line's second half (UX-C-37): the
 // search's error_class facet groups the arena's two usage-limit
 // failures — different token counts, different steps — into one class,
-// whose string filters /api/search and /api/runs to exactly those runs.
+// whose string filters /v1/search and /v1/runs to exactly those runs.
 func TestErrorClassFacet(t *testing.T) {
 	h := Handler(DB(statsFixtureDB(t)))
-	code, _, body := get(t, h, "/weftbase/api/search?status=failed")
+	code, _, body := get(t, h, "/weftbase/v1/runs?sort=started&status=failed")
 	if code != http.StatusOK {
 		t.Fatalf("search: %d %s", code, body)
 	}
@@ -290,22 +286,22 @@ func TestErrorClassFacet(t *testing.T) {
 		}
 	}
 	v := url.QueryEscape(usageClass)
-	ids, total, _ := searchIDs(t, h, "/weftbase/api/search?error_class="+v)
+	ids, total, _ := searchIDs(t, h, "/weftbase/v1/runs?sort=started&error_class="+v)
 	if strings.Join(ids, ",") != "st_r3,st_r2" || total != 2 {
 		t.Errorf("search?error_class=<usage> = %v (total %d), want st_r3,st_r2", ids, total)
 	}
 	// The facet counts the match without its own filter: still every class.
-	if _, _, b := get(t, h, "/weftbase/api/search?error_class="+v); !strings.Contains(b, `"count":1}`) {
+	if _, _, b := get(t, h, "/weftbase/v1/runs?sort=started&error_class="+v); !strings.Contains(b, `"count":1}`) {
 		t.Errorf("search?error_class= facet narrowed by its own filter: %s", b)
 	}
-	ids, total, _ = searchIDs(t, h, "/weftbase/api/runs?error_class="+v)
+	ids, total, _ = searchIDs(t, h, "/weftbase/v1/runs?error_class="+v)
 	if strings.Join(ids, ",") != "st_r3,st_r2" || total != 2 {
 		t.Errorf("runs?error_class=<usage> = %v (total %d), want st_r3,st_r2", ids, total)
 	}
-	if ids, total, _ = searchIDs(t, h, "/weftbase/api/runs?agent=director&error_class="+v); len(ids) != 0 || total != 0 {
+	if ids, total, _ = searchIDs(t, h, "/weftbase/v1/runs?agent=director&error_class="+v); len(ids) != 0 || total != 0 {
 		t.Errorf("runs?agent=director&error_class=<usage> = %v, want none", ids)
 	}
-	if ids, _, _ = searchIDs(t, h, "/weftbase/api/runs?error_class=no+such+class"); len(ids) != 0 {
+	if ids, _, _ = searchIDs(t, h, "/weftbase/v1/runs?error_class=no+such+class"); len(ids) != 0 {
 		t.Errorf("runs?error_class=<unknown> = %v, want none", ids)
 	}
 }
@@ -314,16 +310,13 @@ func TestErrorClassFacet(t *testing.T) {
 type noAggregates struct{ obsdb.DB }
 
 // TestStatsOffWithoutAggregator: a database that cannot aggregate has
-// no stats route, no facet, and says why; the class filter is 501.
+// no stats (501), no facet, and the class filter is 501.
 func TestStatsOffWithoutAggregator(t *testing.T) {
 	h := Handler(DB(noAggregates{statsFixtureDB(t)}))
-	if code, _, body := get(t, h, "/weftbase/api/stats?by=agent"); code != http.StatusNotFound {
-		t.Errorf("stats without an Aggregator = %d %s, want 404", code, body)
+	if code, _, body := get(t, h, "/weftbase/v1/stats?by=agent"); code != http.StatusNotImplemented {
+		t.Errorf("stats without an Aggregator = %d %s, want 501", code, body)
 	}
-	if _, _, meta := get(t, h, "/weftbase/api/meta"); !strings.Contains(meta, `"stats":"the database cannot aggregate`) {
-		t.Errorf("meta.capabilities_off without stats' reason: %s", meta)
-	}
-	if code, _, body := get(t, h, "/weftbase/api/runs?error_class=x"); code != http.StatusNotImplemented {
+	if code, _, body := get(t, h, "/weftbase/v1/runs?error_class=x"); code != http.StatusNotImplemented {
 		t.Errorf("runs?error_class= without an Aggregator = %d %s, want 501", code, body)
 	}
 }
@@ -344,17 +337,17 @@ func TestStatsGoldensClickHouse(t *testing.T) {
 	}
 	h := Handler(DB(db))
 	for _, by := range []string{"agent", "model", "tool", "error_type", "step"} {
-		code, _, body := get(t, h, "/weftbase/api/stats?by="+by+"&"+statsWindow)
+		code, _, body := get(t, h, "/weftbase/v1/stats?by="+by+"&"+statsWindow)
 		if code != http.StatusOK {
 			t.Fatalf("stats?by=%s on ClickHouse: %d %s", by, code, body)
 		}
 		golden(t, "stats-"+strings.ReplaceAll(by, "_", "-")+".golden.json", body)
 	}
-	_, _, body := get(t, h, "/weftbase/api/search?status=failed")
+	_, _, body := get(t, h, "/weftbase/v1/runs?sort=started&status=failed")
 	if !strings.Contains(body, `"facets":{"error_class":[{"class":"`+usageClass+`","count":2},`) {
 		t.Errorf("ClickHouse facet: want the usage-limit class first with 2 runs:\n%s", body)
 	}
-	ids, total, _ := searchIDs(t, h, "/weftbase/api/runs?error_class="+url.QueryEscape(usageClass))
+	ids, total, _ := searchIDs(t, h, "/weftbase/v1/runs?error_class="+url.QueryEscape(usageClass))
 	if strings.Join(ids, ",") != "st_r3,st_r2" || total != 2 {
 		t.Errorf("ClickHouse runs?error_class=<usage> = %v (total %d), want st_r3,st_r2", ids, total)
 	}
@@ -362,13 +355,13 @@ func TestStatsGoldensClickHouse(t *testing.T) {
 }
 
 // checkRunsQueries: every agent and error_type group's runs_query,
-// sent to /api/search, totals the group's runs — the card's link
+// sent to /v1/search, totals the group's runs — the card's link
 // lands on the same N — whatever filters the stats query read.
 func checkRunsQueries(t *testing.T, h http.Handler) {
 	t.Helper()
 	for _, path := range []string{"by=agent&" + statsWindow, "by=error_type&" + statsWindow,
 		"by=agent&parent=&" + statsWindow, "by=agent&status=failed&" + statsWindow} {
-		_, _, body := get(t, h, "/weftbase/api/stats?"+path)
+		_, _, body := get(t, h, "/weftbase/v1/stats?"+path)
 		var page struct {
 			Groups []struct {
 				Key       string `json:"key"`
@@ -382,14 +375,14 @@ func checkRunsQueries(t *testing.T, h http.Handler) {
 				t.Errorf("stats?%s: group %q has no runs_query", path, g.Key)
 				continue
 			}
-			if _, total, _ := searchIDs(t, h, "/weftbase/api/search?"+g.RunsQuery); total != g.Runs {
+			if _, total, _ := searchIDs(t, h, searchPath("/weftbase", g.RunsQuery)); total != g.Runs {
 				t.Errorf("stats?%s: group %q counts %d runs, its runs_query %q lists %d", path, g.Key, g.Runs, g.RunsQuery, total)
 			}
 		}
 	}
 	// No runs filter reproduces a model's, tool's or step's group.
 	for _, by := range []string{"model", "tool", "step"} {
-		if _, _, body := get(t, h, "/weftbase/api/stats?by="+by+"&"+statsWindow); strings.Contains(body, "runs_query") {
+		if _, _, body := get(t, h, "/weftbase/v1/stats?by="+by+"&"+statsWindow); strings.Contains(body, "runs_query") {
 			t.Errorf("stats?by=%s carries a runs_query: %s", by, body)
 		}
 	}
@@ -415,7 +408,7 @@ func TestStatsScriptedZeroUsage(t *testing.T) {
 	h := Handler(DB(db))
 	const want = `"cost_usd":0,"cost_known":true,"cost_badge":"scripted","cost_reason":"a scripted model: nothing bills it, an exact $0","cache":"exact"`
 	for _, by := range []string{"model", "agent", "step"} {
-		if _, _, body := get(t, h, "/weftbase/api/stats?by="+by+"&"+statsWindow); !strings.Contains(body, want) {
+		if _, _, body := get(t, h, "/weftbase/v1/stats?by="+by+"&"+statsWindow); !strings.Contains(body, want) {
 			t.Errorf("stats?by=%s, an all-scripted group: want the exact $0:\n%s", by, body)
 		}
 	}
@@ -443,7 +436,7 @@ func TestStatsScriptedBesideIdleModel(t *testing.T) {
 		}
 	}
 	h := Handler(DB(db))
-	_, _, body := get(t, h, "/weftbase/api/stats?by=agent&"+statsWindow)
+	_, _, body := get(t, h, "/weftbase/v1/stats?by=agent&"+statsWindow)
 	if strings.Contains(body, `"cost_badge":"scripted"`) {
 		t.Errorf("a real model's idle part beside scripted ones read the scripted $0:\n%s", body)
 	}

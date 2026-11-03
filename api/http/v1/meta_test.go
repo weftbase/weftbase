@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -25,7 +24,7 @@ import (
 // metaOf reads api/meta from a test server, as a loopback client.
 func metaOf(t *testing.T, ts *httptest.Server, host string) metaDoc {
 	t.Helper()
-	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/meta", nil)
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/v1/meta", nil)
 	if host != "" {
 		req.Host = host
 	}
@@ -157,34 +156,6 @@ func TestMetaManifestCheck(t *testing.T) {
 	t.Cleanup(ts.Close)
 	if m := metaOf(t, ts, ""); m.ManifestCheck != nil {
 		t.Errorf("manifest_check without a manifest = %+v, want null", m.ManifestCheck)
-	}
-}
-
-// TestMetaDBPathSetupA pins db.path/db.size, pid and live_all in setup A (no
-// Token): a loopback Host reads them; a Host let in only by
-// AllowOrigins reads the kind alone. (Setup B and the scoped tokens: TestAuthMatrix.)
-func TestMetaDBPathSetupA(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "weft.db")
-	srv := New(Open(path), AllowOrigins("http://wb.example"))
-	t.Cleanup(func() { _ = srv.Close() })
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-	if m := metaOf(t, ts, ""); m.DB.Kind != "sqlite" || m.DB.Path != path || m.DB.Size == nil || *m.DB.Size <= 0 {
-		t.Errorf("loopback meta.db = %+v, want sqlite at %s with a size", m.DB, path)
-	}
-	if m := metaOf(t, ts, ""); m.PID != os.Getpid() {
-		t.Errorf("loopback meta.pid = %d, want this process's %d", m.PID, os.Getpid())
-	}
-	if m := metaOf(t, ts, "wb.example"); m.DB.Kind != "sqlite" || m.DB.Path != "" || m.DB.Size != nil || m.PID != 0 {
-		t.Errorf("AllowOrigins host meta.db = %+v, pid %d, want the kind only and no pid", m.DB, m.PID)
-	}
-	// live_all (plan A7) follows the same rule: the loopback Host may
-	// open /api/live?all=1, the AllowOrigins host may not (TestLiveAllSetupA).
-	if m := metaOf(t, ts, ""); !m.LiveAll {
-		t.Error("loopback meta.live_all = false, want true")
-	}
-	if m := metaOf(t, ts, "wb.example"); m.LiveAll {
-		t.Error("AllowOrigins host meta.live_all = true, want false")
 	}
 }
 

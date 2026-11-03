@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -134,14 +135,14 @@ func TestGoldensMatchARealRun(t *testing.T) {
 			}
 		}
 	}
-	trace, _ := fetch("/api/runs/" + res.ID).(map[string]any)["trace_id"].(string)
+	trace, _ := fetch("/v1/runs/" + url.PathEscape(res.ID)).(map[string]any)["trace_id"].(string)
 	// The app's lines are the run's, in order, through the pipeline: the
 	// Tap's under the invoke_agent span, the tool's two under its
 	// execute_tool span.
-	logsDoc := fetch("/api/runs/" + res.ID + "/logs").(map[string]any)
+	logsDoc := fetch("/v1/runs/" + url.PathEscape(res.ID) + "/logs").(map[string]any)
 	logs, _ := logsDoc["logs"].([]any)
 	spanOf := map[string]string{} // span id → name
-	for _, sp := range fetch("/api/runs/" + res.ID + "/spans").(map[string]any)["spans"].([]any) {
+	for _, sp := range fetch("/v1/runs/" + url.PathEscape(res.ID) + "/spans").(map[string]any)["spans"].([]any) {
 		m := sp.(map[string]any)
 		id, _ := m["span_id"].(string)
 		name, _ := m["name"].(string)
@@ -156,12 +157,12 @@ func TestGoldensMatchARealRun(t *testing.T) {
 	// The run document counts them by severity (U4-fix: one
 	// severity-narrowed scan, obsdb.DB.CountLogs): the tool's WARN, no
 	// ERROR, nothing capped — the INFO lines are not counted.
-	if d := fetch("/api/runs/" + res.ID).(map[string]any); d["log_warn"] != float64(1) || d["log_error"] != nil || d["logs_capped"] != nil {
+	if d := fetch("/v1/runs/" + url.PathEscape(res.ID)).(map[string]any); d["log_warn"] != float64(1) || d["log_error"] != nil || d["logs_capped"] != nil {
 		t.Errorf("the real run's log counts = warn %v, error %v, capped %v; want 1, absent, absent", d["log_warn"], d["log_error"], d["logs_capped"])
 	}
 	// api/meta reads the real run's content mark (full: the pipeline's
 	// Server destination is content-on) and, on loopback, the file.
-	meta := fetch("/api/meta").(map[string]any)
+	meta := fetch("/v1/meta").(map[string]any)
 	latest, _ := meta["content"].(map[string]any)["latest"].(map[string]any)
 	db, _ := meta["db"].(map[string]any)
 	if latest["run_id"] != res.ID || latest["mark"] != "full" || db["path"] != filepath.Join(dir, "weft.db") || db["size"] == nil {
@@ -177,39 +178,39 @@ func TestGoldensMatchARealRun(t *testing.T) {
 	}{
 		// U7: the fixture's subagent is unpriced (openai/kimi-k2.7-code);
 		// the real run's models are wefttest's, scripted: an exact $0.
-		{"run-sub.golden.json", "/api/runs/" + res.ID, []string{".own_usage", ".delegated_usage", ".children[]", ".children_count", ".meta.cwd", ".delegated_cost_reason", ".delegated_cost_usd=<nil>", ".delegated_unpriced_models[]"}},
+		{"run-sub.golden.json", "/v1/runs/" + url.PathEscape(res.ID), []string{".own_usage", ".delegated_usage", ".children[]", ".children_count", ".meta.cwd", ".delegated_cost_reason", ".delegated_cost_usd=<nil>", ".delegated_unpriced_models[]"}},
 		// The run documents A9.2 pins from runs that compacted (a
 		// PrepareStep trim, thread's session marker): every field but the
 		// compactions themselves is the plain run's.
 		// The fixture's run reports attempts and a fallback (U4's
 		// problem counters); TestProblemCountersFromARealRun pins those
 		// fields from real runs that have them.
-		{"run-compacted.golden.json", "/api/runs/" + res.ID, []string{".own_usage", ".delegated_usage", ".children[]", ".children_count", ".compactions[]", ".holes[]", ".delegated_cost_reason", ".delegated_cost_usd=<nil>", ".attempts_retried", ".fallbacks"}},
+		{"run-compacted.golden.json", "/v1/runs/" + url.PathEscape(res.ID), []string{".own_usage", ".delegated_usage", ".children[]", ".children_count", ".compactions[]", ".holes[]", ".delegated_cost_reason", ".delegated_cost_usd=<nil>", ".attempts_retried", ".fallbacks"}},
 		// The session marker's turn also carries its summarizer figure
 		// (UX-B-13, U15.1-fix); the plain real run is no session turn.
-		{"run-session-compacted.golden.json", "/api/runs/" + res.ID, []string{".compactions[]", ".summarizer"}},
+		{"run-session-compacted.golden.json", "/v1/runs/" + url.PathEscape(res.ID), []string{".compactions[]", ".summarizer"}},
 		// own_usage / delegated_usage (U30.2): the real run delegates
 		// nothing; run-sub.golden.json pins the split from a delegating run.
-		{"runs.golden.json", "/api/runs", []string{".runs[].own_usage", ".runs[].delegated_usage", ".runs[].children_count", ".runs[].finished=<nil>", ".runs[].meta.cwd", ".runs[].delegated_cost_reason", ".runs[].delegated_cost_usd=<nil>", ".runs[].cost_usd=<nil>", ".runs[].delegated_unpriced_models[]"}},
-		{"runs-children.golden.json", "/api/runs?all=1", []string{".runs[].meta.cwd", ".runs[].cost_usd=<nil>", ".runs[].unpriced_models[]"}},
+		{"runs.golden.json", "/v1/runs", []string{".runs[].own_usage", ".runs[].delegated_usage", ".runs[].children_count", ".runs[].finished=<nil>", ".runs[].meta.cwd", ".runs[].delegated_cost_reason", ".runs[].delegated_cost_usd=<nil>", ".runs[].cost_usd=<nil>", ".runs[].delegated_unpriced_models[]"}},
+		{"runs-children.golden.json", "/v1/runs?all=1", []string{".runs[].meta.cwd", ".runs[].cost_usd=<nil>", ".runs[].unpriced_models[]"}},
 		// Search (plan A7): run rows, prompt_preview included, from the
 		// real run's prompt "where is order 42?".
 		// The real run failed nothing: its error_class facet is empty.
-		{"search.golden.json", "/api/search?q=order&sort=tokens", []string{".runs[].own_usage", ".runs[].delegated_usage", ".facets.error_class[]", ".runs[].children_count", ".runs[].meta.cwd", ".runs[].delegated_cost_reason", ".runs[].delegated_cost_usd=<nil>", ".runs[].delegated_unpriced_models[]"}},
-		{"events-ok.golden.json", "/api/runs/" + res.ID + "/events", nil},
-		{"events-ok-paged.golden.json", "/api/runs/" + res.ID + "/events?after=2&limit=3", nil},
-		{"transcript-ok.golden.json", "/api/runs/" + res.ID + "/transcript", nil},
+		{"search.golden.json", "/v1/runs?q=order&sort=tokens", []string{".runs[].own_usage", ".runs[].delegated_usage", ".facets.error_class[]", ".runs[].children_count", ".runs[].meta.cwd", ".runs[].delegated_cost_reason", ".runs[].delegated_cost_usd=<nil>", ".runs[].delegated_unpriced_models[]"}},
+		{"events-ok.golden.json", "/v1/runs/" + url.PathEscape(res.ID) + "/events", nil},
+		{"events-ok-paged.golden.json", "/v1/runs/" + url.PathEscape(res.ID) + "/events?after=2&limit=3", nil},
+		{"transcript-ok.golden.json", "/v1/runs/" + url.PathEscape(res.ID) + "/transcript", nil},
 		// ?step= (ADR 0029), pinned from A9's compacted step run: this run
 		// never compacted, so its compacted_at is null (and its tool arguments
 		// are its own).
-		{"transcript-as-of-step.golden.json", "/api/runs/" + res.ID + "/transcript?step=1", []string{".compacted_at", ".batches[].messages[].content[][tool_call].args", ".messages[].content[][tool_call].args"}},
-		{"spans-sub.golden.json", "/api/runs/" + res.ID + "/spans", nil},
-		{"spans-tree.golden.json", "/api/runs/" + res.ID + "/spans?tree=1", []string{".holes[]", ".spans[].parent_run_id"}}, // the real run delegates to no child; the holes come from TestSpansTreeGolden,
-		{"trace.golden.json", "/api/traces/" + trace, nil},
+		{"transcript-as-of-step.golden.json", "/v1/runs/" + url.PathEscape(res.ID) + "/transcript?step=1", []string{".compacted_at", ".batches[].messages[].content[][tool_call].args", ".messages[].content[][tool_call].args"}},
+		{"spans-sub.golden.json", "/v1/runs/" + url.PathEscape(res.ID) + "/spans", nil},
+		{"spans-tree.golden.json", "/v1/runs/" + url.PathEscape(res.ID) + "/spans?tree=1", []string{".holes[]", ".spans[].parent_run_id"}}, // the real run delegates to no child; the holes come from TestSpansTreeGolden,
+		{"trace.golden.json", "/v1/traces/" + trace, nil},
 		// The trace list (plan A7): the real run's trace has its root; the
 		// fixture's orphan trace pins the missing root's null and badge.
 		// The real run failed nothing (failed_runs is omitted at 0).
-		{"traces.golden.json", "/api/traces", []string{".traces[].root=<nil>", ".traces[].badge", ".traces[].reason", ".traces[].fix", ".traces[].failed_runs"}},
+		{"traces.golden.json", "/v1/traces", []string{".traces[].root=<nil>", ".traces[].badge", ".traces[].reason", ".traces[].fix", ".traces[].failed_runs"}},
 		// The fixture's s_orders holds a thread summarizer span (§3); this
 		// run summarized nothing, so its sessions carry no summarizer_usage
 		// (TestSessionSummarizerUsage pins it from obsdb, scoped and not).
@@ -217,36 +218,33 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		// sessions carry no failed_turns (U16; the SessionTurnFacts
 		// conformance case pins the counts on every backend).
 		// cost_partial (U33.2): only on an unknown set figure with a priced part; the real run is priced.
-		{"sessions.golden.json", "/api/sessions", []string{".sessions[].cost_usd=<nil>", ".sessions[].summarizer_usage", ".sessions[].failed_turns", ".sessions[].cost_partial"}},
-		{"session-orders.golden.json", "/api/sessions/s_x", []string{".runs[].finished=<nil>", ".runs[].meta.cwd", ".cost_usd=<nil>", ".runs[].cost_usd=<nil>", ".summarizer_usage", ".failed_turns", ".cost_partial"}},
-		{"public.golden.json", "/api/public/pub_x", nil},
-		{"session-public-id.golden.json", "/api/sessions/s_x/public_id", nil},
+		{"sessions.golden.json", "/v1/sessions", []string{".sessions[].cost_usd=<nil>", ".sessions[].summarizer_usage", ".sessions[].failed_turns", ".sessions[].cost_partial"}},
+		{"session-orders.golden.json", "/v1/sessions/s_x", []string{".runs[].finished=<nil>", ".runs[].meta.cwd", ".cost_usd=<nil>", ".runs[].cost_usd=<nil>", ".summarizer_usage", ".failed_turns", ".cost_partial"}},
+		{"public.golden.json", "/v1/public/pub_x", nil},
+		{"session-public-id.golden.json", "/v1/sessions/s_x/public_id", nil},
 		// The step goldens are recorded from TestStepRoute's real run;
 		// this one has no instructions, one tool and no failed attempt.
 		// No fallback either: the golden's fallback attempts carry layer.
-		{"step-0.golden.json", "/api/runs/" + res.ID + "/steps/0", []string{".attempts[].error_type", ".attempts[].error", ".attempts[].layer", ".request.prompt", ".request.tools.tools[].schema"}},
+		{"step-0.golden.json", "/v1/runs/" + url.PathEscape(res.ID) + "/steps/0", []string{".attempts[].error_type", ".attempts[].error", ".attempts[].layer", ".request.prompt", ".request.tools.tools[].schema"}},
 		// The app's two log lines, attributed through the tool's span.
-		{"logs-ok.golden.json", "/api/runs/" + res.ID + "/logs", nil},
-		{"logs-ok-paged.golden.json", "/api/runs/" + res.ID + "/logs?limit=1", nil},
+		{"logs-ok.golden.json", "/v1/runs/" + url.PathEscape(res.ID) + "/logs", nil},
+		{"logs-ok-paged.golden.json", "/v1/runs/" + url.PathEscape(res.ID) + "/logs?limit=1", nil},
 		// The step-aligned diff (plan E3.1), the real run against itself:
 		// no change, no instructions (system ""), the golden's lookup a
 		// result of its own.
-		{"diff.golden.json", "/api/diff?a=" + res.ID + "&b=" + res.ID, []string{".summary.first_changed", ".summary.changed_steps[]", ".steps[].changes[]"}},
+		{"diff.golden.json", "/v1/diff?a=" + res.ID + "&b=" + res.ID, []string{".summary.first_changed", ".summary.changed_steps[]", ".steps[].changes[]"}},
 		// The aggregates (A4): the real run is one scripted run of orders
 		// — priced an exact $0, its tool succeeded; the fixture's
 		// unpriced, unknown and failed groups carry what it does not.
-		{"stats-agent.golden.json", "/api/stats?by=agent", []string{".groups[].unpriced_models[]", ".groups[].cost_usd=<nil>", ".groups[].delegated.cost_", ".groups[].delegated.unpriced_models[]"}}, // the real run delegates nothing
-		{"stats-model.golden.json", "/api/stats?by=model", []string{".groups[].unpriced_models[]", ".groups[].cost_usd=<nil>"}},
-		{"stats-tool.golden.json", "/api/stats?by=tool", nil},
-		{"stats-error-type.golden.json", "/api/stats?by=error_type", []string{".groups[]"}},
-		{"stats-step.golden.json", "/api/stats?by=step", []string{".groups[].unpriced_models[]", ".groups[].cost_usd=<nil>"}},
+		{"stats-agent.golden.json", "/v1/stats?by=agent", []string{".groups[].unpriced_models[]", ".groups[].cost_usd=<nil>", ".groups[].delegated.cost_", ".groups[].delegated.unpriced_models[]"}}, // the real run delegates nothing
+		{"stats-model.golden.json", "/v1/stats?by=model", []string{".groups[].unpriced_models[]", ".groups[].cost_usd=<nil>"}},
+		{"stats-tool.golden.json", "/v1/stats?by=tool", nil},
+		{"stats-error-type.golden.json", "/v1/stats?by=error_type", []string{".groups[]"}},
+		{"stats-step.golden.json", "/v1/stats?by=step", []string{".groups[].unpriced_models[]", ".groups[].cost_usd=<nil>"}},
 		// This server has no manifest (manifest_check is null).
-		{"meta.golden.json", "/api/meta", []string{".manifest_check"}},
-		// discovery_file is served only with DiscoveryFile (B7): this
-		// server is embedded and names none.
-		{"meta-discovery.golden.json", "/api/meta", []string{".manifest_check", ".discovery_file"}},
+		{"meta.golden.json", "/v1/meta", []string{".manifest_check"}},
 	} {
-		b, err := os.ReadFile(filepath.Join("testdata", "api", c.golden))
+		b, err := os.ReadFile(filepath.Join("testdata", "v1", c.golden))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -409,7 +407,7 @@ func TestTranscriptStepsFromARealRun(t *testing.T) {
 		var doc struct {
 			Batches []batch `json:"batches"`
 		}
-		read("/api/runs/"+run+"/transcript", &doc)
+		read("/v1/runs/"+url.PathEscape(run)+"/transcript", &doc)
 		if len(doc.Batches) != len(wants) {
 			t.Fatalf("%s: %d batches, want %d: %+v", run, len(doc.Batches), len(wants), doc.Batches)
 		}
@@ -492,7 +490,7 @@ func TestTranscriptStepsFromARealRun(t *testing.T) {
 			} `json:"event"`
 		} `json:"events"`
 	}
-	read("/api/runs/"+first.ID+"/events", &events)
+	read("/v1/runs/"+url.PathEscape(first.ID)+"/events", &events)
 	steered := -1
 	for _, e := range events.Events {
 		if e.Event.Type == "steered" {
@@ -533,7 +531,7 @@ func TestReplayViewGoldenMatchesARealRun(t *testing.T) {
 	var got any
 	var raw string
 	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		resp, err := http.Get(ts.URL + "/api/runs/pg_view")
+		resp, err := http.Get(ts.URL + "/v1/runs/pg_view")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -550,7 +548,7 @@ func TestReplayViewGoldenMatchesARealRun(t *testing.T) {
 			t.Fatalf("GET run = %d %s", resp.StatusCode, b)
 		}
 	}
-	b, err := os.ReadFile(filepath.Join("testdata", "api", "run-replay-view.golden.json"))
+	b, err := os.ReadFile(filepath.Join("testdata", "v1", "run-replay-view.golden.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -652,7 +650,7 @@ func TestProblemCountersFromARealRun(t *testing.T) {
 		}
 		return doc
 	}
-	doc := get("/api/runs/" + re.Result.ID)
+	doc := get("/v1/runs/" + url.PathEscape(re.Result.ID))
 	// Step 0's primary fails twice (Retry gives up) and the backup
 	// answers; steps 1 and 2 find the primary's script spent — one
 	// failed attempt each, not retryable — and fall back again: four
@@ -664,14 +662,14 @@ func TestProblemCountersFromARealRun(t *testing.T) {
 			t.Errorf("failed run %s = %v (%T), want %v", k, doc[k], doc[k], v)
 		}
 	}
-	if d := get("/api/runs/" + second.ID); d["denied"] != float64(1) || d["error_type"] != nil {
+	if d := get("/v1/runs/" + url.PathEscape(second.ID)); d["denied"] != float64(1) || d["error_type"] != nil {
 		t.Errorf("denied resume = denied %v, error_type %v; want 1, absent", d["denied"], d["error_type"])
 	}
-	if d := get("/api/runs/" + first.ID); d["pending"] != float64(1) || d["denied"] != nil {
+	if d := get("/v1/runs/" + url.PathEscape(first.ID)); d["pending"] != float64(1) || d["denied"] != nil {
 		t.Errorf("parked run = pending %v, denied %v; want 1, absent", d["pending"], d["denied"])
 	}
-	for path, n := range map[string]int{"/api/runs?error_type=max_steps": 1, "/api/runs?error_type=cancelled": 0,
-		"/api/search?error_type=max_steps": 1} {
+	for path, n := range map[string]int{"/v1/runs?error_type=max_steps": 1, "/v1/runs?error_type=cancelled": 0,
+		"/v1/runs?sort=started&error_type=max_steps": 1} {
 		runs, _ := get(path)["runs"].([]any)
 		if len(runs) != n {
 			t.Errorf("%s = %d runs, want %d", path, len(runs), n)

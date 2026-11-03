@@ -47,14 +47,14 @@ func TestChildrenCountKnown(t *testing.T) {
 		ChildrenUnknown *bool  `json:"children_unknown"`
 	}
 	var page struct{ Runs []row }
-	_, _, body := get(t, Handler(DB(db)), "/weftbase/api/runs")
+	_, _, body := get(t, Handler(DB(db)), "/weftbase/v1/runs")
 	decode(t, body, &page)
 	if len(page.Runs) != 1 || page.Runs[0].ChildrenCount == nil || *page.Runs[0].ChildrenCount != 2 || page.Runs[0].ChildrenUnknown != nil {
 		t.Fatalf("known: runs = %s, want p with children_count 2 and no children_unknown", body)
 	}
 
 	page.Runs = nil
-	_, _, body = get(t, Handler(DB(failingChildren{db})), "/weftbase/api/runs")
+	_, _, body = get(t, Handler(DB(failingChildren{db})), "/weftbase/v1/runs")
 	decode(t, body, &page)
 	if len(page.Runs) != 1 {
 		t.Fatalf("failing: runs = %s, want p", body)
@@ -93,7 +93,7 @@ func TestChildrenPrimeCapped(t *testing.T) {
 			DelegatedReason    string `json:"delegated_cost_reason"`
 		}
 	}
-	_, _, body := get(t, Handler(DB(db)), "/weftbase/api/runs")
+	_, _, body := get(t, Handler(DB(db)), "/weftbase/v1/runs")
 	decode(t, body, &page)
 	if len(page.Runs) != 1 {
 		t.Fatalf("runs = %s", body)
@@ -106,7 +106,7 @@ func TestChildrenPrimeCapped(t *testing.T) {
 	}
 }
 
-// TestSessionTurnChildren (P8-fix-b #8): /api/sessions/{id}'s turn rows
+// TestSessionTurnChildren (P8-fix-b #8): /v1/sessions/{id}'s turn rows
 // count every parent-linked run, as the runs list's do — a run under a
 // turn that carries another session id (a thread/pool child session's
 // run as weft recorded it before 0.18, linked by weft.parent.run.id)
@@ -128,7 +128,7 @@ func TestSessionTurnChildren(t *testing.T) {
 			ChildrenCount int    `json:"children_count"`
 		} `json:"runs"`
 	}
-	_, _, body := get(t, Handler(DB(db)), "/weftbase/api/sessions/s_a")
+	_, _, body := get(t, Handler(DB(db)), "/weftbase/v1/sessions/s_a")
 	decode(t, body, &doc)
 	for _, r := range doc.Runs {
 		if r.ID == "s_a-t1" {
@@ -153,7 +153,7 @@ func TestOwnDelegatedUsage(t *testing.T) {
 	costUsagePub(t, db, "p", "", "", "pub_a", "anthropic", "claude-opus-5-5", t0, own.Add(mine).Add(theirs), own)
 	costUsagePub(t, db, "p/0/c1", "p", "", "pub_a", "anthropic", "claude-opus-5-5", t0.Add(time.Second), mine, mine)
 	costUsagePub(t, db, "p/0/c2", "p", "", "pub_b", "anthropic", "claude-opus-5-5", t0.Add(2*time.Second), theirs, theirs)
-	h := Handler(DB(db), Token("srv"))
+	h := Handler(DB(db))
 	type split struct {
 		Own *core.Usage `json:"own_usage"`
 		Del *core.Usage `json:"delegated_usage"`
@@ -165,7 +165,7 @@ func TestOwnDelegatedUsage(t *testing.T) {
 			t.Fatalf("%s: %d %s", path, code, body)
 		}
 		var s split
-		if strings.HasPrefix(path, "/weftbase/api/runs?") {
+		if strings.HasPrefix(path, "/weftbase/v1/runs?") {
 			var page struct{ Runs []split }
 			decode(t, body, &page)
 			if len(page.Runs) != 1 {
@@ -176,14 +176,14 @@ func TestOwnDelegatedUsage(t *testing.T) {
 		decode(t, body, &s)
 		return s
 	}
-	for _, path := range []string{"/weftbase/api/runs/p", "/weftbase/api/runs?public_id=pub_a"} {
+	for _, path := range []string{"/weftbase/v1/runs/p", "/weftbase/v1/runs?public_id=pub_a"} {
 		s := read(path, "srv")
 		if s.Own == nil || *s.Own != own || s.Del == nil || *s.Del != mine.Add(theirs) {
 			t.Errorf("server %s: own %+v delegated %+v; want %+v and %+v", path, s.Own, s.Del, own, mine.Add(theirs))
 		}
 	}
 	// A failed children read (the list's per-row read): neither.
-	code, _, body := get(t, Handler(DB(failingChildren{db})), "/weftbase/api/runs")
+	code, _, body := get(t, Handler(DB(failingChildren{db})), "/weftbase/v1/runs")
 	if code != 200 || !strings.Contains(body, `"children_unknown":true`) || strings.Contains(body, "own_usage") || strings.Contains(body, "delegated_usage") {
 		t.Errorf("failing children read: %d %s; want no split", code, body)
 	}
@@ -206,7 +206,7 @@ func TestOwnDelegatedUsageCapped(t *testing.T) {
 	for i, g := range []string{"g1", "g2", "g3"} {
 		seedAt(t, db, "p/0/c1/0/"+g, "", "p/0/c1", at.Add(time.Duration(2+i)*time.Second), true)
 	}
-	_, _, body := get(t, Handler(DB(db)), "/weftbase/api/runs?all=1")
+	_, _, body := get(t, Handler(DB(db)), "/weftbase/v1/runs?all=1")
 	var page struct {
 		Runs []struct {
 			ID  string      `json:"id"`

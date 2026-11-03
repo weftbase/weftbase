@@ -127,7 +127,7 @@ func TestEventStormGapNamesTheQueue(t *testing.T) {
 		EventsEmitted int64 `json:"events_emitted"`
 		Settling      bool  `json:"settling"`
 	}
-	getJSON("/api/runs/"+res.ID, &doc)
+	getJSON("/v1/runs/"+esc(res.ID), &doc)
 	if doc.Status != "succeeded" || doc.Settling {
 		t.Errorf("storm run = %s (settling %v), want succeeded and settled: run_finish is shed last", doc.Status, doc.Settling)
 	}
@@ -167,7 +167,7 @@ func TestEventStormGapNamesTheQueue(t *testing.T) {
 			} `json:"dropped"`
 		} `json:"ingest"`
 	}
-	getJSON("/api/meta", &meta)
+	getJSON("/v1/meta", &meta)
 	if len(meta.Ingest.Dropped) != 1 || meta.Ingest.Dropped[0].Service != "storm-app" || meta.Ingest.Dropped[0].Records <= 0 {
 		t.Errorf("meta ingest.dropped = %+v, want storm-app's count", meta.Ingest.Dropped)
 	}

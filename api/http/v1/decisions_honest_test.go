@@ -16,7 +16,7 @@ import (
 // collector would have sent them. logs false sends the spans alone.
 func ingestEdited(t *testing.T, fixture string, logs bool, edit func(kv map[string]any) bool) http.Handler {
 	t.Helper()
-	srv := New(Open(t.TempDir()+"/dec.db"), Token("srv"))
+	srv := New(Open(t.TempDir() + "/dec.db"))
 	t.Cleanup(func() { _ = srv.Close() })
 	h := srv.Handler()
 	kinds := []string{"traces"}
@@ -202,7 +202,7 @@ func TestFoldDecisions(t *testing.T) {
 // parked again, or failed, before one), recorded with no transcript.
 func ingestWithoutChat(t *testing.T, fixture string) http.Handler {
 	t.Helper()
-	srv := New(Open(t.TempDir()+"/dec.db"), Token("srv"))
+	srv := New(Open(t.TempDir() + "/dec.db"))
 	t.Cleanup(func() { _ = srv.Close() })
 	h := srv.Handler()
 	b, err := os.ReadFile("../../../obsdb/testdata/contract/" + fixture + "/traces.json")

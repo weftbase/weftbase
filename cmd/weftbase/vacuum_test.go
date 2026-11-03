@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	v1 "github.com/weftbase/weftbase/api/http/v1"
+	"github.com/weftbase/weftbase"
 	"github.com/weftbase/weftbase/obsdb"
 	"github.com/weftbase/weftbase/obsdb/sqlite"
 )
@@ -129,7 +129,7 @@ func TestVacuumUsage(t *testing.T) {
 	}
 }
 
-// weftbase vacuum with no --db and no WEFTBASE_DB, and no ./.weftbase/weftbase.db,
+// weftbase vacuum with no --db and no WEFTBASE_DB, and no ./.weftbase/traces.db,
 // refuses (exit 1) and creates nothing: sqlite.Open would have made an
 // empty database to vacuum. A missing --db or WEFTBASE_DB file the same.
 func TestVacuumNoDatabase(t *testing.T) {
@@ -140,7 +140,7 @@ func TestVacuumNoDatabase(t *testing.T) {
 		env, args []string
 		msg       string
 	}{
-		{nil, []string{"vacuum"}, "no database at ./.weftbase/weftbase.db (nothing to vacuum)"},
+		{nil, []string{"vacuum"}, "no database at ./.weftbase/traces.db (nothing to vacuum)"},
 		{[]string{"WEFTBASE_DB", filepath.Join(dir, "env.db")}, []string{"vacuum"}, "no database at " + filepath.Join(dir, "env.db") + " (nothing to vacuum)"},
 		{nil, []string{"vacuum", "--db", "sqlite://flag.db"}, "no database at flag.db (nothing to vacuum)"},
 	} {
@@ -160,7 +160,7 @@ func TestVacuumNoDatabase(t *testing.T) {
 	}
 }
 
-// --retain / WEFT_RETAIN become v1.Retain and the banner's line.
+// --retain / WEFT_RETAIN become weftbase.Retain and the banner's line.
 func TestRetainOptions(t *testing.T) {
 	t.Setenv("WEFT_RETAIN", "")
 	if opts, note, err := retainOptions(""); err != nil || len(opts) != 0 || note != "" {
@@ -181,45 +181,34 @@ func TestRetainOptions(t *testing.T) {
 	}
 }
 
-// The binary's floor message is v1.Retain's, word for word: the
-// panic New raises under an hour carries it.
+// The binary's floor message is the kernel's, word for word: the error
+// New returns under an hour carries it.
 func TestRetainFloorMatchesServer(t *testing.T) {
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "floor.db"))
-	if err != nil {
-		t.Fatal(err)
+	_, err := weftbase.New(weftbase.DataDir(t.TempDir()), weftbase.Retain(30*time.Minute))
+	if err == nil || err.Error() != "weftbase: "+retainFloorMsg {
+		t.Errorf("weftbase.New(Retain(30m)) = %v, want %q", err, "weftbase: "+retainFloorMsg)
 	}
-	defer func() { _ = db.Close() }()
-	defer func() {
-		if r := recover(); r != "weftbase: "+retainFloorMsg {
-			t.Errorf("v1.New(Retain(30m)) panicked %v, want %q", r, "weftbase: "+retainFloorMsg)
-		}
-	}()
-	_ = v1.New(v1.DB(db), v1.Retain(30*time.Minute))
 }
 
-// weftbase dev --retain reaches api/meta as retention.
+// weftbase dev --retain reaches /v1/meta as retention.
 func TestServerRetainInMeta(t *testing.T) {
 	t.Setenv("WEFT_RETAIN", "")
 	opts, _, err := retainOptions("168h")
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv, err := newServer("sqlite://"+filepath.Join(t.TempDir(), "weft.db"), "tok", opts...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = srv.Close() }()
+	srv := newServer(t, tok, opts...)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
-	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/meta", nil)
-	req.Header.Set("Authorization", "Bearer tok")
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/v1/meta", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	b, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(b), `"retention":"168h0m0s"`) || !strings.Contains(string(b), `"delete"`) {
+	if !strings.Contains(string(b), `"retention":"168h0m0s"`) {
 		t.Errorf("meta = %s", b)
 	}
 }

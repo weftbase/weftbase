@@ -41,7 +41,7 @@ func usageLimitRuns() []statsRun {
 
 // TestUsageLimitOneFacetOneMatrix is U24.2's Done line through the real
 // routes: the seven usage-limit failures are one error_class facet of 7,
-// and the class filters /api/search to exactly them. The facet page is
+// and the class filters /v1/search to exactly them. The facet page is
 // the golden the runs list's facet test reads.
 func TestUsageLimitOneFacetOneMatrix(t *testing.T) {
 	db, err := sqlite.Open(":memory:")
@@ -55,7 +55,7 @@ func TestUsageLimitOneFacetOneMatrix(t *testing.T) {
 		}
 	}
 	h := Handler(DB(db))
-	code, _, body := get(t, h, "/weftbase/api/search?status=failed&agent=researcher")
+	code, _, body := get(t, h, "/weftbase/v1/runs?sort=started&status=failed&agent=researcher")
 	if code != http.StatusOK {
 		t.Fatalf("search: %d %s", code, body)
 	}
@@ -64,7 +64,7 @@ func TestUsageLimitOneFacetOneMatrix(t *testing.T) {
 	}
 	golden(t, "search-usage-limit.golden.json", body)
 
-	ids, total, _ := searchIDs(t, h, "/weftbase/api/search?status=failed&agent=researcher&error_class="+url.QueryEscape(usageClass))
+	ids, total, _ := searchIDs(t, h, "/weftbase/v1/runs?sort=started&status=failed&agent=researcher&error_class="+url.QueryEscape(usageClass))
 	if total != 7 || len(ids) != 7 {
 		t.Fatalf("search?error_class=<usage limit> = %v (total %d), want the 7 runs", ids, total)
 	}

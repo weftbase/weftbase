@@ -44,14 +44,14 @@ func seedRawRun(t *testing.T, db obsdb.DB) {
 
 func TestRequestsRowCarriesRaw(t *testing.T) {
 	const tok = "server-token"
-	srv := New(Open(t.TempDir()+"/raw.db"), Token(tok))
+	srv := New(Open(t.TempDir() + "/raw.db"))
 	t.Cleanup(func() { _ = srv.Close() })
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	seedRawRun(t, srv.db)
 	get := func(bearer string) (int, string) {
 		t.Helper()
-		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/runs/run_raw/requests", nil)
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/v1/runs/run_raw/requests", nil)
 		req.Header.Set("Authorization", "Bearer "+bearer)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -140,7 +140,7 @@ func TestRequestsRawGolden(t *testing.T) {
 	srv := New(Open(t.TempDir() + "/rawg.db"))
 	t.Cleanup(func() { _ = srv.Close() })
 	seedRawGoldenRun(t, srv.db)
-	code, _, body := get(t, srv.Handler(), "/weftbase/api/runs/run_rawg/requests?refs=1")
+	code, _, body := get(t, srv.Handler(), "/weftbase/v1/runs/run_rawg/requests?refs=1")
 	if code != http.StatusOK {
 		t.Fatalf("requests: %d %s", code, body)
 	}

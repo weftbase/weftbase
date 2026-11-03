@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -81,10 +80,9 @@ import (
 // (step_finish's usage) at the model that answered it, else the model
 // it requested, else the run's.
 
-// Pricing sets the table the server prices usage with (plan A5). Without
-// it, New reads the file WEFT_PRICING names (cost.Load; a file that
-// does not load panics at New, naming the path and the field), else
-// uses cost.Default. The table replaces the default whole.
+// Pricing sets the table the server prices usage with (plan A5).
+// Without it New uses cost.Default. The table replaces the default
+// whole.
 func Pricing(t pricing.Table) Option {
 	return func(c *config) {
 		t.Models = slices.Clone(t.Models)
@@ -95,9 +93,9 @@ func Pricing(t pricing.Table) Option {
 	}
 }
 
-// resolvePricing is New's rule: the Pricing option, else WEFT_PRICING's
-// file (a file that does not load panics, as Open's database does),
-// else the default.
+// resolvePricing is New's rule: the Pricing option, else the default
+// table. Reading WEFT_PRICING is the CLI's business, never the
+// server's.
 func resolvePricing(c *config) {
 	if c.pricing != nil {
 		// A Go-built row without a provider is the any-provider row, as
@@ -107,14 +105,6 @@ func resolvePricing(c *config) {
 				c.pricing.Models[i].Provider = pricing.AnyProvider
 			}
 		}
-		return
-	}
-	if file := os.Getenv("WEFT_PRICING"); file != "" {
-		t, err := pricing.Load(file)
-		if err != nil {
-			panic("weftbase: WEFT_PRICING: " + err.Error())
-		}
-		c.pricing = &t
 		return
 	}
 	t := pricing.Default()
@@ -879,9 +869,9 @@ func (c *coster) setCost(runs []obsdb.RunRow, noun string) cost {
 	return out
 }
 
-// ── api/meta and GET /api/settings/pricing ─────────────────────────
+// ── /v1/meta and GET /v1/settings/pricing ─────────────────────────
 
-// metaPricing is api/meta's pricing block.
+// metaPricing is /v1/meta's pricing block.
 type metaPricing struct {
 	Source string `json:"source"`
 	// Path is the override file's, under db.path's rule (mayReadDBPath);
@@ -893,13 +883,13 @@ type metaPricing struct {
 
 func (s *Server) metaPricing(r *http.Request) metaPricing {
 	out := metaPricing{Source: s.pricing.Source, Dated: s.pricing.Dated, Models: len(s.pricing.Models)}
-	if mayReadDBPath(s, r) {
+	if hostDetails(r) {
 		out.Path = s.pricing.Path
 	}
 	return out
 }
 
-// pricingDoc is GET /api/settings/pricing: the effective table in the
+// pricingDoc is GET /v1/settings/pricing: the effective table in the
 // override file's shape (so it saves as a WEFT_PRICING file and loads
 // back — LoadPricing accepts the source and path keys), plus where it
 // came from.
@@ -911,7 +901,7 @@ type pricingDoc struct {
 	Models []pricing.ModelPrice `json:"models"`
 }
 
-// servePricing answers GET /api/settings/pricing (capability pricing):
+// servePricing answers GET /v1/settings/pricing (capability pricing):
 // every valid identity may read it — prices are not secrets — and the
 // file's path follows db.path's rule.
 func (s *Server) servePricing(w http.ResponseWriter, r *http.Request) {
@@ -919,19 +909,8 @@ func (s *Server) servePricing(w http.ResponseWriter, r *http.Request) {
 	if doc.Models == nil {
 		doc.Models = []pricing.ModelPrice{}
 	}
-	if mayReadDBPath(s, r) {
+	if hostDetails(r) {
 		doc.Path = s.pricing.Path
 	}
 	writeJSON(w, r, http.StatusOK, doc)
-}
-
-// pricingGroup is the settings route's group (capability pricing).
-func pricingGroup() routeGroup {
-	return routeGroup{
-		name:       "pricing",
-		capability: "pricing",
-		register: func(mux *http.ServeMux, s *Server) {
-			mux.HandleFunc("GET /api/settings/pricing", s.servePricing)
-		},
-	}
 }

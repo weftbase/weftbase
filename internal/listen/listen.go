@@ -7,7 +7,7 @@
 //   - The address is free: it is bound.
 //   - It is busy and pinned (--addr or WEFTBASE_ADDR set
 //     explicitly): an error naming the address. No probe, no fallback.
-//   - It is busy and a weftbase server answers GET /api/meta there with the
+//   - It is busy and a weftbase server answers GET /v1/meta there with the
 //     same database file (db.path, which B5 serves to loopback and the
 //     dev token only): Choose binds nothing and returns a reuse verdict
 //     naming that server's URL and pid.
@@ -58,7 +58,7 @@ const (
 	// DefaultSpan is how many ports an unpinned Choose tries, from the
 	// wanted one up: 7331–7340.
 	DefaultSpan = 10
-	// ProbeTimeout bounds each /api/meta probe: a port held by
+	// ProbeTimeout bounds each /v1/meta probe: a port held by
 	// something that accepts and never answers costs at most this,
 	// never a hang. Shorter than the doctor's 5 s: a server on loopback
 	// answers meta in milliseconds, and a start may probe the whole
@@ -115,7 +115,7 @@ type Choice struct {
 	// Reuse is set when a server on the same database already serves
 	// Addr: nothing was bound.
 	Reuse bool
-	// PID is the reused server's process id (api/meta's pid; 0 when it
+	// PID is the reused server's process id (/v1/meta's pid; 0 when it
 	// served none).
 	PID int
 	// Note is one line saying why the wanted address was not used —
@@ -210,7 +210,7 @@ type verdict struct {
 	why   string // a non-reuse verdict's reason, for the Note
 }
 
-// probe asks the busy address's GET /api/meta what holds it, with the
+// probe asks the busy address's GET /v1/meta what holds it, with the
 // doctor's conventions: one bounded request, the bearer when there is
 // one, redirects reported never followed.
 func probe(ctx context.Context, addr string, r Request) verdict {
@@ -278,12 +278,12 @@ func probe(ctx context.Context, addr string, r Request) verdict {
 	return verdict{reuse: true, pid: m.PID}
 }
 
-// probeRequest builds the probe's GET /api/meta for the busy addr.
+// probeRequest builds the probe's GET /v1/meta for the busy addr.
 // The bearer is attached only when the dialled host is loopback: a
 // fixed token is never sent to whatever holds a non-loopback port.
 func probeRequest(ctx context.Context, addr, token string) (*http.Request, error) {
 	dial := probeAddr(addr)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+dial+"/api/meta", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+dial+"/v1/meta", nil)
 	if err != nil {
 		return nil, err
 	}

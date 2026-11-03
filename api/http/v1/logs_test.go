@@ -13,7 +13,7 @@ import (
 	"github.com/weftbase/weftbase/obsdb/sqlite"
 )
 
-// TestLogsRoute pins GET /api/runs/{id}/logs (plan A7) over the
+// TestLogsRoute pins GET /v1/runs/{id}/logs (plan A7) over the
 // fixture database: r_ok's two app log lines in time order, each with
 // its index, severity name and number, body, attributes and span; the
 // page, the severity filter that keeps indexes, the bad parameters, a
@@ -34,7 +34,7 @@ func TestLogsRoute(t *testing.T) {
 	}
 	h := Handler(DB(db))
 
-	code, _, body := get(t, h, "/weftbase/api/runs/r_ok/logs")
+	code, _, body := get(t, h, "/weftbase/v1/runs/r_ok/logs")
 	if code != http.StatusOK {
 		t.Fatalf("logs: %d %s", code, body)
 	}
@@ -43,40 +43,40 @@ func TestLogsRoute(t *testing.T) {
 		t.Errorf("a finished run's logs = %s, want neither partial nor a badge, and no holes", body)
 	}
 
-	code, _, body = get(t, h, "/weftbase/api/runs/r_ok/logs?limit=1")
+	code, _, body = get(t, h, "/weftbase/v1/runs/r_ok/logs?limit=1")
 	if code != http.StatusOK {
 		t.Fatalf("logs?limit=1: %d %s", code, body)
 	}
 	golden(t, "logs-ok-paged.golden.json", body)
-	code, _, body = get(t, h, "/weftbase/api/runs/r_ok/logs?from=1&limit=1")
+	code, _, body = get(t, h, "/weftbase/v1/runs/r_ok/logs?from=1&limit=1")
 	if code != http.StatusOK || !strings.Contains(body, `"index":1`) || strings.Contains(body, `"index":0`) || !strings.Contains(body, `"next_from":2`) {
 		t.Errorf("logs?from=1&limit=1 = %d %s, want index 1 and next_from 2 (a full page)", code, body)
 	}
-	code, _, body = get(t, h, "/weftbase/api/runs/r_ok/logs?from=2")
+	code, _, body = get(t, h, "/weftbase/v1/runs/r_ok/logs?from=2")
 	if code != http.StatusOK || strings.TrimSpace(body) != `{"logs":[],"holes":[]}` {
 		t.Errorf("logs?from=2 = %d %q, want an empty last page", code, body)
 	}
 
 	for _, sev := range []string{"warn", "WARN", "warning", "13"} {
-		code, _, body = get(t, h, "/weftbase/api/runs/r_ok/logs?severity="+sev)
+		code, _, body = get(t, h, "/weftbase/v1/runs/r_ok/logs?severity="+sev)
 		if code != http.StatusOK || !strings.Contains(body, `"index":1`) || strings.Contains(body, `"index":0`) ||
 			!strings.Contains(body, `"severity":"WARN"`) {
 			t.Errorf("logs?severity=%s = %d %s, want the warning alone at index 1", sev, code, body)
 		}
 	}
-	code, _, body = get(t, h, "/weftbase/api/runs/r_ok/logs?severity=error")
+	code, _, body = get(t, h, "/weftbase/v1/runs/r_ok/logs?severity=error")
 	if code != http.StatusOK || !strings.HasPrefix(body, `{"logs":[]`) {
 		t.Errorf("logs?severity=error = %d %s, want none", code, body)
 	}
 	for _, q := range []string{"severity=loud", "severity=25", "from=-1", "from=x", "limit=-2"} {
-		if code, _, body := get(t, h, "/weftbase/api/runs/r_ok/logs?"+q); code != http.StatusBadRequest {
+		if code, _, body := get(t, h, "/weftbase/v1/runs/r_ok/logs?"+q); code != http.StatusBadRequest {
 			t.Errorf("logs?%s = %d %s, want 400", q, code, body)
 		}
 	}
 
 	// r_fail has a span, no line and no bridge mark: the hint names
 	// the fix (otel.Slog()), never "the app logged nothing".
-	code, _, body = get(t, h, "/weftbase/api/runs/r_fail/logs")
+	code, _, body = get(t, h, "/weftbase/v1/runs/r_fail/logs")
 	if code != http.StatusOK {
 		t.Fatalf("r_fail logs: %d %s", code, body)
 	}
@@ -85,22 +85,22 @@ func TestLogsRoute(t *testing.T) {
 		t.Errorf("r_fail logs = %s, want an empty list with the not_recorded hint naming otel.Slog()", body)
 	}
 	// r_quiet was bridged and logged nothing: empty, no badge.
-	code, _, body = get(t, h, "/weftbase/api/runs/r_quiet/logs")
+	code, _, body = get(t, h, "/weftbase/v1/runs/r_quiet/logs")
 	if code != http.StatusOK || strings.Contains(body, "badge") || !strings.HasPrefix(body, `{"logs":[]`) || !strings.Contains(body, `"holes":[]`) {
 		t.Errorf("r_quiet logs = %d %s, want an empty list without a badge", code, body)
 	}
 	// r_stale was recorded without a tracer: nothing to attribute
 	// through.
-	code, _, body = get(t, h, "/weftbase/api/runs/r_stale/logs")
+	code, _, body = get(t, h, "/weftbase/v1/runs/r_stale/logs")
 	if code != http.StatusOK {
 		t.Fatalf("r_stale logs: %d %s", code, body)
 	}
 	golden(t, "logs-not-recorded.golden.json", body)
 	// The child id's slashes route like every run sub-route.
-	if code, _, body := get(t, h, "/weftbase/api/runs/r_sub/0/call_3/logs"); code != http.StatusOK || !strings.HasPrefix(body, `{"logs":[]`) {
+	if code, _, body := get(t, h, "/weftbase/v1/runs/r_sub%2F0%2Fcall_3/logs"); code != http.StatusOK || !strings.HasPrefix(body, `{"logs":[]`) {
 		t.Errorf("child logs = %d %s", code, body)
 	}
-	if code, _, body := get(t, h, "/weftbase/api/runs/r_nope/logs"); code != http.StatusNotFound {
+	if code, _, body := get(t, h, "/weftbase/v1/runs/r_nope/logs"); code != http.StatusNotFound {
 		t.Errorf("unknown run logs = %d %s, want 404", code, body)
 	}
 }
@@ -124,7 +124,7 @@ func TestLogsEventName(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	code, _, body := get(t, Handler(DB(db)), "/weftbase/api/runs/r_genai/logs")
+	code, _, body := get(t, Handler(DB(db)), "/weftbase/v1/runs/r_genai/logs")
 	var page struct {
 		Logs []map[string]any `json:"logs"`
 	}
@@ -143,7 +143,7 @@ func TestLogsEventName(t *testing.T) {
 // obsdb counted and never stored.
 func TestRunRowDeltaCount(t *testing.T) {
 	h := Handler(DB(fixtureDB(t)))
-	for _, path := range []string{"/weftbase/api/runs/r_ok", "/weftbase/api/runs"} {
+	for _, path := range []string{"/weftbase/v1/runs/r_ok", "/weftbase/v1/runs"} {
 		code, _, body := get(t, h, path)
 		if code != http.StatusOK || !strings.Contains(body, `"delta_count":0`) {
 			t.Errorf("%s = %d %s, want delta_count on the row", path, code, body)
@@ -266,39 +266,39 @@ func TestLogsLiveGapTruncated(t *testing.T) {
 	}
 
 	// Running: partial with its reason, and — no hole — reason too.
-	live := read("/weftbase/api/runs/r_live/logs")
+	live := read("/weftbase/v1/runs/r_live/logs")
 	if !live.Partial || live.PartialReason != logsPartialReason || live.Reason != logsPartialReason || live.Badge != "" ||
 		len(live.Holes) != 0 || strings.Join(bodies(live), "|") != "started" {
 		t.Errorf("a running run's logs = %+v, want the attributable line, partial with its reason, no hole", live)
 	}
 	// A gap: one line, singular; the lines may be anyone's.
-	gap := read("/weftbase/api/runs/r_gap/logs")
+	gap := read("/weftbase/v1/runs/r_gap/logs")
 	const gap1 = "1 log line in this run's trace and time window names a span that is not stored (dropped, or still open): it may belong to this run or to another in the same trace"
 	if gap.Partial || gap.Badge != "gap" || gap.Reason != gap1 || gap.Fix == "" || len(gap.Holes) != 1 ||
 		gap.Holes[0] != (hole{"gap", gap1, gap.Fix}) || strings.Join(bodies(gap), "|") != "kept" {
 		t.Errorf("a gap = %+v, want the kept line and the gap hole", gap)
 	}
-	gap2 := read("/weftbase/api/runs/r_gap2/logs")
+	gap2 := read("/weftbase/v1/runs/r_gap2/logs")
 	if want := "2 log lines in this run's trace and time window name a span that is not stored (dropped, or still open): they may belong to this run or to another in the same trace"; gap2.Reason != want {
 		t.Errorf("two gap lines: reason %q, want %q", gap2.Reason, want)
 	}
 	// Past the cap: truncated with the honest reason and a fix.
 	const truncReason = "the run's traces hold more than 10 000 log lines in its window: only lines among the first 10 000 by time were read; later lines of this run may be missing"
-	capped := read(fmt.Sprintf("/weftbase/api/runs/r_many/logs?from=%d", obsdb.MaxLogCandidates-1))
+	capped := read(fmt.Sprintf("/weftbase/v1/runs/r_many/logs?from=%d", obsdb.MaxLogCandidates-1))
 	if capped.Badge != "truncated" || capped.Reason != truncReason || capped.Fix != logsTruncatedFix || len(capped.Holes) != 1 ||
 		len(capped.Logs) != 1 || capped.Logs[0].Index != obsdb.MaxLogCandidates-1 {
 		t.Errorf("past the cap = %+v holes %+v, want the last kept line and the truncated hole", capped.Badge, capped.Holes)
 	}
 	// A flooding subagent: the parent's own line is past the cap; the
 	// page is empty and says why, never "10 000 shown".
-	fl := read("/weftbase/api/runs/r_flood/logs")
+	fl := read("/weftbase/v1/runs/r_flood/logs")
 	if len(fl.Logs) != 0 || fl.Badge != "truncated" || fl.Reason != truncReason || strings.Contains(fl.Reason, "shown") {
 		t.Errorf("a flooded trace = %d lines, badge %q reason %q; want none, truncated, the honest reason", len(fl.Logs), fl.Badge, fl.Reason)
 	}
 	// Every hole a page has, deduped, in the table's order: a truncated
 	// page with a lost span lists truncated then gap.
 	write(obsdb.Batch{Records: []obsdb.Record{line(floodTrace, "dead00000000beef", fixtureT0.Add(time.Microsecond/2), "lost early")}})
-	both := read("/weftbase/api/runs/r_flood/logs")
+	both := read("/weftbase/v1/runs/r_flood/logs")
 	if len(both.Holes) != 2 || both.Holes[0].Hole != "truncated" || both.Holes[1].Hole != "gap" || both.Badge != "truncated" {
 		t.Errorf("truncated and a gap = %+v, want [truncated gap] with the badge the first", both.Holes)
 	}

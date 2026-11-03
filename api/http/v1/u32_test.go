@@ -17,7 +17,7 @@ func TestRetriesTapsFixture(t *testing.T) {
 	h := srv.Handler()
 	ingestFile(t, h, "/weftbase/otlp/v1/traces", "../../../obsdb/testdata/contract/retries_taps/traces.json")
 	ingestFile(t, h, "/weftbase/otlp/v1/logs", "../../../obsdb/testdata/contract/retries_taps/logs.json")
-	_, _, runs := get(t, h, "/weftbase/api/runs")
+	_, _, runs := get(t, h, "/weftbase/v1/runs")
 	var list struct {
 		Runs []struct {
 			ID        string `json:"id"`
@@ -29,7 +29,7 @@ func TestRetriesTapsFixture(t *testing.T) {
 		t.Fatalf("runs = %s, want one run with tap_panics 1", runs)
 	}
 	id := list.Runs[0].ID
-	_, _, body := get(t, h, "/weftbase/api/runs/"+id)
+	_, _, body := get(t, h, "/weftbase/v1/runs/"+esc(id))
 	var doc struct {
 		TapPanics       int64 `json:"tap_panics"`
 		MetadataDropped int64 `json:"metadata_dropped"`
@@ -51,11 +51,11 @@ func TestRetriesTapsFixture(t *testing.T) {
 	if !found {
 		t.Errorf("holes = %+v, want truncated with the metadata_cap words", doc.Holes)
 	}
-	_, _, reqs := get(t, h, "/weftbase/api/runs/"+id+"/requests")
+	_, _, reqs := get(t, h, "/weftbase/v1/runs/"+esc(id)+"/requests")
 	if !strings.Contains(reqs, `"segments":[{"source":"instructions","text":"You are a support agent."},{"source":"tool:flaky","text":"Call flaky for orders; it may ask you to retry."}]`) {
 		t.Errorf("requests = %s, want the prompt's segments", reqs)
 	}
-	_, _, spans := get(t, h, "/weftbase/api/runs/"+id+"/spans")
+	_, _, spans := get(t, h, "/weftbase/v1/runs/"+esc(id)+"/spans")
 	for _, k := range []string{`"weft.tool.retry":2`, `"weft.tool.retry_budget":1`, `"weft.tap.panics":1`} {
 		if !strings.Contains(spans, k) {
 			t.Errorf("spans lack %s", k)

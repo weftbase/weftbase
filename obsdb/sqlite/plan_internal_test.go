@@ -223,7 +223,7 @@ func TestResumedByUsesItsIndex(t *testing.T) {
 // are planned on the partial index spans_run (0001) — runSpansWhere
 // states its condition (run_id <> ”) beside the equality, without
 // which sqlite scanned the whole spans table and sorted it — and a run
-// tree's one read (treeSpansSQL, GET /api/runs/{id}/spans?tree=1) on
+// tree's one read (treeSpansSQL, GET /v1/runs/{id}/spans?tree=1) on
 // spans_trace_start (0020): the trace in start order, no temp B-tree,
 // each span's run row by runs_id. Trace and a derived run's
 // spans read the same trace order.

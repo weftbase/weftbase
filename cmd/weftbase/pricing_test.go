@@ -49,14 +49,14 @@ func TestPricingOptions(t *testing.T) {
 	}
 	// weftbase dev refuses to start on it: exit 1, the error on stderr.
 	var out, errb bytes.Buffer
-	code := run([]string{"dev", "--db", "sqlite://" + filepath.Join(dir, "w.db"), "--addr", "127.0.0.1:0", "--open=false"}, &out, &errb)
+	code := run([]string{"dev", "--data", filepath.Join(dir, "data"), "--addr", "127.0.0.1:0", "--open=false"}, &out, &errb)
 	if code != 1 || !strings.Contains(errb.String(), bad) || !strings.Contains(errb.String(), "models[0].input") {
 		t.Errorf("weftbase dev under a malformed WEFT_PRICING = %d %q, want exit 1 naming the path and the field", code, errb.String())
 	}
 }
 
-// weftbase dev --pricing reaches api/meta as pricing {source file, path
-// (the server token's), dated, models}.
+// weftbase dev --pricing reaches /v1/meta as pricing {source file, path
+// (the key may see it), dated, models}.
 func TestServerPricingInMeta(t *testing.T) {
 	t.Setenv("WEFT_PRICING", "")
 	file := filepath.Join(t.TempDir(), "prices.json")
@@ -67,15 +67,11 @@ func TestServerPricingInMeta(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv, err := newServer("sqlite://"+filepath.Join(t.TempDir(), "weft.db"), "tok", opts...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = srv.Close() }()
+	srv := newServer(t, tok, opts...)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
-	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/meta", nil)
-	req.Header.Set("Authorization", "Bearer tok")
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/v1/meta", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)

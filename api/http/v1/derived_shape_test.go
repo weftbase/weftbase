@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -82,15 +83,15 @@ func TestDerivedGoldensMatchAStockApp(t *testing.T) {
 		return v
 	}
 	id := "otel-" + root.SpanContext().TraceID().String() + "-" + root.SpanContext().SpanID().String()
-	if run, _ := fetch("/api/runs/" + id).(map[string]any); run["derived"] != true || run["steps"] != float64(2) {
+	if run, _ := fetch("/v1/runs/" + url.PathEscape(id)).(map[string]any); run["derived"] != true || run["steps"] != float64(2) {
 		t.Fatalf("the stock app's run %s = %v, want derived with two steps", id, run)
 	}
 	for _, c := range []struct{ golden, path string }{
-		{"run-derived.golden.json", "/api/runs/" + id},
-		{"events-derived.golden.json", "/api/runs/" + id + "/events"},
-		{"transcript-derived.golden.json", "/api/runs/" + id + "/transcript"},
+		{"run-derived.golden.json", "/v1/runs/" + url.PathEscape(id)},
+		{"events-derived.golden.json", "/v1/runs/" + url.PathEscape(id) + "/events"},
+		{"transcript-derived.golden.json", "/v1/runs/" + url.PathEscape(id) + "/transcript"},
 	} {
-		b, err := os.ReadFile(filepath.Join("testdata", "api", c.golden))
+		b, err := os.ReadFile(filepath.Join("testdata", "v1", c.golden))
 		if err != nil {
 			t.Fatal(err)
 		}

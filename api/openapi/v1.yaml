@@ -1,0 +1,1021 @@
+openapi: 3.1.0
+info:
+  title: Weftbase API
+  version: v1
+  description: |
+    The public /v1 surface of a Weftbase server: the one door for the
+    Console, the CLI, `weftbase mcp`, SDKs and customers. This step
+    describes the read baseline (runs, sessions, traces, stats, diff,
+    manifests, pricing, deletion, the live streams and the outbox
+    stream), the Console sign-in, the server's own health routes and
+    OTLP ingest.
+
+    Ids in paths are percent-encoded: a child run id carries "/"
+    (`<parent>/<step>/<call>`), sent as `%2F`; the router decodes it
+    once. Every GET also answers HEAD.
+
+    Every error is `{"error": {"code", "message", "request_id"?}}`
+    (Error). Every response carries `X-Request-Id`.
+
+    Each operation names the authz action it needs in
+    `x-weftbase-action` (authz/can.go); `public` needs no credential.
+    Code generation from this file (server interface, Go client,
+    Console types) lands in a later step; until then
+    api/http/routes_test.go keeps it and the route table equal.
+servers:
+  - url: http://127.0.0.1:7331
+    description: weftbase dev
+security:
+  - apiKey: []
+  - session: []
+x-weftbase-events:
+  /v1/runs/stream: &liveEvents
+    run: RunFrame
+    record: RecordFrame
+    attempt: AttemptFrame
+    backfill_error: BackfillErrorFrame
+    ping: Ping
+    overflow: Overflow
+  /v1/runs/{id}/stream: *liveEvents
+  /v1/sessions/{id}/stream: *liveEvents
+  /v1/events:
+    "<event type>": OutboxEvent
+    ping: Ping
+    overflow: Overflow
+
+paths:
+  /healthz:
+    get:
+      operationId: healthz
+      summary: Liveness
+      x-weftbase-action: public
+      security: []
+      responses:
+        "200":
+          description: The process answers.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+  /readyz:
+    get:
+      operationId: readyz
+      summary: Readiness (the stores answer)
+      x-weftbase-action: public
+      security: []
+      responses:
+        "200":
+          description: Ready.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+        "503": { $ref: "#/components/responses/Error" }
+  /metrics:
+    get:
+      operationId: metrics
+      summary: Prometheus text exposition
+      description: weftbase_http_requests_total{route,code} and weftbase_ingest_batches_total{outcome}.
+      x-weftbase-action: public
+      security: []
+      responses:
+        "200":
+          description: Counters.
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /v1/auth/sessions:
+    post:
+      operationId: signIn
+      summary: Exchange a one-time sign-in link token for a Console session
+      description: |
+        Sets `wb_session` (HttpOnly, SameSite=Strict, Path=/, Secure
+        except on a loopback Host, 12 h). The link token is printed by
+        `weftbase dev` (`#signin=<token>`) and is spent once.
+      x-weftbase-action: public
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SignInRequest" }
+      responses:
+        "201":
+          description: Signed in; the cookie is set.
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SignInResponse" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /v1/auth/sessions/current:
+    delete:
+      operationId: signOut
+      summary: End the Console session the cookie names
+      x-weftbase-action: auth.session
+      security:
+        - session: []
+      parameters:
+        - $ref: "#/components/parameters/CSRF"
+      responses:
+        "204": { description: Signed out; the cookie is cleared. }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /v1/meta:
+    get:
+      operationId: getMeta
+      summary: What this server is, and who is asking
+      x-weftbase-action: meta.read
+      responses:
+        "200":
+          description: Meta.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Meta" }
+        "401": { $ref: "#/components/responses/Error" }
+  /v1/manifest:
+    get:
+      operationId: getManifest
+      summary: The weft.json the server was given, with its sources
+      description: Interim until GET /v1/agents (Phase 1).
+      x-weftbase-action: agents.read
+      responses:
+        "200":
+          description: The manifest document.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Loose" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/manifests/{hash}:
+    get:
+      operationId: getStoredManifest
+      summary: The one-agent manifest a run's manifest_hash names
+      x-weftbase-action: agents.read
+      parameters:
+        - name: hash
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The stored manifest.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StoredManifest" }
+        "404": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/Error" }
+  /v1/settings/pricing:
+    get:
+      operationId: getPricing
+      summary: The effective pricing table
+      x-weftbase-action: settings.read
+      responses:
+        "200":
+          description: The table, in the WEFT_PRICING file's shape.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PricingTable" }
+
+  /v1/runs:
+    get:
+      operationId: listRuns
+      summary: Runs, newest first; a search when any search parameter is present
+      description: |
+        Without a search parameter the page is cursor-paged (RunsPage:
+        next_before / next_before_id). With any of q, tool, model,
+        error, since, until, min_tokens, min_cost, sort or offset it is
+        the search over runs (SearchPage: offset-paged, facets).
+        Run metadata filters are `tag.<k>=<v>` (any key) and `flow=`.
+      x-weftbase-action: runs.read
+      parameters:
+        - { name: agent, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/RunStatus" } }
+        - { name: session, in: query, schema: { type: string } }
+        - { name: public_id, in: query, schema: { type: string } }
+        - name: parent
+          in: query
+          description: '"" top-level runs only (default), "*" every run, or a run id for its children.'
+          schema: { type: string }
+        - { name: all, in: query, description: true is parent=*, schema: { type: boolean } }
+        - { name: stopped_by, in: query, schema: { type: string } }
+        - { name: error_type, in: query, schema: { type: string } }
+        - { name: error_class, in: query, schema: { type: string } }
+        - { name: id_prefix, in: query, schema: { type: string } }
+        - { name: turn_below, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: turn_above, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: oldest, in: query, schema: { type: boolean } }
+        - { name: flow, in: query, schema: { type: string } }
+        - { name: before, in: query, schema: { type: string, format: date-time } }
+        - { name: before_id, in: query, schema: { type: string } }
+        - $ref: "#/components/parameters/Limit"
+        - { name: q, in: query, description: Search terms (makes this a search)., schema: { type: string } }
+        - { name: tool, in: query, schema: { type: string } }
+        - { name: model, in: query, schema: { type: string } }
+        - { name: error, in: query, schema: { type: string } }
+        - { name: since, in: query, schema: { type: string, format: date-time } }
+        - { name: until, in: query, schema: { type: string, format: date-time } }
+        - { name: min_tokens, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: min_cost, in: query, schema: { type: number, minimum: 0 } }
+        - name: sort
+          in: query
+          schema: { type: string, enum: [started, duration, tokens, cost] }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, maximum: 100000 } }
+      responses:
+        "200":
+          description: A page of run rows.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/RunsPage"
+                  - $ref: "#/components/schemas/SearchPage"
+        "400": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/Error" }
+  /v1/runs/stream:
+    get:
+      operationId: streamRuns
+      summary: Live stream of runs selected by query (every run, an agent, a public id, metadata)
+      description: |
+        Exactly one of public_id, agent or all=1, or a metadata filter
+        (tag.<k>=<v>, flow=) alone. SSE frames: x-weftbase-events.
+      x-weftbase-action: runs.read
+      x-weftbase-events: *liveEvents
+      parameters:
+        - { name: all, in: query, schema: { type: string, enum: ["1", "true"] } }
+        - { name: public_id, in: query, schema: { type: string } }
+        - { name: agent, in: query, schema: { type: string } }
+        - { name: flow, in: query, schema: { type: string } }
+        - $ref: "#/components/parameters/Kinds"
+        - $ref: "#/components/parameters/LastEventID"
+      responses:
+        "200": { $ref: "#/components/responses/EventStream" }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/runs/{id}:
+    parameters:
+      - $ref: "#/components/parameters/RunID"
+    get:
+      operationId: getRun
+      summary: One run, its children, holes and compactions
+      x-weftbase-action: runs.read
+      responses:
+        "200":
+          description: The run page.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunPage" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteRun
+      summary: Delete a run's trace rows and its children's
+      x-weftbase-action: runs.delete
+      parameters:
+        - $ref: "#/components/parameters/CSRF"
+      responses:
+        "200":
+          description: Deleted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeleteResult" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/runs/{id}/events:
+    get:
+      operationId: listRunEvents
+      summary: A run's events, paged by position
+      x-weftbase-action: runs.content
+      parameters:
+        - $ref: "#/components/parameters/RunID"
+        - { name: after, in: query, schema: { type: integer } }
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200": { $ref: "#/components/responses/Loose" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/runs/{id}/transcript:
+    get:
+      operationId: getRunTranscript
+      summary: A run's transcript (as of a step with step=)
+      x-weftbase-action: runs.content
+      parameters:
+        - $ref: "#/components/parameters/RunID"
+        - { name: step, in: query, schema: { type: integer, minimum: 0 } }
+      responses:
+        "200": { $ref: "#/components/responses/Loose" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/runs/{id}/spans:
+    get:
+      operationId: listRunSpans
+      summary: A run's spans (tree=1 with every descendant run's)
+      x-weftbase-action: runs.read
+      parameters:
+        - $ref: "#/components/parameters/RunID"
+        - { name: tree, in: query, schema: { type: string, enum: ["1"] } }
+      responses:
+        "200": { $ref: "#/components/responses/Loose" }
+        "404": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/Error" }
+  /v1/runs/{id}/steps/{n}:
+    get:
+      operationId: getRunStep
+      summary: One step assembled server-side
+      x-weftbase-action: runs.content
+      parameters:
+        - $ref: "#/components/parameters/RunID"
+        - name: n
+          in: path
+          required: true
+          schema: { type: integer, minimum: 0 }
+      responses:
+        "200": { $ref: "#/components/responses/Loose" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/runs/{id}/requests:
+    get:
+      operationId: listRunRequests
+      summary: Every model-call attempt with the prompt and catalog it named
+      x-weftbase-action: runs.content
+      parameters:
+        - $ref: "#/components/parameters/RunID"
+        - { name: step, in: query, schema: { type: integer, minimum: 0 } }
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200": { $ref: "#/components/responses/Loose" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/runs/{id}/tools:
+    get:
+      operationId: listRunTools
+      summary: The run's tool catalogs
+      x-weftbase-action: runs.content
+      parameters:
+        - $ref: "#/components/parameters/RunID"
+      responses:
+        "200": { $ref: "#/components/responses/Loose" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/runs/{id}/logs:
+    get:
+      operationId: listRunLogs
+      summary: The app logs attributed to the run
+      x-weftbase-action: runs.content
+      parameters:
+        - $ref: "#/components/parameters/RunID"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200": { $ref: "#/components/responses/Loose" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/runs/{id}/export:
+    get:
+      operationId: exportRun
+      summary: The whole run as one download
+      x-weftbase-action: runs.content
+      parameters:
+        - $ref: "#/components/parameters/RunID"
+        - name: format
+          in: query
+          schema: { type: string, enum: [json, jsonl, otlp, wefttest], default: json }
+      responses:
+        "200":
+          description: The export (Content-Disposition attachment).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Loose" }
+            application/x-ndjson:
+              schema: { type: string }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/runs/{id}/stream:
+    get:
+      operationId: streamRun
+      summary: Live stream of one run
+      x-weftbase-action: runs.content
+      x-weftbase-events: *liveEvents
+      parameters:
+        - $ref: "#/components/parameters/RunID"
+        - $ref: "#/components/parameters/Kinds"
+        - $ref: "#/components/parameters/LastEventID"
+      responses:
+        "200": { $ref: "#/components/responses/EventStream" }
+        "400": { $ref: "#/components/responses/Error" }
+
+  /v1/sessions:
+    get:
+      operationId: listSessions
+      summary: Sessions, newest activity first
+      x-weftbase-action: sessions.read
+      parameters:
+        - { name: agent, in: query, schema: { type: string } }
+        - { name: public_id, in: query, schema: { type: string } }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: id_prefix, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string } }
+        - { name: since, in: query, schema: { type: string, format: date-time } }
+        - { name: before, in: query, schema: { type: string, format: date-time } }
+        - { name: before_id, in: query, schema: { type: string } }
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200": { $ref: "#/components/responses/Loose" }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{id}:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+    get:
+      operationId: getSession
+      summary: One session and its turns
+      x-weftbase-action: sessions.read
+      responses:
+        "200": { $ref: "#/components/responses/Loose" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteSession
+      summary: Delete a session's trace rows (never the app's conversation store)
+      x-weftbase-action: sessions.write
+      parameters:
+        - $ref: "#/components/parameters/CSRF"
+      responses:
+        "200":
+          description: Deleted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeleteResult" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{id}/public_id:
+    get:
+      operationId: getSessionPublicID
+      summary: The public id a session's turns carry
+      x-weftbase-action: sessions.read
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+      responses:
+        "200": { $ref: "#/components/responses/Loose" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{id}/timeline:
+    get:
+      operationId: getSessionTimeline
+      summary: A session's turns beside its state log
+      x-weftbase-action: sessions.read
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+      responses:
+        "200": { $ref: "#/components/responses/Loose" }
+        "404": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{id}/entries:
+    get:
+      operationId: listSessionEntries
+      summary: A session's state-log entries, paged
+      x-weftbase-action: sessions.read
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - { name: offset, in: query, schema: { type: integer, minimum: 0 } }
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200": { $ref: "#/components/responses/Loose" }
+        "404": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{id}/export:
+    get:
+      operationId: exportSession
+      summary: The whole conversation as JSON lines
+      x-weftbase-action: runs.content
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - { name: format, in: query, schema: { type: string, enum: [jsonl] } }
+      responses:
+        "200":
+          description: JSON lines.
+          content:
+            application/x-ndjson:
+              schema: { type: string }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{id}/stream:
+    get:
+      operationId: streamSession
+      summary: Live stream of one session's runs
+      x-weftbase-action: runs.content
+      x-weftbase-events: *liveEvents
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/Kinds"
+        - $ref: "#/components/parameters/LastEventID"
+      responses:
+        "200": { $ref: "#/components/responses/EventStream" }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/public/{id}:
+    get:
+      operationId: resolvePublicID
+      summary: The session a public id names
+      x-weftbase-action: sessions.read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The session.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session_id]
+                properties:
+                  session_id: { type: string }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/traces:
+    get:
+      operationId: listTraces
+      summary: Every trace, one row each
+      x-weftbase-action: traces.read
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - { name: before, in: query, schema: { type: string, format: date-time } }
+      responses:
+        "200": { $ref: "#/components/responses/Loose" }
+  /v1/traces/{id}:
+    get:
+      operationId: getTrace
+      summary: One trace's spans and the runs they make
+      x-weftbase-action: traces.read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/Loose" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/stats:
+    get:
+      operationId: getStats
+      summary: Aggregates over a window, grouped
+      x-weftbase-action: runs.read
+      parameters:
+        - name: by
+          in: query
+          schema: { type: string, enum: [agent, model, tool, error_type, step] }
+        - { name: since, in: query, description: RFC 3339, a Go duration or Nd back from until., schema: { type: string } }
+        - { name: until, in: query, schema: { type: string, format: date-time } }
+      responses:
+        "200": { $ref: "#/components/responses/Loose" }
+        "400": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/Error" }
+  /v1/diff:
+    get:
+      operationId: diffRuns
+      summary: The step-aligned diff of two runs
+      x-weftbase-action: runs.content
+      parameters:
+        - { name: a, in: query, required: true, schema: { type: string } }
+        - { name: b, in: query, required: true, schema: { type: string } }
+      responses:
+        "200": { $ref: "#/components/responses/Loose" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/events:
+    get:
+      operationId: streamEvents
+      summary: The control store's outbox as a resource stream
+      description: |
+        `id:` is the event's seq, `event:` its type, `data:` the
+        OutboxEvent. Last-Event-ID (or after=) replays every stored
+        event after it, then live ones, each once, in seq order; every
+        row is matched against the caller's scope.
+      x-weftbase-action: events.read
+      x-weftbase-events:
+        "<event type>": OutboxEvent
+        ping: Ping
+        overflow: Overflow
+      parameters:
+        - name: type
+          in: query
+          description: Repeatable or comma-separated.
+          schema: { type: array, items: { type: string } }
+          style: form
+          explode: true
+        - { name: resource_kind, in: query, schema: { type: string } }
+        - { name: resource_id, in: query, schema: { type: string } }
+        - { name: after, in: query, schema: { type: integer, minimum: 0 } }
+        - $ref: "#/components/parameters/LastEventID"
+      responses:
+        "200": { $ref: "#/components/responses/EventStream" }
+        "400": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/Error" }
+
+  /otlp/v1/traces:
+    post:
+      operationId: ingestTraces
+      summary: OTLP/HTTP trace export
+      description: OTEL_EXPORTER_OTLP_ENDPOINT is `<server>/otlp`. Tenant comes from the credential, never from attributes. 16 MiB body cap, gzip accepted.
+      x-weftbase-action: ingest.write
+      security:
+        - apiKey: []
+      requestBody:
+        $ref: "#/components/requestBodies/OTLP"
+      responses:
+        "200": { $ref: "#/components/responses/OTLPAccepted" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /otlp/v1/logs:
+    post:
+      operationId: ingestLogs
+      summary: OTLP/HTTP log export (weft records)
+      x-weftbase-action: ingest.write
+      security:
+        - apiKey: []
+      requestBody:
+        $ref: "#/components/requestBodies/OTLP"
+      responses:
+        "200": { $ref: "#/components/responses/OTLPAccepted" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: wb_<sk|rk|pk|wk>_<test|live>_<secret>
+      description: An API key in `Authorization`. Never in the URL (`?token=` is refused).
+    session:
+      type: apiKey
+      in: cookie
+      name: wb_session
+      description: |
+        The Console session cookie (POST /v1/auth/sessions). An unsafe
+        method (POST, PUT, PATCH, DELETE) with it also needs the header
+        `Weftbase-CSRF: 1` and must come from the server's own origin.
+
+  parameters:
+    RunID:
+      name: id
+      in: path
+      required: true
+      description: The run id, percent-encoded (a child run id carries "/").
+      schema: { type: string }
+    SessionID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 0 }
+    Kinds:
+      name: kinds
+      in: query
+      description: Comma-separated frame kinds (event, delta, messages, run, attempt); default everything but deltas.
+      schema: { type: string }
+    LastEventID:
+      name: Last-Event-ID
+      in: header
+      description: The last frame id seen; the stream resumes after it.
+      schema: { type: string }
+    CSRF:
+      name: Weftbase-CSRF
+      in: header
+      description: Required ("1") with a cookie session on an unsafe method.
+      schema: { type: string, enum: ["1"] }
+
+  requestBodies:
+    OTLP:
+      required: true
+      content:
+        application/x-protobuf:
+          schema: { type: string, format: binary }
+        application/json:
+          schema: { $ref: "#/components/schemas/Loose" }
+
+  responses:
+    Error:
+      description: The error shape.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Loose:
+      description: A JSON document (see the /v1 goldens in api/http/v1/testdata/v1 for its fields).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Loose" }
+    EventStream:
+      description: Server-sent events; the frames are listed in x-weftbase-events.
+      content:
+        text/event-stream:
+          schema: { type: string }
+    OTLPAccepted:
+      description: The export response (partial success when some rows were refused).
+      content:
+        application/x-protobuf:
+          schema: { type: string, format: binary }
+        application/json:
+          schema: { $ref: "#/components/schemas/Loose" }
+
+  schemas:
+    Loose:
+      type: object
+      additionalProperties: true
+      description: A document this version of the contract does not spell out field by field.
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: not_found, bad_request, unauthorized, forbidden, conflict, method_not_allowed, unsupported, unavailable, internal, not_implemented.
+            message: { type: string }
+            request_id: { type: string, description: Present on a 5xx. }
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [ok, ready] }
+    SignInRequest:
+      type: object
+      required: [token]
+      properties:
+        token: { type: string, description: The one-time sign-in link token. }
+    SignInResponse:
+      type: object
+      required: [operator, expires_at]
+      properties:
+        operator: { type: string }
+        expires_at: { type: string, format: date-time }
+    Principal:
+      type: object
+      required: [kind, id, scope, all_tenants]
+      properties:
+        kind: { type: string, enum: [key, operator, local] }
+        id: { type: string }
+        key_kind: { type: string, enum: [sk, rk, pk, wk] }
+        scope:
+          type: object
+          required: [project, env, tenant]
+          properties:
+            project: { type: string }
+            env: { type: string, enum: [test, live] }
+            tenant: { type: string }
+        all_tenants: { type: boolean }
+    Meta:
+      type: object
+      required: [weft_version, server_version, capabilities, principal, pricing, db, interrupted_after_ms, content, retention, manifest_check]
+      properties:
+        weft_version: { type: string }
+        server_version: { type: string }
+        capabilities:
+          type: array
+          description: The optional features that are on (ingest, clickhouse; later workers, approvals, tenants).
+          items: { type: string }
+        principal: { $ref: "#/components/schemas/Principal" }
+        ingest:
+          type: object
+          properties:
+            dropped: { type: array, items: { type: object } }
+            accepted: { type: integer }
+            refused: { type: integer }
+            last_error: { type: string }
+            last_at: { type: string, format: date-time }
+        pricing:
+          type: object
+          required: [source, dated, models]
+          properties:
+            source: { type: string, enum: [default, file, option] }
+            path: { type: string }
+            dated: { type: string }
+            models: { type: integer }
+        db:
+          type: object
+          required: [kind]
+          properties:
+            kind: { type: string }
+            path: { type: string }
+            size: { type: integer }
+        interrupted_after_ms: { type: integer }
+        content: { $ref: "#/components/schemas/Loose" }
+        retention: { type: [string, "null"] }
+        manifest_check:
+          oneOf:
+            - type: "null"
+            - $ref: "#/components/schemas/Loose"
+        pid: { type: integer }
+    RunStatus:
+      type: string
+      enum: [running, succeeded, failed, interrupted, parked, cancelled]
+    Usage:
+      type: object
+      properties:
+        input_tokens: { type: integer }
+        output_tokens: { type: integer }
+      additionalProperties: true
+    RunRow:
+      type: object
+      additionalProperties: true
+      required: [id, parent_run_id, agent, started, status, steps, usage, cost_known]
+      properties:
+        id: { type: string }
+        parent_run_id: { type: string }
+        parent_call_id: { type: string }
+        trace_id: { type: string }
+        agent: { type: string }
+        model:
+          type: object
+          properties:
+            provider: { type: string }
+            name: { type: string }
+        manifest_hash: { type: string }
+        weft_version: { type: string }
+        service: { type: string }
+        session_id: { type: string }
+        public_id: { type: string }
+        turn: { type: integer }
+        forked_from: { type: string }
+        meta: { type: object, additionalProperties: { type: string } }
+        started: { type: string, format: date-time }
+        finished: { type: [string, "null"], format: date-time }
+        last_seen: { type: string, format: date-time }
+        status: { $ref: "#/components/schemas/RunStatus" }
+        err: { type: string }
+        steps: { type: integer }
+        pending: { type: integer }
+        stop_reason: { type: string }
+        usage: { $ref: "#/components/schemas/Usage" }
+        cost_usd: { type: [number, "null"] }
+        cost_known: { type: boolean }
+        cost_badge: { type: string }
+        cost_reason: { type: string }
+        cache: { type: string }
+        delegated_cost_usd: { type: [number, "null"] }
+        delegated_cost_known: { type: boolean }
+        event_count: { type: integer }
+        message_count: { type: integer }
+        delta_count: { type: integer }
+        instructions_hash: { type: string }
+        catalog_hash: { type: string }
+        request_count: { type: integer }
+        prompt_preview: { type: string }
+        children_count: { type: integer }
+    RunsPage:
+      type: object
+      required: [total, runs, next_before, next_before_id]
+      properties:
+        total: { type: integer }
+        runs: { type: array, items: { $ref: "#/components/schemas/RunRow" } }
+        next_before: { type: [string, "null"], format: date-time }
+        next_before_id: { type: [string, "null"] }
+        turn_marks_capped: { $ref: "#/components/schemas/Loose" }
+    SearchPage:
+      type: object
+      required: [total, runs, sort, next_offset]
+      properties:
+        total: { type: integer }
+        runs: { type: array, items: { $ref: "#/components/schemas/RunRow" } }
+        sort: { type: string, enum: [started, duration, tokens, cost] }
+        next_offset: { type: [integer, "null"] }
+        cost_sort_cap: { type: integer }
+        facets:
+          type: object
+          properties:
+            error_class:
+              type: array
+              items:
+                type: object
+                required: [class, count]
+                properties:
+                  class: { type: string }
+                  count: { type: integer }
+            error_class_capped: { type: boolean }
+    RunPage:
+      allOf:
+        - $ref: "#/components/schemas/RunRow"
+        - type: object
+          additionalProperties: true
+          properties:
+            children: { type: array, items: { $ref: "#/components/schemas/RunRow" } }
+            holes: { type: array, items: { $ref: "#/components/schemas/Loose" } }
+            compactions: { type: array, items: { $ref: "#/components/schemas/Loose" } }
+            manifest_available: { type: boolean }
+            log_warn: { type: integer }
+            log_error: { type: integer }
+    DeleteResult:
+      type: object
+      required: [deleted, note]
+      properties:
+        deleted: { type: string, enum: [run, session] }
+        run_id: { type: string }
+        session_id: { type: string }
+        note: { type: string }
+    StoredManifest:
+      type: object
+      required: [manifest_hash, agent, source, first_seen, current_manifest_hash, manifest]
+      properties:
+        manifest_hash: { type: string }
+        agent: { type: string }
+        source: { type: string }
+        first_seen: { type: string, format: date-time }
+        current_manifest_hash: { type: string }
+        manifest: { $ref: "#/components/schemas/Loose" }
+    PricingTable:
+      type: object
+      required: [source, dated, models]
+      properties:
+        source: { type: string }
+        path: { type: string }
+        dated: { type: string }
+        note: { type: string }
+        models:
+          type: array
+          items:
+            type: object
+            required: [model_glob, input, output]
+            properties:
+              provider: { type: string }
+              model_glob: { type: string }
+              input: { type: number }
+              output: { type: number }
+              cached_input: { type: number }
+              cache_write: { type: number }
+              reasoning: { type: number }
+
+    # Stream frames (x-weftbase-events).
+    RunFrame:
+      type: object
+      description: "`event: run`: a run row changed."
+      required: [run]
+      properties:
+        run: { $ref: "#/components/schemas/RunRow" }
+    RecordFrame:
+      type: object
+      description: "`event: record`: one weft record as ingested."
+      required: [run_id, kind, pos, time, event]
+      properties:
+        run_id: { type: string }
+        session_id: { type: string }
+        public_id: { type: string }
+        kind: { type: string, enum: [event, delta, messages] }
+        pos: { type: integer }
+        time: { type: string, format: date-time }
+        trace_id: { type: string }
+        span_id: { type: string }
+        event: { $ref: "#/components/schemas/Loose" }
+        attrs: { type: object, additionalProperties: true }
+    AttemptFrame:
+      type: object
+      description: "`event: attempt`: one try inside a model call."
+      required: [run_id, step, attempt, status, start, end]
+      properties:
+        run_id: { type: string }
+        session_id: { type: string }
+        public_id: { type: string }
+        step: { type: integer }
+        attempt: { type: integer }
+        layer: { type: string }
+        status: { type: string, enum: [ok, error] }
+        error_type: { type: string }
+        provider: { type: string }
+        model: { type: string }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        wait_ms: { type: integer }
+        retry_after_ms: { type: integer }
+    BackfillErrorFrame:
+      type: object
+      description: "`event: backfill_error`: a resume could not read a run's stored frames."
+      additionalProperties: true
+    Ping:
+      type: object
+      description: "`event: ping`: a heartbeat, `{}`."
+    Overflow:
+      type: object
+      description: "`event: overflow`: the subscriber fell behind; the stream ends and the client reconnects with its last id."
+    OutboxEvent:
+      type: object
+      description: One outbox row; the SSE `id:` is its seq and `event:` its type.
+      required: [seq, id, project_id, env, tenant_id, type, resource_kind, resource_id, actor, data, audited, created_at]
+      properties:
+        seq: { type: integer }
+        id: { type: string }
+        project_id: { type: string }
+        env: { type: string }
+        tenant_id: { type: string }
+        type: { type: string, description: run.finished, key.minted, … (plan §6.5). }
+        resource_kind: { type: string }
+        resource_id: { type: string }
+        actor:
+          type: object
+          properties:
+            kind: { type: string, enum: [key, operator, worker, system] }
+            id: { type: string }
+            credential: { type: string }
+            assurance: { type: string }
+        data: { type: object, additionalProperties: true }
+        audited: { type: boolean }
+        created_at: { type: string, format: date-time }

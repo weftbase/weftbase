@@ -10,7 +10,7 @@ import (
 	"github.com/weftbase/weftbase/obsdb/sqlite"
 )
 
-// BenchmarkSessionsTurnFacts reads one /api/sessions page of 50
+// BenchmarkSessionsTurnFacts reads one /v1/sessions page of 50
 // sessions of 1,000 turns each (U16-fix): the turn facts are counted
 // in SQL and the strip reads the newest obsdb.MaxOutcomes turns per
 // session, so the page reads 50 × 40 narrow rows, never 50,000 run

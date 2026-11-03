@@ -31,7 +31,7 @@ import (
 )
 
 // mcpServer is setup B's server under httptest (the token wall on,
-// token "tok") with three runs ingested through the otel pipeline:
+// token tok) with three runs ingested through the otel pipeline:
 // r_ok (orders: a tool call, then an answer; session s_mcp, public id
 // pub_mcp), r_fail (triage: the model fails at step 0) and r_max
 // (orders under MaxSteps(1): step 0 calls the tool, the budget ends
@@ -53,7 +53,7 @@ type seededServer struct {
 func mcpSeed(t *testing.T) *seededServer {
 	t.Helper()
 	db := "sqlite://" + filepath.Join(t.TempDir(), "weft.db")
-	srv, err := newServer(db, "tok")
+	srv, err := newServer(db, tok)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func mcpSeed(t *testing.T) *seededServer {
 	t.Cleanup(stop)
 
 	ctx := context.Background()
-	p, err := exporter.Start(ctx, exporter.Remote(ts.URL, ""), otel.NoGlobal())
+	p, err := exporter.Start(ctx, exporter.Remote(ts.URL, tok), otel.NoGlobal())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,10 @@ func mcpSeed(t *testing.T) *seededServer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := http.Post(ts.URL+"/otlp/v1/traces", "application/json", strings.NewReader(string(traces)))
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/otlp/v1/traces", strings.NewReader(string(traces)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +117,7 @@ func mcpSeed(t *testing.T) *seededServer {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("ingest stock_genai: %s", resp.Status)
 	}
-	c := rest.New(ts.URL, "tok")
+	c := rest.New(ts.URL, tok)
 	for id, status := range map[string]string{"r_ok": `"status":"succeeded"`, "r_fail": `"status":"failed"`, "r_max": `"status":"failed"`,
 		"r_park": `"pending":1`, derivedFailID: `"status":"failed"`} {
 		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
@@ -182,25 +185,25 @@ func TestMCPReresolvesAfterServerMoves(t *testing.T) {
 	t.Setenv("WEFTBASE_TOKEN", "")
 	t.Setenv("WEFTBASE_DISCOVERY", "")
 	a := mcpSeed(t)
-	pointDiscovery(t, a.base, "tok")
+	pointDiscovery(t, a.base, tok)
 	var stderr syncBuffer
 	srv, err := startMCP(context.Background(), "", "", &stderr)
 	if err != nil {
 		t.Fatal(err)
 	}
 	cs := connect(t, srv)
-	if isErr, got := mcpCallRun(t, cs); isErr || got[1] != routeBody(t, a.base, "tok", "/api/runs/r_ok") {
+	if isErr, got := mcpCallRun(t, cs); isErr || got[1] != routeBody(t, a.base, tok, "/v1/runs/r_ok") {
 		t.Fatalf("on server A = %v %q", isErr, got)
 	}
 	b := mcpSeed(t)
 	a.stop()
-	pointDiscovery(t, b.base, "tok")
+	pointDiscovery(t, b.base, tok)
 	isErr, got := mcpCallRun(t, cs)
 	if !isErr || !strings.Contains(got[0], "weftbase not reachable at "+a.base) || !strings.Contains(got[0], "the next call looks again") ||
 		!strings.Contains(got[0], "no restart needed") {
 		t.Errorf("the call that finds A dead = %v %q, want the transport error with the hint", isErr, got)
 	}
-	if isErr, got := mcpCallRun(t, cs); isErr || got[1] != routeBody(t, b.base, "tok", "/api/runs/r_ok") {
+	if isErr, got := mcpCallRun(t, cs); isErr || got[1] != routeBody(t, b.base, tok, "/v1/runs/r_ok") {
 		t.Errorf("after the move = %v %q, want B's row", isErr, got)
 	}
 	if n := strings.Count(stderr.String(), "now reading the server at "+b.base); n != 1 {
@@ -217,7 +220,7 @@ func TestMCPReresolvesAfterTokenRotation(t *testing.T) {
 	t.Setenv("WEFTBASE_TOKEN", "")
 	t.Setenv("WEFTBASE_DISCOVERY", "")
 	s := mcpSeed(t)
-	pointDiscovery(t, s.base, "tok")
+	pointDiscovery(t, s.base, tok)
 	srv, err := startMCP(context.Background(), "", "", io.Discard)
 	if err != nil {
 		t.Fatal(err)
@@ -226,13 +229,13 @@ func TestMCPReresolvesAfterTokenRotation(t *testing.T) {
 	if isErr, got := mcpCallRun(t, cs); isErr {
 		t.Fatalf("before the restart = %q", got)
 	}
-	restartOn(t, s, "tok2")
-	pointDiscovery(t, s.base, "tok2")
+	restartOn(t, s, tok2)
+	pointDiscovery(t, s.base, tok2)
 	isErr, got := mcpCallRun(t, cs)
 	if !isErr || !strings.Contains(got[0], "401") || !strings.Contains(got[0], "the next call looks again") {
 		t.Errorf("the first call after the rotation = %v %q, want the 401 with the hint", isErr, got)
 	}
-	if isErr, got := mcpCallRun(t, cs); isErr || got[1] != routeBody(t, s.base, "tok2", "/api/runs/r_ok") {
+	if isErr, got := mcpCallRun(t, cs); isErr || got[1] != routeBody(t, s.base, tok2, "/v1/runs/r_ok") {
 		t.Errorf("after the file's new token = %v %q, want the row", isErr, got)
 	}
 }
@@ -268,38 +271,38 @@ var sessionSame = map[string]string{"agent": "agent", "session_id": "id", "publi
 // mcpCalls is every registered tool called once against mcpSeedServer.
 func mcpCalls() []mcpCall {
 	return []mcpCall{
-		{tool: "meta", route: "/api/meta"},
+		{tool: "meta", route: "/v1/meta"},
 		// I3: a read-time status word is the API's filter, as the tool documents.
-		{tool: "runs", args: map[string]any{"agent": "orders", "status": "parked"}, route: "/api/runs?agent=orders&status=parked", shape: rowsOf("runs", nil)},
-		{tool: "runs", args: map[string]any{"agent": "orders", "full": true}, route: "/api/runs?agent=orders"},
-		{tool: "search", args: map[string]any{"q": "order", "status": "succeeded"}, route: "/api/search?q=order&status=succeeded", shape: rowsOf("runs", nil)},
+		{tool: "runs", args: map[string]any{"agent": "orders", "status": "parked"}, route: "/v1/runs?agent=orders&status=parked", shape: rowsOf("runs", nil)},
+		{tool: "runs", args: map[string]any{"agent": "orders", "full": true}, route: "/v1/runs?agent=orders"},
+		{tool: "search", args: map[string]any{"q": "order", "status": "succeeded"}, route: "/v1/runs?q=order&sort=started&status=succeeded", shape: rowsOf("runs", nil)},
 		// U33.1: error_class on search and runs, the route's filter.
-		{tool: "search", args: map[string]any{"error_class": "upstream down", "all": true}, route: "/api/search?all=1&error_class=upstream+down", shape: rowsOf("runs", nil)},
-		{tool: "runs", args: map[string]any{"error_class": "upstream down"}, route: "/api/runs?error_class=upstream+down", shape: rowsOf("runs", nil)},
+		{tool: "search", args: map[string]any{"error_class": "upstream down", "all": true}, route: "/v1/runs?all=1&error_class=upstream+down&sort=started", shape: rowsOf("runs", nil)},
+		{tool: "runs", args: map[string]any{"error_class": "upstream down"}, route: "/v1/runs?error_class=upstream+down", shape: rowsOf("runs", nil)},
 		{tool: "stats", args: map[string]any{"by": "agent", "since": "2000-01-01T00:00:00Z", "until": "2100-01-01T00:00:00Z"},
-			route: "/api/stats?by=agent&since=2000-01-01T00%3A00%3A00Z&until=2100-01-01T00%3A00%3A00Z", shape: compactStats},
+			route: "/v1/stats?by=agent&since=2000-01-01T00%3A00%3A00Z&until=2100-01-01T00%3A00%3A00Z", shape: compactStats},
 		{tool: "stats", args: map[string]any{"by": "tool", "since": "2000-01-01T00:00:00Z", "until": "2100-01-01T00:00:00Z", "full": true},
-			route: "/api/stats?by=tool&since=2000-01-01T00%3A00%3A00Z&until=2100-01-01T00%3A00%3A00Z"},
-		{tool: "run", args: map[string]any{"id": "r_ok"}, route: "/api/runs/r_ok"},
-		{tool: "step", args: map[string]any{"id": "r_ok", "n": 0}, route: "/api/runs/r_ok/steps/0"},
-		{tool: "request", args: map[string]any{"id": "r_ok", "step": 1, "transcript": true}, route: "/api/runs/r_ok/requests?step=1",
-			extra: []string{"/api/runs/r_ok/transcript?step=1"}},
-		{tool: "events", args: map[string]any{"id": "r_ok", "limit": 3}, route: "/api/runs/r_ok/events?limit=3", shape: eventsProjection},
-		{tool: "tools", args: map[string]any{"id": "r_ok"}, route: "/api/runs/r_ok/tools"},
-		{tool: "diff", args: map[string]any{"a": "r_ok", "b": "r_max"}, route: "/api/diff?a=r_ok&b=r_max"},
-		{tool: "export", args: map[string]any{"id": "r_ok", "format": "jsonl", "max_bytes": mcpMaxBytes}, route: "/api/runs/r_ok/export?format=jsonl"},
-		{tool: "sessions", route: "/api/sessions", shape: rowsOf("sessions", nil)},
-		{tool: "session", args: map[string]any{"id": "s_mcp"}, route: "/api/sessions/s_mcp", shape: rowsOf("runs", sessionSame)},
-		{tool: "session", args: map[string]any{"id": "s_mcp", "full": true}, route: "/api/sessions/s_mcp"},
-		{tool: "logs", args: map[string]any{"id": "r_ok", "severity": "info"}, route: "/api/runs/r_ok/logs?severity=info"},
-		{tool: "spans", args: map[string]any{"id": "r_ok"}, route: "/api/runs/r_ok/spans",
+			route: "/v1/stats?by=tool&since=2000-01-01T00%3A00%3A00Z&until=2100-01-01T00%3A00%3A00Z"},
+		{tool: "run", args: map[string]any{"id": "r_ok"}, route: "/v1/runs/r_ok"},
+		{tool: "step", args: map[string]any{"id": "r_ok", "n": 0}, route: "/v1/runs/r_ok/steps/0"},
+		{tool: "request", args: map[string]any{"id": "r_ok", "step": 1, "transcript": true}, route: "/v1/runs/r_ok/requests?step=1",
+			extra: []string{"/v1/runs/r_ok/transcript?step=1"}},
+		{tool: "events", args: map[string]any{"id": "r_ok", "limit": 3}, route: "/v1/runs/r_ok/events?limit=3", shape: eventsProjection},
+		{tool: "tools", args: map[string]any{"id": "r_ok"}, route: "/v1/runs/r_ok/tools"},
+		{tool: "diff", args: map[string]any{"a": "r_ok", "b": "r_max"}, route: "/v1/diff?a=r_ok&b=r_max"},
+		{tool: "export", args: map[string]any{"id": "r_ok", "format": "jsonl", "max_bytes": mcpMaxBytes}, route: "/v1/runs/r_ok/export?format=jsonl"},
+		{tool: "sessions", route: "/v1/sessions", shape: rowsOf("sessions", nil)},
+		{tool: "session", args: map[string]any{"id": "s_mcp"}, route: "/v1/sessions/s_mcp", shape: rowsOf("runs", sessionSame)},
+		{tool: "session", args: map[string]any{"id": "s_mcp", "full": true}, route: "/v1/sessions/s_mcp"},
+		{tool: "logs", args: map[string]any{"id": "r_ok", "severity": "info"}, route: "/v1/runs/r_ok/logs?severity=info"},
+		{tool: "spans", args: map[string]any{"id": "r_ok"}, route: "/v1/runs/r_ok/spans",
 			shape: func(b []byte) []byte { return compactSpans(b, "r_ok") }},
-		{tool: "spans", args: map[string]any{"id": "r_ok", "tree": true, "full": true}, route: "/api/runs/r_ok/spans?tree=1"},
-		{tool: "trace", args: map[string]any{"trace_id": derivedTraceID}, route: "/api/traces/" + derivedTraceID,
+		{tool: "spans", args: map[string]any{"id": "r_ok", "tree": true, "full": true}, route: "/v1/runs/r_ok/spans?tree=1"},
+		{tool: "trace", args: map[string]any{"trace_id": derivedTraceID}, route: "/v1/traces/" + derivedTraceID,
 			shape: func(b []byte) []byte { return compactSpans(b, "") }},
-		{tool: "transcript", args: map[string]any{"id": "r_ok"}, route: "/api/runs/r_ok/transcript"},
-		{tool: "live", route: "/api/runs?all=1&status=running", shape: rowsOf("runs", nil)},
-		{tool: "agents", route: "/api/manifest", wantErr: "404 no manifest"},
+		{tool: "transcript", args: map[string]any{"id": "r_ok"}, route: "/v1/runs/r_ok/transcript"},
+		{tool: "live", route: "/v1/runs?all=1&status=running", shape: rowsOf("runs", nil)},
+		{tool: "agents", route: "/v1/manifest", wantErr: "404 no manifest"},
 		{tool: "explain_failure", args: map[string]any{"id": "r_fail"}},
 	}
 }
@@ -353,7 +356,7 @@ func TestMCPStdio(t *testing.T) {
 	clientIn, serverOut := io.Pipe()
 	served := make(chan error, 1)
 	go func() {
-		served <- Serve(ctx, Options{Client: rest.New(base, "tok"), TokenFrom: "from WEFTBASE_TOKEN", Stderr: &stderr}, serverIn, serverOut)
+		served <- Serve(ctx, Options{Client: rest.New(base, tok), TokenFrom: "from WEFTBASE_TOKEN", Stderr: &stderr}, serverIn, serverOut)
 		_ = serverOut.Close()
 	}()
 	cs, err := sdk.NewClient(&sdk.Implementation{Name: "test", Version: "0"}, nil).
@@ -405,13 +408,13 @@ func TestMCPStdio(t *testing.T) {
 			t.Errorf("%s: error %q", c.tool, got)
 			continue
 		}
-		body := routeBody(t, base, "tok", c.route)
+		body := routeBody(t, base, tok, c.route)
 		if c.shape != nil {
 			body = string(c.shape([]byte(body)))
 		}
 		want := append([]string{body}, nil...)
 		for _, r := range c.extra {
-			want = append(want, routeBody(t, base, "tok", r))
+			want = append(want, routeBody(t, base, tok, r))
 		}
 		if len(got) != 1+len(want) || got[0] == "" {
 			t.Errorf("%s: %d items %q, want a summary and %d bodies", c.tool, len(got), got, len(want))
@@ -549,7 +552,7 @@ func connect(t *testing.T, srv *sdk.Server) *sdk.ClientSession {
 func TestMCPReadOnlyMethods(t *testing.T) {
 	base := mcpSeedServer(t)
 	rec := &recorder{}
-	c := rest.New(base, "tok")
+	c := rest.New(base, tok)
 	c.HTTP().Transport = rec
 	cs := inProcess(t, c)
 	ctx := context.Background()
@@ -591,7 +594,7 @@ func TestMCPReadOnlyMethods(t *testing.T) {
 	methods := map[string]bool{}
 	for _, r := range rec.reqs {
 		methods[r.Method] = true
-		if r.Header.Get("Authorization") != "Bearer tok" || strings.Contains(r.URL.String(), "tok") {
+		if r.Header.Get("Authorization") != "Bearer "+tok || strings.Contains(r.URL.String(), tok) {
 			t.Errorf("%s %s: the token travels in the Authorization header only", r.Method, r.URL)
 		}
 		if r.URL.Query().Has("token") {
@@ -624,10 +627,10 @@ func TestMCPTransportRefusesWrites(t *testing.T) {
 		_, _ = io.WriteString(w, "{}")
 	}))
 	defer server.Close()
-	c := rest.New(server.URL, "tok")
+	c := rest.New(server.URL, tok)
 	srv := newMCPServer(c, slog.New(slog.DiscardHandler))
 	addTool(srv, "mutant", "a tool mutated to write", func(ctx context.Context, _ *sdk.CallToolRequest, in mcpRunIn) (*sdk.CallToolResult, any, error) {
-		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.Base()+"/api/runs/"+in.ID+"/cancel", strings.NewReader("{}"))
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.Base()+"/v1/runs/"+in.ID+"/cancel", strings.NewReader("{}"))
 		resp, err := c.HTTP().Do(req)
 		if err != nil {
 			return nil, nil, err
@@ -646,12 +649,12 @@ func TestMCPTransportRefusesWrites(t *testing.T) {
 		t.Errorf("a POST through the tools' client = %v %q, want the refusal", res.IsError, got)
 	}
 	for _, m := range []string{http.MethodPut, http.MethodDelete, http.MethodPatch} {
-		req, _ := http.NewRequest(m, server.URL+"/api/runs/r", nil)
+		req, _ := http.NewRequest(m, server.URL+"/v1/runs/r", nil)
 		if _, err := c.HTTP().Do(req); err == nil || !strings.Contains(err.Error(), "weftbase mcp is read-only: "+m+" refused") {
 			t.Errorf("%s through the transport = %v, want the refusal", m, err)
 		}
 	}
-	if _, err := c.Get(context.Background(), "/api/meta", nil); err != nil {
+	if _, err := c.Get(context.Background(), "/v1/meta", nil); err != nil {
 		t.Errorf("a GET through the transport = %v", err)
 	}
 	mu.Lock()
@@ -663,7 +666,7 @@ func TestMCPTransportRefusesWrites(t *testing.T) {
 
 // TestMCPNoWriteVerbs pins the read-only promise by name and by
 // declaration: no tool's name carries a write verb (run and runs are
-// the reads of /api/runs — the verb "run" as starting one is the
+// the reads of /v1/runs — the verb "run" as starting one is the
 // replay's, absent), the instructions say read-only, and the
 // server declares it in its capabilities.
 func TestMCPNoWriteVerbs(t *testing.T) {
@@ -677,7 +680,7 @@ func TestMCPNoWriteVerbs(t *testing.T) {
 	for _, tool := range lt.Tools {
 		switch tool.Name {
 		case "run", "runs":
-			continue // GET /api/runs/{id}, /api/runs: nouns, pinned GET by TestMCPReadOnlyMethods
+			continue // GET /v1/runs/{id}, /v1/runs: nouns, pinned GET by TestMCPReadOnlyMethods
 		}
 		for _, v := range verbs {
 			if strings.Contains(tool.Name, v) {
@@ -748,14 +751,14 @@ func TestMCPServesBeforeServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := texts(t, res); !res.IsError || !strings.Contains(got[0], "no server answers /api/meta") ||
+	if got := texts(t, res); !res.IsError || !strings.Contains(got[0], "no server answers /v1/meta") ||
 		!strings.Contains(got[0], "no restart needed") {
 		t.Errorf("before the server = %v %q, want the isError line", res.IsError, got)
 	}
 
 	base := mcpSeedServer(t)
 	dead.Remove()
-	w, err := discovery.Write(discovery.Info{URL: base, Token: "tok", PID: os.Getpid(), Started: time.Now().UTC()})
+	w, err := discovery.Write(discovery.Info{URL: base, Token: tok, PID: os.Getpid(), Started: time.Now().UTC()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -764,7 +767,7 @@ func TestMCPServesBeforeServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := texts(t, res); res.IsError || len(got) != 2 || got[1] != routeBody(t, base, "tok", "/api/runs/r_ok") {
+	if got := texts(t, res); res.IsError || len(got) != 2 || got[1] != routeBody(t, base, tok, "/v1/runs/r_ok") {
 		t.Errorf("after the server came up = %v %q, want r_ok's row", res.IsError, got)
 	}
 	if s := stderr.String(); !strings.Contains(s, "now reading the server at "+base) || strings.Contains(s, "tok\n") {
@@ -788,9 +791,9 @@ func TestMCPExplainTailSurvivesCut(t *testing.T) {
 		calls = append(calls, fmt.Sprintf(`{"call_id":"c%d","name":"lookup","result":{"content":%q}}`, i, big))
 	}
 	m := &mcpReader{s: fakeServer{
-		"/api/runs/r":            {200, `{"id":"r","agent":"a","status":"failed","err":"boom","steps":1,"holes":[]}`},
-		"/api/runs/r/steps/1":    {200, `{"status":"error","tool_calls":[` + strings.Join(calls, ",") + `],"attempts":[],"children":[],"holes":[]}`},
-		"/api/runs/r/transcript": {200, `{"batches":[{"messages":[{"role":"assistant","content":[{"type":"text","text":"looking it up"}]}]}]}`},
+		"/v1/runs/r":            {200, `{"id":"r","agent":"a","status":"failed","err":"boom","steps":1,"holes":[]}`},
+		"/v1/runs/r/steps/1":    {200, `{"status":"error","tool_calls":[` + strings.Join(calls, ",") + `],"attempts":[],"children":[],"holes":[]}`},
+		"/v1/runs/r/transcript": {200, `{"batches":[{"messages":[{"role":"assistant","content":[{"type":"text","text":"looking it up"}]}]}]}`},
 	}}
 	res, _, err := m.explainFailure(context.Background(), nil, mcpRunIn{ID: "r"})
 	if err != nil {
@@ -835,10 +838,10 @@ func TestMCPExplainInFlightHidden(t *testing.T) {
 		word   string
 	}{{http.StatusForbidden, "hidden (403)"}, {http.StatusBadGateway, "unavailable (502)"}} {
 		m := &mcpReader{s: fakeServer{
-			"/api/runs/r":            {200, `{"id":"r","agent":"a","status":"failed","err":"boom","steps":1,"holes":[]}`},
-			"/api/runs/r/steps/1":    {c.status, `{"error":{"code":"x","message":"y"},"badge":"hidden"}`},
-			"/api/runs/r/steps/0":    {200, `{"status":"ok","tool_calls":[],"holes":[]}`},
-			"/api/runs/r/transcript": {200, `{"batches":[]}`},
+			"/v1/runs/r":            {200, `{"id":"r","agent":"a","status":"failed","err":"boom","steps":1,"holes":[]}`},
+			"/v1/runs/r/steps/1":    {c.status, `{"error":{"code":"x","message":"y"},"badge":"hidden"}`},
+			"/v1/runs/r/steps/0":    {200, `{"status":"ok","tool_calls":[],"holes":[]}`},
+			"/v1/runs/r/transcript": {200, `{"batches":[]}`},
 		}}
 		res, _, err := m.explainFailure(context.Background(), nil, mcpRunIn{ID: "r"})
 		if err != nil {
@@ -871,10 +874,10 @@ func (f failingServer) get(ctx context.Context, path string, q url.Values) (int,
 // transport failure read "unreachable", never "(0)".
 func TestMCPExplainBothStepsFail(t *testing.T) {
 	m := &mcpReader{s: failingServer{fakeServer{
-		"/api/runs/r":            {200, `{"id":"r","agent":"a","status":"failed","err":"boom","steps":1,"holes":[]}`},
-		"/api/runs/r/steps/1":    {http.StatusForbidden, `{"error":{"code":"forbidden","message":"no"}}`},
-		"/api/runs/r/transcript": {200, `{"batches":[]}`},
-	}, map[string]bool{"/api/runs/r/steps/0": true}}}
+		"/v1/runs/r":            {200, `{"id":"r","agent":"a","status":"failed","err":"boom","steps":1,"holes":[]}`},
+		"/v1/runs/r/steps/1":    {http.StatusForbidden, `{"error":{"code":"forbidden","message":"no"}}`},
+		"/v1/runs/r/transcript": {200, `{"batches":[]}`},
+	}, map[string]bool{"/v1/runs/r/steps/0": true}}}
 	res, _, err := m.explainFailure(context.Background(), nil, mcpRunIn{ID: "r"})
 	if err != nil {
 		t.Fatal(err)
@@ -914,7 +917,7 @@ func TestMCPSourceOneClient(t *testing.T) {
 // the busiest — and full=true the route's body.
 func TestMCPErrorClassAndStats(t *testing.T) {
 	base := mcpSeedServer(t)
-	cs := inProcess(t, rest.New(base, "tok"))
+	cs := inProcess(t, rest.New(base, tok))
 	ctx := context.Background()
 	call := func(tool string, args map[string]any) []string {
 		t.Helper()
@@ -985,7 +988,7 @@ func TestMCPWordingAndEvents(t *testing.T) {
 		t.Errorf("page summary %q", got)
 	}
 	base := mcpSeedServer(t)
-	cs := inProcess(t, rest.New(base, "tok"))
+	cs := inProcess(t, rest.New(base, tok))
 	ctx := context.Background()
 	res, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: "run", Arguments: map[string]any{"id": "does-not-exist"}})
 	if err != nil || !res.IsError || !strings.Contains(texts(t, res)[0], "404") || !strings.Contains(texts(t, res)[0], "find run ids with runs or search {q}") {

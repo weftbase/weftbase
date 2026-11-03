@@ -12,8 +12,8 @@ import (
 
 // The request record's read routes (ADR 0028 §10, plan A1):
 //
-//	GET /api/runs/{id}/requests?step=&from=&limit=&refs=1
-//	GET /api/runs/{id}/tools
+//	GET /v1/runs/{id}/requests?step=&from=&limit=&refs=1
+//	GET /v1/runs/{id}/tools
 //
 // Every hole is a badge from ADR 0028 §11's
 // closed table (obsdb.Hole) with a reason and, where one exists, a fix:
@@ -81,7 +81,7 @@ type requestRow struct {
 	Tools          any               `json:"tools,omitempty"`
 }
 
-// requestWire is a requests row as GET /api/runs/{id}/requests serves
+// requestWire is a requests row as GET /v1/runs/{id}/requests serves
 // it: the request record plus its attempt's raw record (ADR 0028 §12,
 // plan A6) — the provider request and response on the wire, credential
 // headers stripped and named, each body capped at 256 KiB — or null
@@ -105,7 +105,7 @@ func wireOf(row requestRow, rec obsdb.RequestRecord) requestWire {
 	return w
 }
 
-// requestsPage is GET /api/runs/{id}/requests. NextFrom is the next
+// requestsPage is GET /v1/runs/{id}/requests. NextFrom is the next
 // page's from (the last index + 1) when the page is full; absent on
 // the last page. A run written before the record carries the
 // not_recorded badge beside an empty list.
@@ -148,7 +148,7 @@ type holeRef struct {
 	Badge string `json:"badge"`
 }
 
-// toolsDoc is GET /api/runs/{id}/tools: every catalog of the run, one
+// toolsDoc is GET /v1/runs/{id}/tools: every catalog of the run, one
 // per hash, in index order, with the badge when there are none to show
 // for a reason (not_recorded, stripped, gap).
 type toolsDoc struct {
@@ -176,7 +176,7 @@ func missingHole(err error) obsdb.Hole {
 	return obsdb.HoleGap
 }
 
-// serveRunRequests answers api/runs/{id}/requests?step=&from=&limit=&refs=1:
+// serveRunRequests answers /v1/runs/{id}/requests?step=&from=&limit=&refs=1:
 // one page of the run's request records in index order. step keeps one
 // step's attempts; from is the first index (next_from feeds straight
 // back in); limit 0 = 100, max 1000. Without refs=1 each row inlines
@@ -325,7 +325,7 @@ func (rs *resolver) catalog(hash string, stripped bool) (any, error) {
 	return v, nil
 }
 
-// serveRunTools answers api/runs/{id}/tools: the run's catalogs, one
+// serveRunTools answers /v1/runs/{id}/tools: the run's catalogs, one
 // per hash, in index order. None to show is badged when there is a
 // reason: not_recorded (a run written before the record), stripped (a
 // content-off destination dropped them) or gap (dropped in transit); a

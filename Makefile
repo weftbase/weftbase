@@ -138,16 +138,17 @@ console-check: console-build
 	cd $(CONSOLE_APP) && bun run check
 
 # ── The /v1 contract ─────────────────────────────────────────────────
-# api/openapi/v1.yaml is the contract (spec-first). api-gen regenerates
-# the Go server interface, the Go client and the Console's types;
-# api-check fails on a stale generation.
+# api/openapi/v1.yaml is the contract (spec-first). Code generation
+# from it (the oapi-codegen strict server interface, a generated
+# client/rest, the Console's types) lands in a later step: until then
+# api-gen generates nothing, and api-check runs the spec/route
+# consistency test (every route of the table is an operation of the
+# spec with the same authz action, and every operation a route).
 api-gen:
-	$(GO) generate ./api/...
-	cd client && $(GO) generate ./rest/...
-	@if test -f $(CONSOLE_APP)/package.json; then cd $(CONSOLE_APP) && bun run api:gen; fi
+	@echo "api-gen: no code is generated from api/openapi/v1.yaml yet (client/rest and the handlers are hand-written); see api-check"
 
-api-check: api-gen
-	git diff --exit-code -- api client/rest $(CONSOLE_APP)/src/lib/api || { echo "generated API code is stale: run 'make api-gen' and commit"; exit 1; }
+api-check:
+	$(GO) test -count=1 -run 'TestRoute|TestOpenAPI' ./api/http/
 
 # The tenancy conformance suite: every endpoint and stream, run with
 # tenant A's credentials against tenant B's ids, answers 404 and no

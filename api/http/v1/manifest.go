@@ -8,36 +8,14 @@ import (
 	"net/http"
 )
 
-// api/manifest: the agents this server knows, from the weft.json
+// /v1/manifest: the agents this server knows, from the weft.json
 // passed to Manifest(...). The response carries a sources array naming
 // the file and each agent's own hash.
 
 // manifestSourceFile is the one manifest source kind: the weft.json.
 const manifestSourceFile = "file"
 
-// Why a capability is off (meta.capabilities_off).
-const (
-	offIngest    = "OTLP ingest is off: the NoIngest option turned it off"
-	offSearch    = "the database cannot search: its obsdb.DB does not implement obsdb.Searcher (obsdb/sqlite and obsdb/clickhouse both do)"
-	offSpansTree = "the database cannot read a run tree: its obsdb.DB does not implement obsdb.TreeReader (obsdb/sqlite and obsdb/clickhouse both do); GET /api/runs/{id}/spans?tree=1 answers 501"
-	offStats     = "the database cannot aggregate: its obsdb.DB does not implement obsdb.Aggregator (obsdb/sqlite and obsdb/clickhouse both do); GET /api/stats and the error_class facet and filter are off"
-	offTimeline  = "the database cannot read a session's state log: its obsdb.DB does not implement obsdb.SessionEventReader (obsdb/sqlite and obsdb/clickhouse both do); GET /api/sessions/{id}/timeline and /entries answer 501"
-)
-
-// optionalCapabilities is every capability a route group registers
-// only under an option, with the reason meta.capabilities_off gives
-// when it is absent — the one table capabilitiesOff reads (a test
-// checks every optional group has an entry).
-var optionalCapabilities = map[string]string{
-	"ingest":     offIngest,
-	"search":     offSearch,
-	"manifests":  offManifests,
-	"spans_tree": offSpansTree,
-	"timeline":   offTimeline,
-	"stats":      offStats,
-}
-
-// manifestSourceView is one entry of api/manifest's sources.
+// manifestSourceView is one entry of /v1/manifest's sources.
 type manifestSourceView struct {
 	Source       string `json:"source"` // file
 	ManifestHash string `json:"manifest_hash"`
@@ -67,7 +45,7 @@ func (s *Server) manifestSources() []manifestSourceView {
 	return out
 }
 
-// serveManifest answers api/manifest: the file manifest with sources
+// serveManifest answers /v1/manifest: the file manifest with sources
 // added, else 404 saying why.
 func (s *Server) serveManifest(w http.ResponseWriter, r *http.Request) {
 	if len(s.manifest) == 0 {
@@ -129,30 +107,4 @@ func (s *Server) checkedManifest() (source string, hashes []agentHash, err error
 	}
 	hashes, err = manifestAgentHashes(s.manifest)
 	return manifestSourceFile, hashes, err
-}
-
-// capabilitiesOff names each optional capability this server does not
-// report and why (meta.capabilities_off): computed from capabilityList,
-// so a capability a host declares itself (Capabilities) is never both
-// on and off. Nil when nothing is off.
-func (s *Server) capabilitiesOff() map[string]string {
-	on := map[string]bool{}
-	for _, c := range s.capabilityList() {
-		on[c] = true
-	}
-	off := map[string]string{}
-	for c, why := range optionalCapabilities {
-		if !on[c] {
-			off[c] = why
-			for host, words := range s.offReasons {
-				if optionalCapabilities[host] == why {
-					off[c] = words
-				}
-			}
-		}
-	}
-	if len(off) == 0 {
-		return nil
-	}
-	return off
 }

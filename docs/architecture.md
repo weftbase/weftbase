@@ -72,3 +72,29 @@ interface and the kernel wires it.
 | Control (`store/`) | tenants, keys, registry, run ledger, queue, approvals, audit, budgets, webhooks, the `events` outbox | SQLite; Postgres later |
 | Thread (weft `thread`) | session entries, the journal | weft `thread/sqlite` |
 | Trace (`obsdb`) | spans, records, derived runs, search, stats | SQLite, ClickHouse |
+
+## The kernel and the HTTP front
+
+`weftbase.New(opts…)` opens the stores — by default `<data>/control.db`
+and `<data>/traces.db` under `DataDir` (`./.weftbase`), each SQLite file
+under its OS lock (`internal/dblock`) — wires the services and returns
+an `App`. `App.Handler()` serves the node's roles and mounts under a
+prefix (`http.StripPrefix` plus `Base`); `App.Run(ctx)` runs the
+background work (the outbox hub's pump on `api`, the retention sweeper
+on `scheduler`); `App.Shutdown` stops it and closes what `New` opened.
+
+`api/http` is the one router. Every route is a row of one table —
+method, pattern, `authz` action, handler — and the middleware runs in
+this order: request id (`internal/reqlog`), CORS (never with
+credentials), the URL-credential refusal, authentication (bearer key,
+then the `wb_session` cookie, then `Open`'s Local principal), the guards
+(Local: loopback Host and same-origin writes; a cookie session: the
+`Weftbase-CSRF: 1` header and same-origin writes), then
+`authz.Can(principal, action)`. `/v1/*`, `/otlp/*`, `/healthz`,
+`/readyz` and `/metrics` never fall through to the Console: an unknown
+one is a JSON 404, a wrong method a 405 with `Allow`. Ids in paths are
+percent-encoded (a child run id carries `/`) and decoded once.
+
+`api/openapi/v1.yaml` is the contract. A test (`make api-check`) holds
+it and the route table to the same operations and actions; code
+generation from it lands later.

@@ -7,7 +7,7 @@ import (
 
 // TestCostParityGolden pins one cost rule for a set (P10b-pre-web-fix):
 // the session row's figure (tally, cost_partial) beside the turn rows it
-// sums, for the three probe cases — testdata/api/cost-parity.golden.json,
+// sums, for the three probe cases — testdata/v1/cost-parity.golden.json,
 // which the web's parity.test feeds to server's partialView and to the
 // Console's atLeastCost, so both surfaces say the same figure as Go.
 func TestCostParityGolden(t *testing.T) {

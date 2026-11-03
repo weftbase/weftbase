@@ -159,7 +159,7 @@ func (v timelineView) hole(h string) (int, bool) {
 	return 0, false
 }
 
-// TestSessionTimeline pins GET /api/sessions/{id}/timeline (U12.2, A3):
+// TestSessionTimeline pins GET /v1/sessions/{id}/timeline (U12.2, A3):
 // the turns in turn order with the marks filed under each, the marks in
 // record-time order on their lanes — the runless record last, a
 // session-level mark (run_id and turn null) — the lanes' counts, the
@@ -167,7 +167,7 @@ func (v timelineView) hole(h string) (int, bool) {
 // (TestSessionTimelineFromARealRun holds a real thread session to it).
 func TestSessionTimeline(t *testing.T) {
 	h := Handler(DB(timelineDB(t)))
-	code, _, body := get(t, h, "/weftbase/api/sessions/s_acme/timeline")
+	code, _, body := get(t, h, "/weftbase/v1/sessions/s_acme/timeline")
 	if code != http.StatusOK {
 		t.Fatalf("timeline: %d %s", code, body)
 	}
@@ -210,7 +210,7 @@ func TestSessionTimeline(t *testing.T) {
 	}
 
 	// entries: the same records, paged.
-	code, _, body = get(t, h, "/weftbase/api/sessions/s_acme/entries?limit=4")
+	code, _, body = get(t, h, "/weftbase/v1/sessions/s_acme/entries?limit=4")
 	if code != http.StatusOK {
 		t.Fatalf("entries: %d %s", code, body)
 	}
@@ -223,11 +223,11 @@ func TestSessionTimeline(t *testing.T) {
 	if err := json.Unmarshal([]byte(body), &e); err != nil || len(e.Entries) != 4 || e.Total != 12 || e.NextOffset == nil || *e.NextOffset != 4 {
 		t.Errorf("entries?limit=4 = %d entries, total %d, next %v (%v); want 4 of 12, next 4", len(e.Entries), e.Total, e.NextOffset, err)
 	}
-	_, _, body = get(t, h, "/weftbase/api/sessions/s_acme/entries?offset=10")
+	_, _, body = get(t, h, "/weftbase/v1/sessions/s_acme/entries?offset=10")
 	if err := json.Unmarshal([]byte(body), &e); err != nil || len(e.Entries) != 2 || e.NextOffset != nil {
 		t.Errorf("entries?offset=10 = %s, want the last 2 and no next", body)
 	}
-	if code, _, _ := get(t, h, "/weftbase/api/sessions/s_acme/entries?limit=x"); code != http.StatusBadRequest {
+	if code, _, _ := get(t, h, "/weftbase/v1/sessions/s_acme/entries?limit=x"); code != http.StatusBadRequest {
 		t.Errorf("entries?limit=x: %d, want 400", code)
 	}
 	// ?run= (P9-pre-web-fix2 9): one run's marks in one read — total,
@@ -235,7 +235,7 @@ func TestSessionTimeline(t *testing.T) {
 	var whole []struct {
 		RunID *string `json:"run_id"`
 	}
-	_, _, body = get(t, h, "/weftbase/api/sessions/s_acme/entries?limit=1000")
+	_, _, body = get(t, h, "/weftbase/v1/sessions/s_acme/entries?limit=1000")
 	var all struct {
 		Entries json.RawMessage `json:"entries"`
 	}
@@ -247,7 +247,7 @@ func TestSessionTimeline(t *testing.T) {
 			runMarks++
 		}
 	}
-	_, _, body = get(t, h, "/weftbase/api/sessions/s_acme/entries?run=s_acme-t1&limit=1")
+	_, _, body = get(t, h, "/weftbase/v1/sessions/s_acme/entries?run=s_acme-t1&limit=1")
 	var one struct {
 		Run     string `json:"run"`
 		Entries []struct {
@@ -261,42 +261,42 @@ func TestSessionTimeline(t *testing.T) {
 		one.NextOffset == nil || *one.NextOffset != 1 {
 		t.Errorf("entries?run=s_acme-t1&limit=1 = %s; want 1 of t1's %d marks, next 1", body, runMarks)
 	}
-	if _, _, body = get(t, h, "/weftbase/api/sessions/s_acme/entries?run=nope"); !strings.Contains(body, `"total":0`) {
+	if _, _, body = get(t, h, "/weftbase/v1/sessions/s_acme/entries?run=nope"); !strings.Contains(body, `"total":0`) {
 		t.Errorf("entries?run=nope = %s; want none", body)
 	}
 
 	// No mark and no turn that would have written one (a plain send):
 	// the timeline is its turns, no hole.
-	_, _, body = get(t, h, "/weftbase/api/sessions/s_quiet/timeline")
+	_, _, body = get(t, h, "/weftbase/v1/sessions/s_quiet/timeline")
 	q := decodeTimeline(t, body)
 	if len(q.Holes) != 0 || len(q.Turns) != 1 || len(q.Marks) != 0 {
 		t.Errorf("s_quiet's timeline = %s, want its turn, no mark and no hole: a plain send writes no thread record", body)
 	}
 	// No mark although a turn parked a call: not_recorded on that
 	// evidence, its fix naming the LoggerProvider.
-	_, _, body = get(t, h, "/weftbase/api/sessions/s_parked/timeline")
+	_, _, body = get(t, h, "/weftbase/v1/sessions/s_parked/timeline")
 	pk := decodeTimeline(t, body)
 	if _, ok := pk.hole("not_recorded"); !ok || len(pk.Turns) != 1 || len(pk.Marks) != 0 ||
 		!strings.Contains(body, "turn 1 parked a call") || !strings.Contains(body, "LoggerProvider") {
 		t.Errorf("s_parked's timeline = %s, want its turn, no mark and the not_recorded hole naming the park and the LoggerProvider", body)
 	}
-	if _, _, eb := get(t, h, "/weftbase/api/sessions/s_parked/entries"); !strings.Contains(eb, `"hole":"not_recorded"`) {
+	if _, _, eb := get(t, h, "/weftbase/v1/sessions/s_parked/entries"); !strings.Contains(eb, `"hole":"not_recorded"`) {
 		t.Errorf("s_parked's entries = %s, want the not_recorded hole too", eb)
 	}
 	// ?run= (P9-pre-web-fix3 F5): the holes are that run's — the parked
 	// run's own not_recorded, none for a run that parked nothing.
-	if _, _, eb := get(t, h, "/weftbase/api/sessions/s_parked/entries?run=s_parked-t1"); !strings.Contains(eb, `"hole":"not_recorded"`) {
+	if _, _, eb := get(t, h, "/weftbase/v1/sessions/s_parked/entries?run=s_parked-t1"); !strings.Contains(eb, `"hole":"not_recorded"`) {
 		t.Errorf("s_parked's entries?run=s_parked-t1 = %s, want the parked run's not_recorded hole", eb)
 	}
-	if _, _, eb := get(t, h, "/weftbase/api/sessions/s_parked/entries?run=nope"); strings.Contains(eb, `"hole"`) {
+	if _, _, eb := get(t, h, "/weftbase/v1/sessions/s_parked/entries?run=nope"); strings.Contains(eb, `"hole"`) {
 		t.Errorf("s_parked's entries?run=nope = %s, want no hole: that run parked nothing", eb)
 	}
 	// Marks and no turn (every record held at Close): the session-level marks.
-	code, _, body = get(t, h, "/weftbase/api/sessions/s_held/timeline")
+	code, _, body = get(t, h, "/weftbase/v1/sessions/s_held/timeline")
 	if hv := decodeTimeline(t, body); code != http.StatusOK || len(hv.Turns) != 0 || len(hv.Marks) != 1 {
 		t.Errorf("s_held's timeline = %d %s, want no turn and its one mark", code, body)
 	}
-	for _, p := range []string{"/weftbase/api/sessions/s_none/timeline", "/weftbase/api/sessions/s_none/entries"} {
+	for _, p := range []string{"/weftbase/v1/sessions/s_none/timeline", "/weftbase/v1/sessions/s_none/entries"} {
 		if code, _, _ := get(t, h, p); code != http.StatusNotFound {
 			t.Errorf("%s: %d, want 404", p, code)
 		}
@@ -305,7 +305,7 @@ func TestSessionTimeline(t *testing.T) {
 	// The cap: a truncated hole pointing at entries.
 	defer func(n int) { timelineMarkCap = n }(timelineMarkCap)
 	timelineMarkCap = 3
-	_, _, body = get(t, h, "/weftbase/api/sessions/s_acme/timeline")
+	_, _, body = get(t, h, "/weftbase/v1/sessions/s_acme/timeline")
 	if tv := decodeTimeline(t, body); len(tv.Marks) != 3 || tv.MarksTotal != 12 || !strings.Contains(body, "entries?offset=3") {
 		t.Errorf("capped timeline = %s, want 3 marks of 12 and the truncated hole's offset", body)
 	} else if _, ok := tv.hole("truncated"); !ok || !strings.Contains(body, `"hole":"truncated","cause":"response_cap"`) {
@@ -313,16 +313,16 @@ func TestSessionTimeline(t *testing.T) {
 	}
 }
 
-// TestSessionsTagFilter: /api/sessions?tag.<k>=<v> (D6) lists the
+// TestSessionsTagFilter: /v1/sessions?tag.<k>=<v> (D6) lists the
 // sessions one of whose own turns carries the pair, those turns alone
 // (I4: the tags scope turns as a public id does — t6 carries none).
 func TestSessionsTagFilter(t *testing.T) {
 	h := Handler(DB(timelineDB(t)))
-	_, _, body := get(t, h, "/weftbase/api/sessions?tag.arena.batch=b_u122")
+	_, _, body := get(t, h, "/weftbase/v1/sessions?tag.arena.batch=b_u122")
 	if !strings.Contains(body, `"total":1`) || !strings.Contains(body, `"id":"s_acme"`) || !strings.Contains(body, `"turns":5`) {
 		t.Errorf("sessions?tag.arena.batch=b_u122 = %s, want s_acme alone with its 5 tagged turns", body)
 	}
-	_, _, body = get(t, h, "/weftbase/api/sessions?tag.arena.batch=nope")
+	_, _, body = get(t, h, "/weftbase/v1/sessions?tag.arena.batch=nope")
 	if !strings.Contains(body, `"total":0`) {
 		t.Errorf("sessions?tag.arena.batch=nope = %s, want none", body)
 	}
@@ -335,11 +335,7 @@ type noEventsDB struct{ obsdb.DB }
 // leaves the timeline capability off, says why, and the routes are 501.
 func TestSessionTimelineOff(t *testing.T) {
 	h := Handler(DB(noEventsDB{timelineDB(t)}))
-	_, _, meta := get(t, h, "/weftbase/api/meta")
-	if strings.Contains(meta, `"timeline",`) || !strings.Contains(meta, `"timeline":"the database cannot read a session's state log`) {
-		t.Errorf("meta without a reader: %s", meta)
-	}
-	for _, p := range []string{"/weftbase/api/sessions/s_acme/timeline", "/weftbase/api/sessions/s_acme/entries"} {
+	for _, p := range []string{"/weftbase/v1/sessions/s_acme/timeline", "/weftbase/v1/sessions/s_acme/entries"} {
 		if code, _, body := get(t, h, p); code != http.StatusNotImplemented || !strings.Contains(body, "SessionEventReader") {
 			t.Errorf("%s without a reader: %d %s, want 501 naming the interface", p, code, body)
 		}

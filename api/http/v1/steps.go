@@ -19,7 +19,7 @@ import (
 
 // The step route (plan A7, with A10's children and A4's attempts):
 //
-//	GET /api/runs/{id}/steps/{n}
+//	GET /v1/runs/{id}/steps/{n}
 //
 // One step, assembled here from obsdb so a client folds nothing: the
 // request it sent (attempt 1, prompt and catalog inline), every attempt
@@ -52,7 +52,7 @@ const stepEventsPage = 1000
 // count, not a list); a larger count is listed this far, badged derived.
 const maxStepCountedCalls = maxRequestsLimit
 
-// stepDoc is GET /api/runs/{id}/steps/{n}. Blocks a step may lack are
+// stepDoc is GET /v1/runs/{id}/steps/{n}. Blocks a step may lack are
 // omitted; when one is missing for a reason, that reason is a badge —
 // on the block (request, attempts_badge, messages_in, compaction) and
 // in holes, deduplicated, in ADR 0028 §11's order.
@@ -533,7 +533,7 @@ walk:
 	return out, nil
 }
 
-// serveRunStep answers api/runs/{id}/steps/{n}.
+// serveRunStep answers /v1/runs/{id}/steps/{n}.
 func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item string) {
 	n, err := strconv.Atoi(item)
 	if err != nil || n < 0 || strconv.Itoa(n) != item {

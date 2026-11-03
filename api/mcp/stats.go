@@ -13,7 +13,7 @@ import (
 )
 
 // The stats tool (U33.1, carried from P10a-pre-go 9): numbers across
-// runs — GET /api/stats, one GET, nothing computed here. Its answer is
+// runs — GET /v1/stats, one GET, nothing computed here. Its answer is
 // compact rows, the list tools' rule (mcp_compact.go): each group's
 // 24-bucket series is left out (full=true keeps it), empty and zero
 // figures are omitted, cost reasons lifted to one cost_reasons list
@@ -49,7 +49,7 @@ func (m *mcpReader) stats(ctx context.Context, _ *sdk.CallToolRequest, in mcpSta
 			q.Set("tag."+k, v)
 		}
 	}
-	b, err := m.get(ctx, "/api/stats", q)
+	b, err := m.get(ctx, "/v1/stats", q)
 	if err != nil {
 		return nil, nil, err
 	}

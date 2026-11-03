@@ -29,7 +29,7 @@ func exportLines(t *testing.T, body string) ([]string, []map[string]any) {
 	return kinds, lines
 }
 
-// TestSessionExport pins GET /api/sessions/{id}/export (UX-B-29): one
+// TestSessionExport pins GET /v1/sessions/{id}/export (UX-B-29): one
 // "session" line, then each turn's run export in turn order (each
 // beginning with its "run" record), then the state log's marks in
 // record-time order, then the holes, then one "session_end" line with
@@ -37,7 +37,7 @@ func exportLines(t *testing.T, body string) ([]string, []map[string]any) {
 // Content-Length).
 func TestSessionExport(t *testing.T) {
 	h := Handler(DB(timelineDB(t)))
-	code, hdr, body := get(t, h, "/weftbase/api/sessions/s_acme/export?format=jsonl")
+	code, hdr, body := get(t, h, "/weftbase/v1/sessions/s_acme/export?format=jsonl")
 	if code != http.StatusOK {
 		t.Fatalf("export: %d %s", code, body)
 	}
@@ -96,10 +96,10 @@ func TestSessionExport(t *testing.T) {
 	if !strings.Contains(body, `"record":"session_hole","hole":"stripped"`) {
 		t.Errorf("the stripped receipt's hole is missing: %s", body)
 	}
-	if code, _, body := get(t, h, "/weftbase/api/sessions/s_acme/export?format=otlp"); code != http.StatusBadRequest || !strings.Contains(body, "format must be jsonl") {
+	if code, _, body := get(t, h, "/weftbase/v1/sessions/s_acme/export?format=otlp"); code != http.StatusBadRequest || !strings.Contains(body, "format must be jsonl") {
 		t.Errorf("format=otlp = %d %s, want 400", code, body)
 	}
-	if code, _, _ := get(t, h, "/weftbase/api/sessions/s_nope/export"); code != http.StatusNotFound {
+	if code, _, _ := get(t, h, "/weftbase/v1/sessions/s_nope/export"); code != http.StatusNotFound {
 		t.Errorf("an unknown session = %d, want 404", code)
 	}
 }
@@ -109,8 +109,8 @@ func TestSessionExport(t *testing.T) {
 func TestSessionExportCap(t *testing.T) {
 	defer func(n int) { sessionExportTurnCap = n }(sessionExportTurnCap)
 	sessionExportTurnCap = 2
-	h := Handler(DB(timelineDB(t)), Token("srv"))
-	code, _, body := getWith(t, h, "/weftbase/api/sessions/s_acme/export", "srv", "")
+	h := Handler(DB(timelineDB(t)))
+	code, _, body := getWith(t, h, "/weftbase/v1/sessions/s_acme/export", "srv", "")
 	if code != http.StatusOK {
 		t.Fatalf("export: %d %s", code, body)
 	}
@@ -142,7 +142,7 @@ func lastLine(body string) string {
 // still closes the file under the cap's bytes.
 func TestSessionExportByteCap(t *testing.T) {
 	h := Handler(DB(timelineDB(t)))
-	_, _, whole := get(t, h, "/weftbase/api/sessions/s_acme/export")
+	_, _, whole := get(t, h, "/weftbase/v1/sessions/s_acme/export")
 	kinds, _ := exportLines(t, whole)
 	// The cap just past the head and the first two turns: the bytes
 	// before the third turn's run line.
@@ -158,7 +158,7 @@ func TestSessionExportByteCap(t *testing.T) {
 	}
 	defer func(n int) { sessionExportByteCap = n }(sessionExportByteCap)
 	sessionExportByteCap = cap + 10
-	code, _, body := get(t, h, "/weftbase/api/sessions/s_acme/export")
+	code, _, body := get(t, h, "/weftbase/v1/sessions/s_acme/export")
 	if code != http.StatusOK {
 		t.Fatalf("export: %d %s", code, body)
 	}

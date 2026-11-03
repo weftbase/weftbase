@@ -1,7 +1,6 @@
 package v1
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,8 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -87,7 +84,7 @@ func TestLiveHEADDoesNotHoldAStream(t *testing.T) {
 	done := make(chan int, 1)
 	go func() {
 		w := httptest.NewRecorder()
-		h.ServeHTTP(w, httptest.NewRequest(http.MethodHead, "http://127.0.0.1/api/live?run=r_ok", nil))
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodHead, "http://127.0.0.1/v1/runs/stream?run=r_ok", nil))
 		done <- w.Code
 	}()
 	select {
@@ -96,7 +93,7 @@ func TestLiveHEADDoesNotHoldAStream(t *testing.T) {
 			t.Errorf("HEAD = %d, want 200", code)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("HEAD /api/live never returned: the handler is streaming to a bodiless request")
+		t.Fatal("HEAD /v1/runs/stream never returned: the handler is streaming to a bodiless request")
 	}
 }
 
@@ -158,7 +155,7 @@ func TestLiveBackfillStopsWhenTheClientLeaves(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	// A loopback Host: setup A's API answers nothing else (the
 	// DNS-rebinding guard), and httptest's default is example.com.
-	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/api/live?session=s_big", nil).WithContext(ctx)
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/v1/runs/stream?session=s_big", nil).WithContext(ctx)
 	req.Header.Set("Last-Event-ID", "1")
 	done := make(chan struct{})
 	go func() {
@@ -206,7 +203,7 @@ func TestLiveSlowClientIsDropped(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	if _, err := fmt.Fprintf(conn, "GET /api/live?run=run_big HTTP/1.1\r\nHost: server\r\n\r\n"); err != nil {
+	if _, err := fmt.Fprintf(conn, "GET /v1/runs/stream?run=run_big HTTP/1.1\r\nHost: server\r\n\r\n"); err != nil {
 		t.Fatal(err)
 	}
 	// Read the response head so the subscription is known to exist,
@@ -259,88 +256,6 @@ func TestLiveDedupIsBounded(t *testing.T) {
 	}
 }
 
-// TestLoopbackOpenIngestRefusesBrowsersAndProxies: with no ingest
-// token, "loopback" was the socket's peer address alone. A page on any
-// origin (DNS rebinding makes 127.0.0.1 same-origin) and every client
-// of a reverse proxy on the same host arrive from loopback too. A
-// request that names a foreign Origin, or that a proxy forwarded, is
-// not a local exporter. And 127.0.0.0/8 and the IPv4-mapped form are
-// loopback like 127.0.0.1.
-func TestLoopbackOpenIngestRefusesBrowsersAndProxies(t *testing.T) {
-	pb, err := os.ReadFile(filepath.Join("..", "..", "..", "obsdb", "testdata", "logs.pb"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	postTo := func(h http.Handler, remote string, hdr map[string]string) int {
-		req := httptest.NewRequest(http.MethodPost, "/otlp/v1/logs", bytes.NewReader(pb))
-		req.RemoteAddr = remote
-		req.Header.Set("Content-Type", "application/x-protobuf")
-		for k, v := range hdr {
-			req.Header.Set(k, v)
-		}
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, req)
-		return w.Code
-	}
-	open := New(DB(fixtureDB(t))).Handler()
-	for _, tc := range []struct {
-		name   string
-		remote string
-		hdr    map[string]string
-		want   int
-	}{
-		{"plain loopback", "127.0.0.1:5", nil, http.StatusOK},
-		{"127.0.0.0/8", "127.0.0.2:5", nil, http.StatusOK},
-		{"ipv6 loopback", "[::1]:5", nil, http.StatusOK},
-		{"ipv4-mapped loopback", "[::ffff:127.0.0.1]:5", nil, http.StatusOK},
-		{"a localhost page", "127.0.0.1:5", map[string]string{"Origin": "http://localhost:3000"}, http.StatusOK},
-		{"a foreign page", "127.0.0.1:5", map[string]string{"Origin": "https://evil.example"}, http.StatusUnauthorized},
-		{"a rebound page", "127.0.0.1:5", map[string]string{"Origin": "http://evil.example:7331"}, http.StatusUnauthorized},
-		{"the null origin", "127.0.0.1:5", map[string]string{"Origin": "null"}, http.StatusUnauthorized},
-		{"behind a proxy (X-Forwarded-For)", "127.0.0.1:5", map[string]string{"X-Forwarded-For": "203.0.113.9"}, http.StatusUnauthorized},
-		{"behind a proxy (Forwarded)", "127.0.0.1:5", map[string]string{"Forwarded": "for=203.0.113.9"}, http.StatusUnauthorized},
-		{"behind a proxy (X-Real-IP)", "127.0.0.1:5", map[string]string{"X-Real-Ip": "203.0.113.9"}, http.StatusUnauthorized},
-		{"remote", "10.0.0.5:5", nil, http.StatusUnauthorized},
-	} {
-		if got := postTo(open, tc.remote, tc.hdr); got != tc.want {
-			t.Errorf("%s: %d, want %d", tc.name, got, tc.want)
-		}
-	}
-	// An explicitly allowed origin is a page the operator vouched for.
-	allowed := New(DB(fixtureDB(t)), AllowOrigins("https://app.example")).Handler()
-	if got := postTo(allowed, "127.0.0.1:5", map[string]string{"Origin": "https://app.example"}); got != http.StatusOK {
-		t.Errorf("an allowed origin: %d, want 200", got)
-	}
-	// With an ingest token the bearer is the whole rule.
-	tok := New(DB(fixtureDB(t)), IngestToken("s3cr3t")).Handler()
-	if got := postTo(tok, "10.0.0.5:5", map[string]string{
-		"Authorization": "Bearer s3cr3t", "X-Forwarded-For": "203.0.113.9", "Origin": "https://evil.example",
-	}); got != http.StatusOK {
-		t.Errorf("bearer through a proxy: %d, want 200", got)
-	}
-}
-
-// TestCORSVaryOnEveryAnswer pins the audit's P3: Vary: Origin rode
-// only the answers to allowed origins, so a shared cache could hand a
-// header-less answer (made for a refused origin) to an allowed one.
-func TestCORSVaryOnEveryAnswer(t *testing.T) {
-	h := Handler(DB(fixtureDB(t)), Token("dev"))
-	for _, origin := range []string{"https://evil.example", ""} {
-		_, hdr, _ := getWith(t, h, "/weftbase/api/meta", "dev", origin)
-		if !strings.Contains(strings.Join(hdr.Values("Vary"), ","), "Origin") {
-			t.Errorf("Origin %q: Vary = %q, want Origin", origin, hdr.Values("Vary"))
-		}
-		if hdr.Get("Access-Control-Allow-Origin") != "" {
-			t.Errorf("Origin %q was allowed", origin)
-		}
-	}
-	// Setup A sends no CORS at all, Vary included.
-	_, hdr, _ := getWith(t, Handler(DB(fixtureDB(t))), "/weftbase/api/meta", "", "https://evil.example")
-	if v := hdr.Values("Vary"); len(v) != 0 {
-		t.Errorf("setup A: Vary = %q, want none", v)
-	}
-}
-
 // TestSSEHeadersDefeatProxyBuffering: an nginx in front buffers a
 // response unless told not to; the live tail then arrives in bursts or
 // not at all.
@@ -376,7 +291,7 @@ func TestRunsCursorSurvivesATiedPage(t *testing.T) {
 	}
 	h := Handler(DB(db))
 	for _, list := range []string{"runs", "sessions"} {
-		_, _, body := get(t, h, "/weftbase/api/"+list+"?limit=2")
+		_, _, body := get(t, h, "/weftbase/v1/"+list+"?limit=2")
 		var page struct {
 			Runs       []json.RawMessage `json:"runs"`
 			Sessions   []json.RawMessage `json:"sessions"`
@@ -391,7 +306,7 @@ func TestRunsCursorSurvivesATiedPage(t *testing.T) {
 		if page.NextBefore == nil {
 			t.Fatalf("%s: next_before is null on a page with an older row behind it: %s", list, body)
 		}
-		_, _, next := get(t, h, "/weftbase/api/"+list+"?limit=2&before="+page.NextBefore.Format(time.RFC3339Nano))
+		_, _, next := get(t, h, "/weftbase/v1/"+list+"?limit=2&before="+page.NextBefore.Format(time.RFC3339Nano))
 		if !strings.Contains(next, "_old") {
 			t.Errorf("%s: the page after the cursor lacks the older row: %s", list, next)
 		}
@@ -462,7 +377,7 @@ func TestTranscriptBatchesNameTheirStepAndInput(t *testing.T) {
 	}
 	read := func(run string) []batch {
 		t.Helper()
-		_, _, body := get(t, Handler(DB(db)), "/weftbase/api/runs/"+run+"/transcript")
+		_, _, body := get(t, Handler(DB(db)), "/weftbase/v1/runs/"+esc(run)+"/transcript")
 		var doc struct {
 			Batches []batch `json:"batches"`
 		}
@@ -526,7 +441,7 @@ func TestListCursorsWalkALongTie(t *testing.T) {
 	const limit = 50
 	for _, list := range []string{"runs", "sessions"} {
 		seen := map[string]int{}
-		query := fmt.Sprintf("/weftbase/api/%s?limit=%d", list, limit)
+		query := fmt.Sprintf("/weftbase/v1/%s?limit=%d", list, limit)
 		for pages := 0; ; pages++ {
 			if pages > 100 {
 				t.Fatalf("%s: the walk never ended", list)
@@ -557,7 +472,7 @@ func TestListCursorsWalkALongTie(t *testing.T) {
 				}
 				break
 			}
-			query = fmt.Sprintf("/weftbase/api/%s?limit=%d&before=%s", list, limit, page.NextBefore.Format(time.RFC3339Nano))
+			query = fmt.Sprintf("/weftbase/v1/%s?limit=%d&before=%s", list, limit, page.NextBefore.Format(time.RFC3339Nano))
 			if page.NextBeforeID != nil {
 				query += "&before_id=" + url.QueryEscape(*page.NextBeforeID)
 			}

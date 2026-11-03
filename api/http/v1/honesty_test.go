@@ -88,7 +88,7 @@ func TestEventAttrs(t *testing.T) {
 	recordAttrsRun(t, ts.URL, "r_strip", otel.NoContent())
 	done := func(b string) bool { return strings.Contains(b, `"type":"run_finish"`) }
 
-	capped := fetchJSON(t, ts, "/api/runs/r_cap/events?limit=1000", done)
+	capped := fetchJSON(t, ts, "/v1/runs/r_cap/events?limit=1000", done)
 	requestsGolden(t, "events-capped.golden.json", msNorm(capped))
 	var cp attrsPage
 	decode(t, capped, &cp)
@@ -118,7 +118,7 @@ func TestEventAttrs(t *testing.T) {
 		t.Fatalf("no capped event: %s", capped)
 	}
 
-	stripped := fetchJSON(t, ts, "/api/runs/r_strip/events?limit=1000", done)
+	stripped := fetchJSON(t, ts, "/v1/runs/r_strip/events?limit=1000", done)
 	requestsGolden(t, "events-stripped.golden.json", msNorm(stripped))
 	var sp attrsPage
 	decode(t, stripped, &sp)
@@ -129,12 +129,12 @@ func TestEventAttrs(t *testing.T) {
 	}
 
 	var doc holesDoc
-	decode(t, fetchJSON(t, ts, "/api/runs/r_strip", nil), &doc)
+	decode(t, fetchJSON(t, ts, "/v1/runs/r_strip", nil), &doc)
 	reason, fix := obsdb.HoleNote(obsdb.HoleStripped)
 	if len(doc.Holes) != 1 || doc.Holes[0].Hole != "stripped" || doc.Holes[0].Reason != reason || doc.Holes[0].Fix != fix {
 		t.Errorf("content-off run holes = %+v, want [stripped] with the table's words", doc.Holes)
 	}
-	decode(t, fetchJSON(t, ts, "/api/runs/r_cap", nil), &doc)
+	decode(t, fetchJSON(t, ts, "/v1/runs/r_cap", nil), &doc)
 	if len(doc.Holes) != 0 {
 		t.Errorf("capped run holes = %+v, want none (the cut is the events')", doc.Holes)
 	}
@@ -225,7 +225,7 @@ func TestRunHolesInterrupted(t *testing.T) {
 		"r_chat":  {"interrupted", []obsdb.Hole{obsdb.HoleInterrupted, obsdb.HoleNotRecorded}},
 	} {
 		want := c.holes
-		code, _, body := get(t, h, "/weftbase/api/runs/"+run)
+		code, _, body := get(t, h, "/weftbase/v1/runs/"+esc(run))
 		if code != http.StatusOK {
 			t.Fatalf("%s: %d %s", run, code, body)
 		}
@@ -270,7 +270,7 @@ func TestContentOffAgent(t *testing.T) {
 	if err := p.Shutdown(ctx); err != nil {
 		t.Fatal(err)
 	}
-	body := fetchJSON(t, ts, "/api/runs/r_none/events?limit=1000", func(b string) bool { return strings.Contains(b, `"type":"run_finish"`) })
+	body := fetchJSON(t, ts, "/v1/runs/r_none/events?limit=1000", func(b string) bool { return strings.Contains(b, `"type":"run_finish"`) })
 	var page attrsPage
 	decode(t, body, &page)
 	for _, e := range page.Events {
@@ -279,7 +279,7 @@ func TestContentOffAgent(t *testing.T) {
 		}
 	}
 	var doc holesDoc
-	decode(t, fetchJSON(t, ts, "/api/runs/r_none", nil), &doc)
+	decode(t, fetchJSON(t, ts, "/v1/runs/r_none", nil), &doc)
 	if len(doc.Holes) != 1 || doc.Holes[0].Hole != "stripped" {
 		t.Errorf("content-off agent run holes = %+v, want [stripped]", doc.Holes)
 	}
@@ -291,11 +291,11 @@ func TestContentOffAgent(t *testing.T) {
 func TestStepHolesFromAttrs(t *testing.T) {
 	ts, _ := requestsServer(t)
 	recordAttrsRun(t, ts.URL, "r_cap", otel.WithContent(otel.ContentConfig{MaxBytes: 16}))
-	fetchJSON(t, ts, "/api/runs/r_cap", func(b string) bool { return strings.Contains(b, `"status":"succeeded"`) })
+	fetchJSON(t, ts, "/v1/runs/r_cap", func(b string) bool { return strings.Contains(b, `"status":"succeeded"`) })
 	var sd struct {
 		Holes []struct{ Hole, Reason, Fix string } `json:"holes"`
 	}
-	decode(t, fetchJSON(t, ts, "/api/runs/r_cap/steps/0", nil), &sd)
+	decode(t, fetchJSON(t, ts, "/v1/runs/r_cap/steps/0", nil), &sd)
 	_, fix := obsdb.HoleNote(obsdb.HoleTruncated)
 	// The 16-byte cap cut the tool catalog (its specific reason comes
 	// first) and the tool result (the events' cut, beside it); both
@@ -327,7 +327,7 @@ func TestStepHolesFromAttrs(t *testing.T) {
 	if err := db.Write(context.Background(), obsdb.Batch{Records: recs}); err != nil {
 		t.Fatal(err)
 	}
-	code, _, body := get(t, Handler(DB(db)), "/weftbase/api/runs/r_off/steps/0")
+	code, _, body := get(t, Handler(DB(db)), "/weftbase/v1/runs/r_off/steps/0")
 	if code != http.StatusOK {
 		t.Fatalf("step: %d %s", code, body)
 	}
@@ -404,11 +404,11 @@ func TestStepHolesBothCuts(t *testing.T) {
 	if err := p.Shutdown(ctx); err != nil {
 		t.Fatal(err)
 	}
-	fetchJSON(t, ts, "/api/runs/r_both", func(b string) bool { return strings.Contains(b, `"status":"succeeded"`) })
+	fetchJSON(t, ts, "/v1/runs/r_both", func(b string) bool { return strings.Contains(b, `"status":"succeeded"`) })
 	var sd struct {
 		Holes []struct{ Hole, Reason, Fix string } `json:"holes"`
 	}
-	decode(t, fetchJSON(t, ts, "/api/runs/r_both/steps/0", nil), &sd)
+	decode(t, fetchJSON(t, ts, "/v1/runs/r_both/steps/0", nil), &sd)
 	var tr *struct{ Hole, Reason, Fix string }
 	for i := range sd.Holes {
 		if sd.Holes[i].Hole == "truncated" {
@@ -478,7 +478,7 @@ func TestRunHolesReplayView(t *testing.T) {
 		"r_plain":            "",
 		"r_derived/0/call_1": "",
 	} {
-		code, _, body := get(t, h, "/weftbase/api/runs/"+run)
+		code, _, body := get(t, h, "/weftbase/v1/runs/"+esc(run))
 		if code != http.StatusOK {
 			t.Fatalf("%s: %d %s", run, code, body)
 		}

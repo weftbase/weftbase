@@ -72,25 +72,25 @@ type mcpTool struct {
 // mcpTools is the tool table, in the order --help and the docs list it.
 var mcpTools = []mcpTool{
 	{"explain_failure", "run + steps + children + transcript", "why a run failed (or how it ended): status, error, the first error anywhere in the run (its steps, its child runs), every step and child in a digest, decisions, holes, this run's last assistant text"},
-	{"runs", "GET /api/runs", "list runs, newest first (agent, status, session, public_id, error_class, all, parent, limit, before cursor)"},
-	{"search", "GET /api/search", "find runs by text (prompt, answer, error, tool names) and filters (since/until, model, min_tokens, min_cost, error_class, sort); the error_class facet"},
-	{"stats", "GET /api/stats", "numbers across runs grouped by agent, model, tool, error_type or step: runs, failures, tokens, cost, latency, retries, denials (since, agent, tag, public_id)"},
-	{"run", "GET /api/runs/{id}", "one run's row: status, error, steps, usage, cost, children, holes"},
-	{"step", "GET /api/runs/{id}/steps/{n}", "one step assembled: request, attempts, events, tool calls and results, children, holes"},
-	{"request", "GET /api/runs/{id}/requests", "the exact model input per step (prompt, catalog, params); transcript=true adds the step's messages"},
-	{"events", "GET /api/runs/{id}/events", "the run's durable event stream, paged (after, limit)"},
-	{"tools", "GET /api/runs/{id}/tools", "the tool catalogs the run offered the model"},
-	{"diff", "GET /api/diff", "two runs compared step by step (what changed, what is not comparable)"},
-	{"export", "GET /api/runs/{id}/export", "the whole run as one document: json, jsonl or otlp"},
-	{"sessions", "GET /api/sessions", "list thread sessions"},
-	{"session", "GET /api/sessions/{id}", "one session with its turns"},
-	{"logs", "GET /api/runs/{id}/logs", "the app's own log lines under a run's spans (severity, from, limit)"},
-	{"spans", "GET /api/runs/{id}/spans", "a run's spans, compact (timing, status, model, tokens, tool); tree=true adds every descendant run's"},
-	{"trace", "GET /api/traces/{id}", "one trace's spans by trace id, weft or stock OTel, compact"},
-	{"transcript", "GET /api/runs/{id}/transcript", "a run's messages, input and its own; step=N adds what step N's model call carried"},
-	{"live", "GET /api/runs?status=running", "the runs running now, compact rows (a snapshot, not the stream)"},
-	{"agents", "GET /api/manifest", "the agents weftbase knows: manifests (instructions, tools, options) and their sources"},
-	{"meta", "GET /api/meta", "what this server is and can do: versions, capabilities, retention"},
+	{"runs", "GET /v1/runs", "list runs, newest first (agent, status, session, public_id, error_class, all, parent, limit, before cursor)"},
+	{"search", "GET /v1/runs?q=", "find runs by text (prompt, answer, error, tool names) and filters (since/until, model, min_tokens, min_cost, error_class, sort); the error_class facet"},
+	{"stats", "GET /v1/stats", "numbers across runs grouped by agent, model, tool, error_type or step: runs, failures, tokens, cost, latency, retries, denials (since, agent, tag, public_id)"},
+	{"run", "GET /v1/runs/{id}", "one run's row: status, error, steps, usage, cost, children, holes"},
+	{"step", "GET /v1/runs/{id}/steps/{n}", "one step assembled: request, attempts, events, tool calls and results, children, holes"},
+	{"request", "GET /v1/runs/{id}/requests", "the exact model input per step (prompt, catalog, params); transcript=true adds the step's messages"},
+	{"events", "GET /v1/runs/{id}/events", "the run's durable event stream, paged (after, limit)"},
+	{"tools", "GET /v1/runs/{id}/tools", "the tool catalogs the run offered the model"},
+	{"diff", "GET /v1/diff", "two runs compared step by step (what changed, what is not comparable)"},
+	{"export", "GET /v1/runs/{id}/export", "the whole run as one document: json, jsonl or otlp"},
+	{"sessions", "GET /v1/sessions", "list thread sessions"},
+	{"session", "GET /v1/sessions/{id}", "one session with its turns"},
+	{"logs", "GET /v1/runs/{id}/logs", "the app's own log lines under a run's spans (severity, from, limit)"},
+	{"spans", "GET /v1/runs/{id}/spans", "a run's spans, compact (timing, status, model, tokens, tool); tree=true adds every descendant run's"},
+	{"trace", "GET /v1/traces/{id}", "one trace's spans by trace id, weft or stock OTel, compact"},
+	{"transcript", "GET /v1/runs/{id}/transcript", "a run's messages, input and its own; step=N adds what step N's model call carried"},
+	{"live", "GET /v1/runs?status=running", "the runs running now, compact rows (a snapshot, not the stream)"},
+	{"agents", "GET /v1/manifest", "the agents weftbase knows: manifests (instructions, tools, options) and their sources"},
+	{"meta", "GET /v1/meta", "what this server is and can do: versions, capabilities, retention"},
 }
 
 // ToolNames are the registered tools' names, in the order --help lists
@@ -133,7 +133,7 @@ type Options struct {
 	Stderr io.Writer
 }
 
-// New checks that the server answers /api/meta and builds the MCP
+// New checks that the server answers /v1/meta and builds the MCP
 // server. Nothing answering is a WARN on Stderr, not an error: the
 // server serves, and each tool call looks again (Resolve) and checks
 // again. A server that answers and refuses (a 401, a 404 from
@@ -146,13 +146,13 @@ func New(ctx context.Context, o Options) (*sdk.Server, error) {
 	c := o.Client
 	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	down := false
-	if _, err := c.Get(ctx, "/api/meta", nil); err != nil {
+	if _, err := c.Get(ctx, "/v1/meta", nil); err != nil {
 		var se *rest.StatusError
 		if errors.As(err, &se) {
-			return nil, fmt.Errorf("mcp: no server answers /api/meta: %w", err) // main prefixes "weftbase: "
+			return nil, fmt.Errorf("mcp: no server answers /v1/meta: %w", err) // main prefixes "weftbase: "
 		}
 		down = true
-		log.Warn("weftbase mcp: no server answers /api/meta yet; tools will retry per call", "err", err.Error())
+		log.Warn("weftbase mcp: no server answers /v1/meta yet; tools will retry per call", "err", err.Error())
 	}
 	from := o.TokenFrom
 	if from == "" {
@@ -183,7 +183,7 @@ func Serve(ctx context.Context, o Options, stdin io.Reader, stdout io.Writer) er
 // serverLink is the server the tools read: the one walled client, and
 // — when the last attempt failed with a transport error, or a 401
 // while the token is the discovery file's — a fresh look before the
-// next request: re-resolve (no --url), then GET /api/meta. Nothing
+// next request: re-resolve (no --url), then GET /v1/meta. Nothing
 // answering is the call's error, the startup line with its fix; a
 // Server found again is said on stderr once.
 type serverLink struct {
@@ -217,7 +217,7 @@ func newLink(c *rest.Client, resolve func() (string, string), down bool, stderr 
 
 // client is the client the next request goes through: the current one,
 // or — after a transport failure — the one a fresh look found
-// answering /api/meta; an error when none answers.
+// answering /v1/meta; an error when none answers.
 func (l *serverLink) client(ctx context.Context) (*rest.Client, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -229,10 +229,10 @@ func (l *serverLink) client(ctx context.Context) (*rest.Client, error) {
 		u, tok := l.resolve()
 		c = l.c.With(u, tok) // the same walled http.Client: never a second one
 	}
-	if _, err := c.Get(ctx, "/api/meta", nil); err != nil {
+	if _, err := c.Get(ctx, "/v1/meta", nil); err != nil {
 		var se *rest.StatusError
 		if !errors.As(err, &se) {
-			return nil, fmt.Errorf("no server answers /api/meta: %w; %s", err, l.hint())
+			return nil, fmt.Errorf("no server answers /v1/meta: %w; %s", err, l.hint())
 		}
 	}
 	if c.Base() != l.c.Base() {
@@ -323,7 +323,7 @@ func (g linkGetter) get(ctx context.Context, path string, q url.Values) (int, []
 	return http.StatusOK, b, nil
 }
 
-func (g linkGetter) runLink(id string) string { return rest.RunLink(g.l.current().Base(), id, "") }
+func (g linkGetter) runLink(id string) string { return rest.RunLink(g.l.current().Base(), id) }
 func (g linkGetter) redacted() string         { return g.l.current().Redacted() }
 
 // newMCPServer builds the server and registers the read tools over c,
@@ -359,75 +359,75 @@ func newMCPServerLink(link *serverLink, log *slog.Logger) *sdk.Server {
 		`last_assistant_text (this run's own output only, never an earlier turn's), tool_calls, attempts, holes, url}. `+
 		`Works on any run: a succeeded run explains how it ended. Then use step/request for more.`,
 		m.explainFailure)
-	addTool(srv, "runs", `List runs, newest first (GET /api/runs): one compact row per run with status, error, steps, usage, cost (full=true: the route's rows). `+
+	addTool(srv, "runs", `List runs, newest first (GET /v1/runs): one compact row per run with status, error, steps, usage, cost (full=true: the route's rows). `+
 		`Top-level runs only unless all=true or parent=<run id>. Filter by agent, status (running|succeeded|failed|interrupted), `+
 		`session, public_id, error_class (a class string from search's error_class facet). Page with before + before_id `+
 		`from the answer's next_before/next_before_id. For text or a time window use search.`,
 		m.runs)
-	addTool(srv, "search", `Find runs by text and filters (GET /api/search): q terms are case-insensitive substrings of the prompt, `+
+	addTool(srv, "search", `Find runs by text and filters (GET /v1/runs?q=): q terms are case-insensitive substrings of the prompt, `+
 		`answer, error or a called tool's name, all required ("quoted phrase" = one term). Filters: agent, tool, status, model, `+
 		`error, error_class (exact, a class from the facet), since/until (RFC 3339), min_tokens, min_cost (USD), `+
 		`sort=started|duration|tokens|cost, limit, offset. The answer's facets.error_class groups the match's failures by their `+
 		`normalised error text (numbers N, ids <id>), most runs first — the classes error_class takes (capability stats; see meta).`,
 		m.search)
-	addTool(srv, "stats", `Numbers across runs (GET /api/stats): by=agent|model|tool|error_type|step, one row per group with runs, failed, `+
+	addTool(srv, "stats", `Numbers across runs (GET /v1/stats): by=agent|model|tool|error_type|step, one row per group with runs, failed, `+
 		`failure_rate, calls, tokens, cost, duration_ms and ttft_ms {p50, p95, n}, retry_rate, denials (agent groups: delegated, what `+
 		`their subagents spent; runs_query, the search query listing the group's runs). Window: since (RFC 3339 or 90m/24h/7d back, `+
 		`default 24h), until. Filters: agent, tag {k: v}, public_id, parent (* default: every run; "" top-level), `+
 		`status. Compact rows: each group's 24-bucket series left out (full=true: as served). 404 when the database `+
 		`cannot aggregate (see meta).`,
 		m.stats)
-	addTool(srv, "run", `One run's row (GET /api/runs/{id}): status, err, steps, stop_reason, usage, cost, its subagent children, `+
+	addTool(srv, "run", `One run's row (GET /v1/runs/{id}): status, err, steps, stop_reason, usage, cost, its subagent children, `+
 		`its holes (why something is absent) and compactions. Use after runs/search to look at one run.`,
 		m.run)
-	addTool(srv, "step", `One step of a run assembled (GET /api/runs/{id}/steps/{n}, n from 0): status, stop reason, the model asked and `+
+	addTool(srv, "step", `One step of a run assembled (GET /v1/runs/{id}/steps/{n}, n from 0): status, stop reason, the model asked and `+
 		`the one that answered, attempt 1's request, every attempt with its outcome, events, tool calls with args and results, `+
 		`child runs, usage, cost, holes. The view for "what happened at step n".`,
 		m.step)
-	addTool(srv, "request", `The exact model input (GET /api/runs/{id}/requests): one row per model-call attempt with the system prompt, `+
+	addTool(srv, "request", `The exact model input (GET /v1/runs/{id}/requests): one row per model-call attempt with the system prompt, `+
 		`tool catalog, params and the messages it carried by reference; step narrows to one step. transcript=true (with step) `+
-		`also returns GET /api/runs/{id}/transcript?step=N: the messages step N's model call carried.`,
+		`also returns GET /v1/runs/{id}/transcript?step=N: the messages step N's model call carried.`,
 		m.request)
-	addTool(srv, "events", `The run's durable event stream (GET /api/runs/{id}/events): run_start, step_start, tool_start/finish, `+
+	addTool(srv, "events", `The run's durable event stream (GET /v1/runs/{id}/events): run_start, step_start, tool_start/finish, `+
 		`step_finish, run_finish, … in order. Paged: pass after=<next_after> from the previous answer until next_after is absent. `+
 		`run_terminal (the route's done) says the run has ended, not that this is the last page.`,
 		m.events)
-	addTool(srv, "tools", `The tool catalogs the run offered the model, by hash (GET /api/runs/{id}/tools): names, descriptions, `+
+	addTool(srv, "tools", `The tool catalogs the run offered the model, by hash (GET /v1/runs/{id}/tools): names, descriptions, `+
 		`input schemas.`,
 		m.tools)
-	addTool(srv, "diff", `Compare two runs step by step (GET /api/diff?a=&b=): per step ordinal what changed (system, tool_calls, `+
+	addTool(srv, "diff", `Compare two runs step by step (GET /v1/diff?a=&b=): per step ordinal what changed (system, tool_calls, `+
 		`tool_results, text, usage) and what is not comparable (unknown), with a summary {changed_steps, first_changed}. `+
 		`Use for "what differs between the good run and the bad one".`,
 		m.diff)
-	addTool(srv, "export", `The whole run as one document (GET /api/runs/{id}/export): format json (default), jsonl or otlp. `+
+	addTool(srv, "export", `The whole run as one document (GET /v1/runs/{id}/export): format json (default), jsonl or otlp. `+
 		`Large: usually cut by max_bytes — prefer run/step/request for questions.`,
 		m.export)
-	addTool(srv, "sessions", `List thread sessions (GET /api/sessions), newest first: agent and public_id filter, before + before_id page. Compact rows (full=true: as served).`,
+	addTool(srv, "sessions", `List thread sessions (GET /v1/sessions), newest first: agent and public_id filter, before + before_id page. Compact rows (full=true: as served).`,
 		m.sessions)
-	addTool(srv, "session", `One thread session (GET /api/sessions/{id}): its row and its turns (runs) in order, compact rows `+
+	addTool(srv, "session", `One thread session (GET /v1/sessions/{id}): its row and its turns (runs) in order, compact rows `+
 		`(a turn's agent, session and public id omitted when the session's; its model, cost_badge, stop_reason and stopped_by omitted `+
 		`when equal to turn_defaults; prompt_preview 80 runes; cost reasons once with their row ids; full=true: as served).`,
 		m.session)
-	addTool(srv, "logs", `The app's own log lines under a run's spans (GET /api/runs/{id}/logs): time order, severity at or above `+
+	addTool(srv, "logs", `The app's own log lines under a run's spans (GET /v1/runs/{id}/logs): time order, severity at or above `+
 		`(trace|debug|info|warn|error|fatal), paged with from=<next_from>. A run without the slog bridge answers a not_recorded hole naming otel.Slog().`,
 		m.logs)
-	addTool(srv, "spans", `A run's spans (GET /api/runs/{id}/spans), compact: name, start_ms / dur_ms from the first span, status, `+
+	addTool(srv, "spans", `A run's spans (GET /v1/runs/{id}/spans), compact: name, start_ms / dur_ms from the first span, status, `+
 		`model, tokens, tool, step, attempt and error attributes (content left out; full=true: as served). tree=true adds every `+
 		`descendant run's spans (run_id on each), with the tree's holes. The view for "where did the time go", retries and stock-OTel runs.`,
 		m.spans)
-	addTool(srv, "trace", `One trace by id (GET /api/traces/{id}), weft or stock OTel spans, compact as spans is (full=true: as served). `+
+	addTool(srv, "trace", `One trace by id (GET /v1/traces/{id}), weft or stock OTel spans, compact as spans is (full=true: as served). `+
 		`A run's trace_id is on the run tool's row.`,
 		m.trace)
-	addTool(srv, "transcript", `A run's transcript (GET /api/runs/{id}/transcript): its message batches in order, each marked input `+
+	addTool(srv, "transcript", `A run's transcript (GET /v1/runs/{id}/transcript): its message batches in order, each marked input `+
 		`(what the run was given — a thread turn's earlier turns) or the run's own; step=N also returns what step N's model call carried.`,
 		m.transcript)
-	addTool(srv, "live", `The runs running now (GET /api/runs?status=running&all=1): a snapshot in compact rows, subagent children included; `+
-		`call again to see it move (the /api/live stream is not an MCP answer).`,
+	addTool(srv, "live", `The runs running now (GET /v1/runs?status=running&all=1): a snapshot in compact rows, subagent children included; `+
+		`call again to see it move (the /v1/runs/stream stream is not an MCP answer).`,
 		m.live)
-	addTool(srv, "agents", `The agents this server knows (GET /api/manifest): each agent's manifest — instructions, tools, options — `+
+	addTool(srv, "agents", `The agents this server knows (GET /v1/manifest): each agent's manifest — instructions, tools, options — `+
 		`and where it came from (weft.json). A 404 means no manifest is loaded.`,
 		m.agents)
-	addTool(srv, "meta", `What this server is and can do (GET /api/meta): versions, database kind, capabilities and capabilities_off `+
+	addTool(srv, "meta", `What this server is and can do (GET /v1/meta): versions, database kind, capabilities and capabilities_off `+
 		`(why one is off), retention, pricing source. Call when a tool answers 404/403 to see whether the route exists.`,
 		m.meta)
 	return srv
@@ -582,11 +582,11 @@ func (m *mcpReader) fetch(ctx context.Context, path string, q url.Values) (int, 
 // (UX-H-29). A route that is not there at all says so through meta.
 func notFoundHint(path string) string {
 	switch {
-	case strings.HasPrefix(path, "/api/runs/"):
+	case strings.HasPrefix(path, "/v1/runs/"):
 		return " — find run ids with runs or search {q}"
-	case strings.HasPrefix(path, "/api/sessions/"):
+	case strings.HasPrefix(path, "/v1/sessions/"):
 		return " — find session ids with sessions"
-	case strings.HasPrefix(path, "/api/traces/"):
+	case strings.HasPrefix(path, "/v1/traces/"):
 		return " — a run row's trace_id (the run tool) names its trace"
 	}
 	return " — meta says whether this server serves the route"
@@ -671,7 +671,7 @@ func needID(name, v string) error {
 }
 
 func (m *mcpReader) meta(ctx context.Context, _ *sdk.CallToolRequest, in mcpMetaIn) (*sdk.CallToolResult, any, error) {
-	b, err := m.get(ctx, "/api/meta", nil)
+	b, err := m.get(ctx, "/v1/meta", nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -716,7 +716,7 @@ func (m *mcpReader) runs(ctx context.Context, _ *sdk.CallToolRequest, in mcpRuns
 	setStr(q, "before", in.Before)
 	setStr(q, "before_id", in.BeforeID)
 	setStr(q, "error_class", in.ErrorClass)
-	b, err := m.get(ctx, "/api/runs", q)
+	b, err := m.get(ctx, "/v1/runs", q)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -738,7 +738,12 @@ func (m *mcpReader) search(ctx context.Context, _ *sdk.CallToolRequest, in mcpSe
 	}
 	setInt(q, "limit", int64(in.Limit))
 	setInt(q, "offset", int64(in.Offset))
-	b, err := m.get(ctx, "/api/search", q)
+	if q.Get("sort") == "" {
+		// GET /v1/runs answers the search page when a search parameter
+		// is present; sort=started is the search's own default order.
+		q.Set("sort", "started")
+	}
+	b, err := m.get(ctx, "/v1/runs", q)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1004,7 +1009,7 @@ func (m *mcpReader) diff(ctx context.Context, _ *sdk.CallToolRequest, in mcpDiff
 	if err := needID("b", in.B); err != nil {
 		return nil, nil, err
 	}
-	b, err := m.get(ctx, "/api/diff", url.Values{"a": {in.A}, "b": {in.B}})
+	b, err := m.get(ctx, "/v1/diff", url.Values{"a": {in.A}, "b": {in.B}})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1053,7 +1058,7 @@ func (m *mcpReader) sessions(ctx context.Context, _ *sdk.CallToolRequest, in mcp
 	setInt(q, "limit", int64(in.Limit))
 	setStr(q, "before", in.Before)
 	setStr(q, "before_id", in.BeforeID)
-	b, err := m.get(ctx, "/api/sessions", q)
+	b, err := m.get(ctx, "/v1/sessions", q)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1064,7 +1069,7 @@ func (m *mcpReader) session(ctx context.Context, _ *sdk.CallToolRequest, in mcpS
 	if err := needID("id", in.ID); err != nil {
 		return nil, nil, err
 	}
-	b, err := m.get(ctx, "/api/sessions/"+url.PathEscape(in.ID), nil)
+	b, err := m.get(ctx, "/v1/sessions/"+url.PathEscape(in.ID), nil)
 	if err != nil {
 		return nil, nil, err
 	}

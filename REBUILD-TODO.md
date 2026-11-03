@@ -67,7 +67,36 @@ it is re-pinned (§9.1).
 
 DAG deviations from the plan's §1.4 (in `layers.txt`): `sessions → observe` (timeline and export need cost and holes); `webhooks → queue` (§4.3 says webhooks depends on queue, the DAG omitted it).
 
-## Step 5. Kernel and read baseline: todo
+## Step 5. Kernel and read baseline: done (codegen and logic extraction remain, see 5b)
+
+| Item | Status | Notes |
+|---|---|---|
+| kernel `weftbase.go`/`options.go`/`roles.go`: `New`, `Handler`, `Run`, `Shutdown`, `Ready`, roles | done | data dir `<data>/control.db` + `<data>/traces.db` under `internal/dblock`; `postgres://` refused "not supported yet" |
+| `store` + `store/sqlite` (migrations, refuse pre-rebuild file) | done | repositories write portable `?` SQL over `store.Tx` in the domain package; backends own connections, dialect, migrations |
+| `storetest` (repository conformance suite) | todo | lands with the first repositories of step 6 |
+| `events`: outbox `Emit` in the caller's tx, relay with cursors, hub (replay then live, overflow) | done | hub pump runs under the `api` role (subscribers live there); sweeper under `scheduler` |
+| `tenant` (Scope, `ten_project`) + `tenant/keys` (`wb_sk_`/`rk`/`pk`/`wk`, hashed, audited mint/revoke) | done | bootstrap `wb_sk_test_` key in `<data>/bootstrap.key` |
+| `authz`: keys, Console sessions (one-time link → `wb_session` cookie), `Open`, `Can` | done | restricted keys have no scopes yet |
+| `api/openapi/v1.yaml` for the read surface | done | 39 operations, `x-weftbase-action`, `x-weftbase-events` |
+| code generation (oapi-codegen strict server, generated `client/rest`, Console types) | todo | `make api-check` runs the spec ↔ route-table test meanwhile; `client/rest` is hand-written |
+| `api/http` (package `httpapi`): route table, request ids, guards, CORS, CSRF, `/healthz`, `/readyz`, `/metrics`, `/v1/meta`, auth sessions, Console last | done | no `/api/*` route remains |
+| OTLP at `/otlp/v1/*`, tenant from the credential | done | no open-loopback ingest without `Open` |
+| `/v1` read surface + streams (`/v1/runs/{id}/stream`, `/v1/sessions/{id}/stream`, `/v1/runs/stream`, `/v1/events`) | done | extras kept beyond §4.4: `/v1/runs/stream`, `/v1/public/{id}`, `/v1/sessions/{id}/public_id`, `/v1/manifest` (until `/v1/agents`) |
+| route-completeness test (every route has an action; spec ↔ routes) | done | `api/http/routes_test.go` |
+| `/v1` goldens re-cut from the legacy `/api` goldens | done | `api/http/v1/testdata/v1`; only the two meta goldens changed (meta redesigned) |
+| CLI: `serve --roles`, `dev` (bootstrap key, discovery, sign-in link `/#signin=`), `runs`, `open`, `export`, `doctor`, `mcp` on `client/rest` | done | `token.go` removed |
+| `make mcp-check` on `/v1` | done | MCP CHECK PASS |
+| gate: `weftbase dev` + an app using `client/exporter` shows runs over `/v1` | partial | covered by the kernel test (OTLP POST → `GET /v1/runs`) and mcp-check; not run as a live app |
+
+### Step 5b. Peel the read logic out of `api/http/v1`: todo
+
+The step 3 deviation: the old read server moved whole into `api/http/v1`.
+Move its logic into the plan's packages, leaving thin handlers:
+`observe/query` (runs, steps, requests, traces, search, stats, logs,
+diff, holes), `observe/export`, `sessions` (timeline, export, delete),
+`approvals/readmodel.go` (decisions), `registry/manifests.go`,
+`observe/retention.go` (the sweeper now in the kernel). Push
+`tenant.Scope` into the obsdb queries (step 7).
 
 ## Step 6. Phase 1 domains: todo
 

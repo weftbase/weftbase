@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,20 +13,62 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/weftbase/weft/core"
-	v1 "github.com/weftbase/weftbase/api/http/v1"
+	"github.com/weftbase/weftbase"
 	"github.com/weftbase/weftbase/client/discovery"
 	"github.com/weftbase/weftbase/client/rest"
+	"github.com/weftbase/weftbase/events"
+	"github.com/weftbase/weftbase/tenant"
+	"github.com/weftbase/weftbase/tenant/keys"
 )
 
-// newServer is the read server over the sqlite file dbFlag names
-// (sqlite://path) with the token wall on: what `weftbase dev` serves.
-func newServer(dbFlag, token string) (*v1.Server, error) {
+// testServer is a weftbase node for the tests: the kernel over a data
+// dir, served by an httptest server the caller starts.
+type testServer struct{ app *weftbase.App }
+
+func (s testServer) Handler() http.Handler { return s.app.Handler() }
+
+func (s testServer) Close() error { return s.app.Shutdown(context.Background()) }
+
+// newServer is the kernel over the trace file dbFlag names
+// (sqlite://path), its control store beside it, with token imported as
+// the bootstrap secret key and every other key revoked (a restart with
+// a new token is a rotation): what `weftbase dev` serves.
+func newServer(dbFlag, token string) (testServer, error) {
 	path := strings.TrimPrefix(dbFlag, "sqlite://")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, err
+		return testServer{}, err
 	}
-	return v1.New(v1.Base("/"), v1.Token(token), v1.Open(path)), nil
+	app, err := weftbase.New(weftbase.DataDir(filepath.Dir(path)), weftbase.TraceDB(dbFlag),
+		weftbase.BootstrapKey(token), weftbase.Logger(slog.New(slog.DiscardHandler)))
+	if err != nil {
+		return testServer{}, err
+	}
+	ctx := context.Background()
+	k, err := app.Keys().Verify(ctx, token)
+	if err == nil {
+		var all []keys.Key
+		if all, err = app.Keys().List(ctx, tenant.Default()); err == nil {
+			for _, o := range all {
+				if o.ID != k.ID && o.RevokedAt == nil {
+					if err = app.Keys().Revoke(ctx, tenant.Default(), o.ID, events.System); err != nil {
+						break
+					}
+				}
+			}
+		}
+	}
+	if err != nil {
+		_ = app.Shutdown(ctx)
+		return testServer{}, err
+	}
+	return testServer{app}, nil
 }
+
+// The tests' keys: secret keys of the default project's test env.
+const (
+	tok  = "wb_sk_test_tok"
+	tok2 = "wb_sk_test_tok2"
+)
 
 // startMCP is New over the server the flags, the environment and the
 // discovery file name — the resolution `weftbase mcp` makes

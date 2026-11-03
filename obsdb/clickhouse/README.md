@@ -119,7 +119,7 @@ cut short leaves the run listed and a retry finishes it. The TTLs stay
 as they are: the server's retention is additive.
 
 The read-time status `parked` (`RunQuery.Status = obsdb.StatusParked`,
-`/api/runs?status=parked`) is an anti-join: a run with pending calls
+`/v1/runs?status=parked`) is an anti-join: a run with pending calls
 whose id no row's `ResumedFrom` names. That `NOT IN (SELECT
 ResumedFrom … WHERE ResumedFrom <> '')` set is built from the
 `ResumedFrom` column of every `weft_runs` row — `idx_resumed_from` (a

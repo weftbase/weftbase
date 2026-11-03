@@ -26,7 +26,7 @@ type treeHoleDoc struct {
 // getTree reads runID's ?tree=1 with tok ("" none).
 func getTree(t *testing.T, url, runID, tok string) (int, treeHoleDoc, string) {
 	t.Helper()
-	req, _ := http.NewRequest(http.MethodGet, url+"/api/runs/"+runID+"/spans?tree=1", nil)
+	req, _ := http.NewRequest(http.MethodGet, url+"/v1/runs/"+esc(runID)+"/spans?tree=1", nil)
 	if tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
@@ -115,7 +115,7 @@ func (g goldenTreeDB) ChildRuns(ctx context.Context, ids []string) (map[string][
 }
 
 // TestSpansTreeGolden (U9.1-fix2) pins api/runs/{id}/spans?tree=1 as
-// the web client reads it (testdata/api/spans-tree.golden.json; the
+// the web client reads it (testdata/v1/spans-tree.golden.json; the
 // TS mirror's test, src/lib/spans-tree.test.ts, reads the same file):
 // a span with run_id and parent_run_id, and the holes — truncated
 // (the span cap and a derived run's trace cap), not_recorded/no_spans
@@ -140,11 +140,11 @@ func TestSpansTreeGolden(t *testing.T) {
 	}
 	srv := New(DB(goldenTreeDB{db, tree}))
 	t.Cleanup(func() { _ = srv.Close() })
-	code, _, body := get(t, srv.Handler(), "/weftbase/api/runs/tg_root/spans?tree=1")
+	code, _, body := get(t, srv.Handler(), "/weftbase/v1/runs/tg_root/spans?tree=1")
 	if code != http.StatusOK {
 		t.Fatalf("?tree=1 = %d %s", code, body)
 	}
-	wefttest.Golden(t, "testdata/api/spans-tree.golden.json", []byte(pretty(t, body)))
+	wefttest.Golden(t, "testdata/v1/spans-tree.golden.json", []byte(pretty(t, body)))
 	var d treeHoleDoc
 	decode(t, body, &d)
 	var kinds []string

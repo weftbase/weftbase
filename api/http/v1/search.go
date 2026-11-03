@@ -11,7 +11,7 @@ import (
 	"github.com/weftbase/weftbase/obsdb"
 )
 
-// GET /api/search (plan A7): runs found by what they said and did —
+// GET /v1/runs?q= (search) (plan A7): runs found by what they said and did —
 // prompt, answer, error, tool names — through the database's
 // obsdb.Searcher, answered as run rows. Capability "search".
 //
@@ -43,7 +43,7 @@ import (
 //	limit       page size (0 = 50, max 500)
 //	offset      rows to skip (0..100000); next_offset is the next page's
 //
-// and /api/runs' own filters with their meaning there: session,
+// and /v1/runs' own filters with their meaning there: session,
 // public_id, parent ("" top-level only, "*" all, a run id its
 // children), all, tag.<k>=<v>. Hits are run rows and nothing else: no
 // snippet.
@@ -58,7 +58,7 @@ import (
 // body says so: cost_sort_cap is the cap, present exactly when the
 // match ran past it (total then counts the capped set).
 
-// searchPage is GET /api/search's body: the whole match's count, one
+// searchPage is GET /v1/runs?q= (search)'s body: the whole match's count, one
 // page of run rows in the order asked, the order, and the next page's
 // offset (null on the last page).
 type searchPage struct {
@@ -74,7 +74,7 @@ type searchPage struct {
 	Facets *searchFacets `json:"facets,omitempty"`
 }
 
-// searchFacets is /api/search's facets block (UX plan A2, UX-C-37).
+// searchFacets is /v1/runs?q= (search)'s facets block (UX plan A2, UX-C-37).
 // error_class is the match's failures grouped by their normalised
 // error text (obsdb.ErrorClass: numbers N, ids <id>, quoted strings
 // kept), most runs first, at most errorClassFacetMax classes — counted

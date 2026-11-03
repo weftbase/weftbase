@@ -1,257 +1,100 @@
-// Command weftbase is the platform's one binary (plan B1, D6 of the
-// repository split): the local server and a terminal over its API,
+// Command weftbase is the platform's one binary: the server (the
+// kernel, package weftbase, by role) and a terminal over its /v1 API,
 // for scripts and CI.
 //
 //	go install github.com/weftbase/weftbase/cmd/weftbase@latest
 //
-//	weftbase dev [--addr] [--db] [--token] [--rotate-token] [--manifest] [--open] [--retain] [--pricing] [--log-level] [--log-format]
-//	weftbase dev [dev's flags] [--no-watch] [--watch dir] -- command args…
-//	weftbase runs [--agent] [--since] [--failed] [--status] [--limit] [--json]
-//	weftbase open [run id | public id | session id | trace id] [--open] [--with-token]
+//	weftbase serve  [--roles api,ingest,scheduler,supervisor] [--console] [node flags]
+//	weftbase dev    [node flags] [--open]
+//	weftbase dev    [node flags] [--open] [--no-watch] [--watch dir] -- command args…
+//	weftbase runs   [--url] [--token] [--agent] [--since] [--failed] [--status] [--limit] [--json]
+//	weftbase open   [run id | public id | session id | trace id] [--open]
 //	weftbase export <run id> [--format json|jsonl|otlp]
 //	weftbase doctor
 //	weftbase mcp
 //	weftbase vacuum [--db] [--retain]
 //	weftbase version
 //
-// Every subcommand is a convenience over what an app or a script can
-// do itself: `weftbase dev` is v1.New with the local options (and,
-// given a command after "--", the app beside it), and
-// runs, open, export and doctor are thin clients of the JSON API
-// (GET /api/runs, /api/runs/{id}, /api/runs/{id}/export, /api/meta). A
-// team that dislikes the CLI loses nothing.
+// The node flags: --addr (WEFTBASE_ADDR), --data (WEFTBASE_DATA, default
+// ./.weftbase: control.db, traces.db, and for dev bootstrap.key),
+// --control-db sqlite://path (postgres:// is not supported yet),
+// --trace-db sqlite://path | clickhouse://…, --manifest (WEFT_MANIFEST,
+// else the nearest weft.json upward), --retain (WEFT_RETAIN, at least
+// 1h), --pricing (WEFT_PRICING), --allow-origin (repeatable),
+// --log-level / --log-format (WEFT_LOG_LEVEL, WEFT_LOG_FORMAT).
 //
-// Every connection flag mirrors an environment variable one to one: --addr
-// WEFTBASE_ADDR, --db WEFTBASE_DB, --token WEFTBASE_TOKEN, --manifest
-// WEFT_MANIFEST, --url WEFTBASE_URL (the server the API clients talk
-// to; unset, the discovery file's, else http://127.0.0.1:7331),
-// --retain WEFT_RETAIN, --pricing
-// WEFT_PRICING. On weftbase dev, --log-level WEFT_LOG_LEVEL
-// (debug, info, warn, error) and --log-format WEFT_LOG_FORMAT (text,
-// json) pick the server log's slog handler on stderr: the refused ingest
-// batches and the 5xx lines with their request ids.
+// # weftbase serve
+//
+// The kernel with the roles asked for (default all four) behind the
+// port policy, until SIGINT, SIGTERM or (unix) SIGHUP. Every /v1 route
+// needs an API key (Authorization: Bearer wb_…) or a Console session;
+// serve keeps no key of its own: WEFTBASE_BOOTSTRAP_KEY, when set, is
+// imported as one. With the api role and the Console on it prints a
+// one-time Console sign-in link. It writes no discovery file.
 //
 // # weftbase dev
 //
-// Without "--": the Console, OTLP ingest, SQLite and a dev token on
-// 127.0.0.1:7331 — the zero-infra server for any language's OTel app:
+// serve with every role over SQLite in the data dir, plus what local
+// development needs: a bootstrap secret key, wb_sk_test_…, created once
+// in <data>/bootstrap.key (0600) and imported (never printed; the
+// banner names the file); the discovery file (client/discovery,
+// dev.json, 0600: url and the key) apps and the API commands find the
+// server through; and a one-time Console sign-in link
+// (http://127.0.0.1:7331/#signin=<token>, one use, 15 minutes), opened
+// in the browser with --open (on when stdout is a terminal).
 //
-//	weftbase dev                              # serves UI + OTLP; the token is in <db>.token
-//	WEFTBASE_URL=http://127.0.0.1:7331 ./my-go-app
-//	OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:7331/otlp python app.py
+// The port policy (internal/listen): 127.0.0.1:7331 is the default;
+// when busy, GET /v1/meta there (with the bootstrap key, loopback only)
+// says whether it serves this data dir's traces — then a second dev is
+// refused (or, with an app after "--", reuses it) — else the next free
+// port in 7331–7340 is taken, said in one line. --addr pins. One server
+// per data dir: the kernel holds the stores' locks (internal/dblock).
 //
-// The database defaults to the otel local sink's path ($WEFTBASE_DB or
-// ./.weftbase/weftbase.db), so the same file serves an in-process app and the
-// binary. --db sqlite://path picks another file; --db
-// clickhouse://user:pass@host:9000/db serves the hosted backend
-// (obsdb/clickhouse). The dev token is stable per database (plan B3):
-// the first start on a SQLite file writes 32 random bytes (base64url)
-// beside it, <db>.token (0600), and every later start serves that
-// token; --rotate-token writes a new one (an action: no environment
-// mirror); --token or WEFTBASE_TOKEN overrides it and leaves the
-// file alone. Like a fixed token it is never printed — the banner names its file and, unless
-// --open handed the browser the link, ends "sign in with `weftbase open
-// --with-token`". A database with no file (":memory:", ClickHouse)
-// gets a token generated for this process, printed at start. Once bound, weftbase dev writes the
-// discovery file (internal/discovery: dev.json in ./.weftbase when that
-// exists, else $XDG_RUNTIME_DIR/weftbase, else the user cache directory;
-// {url, token, db, pid, started, version}, 0600) and removes it on a
-// clean exit — SIGINT, SIGTERM and (unix) SIGHUP all stop it
-// gracefully; a second live server's exit puts the first's file back.
-// The writer drops a .gitignore ("*") into ./.weftbase when it has none.
-// exporter.Install reads the file when WEFTBASE_URL
-// is unset and the pipeline names no exporter.Remote or exporter.Local
-// (docs/cli.md "When exporter reads the file"), trusting it only when its url
-// is loopback, it is fresh and, on unix, it is 0600 and the reader's,
-// so an app joins this server with no configuration (WEFTBASE_DISCOVERY=off
-// turns the read off). The manifest served at /api/manifest is --manifest
-// (default $WEFT_MANIFEST), else the nearest weft.json from the working
-// directory upward; one line says which file was loaded, or that none
-// was found. --open opens the browser on the UI with the token in the
-// URL fragment (a fragment never reaches a server or a Referer); it is
-// on by default when stdout is a terminal, --open=false turns it off.
-// The link, token included, is the opener's argument (xdg-open, open,
-// rundll32): briefly visible to local users in the process list
-// (/proc/*/cmdline) — acceptable for handing the user's own browser
-// its link, and the reason the token is never printed.
+// `weftbase dev [flags] -- command args…` runs the app beside the
+// server with WEFT_ENV=dev (kept when set), WEFTBASE_URL, WEFTBASE_TOKEN
+// (the bootstrap key), OTEL_EXPORTER_OTLP_ENDPOINT=<url>/otlp and
+// OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer%20<key>, restarting it
+// on a .go save (--watch dir, --no-watch: exit with the app's code).
 //
-// The port policy (plan B2, internal/listen): 127.0.0.1:7331 is the
-// one default. When it is busy, weftbase dev asks GET /api/meta there
-// (with --token / WEFTBASE_TOKEN as the bearer when set, else the
-// database's stable token — only to an address this user's discovery
-// file names — to loopback only). Before that, the server this
-// user's discovery file names, on whatever port, is asked the same
-// question. One server per SQLite file (internal/dblock): before any
-// probe, the start takes <db>.lock — an exclusive OS lock (flock,
-// LockFileEx on Windows) held while it serves and released by the
-// kernel when the process ends, however it ends — so two starts at the
-// same moment, or from directories whose discovery files differ,
-// cannot both serve the file. A start that cannot take it, or that
-// finds a server on the file anyway, is refused — "server already
-// running at http://127.0.0.1:7347 (pid 1234) on …/weft.db" (the lock
-// file and the discovery file name the holder; else "another server
-// holds <db>"), exit 1, no database or listener opened (`weftbase dev`
-// reuses it instead). A ClickHouse database is a shared server and
-// takes no lock. Anything else on the wanted port (another program, a server on another
-// database, a server whose meta this token cannot read) moves server to
-// the next free port in 7331–7340, said in one line before the banner,
-// which prints the real address. All ten busy is exit 1 naming the
-// range. --addr (or WEFTBASE_ADDR) pins the address: busy is exit 1
-// with the address in the error, never a probe or another port.
+// # The API commands
 //
-// # weftbase runs, weftbase open, weftbase export
+// runs, open, export, doctor and mcp share one resolver: the server is
+// --url, else $WEFTBASE_URL, else the discovery file a running weftbase
+// dev wrote (WEFTBASE_DISCOVERY=off skips it), else
+// http://127.0.0.1:7331; the key --token, else $WEFTBASE_TOKEN, else the
+// discovery file's when that file names the resolved server. They read
+// GET /v1/runs, /v1/runs/{id} (ids percent-encoded),
+// /v1/runs/{id}/export, /v1/public/{id}, /v1/sessions/{id},
+// /v1/traces/{id}, /v1/meta and /readyz through client/rest.
 //
-// The API over a terminal. runs, open, export, doctor and mcp share one
-// resolver: the server is --url, else $WEFTBASE_URL, else the
-// discovery file a running weftbase dev wrote (the trust rules
-// exporter.Install uses; WEFTBASE_DISCOVERY=off skips it), else
-// http://127.0.0.1:7331; one stderr line names it when the user did not
-// ("weftbase: server http://127.0.0.1:7347 (discovery file …)"). The token
-// is --token, else $WEFTBASE_TOKEN, else the discovery file's when
-// that file names the resolved server.
-// `weftbase runs` prints one row per top-level run (id, agent, status,
-// started with its zone, steps, duration, own cost, the public id when
-// a row has one, the prompt, stopped by — what ended it, a canceled
-// run's cause in parentheses, "-" when none was recorded — and the
-// error: its kind and why, cut to 60 runes), newest first, from GET
-// /api/runs; --agent, --failed and --status (running, succeeded, failed, interrupted,
-// parked or cancelled; a word outside them exits 2) filter on the server, --since (a duration such as 2h, or an
-// RFC 3339 time) stops the paging at the first older run, --limit
-// (default 50, 0 for all) caps the rows and says so on stderr when it
-// hid any, --json prints the rows as server serves them (stopped_by and
-// cancel_cause included when set); stderr names the next step (weft
-// open, weftbase export). `weftbase open <id>` tries the id as a run id, a
-// public id, a session id and a trace id in turn (GET /api/runs/{id},
-// /api/public/{id}, /api/sessions/{id}, /api/traces/{id}) and prints
-// the first one's page — /runs, /conversations, /sessions or /traces —
-// bare; with no id it checks GET /api/meta and prints the server root.
-// --with-token prints the #token= fragment too (bare `weftbase open
-// --with-token` is a terminal's signed-in link to a fresh server),
-// --open hands the browser the link with the token. `weftbase export <id>`
-// writes GET /api/runs/<id>/export to stdout (--format json, jsonl or
-// otlp).
-//
-// # weftbase doctor
-//
-// `weftbase doctor [--url URL] [--token TOK]` checks the server the
-// resolver names and prints one line per check, each read from its GET
-// /api/meta (internal/doctor): reachable, token accepted (a missing one
-// names <db>.token and `weftbase open --with-token`), the discovery file
-// this shell reads against the one the server wrote (this server,
-// another, none), the database's path and size, the content it stores,
-// the newest run's age and weft version (a warning when it is not this
-// server's), the OTLP door (open, walled, off) and whether weft.json
-// is stale against the latest runs. It exits 1 when a check fails — first of all an unreachable
-// Server, reported on the first line within a short timeout.
-//
-// # weftbase dev -- command
-//
-// `weftbase dev [flags] -- command args…` (plan B1.2)
-// is the server alone (in-process: the same flags, the same port policy)
-// plus the app — the command after "--" (go run ., go run ./cmd/app; a
-// "--" with no command, or --watch / --no-watch without "--", is a
-// usage error) — run with WEFT_ENV=dev
-// (kept when already set non-empty), WEFTBASE_URL, WEFTBASE_TOKEN
-// and WEFTBASE_DB (the server's SQLite file, absolute; unset for
-// ClickHouse) added to the environment, the last three overriding the
-// shell's. Each is a plain variable the app could be given by hand:
-// the command is a convenience, never a requirement. The app runs in
-// its own process group; a .go change under the working directory
-// (--watch dir, repeatable, replaces it; .git, node_modules, vendor,
-// testdata, .weftbase and dist are skipped) restarts it after 300 ms of
-// quiet — SIGTERM to the group, up to five seconds, SIGKILL, then the
-// command again. A build failure or an app that exits is reported with
-// its exit code and the next save retries; --no-watch turns watching
-// off, and weftbase dev then exits with the app's code (127 when it cannot
-// start). A directory arriving with .go files in it restarts too;
-// editor lock files (.#name.go) do not. Ctrl-C, SIGTERM and SIGHUP
-// stop the app first (the same signal; SIGHUP as SIGTERM), then
-// Server; exit 0. A SIGKILL of weftbase dev cannot be caught: on Linux
-// `go run` gets SIGTERM (Pdeathsig), but the binary it started can be
-// orphaned. Each start prints one line,
-//
-//	server http://127.0.0.1:7331/ · app pid 4242
-//
-// the token in a #token= fragment only when it was generated for this
-// process (a database with no file: the stable and the fixed token
-// stay out of the log). An unspecified listen host
-// (0.0.0.0) is handed to the app as 127.0.0.1. Reuse is the port
-// policy's: its probe carries the fixed token, else the database's
-// stable token (only to an address a trusted discovery file names: from
-// another directory with --db on the same file the probe goes out bare
-// and a second server starts), so a server on the same database is
-// reused and the app gets its URL and token; one walled by another token is skipped for
-// the next port. A server weftbase dev starts writes the discovery file as
-// weftbase dev does. --watch and --no-watch have no environment mirror:
-// they are the dev loop's, not connection settings.
-//
-// # Retention and weftbase vacuum
-//
-// Server keeps everything by default. --retain (or WEFT_RETAIN; a Go
-// duration, 720h) on weftbase dev is v1.Retain: a
-// sweeper deletes the runs that are not running and were last seen
-// longer ago, with their subagent children, every min(retain/10, 1h)
-// (at least a minute apart), from server's own tables only — a SQLite
-// file that also holds the app's thread sessions keeps them untouched.
-// Interrupted runs count as not running and are swept; a run silent for
-// 30 s reads interrupted, so a retention under 1h — which would sweep a
-// live run paused at a breakpoint — is a usage error (exit 2) on
-// server, dev and vacuum alike.
-// `weftbase vacuum [--db] [--retain]` is the one-shot form: one sweep
-// when a retention is given, then VACUUM (SQLite: the file shrinks;
-// it waits on the busy timeout while another process writes) or
-// OPTIMIZE TABLE … FINAL on the mutated tables (ClickHouse: merges
-// every part, heavy on a large database). `make vacuum` runs it on
-// $WEFTBASE_DB, else ./.weftbase/weftbase.db.
-//
-// # Pricing
-//
-// Server prices usage at read time (plan A5) with the table shipped in
-// the server package (observe/cost/pricing.json, dated). --pricing (or
-// WEFT_PRICING) on weftbase dev names a file of the same
-// shape that replaces it whole — v1.LoadPricing; a file that does
-// not load is a start error (exit 1) naming the path and the field.
-// Nothing is fetched: prices are a plain file.
-//
-// `weftbase version` prints weftbase's version (internal/release) and
-// the weft version it embeds (version.Runtime: the weft module tag this
-// binary was built from): "weftbase v0.1.0 (weft v0.20.3)".
+// `weftbase vacuum [--db] [--retain]` sweeps (with a retention) and
+// vacuums the trace store: --db (WEFTBASE_DB), default
+// ./.weftbase/traces.db.
 //
 // Exit codes: 0 success, 1 a failure (printed as "weftbase: …" on stderr,
 // except doctor, whose lines say it), 2 a usage error.
-//
-// It is a package of the platform module (github.com/weftbase/weftbase) kept apart from
-// the server library so the library never carries what only the
-// binary needs — it is the one place that imports the clickhouse
-// driver.
 package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
-	"os/signal"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/weftbase/weftbase"
 	"github.com/weftbase/weftbase/client/rest"
 
 	"github.com/weftbase/weft/version"
-	v1 "github.com/weftbase/weftbase/api/http/v1"
-	"github.com/weftbase/weftbase/internal/dblock"
 	"github.com/weftbase/weftbase/internal/doctor"
 	"github.com/weftbase/weftbase/internal/listen"
 	"github.com/weftbase/weftbase/internal/release"
-	"github.com/weftbase/weftbase/obsdb/clickhouse"
 )
 
 const defaultAddr = listen.DefaultAddr
@@ -308,25 +151,29 @@ func dashDash(s string) string {
 	return strings.Join(lines, "")
 }
 
-const usage = `weftbase — the weft platform's command line: server, its store and a terminal over its API
+const usage = `weftbase — the weft platform's command line: the server and a terminal over its /v1 API
 
 Usage:
-  weftbase dev     [--addr] [--db] [--token] [--rotate-token] [--manifest] [--open] [--retain] [--pricing] [--log-level] [--log-format]
+  weftbase serve   [--roles api,ingest,scheduler,supervisor] [--console] [node flags]
+  weftbase dev     [node flags] [--open]   (every role, SQLite in --data, a bootstrap key, a Console sign-in link)
   weftbase dev     [dev's flags] [--no-watch] [--watch dir] -- command args…   (server and your app: go run ., go run ./cmd/app)
   weftbase runs    [--url] [--token] [--agent] [--since] [--failed] [--status] [--limit] [--json]
-  weftbase open    [id] [--url] [--token] [--open] [--with-token]   (a run, public, session or trace id; none: the server root)
+  weftbase open    [id] [--url] [--token] [--open]   (a run, public, session or trace id; none: the server root)
   weftbase export  <run id> [--url] [--token] [--format json|jsonl|otlp]
   weftbase doctor  [--url] [--token]
-  weftbase mcp     [--url] [--token]   (a read-only stdio MCP server over the server API; weftbase mcp -h lists its tools)
+  weftbase mcp     [--url] [--token]   (a read-only stdio MCP server over the /v1 API; weftbase mcp -h lists its tools)
   weftbase vacuum  [--db] [--retain]
   weftbase version
 
-Environment (each mirrors a flag): WEFTBASE_ADDR (--addr), WEFTBASE_DB (--db),
-WEFTBASE_TOKEN (--token), WEFT_MANIFEST (--manifest), WEFTBASE_URL (--url;
+Node flags: [--addr] [--data] [--control-db] [--trace-db] [--manifest] [--retain] [--pricing] [--allow-origin] [--log-level] [--log-format]
+
+Environment (each mirrors a flag): WEFTBASE_ADDR (--addr), WEFTBASE_DATA (--data),
+WEFTBASE_TOKEN (--token: an API key), WEFT_MANIFEST (--manifest), WEFTBASE_URL (--url;
 unset, the API commands read the discovery file a running weftbase dev wrote,
-WEFTBASE_DISCOVERY=off skips it, else http://127.0.0.1:7331),
+WEFTBASE_DISCOVERY=off skips it, else http://127.0.0.1:7331), WEFTBASE_DB (vacuum's --db),
 WEFT_RETAIN (--retain; a Go duration of at least 1h, 0 = off), WEFT_PRICING (--pricing),
 WEFT_LOG_LEVEL (--log-level: debug|info|warn|error), WEFT_LOG_FORMAT (--log-format: text|json).
+WEFTBASE_BOOTSTRAP_KEY: a secret key serve imports.
 Run "weftbase <command> -h" for a command's flags.
 `
 
@@ -405,7 +252,9 @@ func dispatch(args []string, stdout, stderr io.Writer) error {
 		if devLoopArgs(rest) {
 			return runDev(rest, stdout, stderr)
 		}
-		return runServer(rest, stdout, stderr)
+		return runDevServer(rest, stdout, stderr)
+	case "serve":
+		return runServe(rest, stdout, stderr)
 	case "help", "-h", "--help", "-help":
 		_, _ = fmt.Fprint(stdout, usage)
 		return nil
@@ -443,56 +292,132 @@ func newFlags(name string, stderr io.Writer) *flag.FlagSet {
 	return fs
 }
 
-// runServer is `weftbase dev` with no app (no "--"): the server
-// (v1.New) behind the port policy, with the manifest found.
-func runServer(args []string, stdout, stderr io.Writer) error {
+// runServe is `weftbase serve`: the kernel with the roles asked for,
+// behind the port policy, until a signal. It writes no discovery file
+// and keeps no bootstrap key: callers bring keys (WEFTBASE_BOOTSTRAP_KEY,
+// when set, is imported as one).
+func runServe(args []string, stdout, stderr io.Writer) error {
+	fs := newFlags("serve", stderr)
+	nf := addNodeFlags(fs)
+	roles := fs.String("roles", "api,ingest,scheduler,supervisor", "the node's `roles`, comma-separated: api, ingest, scheduler, supervisor")
+	console := fs.Bool("console", true, "serve the Console at / (the api role)")
+	if err := parse(fs, args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return usageError("serve takes no arguments (got %s)", gotArgs(fs.Args()))
+	}
+	rs, err := weftbase.ParseRoles(*roles)
+	if err != nil {
+		return usageError("--roles: %v", err)
+	}
+	restoreLog, err := nf.logs.install(stderr)
+	if err != nil {
+		return err
+	}
+	defer restoreLog()
+	res, err := nf.resolve()
+	if err != nil {
+		return err
+	}
+	opts := []weftbase.Option{weftbase.Roles(rs...), weftbase.Console(*console), nodeLogger()}
+	key := os.Getenv("WEFTBASE_BOOTSTRAP_KEY")
+	if key != "" {
+		opts = append(opts, weftbase.BootstrapKey(key))
+	}
+	cfg := nodeConfig{want: wantAddr(*nf.addr, defaultAddr), res: res, opts: opts, key: key,
+		signIn: true, console: *console, out: stdout}
+	return runNode(cfg, false, func(n *node) {
+		_, _ = fmt.Fprintf(stdout, "weftbase: http://%s/ (roles %s)\n", n.addr, rolesLabel(rs))
+		printStores(stdout, res)
+		if key != "" {
+			_, _ = fmt.Fprintln(stdout, "weftbase: bootstrap key from WEFTBASE_BOOTSTRAP_KEY")
+		}
+		printNotes(stdout, res.notes)
+	})
+}
+
+// runDevServer is `weftbase dev` with no app (no "--"): every role,
+// SQLite under the data dir, the bootstrap key in <data>/bootstrap.key,
+// the discovery file and a one-time Console sign-in link.
+func runDevServer(args []string, stdout, stderr io.Writer) error {
 	fs := newFlags("dev", stderr)
-	db := fs.String("db", "",
-		"`sqlite://path` or `clickhouse://user:pass@host:9000/db` (default: $WEFTBASE_DB or ./.weftbase/weftbase.db)")
-	addr := fs.String("addr", "",
-		"listen `address` (default: $WEFTBASE_ADDR, else "+defaultAddr+"); --addr pins; without it weftbase takes the next free port in 7331–7340; a server already holding the same SQLite file (<db>.lock) refuses the start")
-	token := fs.String("token", "",
-		"API token (default: $WEFTBASE_TOKEN, else the database's stable token, <db>.token, never printed; a generated one, printed, for a database with no file)")
-	manifest := fs.String("manifest", "",
-		"`path` to the app's weft.json, served at /api/manifest and checked against the latest runs (default: $WEFT_MANIFEST, else the nearest weft.json from the working directory upward)")
+	nf := addNodeFlags(fs)
 	open := fs.Bool("open", stdoutIsTTY(),
-		"open the browser on the UI, the token in the URL fragment (default: on when stdout is a terminal)")
-	rotate := fs.Bool("rotate-token", false,
-		"write a new stable dev token beside the database (<db>.token) before serving; an action, so no environment mirror")
-	retain := retainFlag(fs, "to keep runs after they were last seen: older ones that are not running are deleted from weftbase's tables")
-	pricing := pricingFlag(fs)
-	logs := addLogFlags(fs)
+		"open the browser on the Console's one-time sign-in link (default: on when stdout is a terminal)")
 	if err := parse(fs, args); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
 		return usageError("dev takes no arguments; run an app after \"--\" (got %s)", gotArgs(fs.Args()))
 	}
-	restoreLog, err := logs.install(stderr)
+	restoreLog, err := nf.logs.install(stderr)
 	if err != nil {
 		return err
 	}
 	defer restoreLog()
-	retainOpts, retainNote, err := retainOptions(*retain)
+	cfg, err := devConfig(nf, stdout)
 	if err != nil {
 		return err
 	}
-	pricingOpts, pricingNote, err := pricingOptions(*pricing)
+	return runNode(cfg, *open, func(n *node) { devBanner(stdout, n, cfg) })
+}
+
+// devConfig is `weftbase dev`'s node: the shared flags, every role, the
+// bootstrap key (created once), the discovery file and the sign-in link.
+func devConfig(nf *nodeFlags, out io.Writer) (nodeConfig, error) {
+	res, err := nf.resolve()
 	if err != nil {
-		return err
+		return nodeConfig{}, err
 	}
-	wd, err := os.Getwd()
+	key, keyPath, created, err := bootstrapKey(res.data)
 	if err != nil {
-		return err
+		return nodeConfig{}, fmt.Errorf("bootstrap key: %w", err)
 	}
-	opts, note, err := manifestOptions(*manifest, wd)
-	if err != nil {
-		return err
+	w := wantAddr(*nf.addr, devDefaultAddr)
+	w.span = devSpan
+	return nodeConfig{want: w, res: res, key: key, keyPath: keyPath, keyCreated: created,
+		opts:   []weftbase.Option{weftbase.BootstrapKey(key), nodeLogger()},
+		signIn: true, disc: true, console: true, out: out}, nil
+}
+
+// devBanner is `weftbase dev`'s banner, the key never printed.
+func devBanner(out io.Writer, n *node, cfg nodeConfig) {
+	_, _ = fmt.Fprintf(out, "weftbase: http://%s/\n", n.addr)
+	printStores(out, cfg.res)
+	if cfg.keyCreated {
+		_, _ = fmt.Fprintf(out, "weftbase: bootstrap key created in %s (a secret key: apps get it through the discovery file or WEFTBASE_TOKEN)\n", cfg.keyPath)
+	} else {
+		_, _ = fmt.Fprintf(out, "weftbase: bootstrap key in %s\n", cfg.keyPath)
 	}
-	opts = append(opts, retainOpts...)
-	opts = append(opts, pricingOpts...)
-	return serveWith(*db, wantAddr(*addr, defaultAddr), *token, stdout,
-		afterBoot{notes: []string{note, retainNote, pricingNote}, open: *open, rotate: *rotate}, opts...)
+	printNotes(out, cfg.res.notes)
+}
+
+func printStores(out io.Writer, r resolved) {
+	_, _ = fmt.Fprintf(out, "weftbase: data %s (control %s, traces %s)\n", r.data, orNone(r.controlPath), r.traceLabel)
+}
+
+func printNotes(out io.Writer, notes []string) {
+	for _, n := range notes {
+		if n != "" {
+			_, _ = fmt.Fprintln(out, n)
+		}
+	}
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "in memory"
+	}
+	return s
+}
+
+func rolesLabel(rs []weftbase.Role) string {
+	out := make([]string, len(rs))
+	for i, r := range rs {
+		out[i] = string(r)
+	}
+	return strings.Join(out, ",")
 }
 
 // want is the address the command wants and whether it is pinned.
@@ -512,59 +437,6 @@ func wantAddr(flagAddr, def string) want {
 		return want{addr: env, pinned: true}
 	}
 	return want{addr: def}
-}
-
-// manifestOptions resolves the manifest: --manifest, then
-// WEFT_MANIFEST, else the nearest weft.json from dir upward. The file
-// is read once, at start (v1.Manifest takes the bytes); note is the
-// one line that says which file was loaded, or that none was found. A
-// named file that cannot be read is a start error, never a server
-// silently serving without the manifest it was given.
-func manifestOptions(flagPath, dir string) (opts []v1.Option, note string, err error) {
-	path, from := flagPath, "--manifest"
-	if path == "" {
-		path, from = os.Getenv("WEFT_MANIFEST"), "WEFT_MANIFEST"
-	}
-	if path == "" {
-		path, from = findUpward(dir, "weft.json"), "found upward"
-		if path == "" {
-			return nil, "weftbase: no weft.json from " + dir + " upward; no manifest (--manifest names one)", nil
-		}
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		if from == "found upward" {
-			return nil, "", fmt.Errorf("manifest %s: %w", path, err)
-		}
-		return nil, "", fmt.Errorf("%s: %w", from, err)
-	}
-	// The top-level shape weft.Manifest writes: an object with the
-	// format version and the agents. A file that is not is a start
-	// error, never served verbatim.
-	var shape struct {
-		Weft   int               `json:"weft"`
-		Agents []json.RawMessage `json:"agents"`
-	}
-	if err := json.Unmarshal(b, &shape); err != nil {
-		return nil, "", fmt.Errorf("manifest %s: does not parse: %w", path, err)
-	}
-	return []v1.Option{v1.Manifest(b)}, "weftbase: manifest " + path + " (" + from + ")", nil
-}
-
-// findUpward is the nearest regular file called name in dir or one of
-// its parents, "" when there is none up to the filesystem root.
-func findUpward(dir, name string) string {
-	for {
-		p := filepath.Join(dir, name)
-		if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() {
-			return p
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return ""
-		}
-		dir = parent
-	}
 }
 
 // clientFlags adds --url and --token to an API client's flag set.
@@ -605,121 +477,10 @@ func runDoctor(args []string, stdout, stderr io.Writer) error {
 	})
 }
 
-// afterBoot is what `weftbase dev` adds around the port policy: lines
-// printed after the banner, and whether to open the browser on the UI.
-type afterBoot struct {
-	notes  []string
-	open   bool
-	rotate bool // --rotate-token: a new stable token before serving
-}
-
-// serve applies the port policy (internal/listen, plan B2), then
-// builds the server, prints where it lives, and serves until the
-// process is stopped. A server already serving the same database on
-// the wanted address is reused: one line naming it, nil (exit 0), and
-// nothing opened. A busy address otherwise moves to the next free port
-// of the range with one line saying which and why — unless it is
-// pinned (--addr, WEFTBASE_ADDR): then the busy address is the
-// error. The port is chosen before the database is opened, so a reuse
-// touches nothing and the banner prints the real address.
-func serve(dbFlag string, w want, tokenFlag string, stdout io.Writer, extra ...v1.Option) error {
-	return serveWith(dbFlag, w, tokenFlag, stdout, afterBoot{}, extra...)
-}
-
-// serveWith is serve plus afterBoot: its notes print after the banner
-// (never on a reuse, whose one line is the whole output), and with
-// open the browser opens on the UI once the listener is bound — on a
-// reuse, on the running server, the fixed token in the fragment when
-// there is one.
-func serveWith(dbFlag string, w want, tokenFlag string, stdout io.Writer, after afterBoot, extra ...v1.Option) error {
-	dbPath, err := dbFile(dbFlag)
-	if err != nil {
-		return err
-	}
-	// One server per database file: the lock first, before any port is
-	// probed or bound — two starts at the same moment, or from two
-	// directories whose discovery files disagree, cannot both pass it.
-	lock, err := lockDB(dbPath)
-	if errors.Is(err, errHeld) {
-		return heldError(dbPath)
-	}
-	if err != nil {
-		return err
-	}
-	defer lock.Release()
-	// The probe carries the token this command was given, else the
-	// database's stable token (plan B3) — only to an address this
-	// user's discovery file names. A token it would generate is nobody
-	// else's.
-	choice, err := listen.Choose(context.Background(), listen.Request{
-		Addr:     w.addr,
-		Pinned:   w.pinned,
-		Span:     w.span,
-		DBPath:   dbPath,
-		Token:    fixedToken(tokenFlag),
-		TokenFor: stableProbe(dbPath),
-		Known:    knownServer(dbPath),
-	})
-	if err != nil {
-		return err
-	}
-	if choice.Reuse {
-		// A server serving the file without its lock (a weft before
-		// the lock, an app's embedded server): refused the same way.
-		return alreadyRunning(choice.Addr, choice.PID, dbPath)
-	}
-	if choice.Note != "" {
-		_, _ = fmt.Fprintln(stdout, "weftbase: "+choice.Note)
-	}
-	srv, err := serveBootWith(dbFlag, choice.Addr, tokenFlag, after.rotate, stdout, append(discoveryOption(), extra...)...)
-	if err != nil {
-		_ = choice.Listener.Close()
-		return err
-	}
-	// The holder is named once it can serve: a refused start, or weft
-	// dev's reuse, never points at a server that failed to boot.
-	lock.SetHolder(dblock.Holder{URL: "http://" + loopbackAddr(choice.Addr), PID: os.Getpid()})
-	for _, n := range after.notes {
-		if n != "" {
-			_, _ = fmt.Fprintln(stdout, n)
-		}
-	}
-	disc := announce(stdout, "http://"+loopbackAddr(choice.Addr), srv.token, dbPath)
-	defer disc.Remove()
-	defer keepFresh(disc)()
-	switch {
-	case after.open:
-		openBrowser(stdout, uiLink(choice.Addr, srv.token))
-	case !srv.tok.printable():
-		// The token is never printed (it is in <db>.token, or fixed):
-		// the one way from a terminal to a signed-in page (UX-S5a-02).
-		_, _ = fmt.Fprintln(stdout, signInLine)
-	}
-	err = serveOn(httpServer(choice.Addr, srv.Handler()), choice.Listener, stdout)
-	if cerr := srv.Close(); err == nil {
-		err = cerr
-	}
-	return err
-}
-
-// signInLine is the banner's last line when the browser is not opened
-// and the token is not printed.
-const signInLine = "weftbase: sign in with `weftbase open --with-token` (prints this server's link, the token in its fragment)"
-
-// uiLink is the UI's address, the token in the fragment when there is
-// one: the UI adopts it, and a fragment never reaches a server.
-func uiLink(addr, token string) string {
-	link := "http://" + addr + "/"
-	if token != "" {
-		link += "#token=" + url.QueryEscape(token)
-	}
-	return link
-}
-
 // httpServer builds the listener's server. The header read and idle
 // keep-alives are bounded — a client that opens a connection and never
 // finishes its request headers must not hold it forever. The write
-// side and the body read are deliberately not: /api/live is
+// side and the body read are deliberately not: /v1/runs/stream is
 // long-lived (each frame carries its own
 // write deadline in the handlers), and a 16 MiB ingest upload over a
 // slow link is legitimate.
@@ -732,53 +493,14 @@ func httpServer(addr string, h http.Handler) *http.Server {
 	}
 }
 
-// server is the server server plus the database handle the binary
-// opened itself: v1.Server.Close leaves a DB(...) handle to its
-// owner, and for --db clickhouse:// that owner is this binary.
-type server struct {
-	*v1.Server
-	db    io.Closer     // nil when the server server owns its database
-	token string        // the one token serveBoot resolved (the wall's)
-	tok   resolvedToken // where it came from (the banner's and the one line's policy)
-}
-
-// Close closes the server server, then the binary's own handle.
-func (s *server) Close() error {
-	err := s.Server.Close()
-	if s.db != nil {
-		if cerr := s.db.Close(); err == nil {
-			err = cerr
-		}
-	}
-	return err
-}
-
-// serveOn runs the HTTP server on ln until SIGINT, SIGTERM or (unix)
-// SIGHUP — a graceful
-// stop (the audit's P2-20: a bare ListenAndServe cut SSE streams mid-
-// frame and skipped srv.Close): the listener closes at once, in-flight
-// requests get a five-second grace window (an SSE stream ends when its
-// request context cancels), and streams that outlive the window are
-// force-closed — the server resources close after, in serve.
-func serveOn(httpSrv *http.Server, ln net.Listener, stdout io.Writer) error {
-	// Signal delivery is armed before the listener starts: a signal
-	// that lands while nobody is notified takes the process down.
-	// SIGHUP too on unix (devSignals): a closed terminal stops server
-	// gracefully, so its discovery file is removed.
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, devSignals...)
-	defer signal.Stop(stop)
-	return serveUntil(httpSrv, ln, stdout, stop)
-}
-
-// serveUntil is serveOn's body: it serves on ln until stop delivers a
+// serveUntil serves on ln until stop delivers a
 // signal (or Serve fails), then stops gracefully. `weftbase dev` owns its
 // signals (the app stops first) and hands its own channel here.
 func serveUntil(httpSrv *http.Server, ln net.Listener, stdout io.Writer, stop <-chan os.Signal) error {
 	// Shutdown never cancels a request's context — it waits for the
 	// connection to go idle, which a stream never does. Every request's
 	// context derives from this one, canceled when the shutdown begins,
-	// so /api/live ends at once instead
+	// so a live stream ends at once instead
 	// of holding the grace window.
 	base, cancelBase := context.WithCancel(context.Background())
 	defer cancelBase()
@@ -799,152 +521,6 @@ func serveUntil(httpSrv *http.Server, ln net.Listener, stdout io.Writer, stop <-
 			_ = httpSrv.Close()
 		}
 		return nil
-	}
-}
-
-// serveBoot is everything serve does before listening: resolve the
-// token, build the server, print the banner. The token is resolved
-// exactly once — the wall newServer builds and the banner it prints
-// are the same value (a generated dev token is fresh randomness per
-// srvToken call; resolving twice minted two different tokens and the
-// printed one could not open the API it advertised). Split out so the
-// boot path — token resolution, banner, wall — is testable without a
-// port.
-func serveBoot(dbFlag, addr, tokenFlag string, stdout io.Writer, extra ...v1.Option) (*server, error) {
-	return serveBootWith(dbFlag, addr, tokenFlag, false, stdout, extra...)
-}
-
-// serveBootWith is serveBoot with --rotate-token.
-func serveBootWith(dbFlag, addr, tokenFlag string, rotate bool, stdout io.Writer, extra ...v1.Option) (*server, error) {
-	tok, err := resolveToken(dbFlag, tokenFlag, rotate)
-	if err != nil {
-		return nil, err
-	}
-	srv, err := newServer(dbFlag, tok.value, extra...)
-	if err != nil {
-		return nil, err
-	}
-	srv.token, srv.tok = tok.value, tok
-	// The banner is best-effort by design: a closed stdout must not
-	// keep the server from serving.
-	// Only a token generated for this process is printed — nobody
-	// knows it otherwise — and then the link carries it too, in the
-	// fragment: the UI adopts a token from the page URL, and a fragment
-	// never reaches a server or a Referer. A token the operator fixed,
-	// and the database's stable token (plan B3), stay out of the log,
-	// link included — the banner says where the token is instead.
-	if !tok.printable() {
-		_, _ = fmt.Fprintf(stdout, "weftbase: http://%s/\n", addr)
-	}
-	switch {
-	case tok.source == tokenFromFlag:
-		_, _ = fmt.Fprintln(stdout, "weftbase: token from --token")
-	case tok.source == tokenFromEnv:
-		_, _ = fmt.Fprintln(stdout, "weftbase: token from WEFTBASE_TOKEN")
-	case tok.rotated:
-		_, _ = fmt.Fprintf(stdout, "weftbase: token rotated: a new one in %s\n", tok.path)
-	case tok.created:
-		_, _ = fmt.Fprintf(stdout, "weftbase: token created in %s (stable for this database; --rotate-token renews it)\n", tok.path)
-	case tok.source == tokenFromFile:
-		_, _ = fmt.Fprintf(stdout, "weftbase: token from %s (stable for this database; --rotate-token renews it)\n", tok.path)
-	default:
-		_, _ = fmt.Fprintf(stdout, "weftbase: http://%s/#token=%s\n", addr, tok.value)
-		_, _ = fmt.Fprintf(stdout, "weftbase: dev token %s (WEFTBASE_TOKEN fixes it)\n", tok.value)
-	}
-	_, _ = fmt.Fprintf(stdout, "weftbase: db %s\n", dbLabel(dbFlag))
-	return srv, nil
-}
-
-// newServer builds setup B's server from the flags: the UI at the
-// root, ingest on, the database under --db or the default path, and
-// the token wall. The token arrives already resolved (serveBoot is
-// the one resolver — the wall and the banner share it). sqlite:// and
-// the default open the local sink's file; clickhouse:// opens the
-// hosted backend — this is the only place that imports the driver.
-//
-// v1.New panics when it cannot open its database (a construction
-// error, for a library). For the binary that is a mistyped --db: the
-// panic is returned as the error main prints.
-func newServer(dbFlag, token string, extra ...v1.Option) (srv *server, err error) {
-	opts := append([]v1.Option{v1.Base("/"), v1.Token(token)}, extra...)
-	var own io.Closer
-	defer func() {
-		if r := recover(); r != nil {
-			if own != nil {
-				_ = own.Close()
-			}
-			srv, err = nil, fmt.Errorf("%v", r)
-		}
-	}()
-	switch {
-	case dbFlag == "":
-		// The default: the otel local sink's path (S4.1).
-	case strings.HasPrefix(dbFlag, "sqlite://"):
-		path := strings.TrimPrefix(dbFlag, "sqlite://")
-		if path == "" {
-			return nil, fmt.Errorf("--db sqlite:// needs a path (sqlite://weft.db, sqlite:///var/lib/weft.db)")
-		}
-		opts = append(opts, v1.Open(path))
-	case strings.HasPrefix(dbFlag, "clickhouse://"):
-		// The hosted backend (S3.6): Open takes the full DSN (scheme
-		// included), creates and versions the schema, so a fresh
-		// database is ready to serve. A closed port surfaces the
-		// driver's dial error here.
-		db, err := clickhouse.Open(dbFlag)
-		if err != nil {
-			return nil, err
-		}
-		opts, own = append(opts, v1.DB(db)), db
-	default:
-		return nil, fmt.Errorf("--db must be sqlite://path or clickhouse://user:pass@host:9000/db")
-	}
-	return &server{Server: v1.New(opts...), db: own, token: token}, nil
-}
-
-// fixedToken is the token the operator fixed: the flag, then
-// WEFTBASE_TOKEN; "" when neither is set.
-func fixedToken(tokenFlag string) string {
-	if tokenFlag != "" {
-		return tokenFlag
-	}
-	return os.Getenv("WEFTBASE_TOKEN")
-}
-
-// dbFile is the absolute database file --db names, the one the port
-// policy compares with a running server's db.path: the default (the
-// local sink's $WEFTBASE_DB or ./.weftbase/weftbase.db) and sqlite://path resolve
-// as obsdb/sqlite resolves them; ":memory:" and clickhouse:// name no
-// file ("", which never matches). A malformed --db is newServer's
-// error to report, after the port is chosen.
-func dbFile(dbFlag string) (string, error) {
-	var path string
-	switch {
-	case dbFlag == "":
-		path = os.Getenv("WEFTBASE_DB")
-		if path == "" {
-			path = ".weftbase/weftbase.db"
-		}
-	case strings.HasPrefix(dbFlag, "sqlite://"):
-		path = strings.TrimPrefix(dbFlag, "sqlite://")
-	}
-	if path == "" || path == ":memory:" {
-		return "", nil
-	}
-	return filepath.Abs(path)
-}
-
-// dbLabel names the database for the banner. A DSN's password is
-// never echoed (the audit's P2-20): clickhouse://user:pass@host/db
-// prints clickhouse://user:***@host/db — the host and database are
-// the useful part of the banner.
-func dbLabel(dbFlag string) string {
-	switch {
-	case dbFlag == "":
-		return "$WEFTBASE_DB or ./.weftbase/weftbase.db (default)"
-	case strings.HasPrefix(dbFlag, "sqlite://"):
-		return strings.TrimPrefix(dbFlag, "sqlite://")
-	default:
-		return maskDSN(dbFlag)
 	}
 }
 

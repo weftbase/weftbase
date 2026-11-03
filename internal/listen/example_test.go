@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	v1 "github.com/weftbase/weftbase/api/http/v1"
+	"github.com/weftbase/weftbase"
 	"github.com/weftbase/weftbase/internal/listen"
 )
 
@@ -25,15 +25,19 @@ func ExampleChoose() {
 	free, _ := net.Listen("tcp", "127.0.0.1:0")
 	want := free.Addr().String()
 	_ = free.Close()
-	req := listen.Request{Addr: want, Span: 2, DBPath: path, Token: "dev-token"}
+	req := listen.Request{Addr: want, Span: 2, DBPath: path, Token: "wb_sk_test_devkey"}
 
 	first, err := listen.Choose(context.Background(), req)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-	srv := v1.New(v1.Base("/"), v1.Open(path), v1.Token("dev-token"))
-	defer func() { _ = srv.Close() }()
+	srv, err := weftbase.New(weftbase.DataDir(dir), weftbase.TraceDB("sqlite://"+path), weftbase.BootstrapKey("wb_sk_test_devkey"))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer func() { _ = srv.Shutdown(context.Background()) }()
 	hs := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: time.Second}
 	go func() { _ = hs.Serve(first.Listener) }()
 	defer func() { _ = hs.Close() }()

@@ -34,15 +34,15 @@ func TestRunsTurnMarks(t *testing.T) {
 	}
 	const sid = "01K00000000000000000000001"
 	// thread_compaction: the session marker is filed under t2.
-	got := read(t, "thread_compaction", "/api/runs?session="+sid)
+	got := read(t, "thread_compaction", "/v1/runs?session="+sid)
 	if got[sid+"-t2"].SessionCompactions != 1 || got[sid+"-t1"].SessionCompactions != 0 {
 		t.Errorf("thread_compaction marks = %+v; want one compaction after t2", got)
 	}
-	if un := read(t, "thread_compaction", "/api/runs"); un[sid+"-t2"].SessionCompactions != 0 {
+	if un := read(t, "thread_compaction", "/v1/runs"); un[sid+"-t2"].SessionCompactions != 0 {
 		t.Errorf("an unnarrowed page carries marks: %+v", un)
 	}
 	// pool_child: the lead's turn delegated one session.
-	got = read(t, "pool_child", "/api/runs?public_id=pub_pool")
+	got = read(t, "pool_child", "/v1/runs?public_id=pub_pool")
 	if got[sid+"-t1"].DelegatedSessions != 1 {
 		t.Errorf("pool_child marks = %+v; want one delegated session on the lead's turn", got)
 	}

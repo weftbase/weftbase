@@ -1,38 +1,31 @@
 {
   "weft_version": "v0.21.0",
   "server_version": "v0.1.0",
-  "db": {
-    "kind": "sqlite"
+  "capabilities": [],
+  "principal": {
+    "kind": "local",
+    "id": "local",
+    "scope": {
+      "project": "prj_default",
+      "env": "test",
+      "tenant": "ten_project"
+    },
+    "all_tenants": true
   },
-  "title": "weftbase",
-  "has_manifest": true,
-  "ingest_open": true,
   "ingest": {
     "dropped": [],
     "accepted": 0,
     "refused": 0
   },
+  "pricing": {
+    "source": "default",
+    "dated": "2026-10-10",
+    "models": 47
+  },
+  "db": {
+    "kind": "sqlite"
+  },
   "interrupted_after_ms": 30000,
-  "capabilities": [
-    "requests",
-    "steps",
-    "export",
-    "logs",
-    "diff",
-    "traces",
-    "search",
-    "stats",
-    "manifests",
-    "spans_tree",
-    "timeline",
-    "pricing",
-    "delete",
-    "live",
-    "scope_tags",
-    "ingest"
-  ],
-  "auth_required": false,
-  "live_all": true,
   "content": {
     "ingest": "as_received",
     "latest": {
@@ -43,11 +36,6 @@
       "weft_version": "v0.6.0",
       "service": "weftbase-test"
     }
-  },
-  "pricing": {
-    "source": "default",
-    "dated": "2026-10-10",
-    "models": 47
   },
   "retention": null,
   "manifest_check": {

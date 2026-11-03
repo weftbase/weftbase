@@ -30,12 +30,12 @@ func texts(t *testing.T, res *sdk.CallToolResult) []string {
 
 // TestMCPCommand pins the command line: -h lists the tools (exit 0),
 // --read-only=false is refused (there is no write mode), arguments are
-// refused, and with no server answering /api/meta it serves, WARNs
+// refused, and with no server answering /v1/meta it serves, WARNs
 // once, and a tool call isErrors with the line saying so.
 func TestMCPCommand(t *testing.T) {
 	t.Setenv("WEFTBASE_URL", "")
 	t.Setenv("WEFTBASE_TOKEN", "")
-	_, errb, code := weftbase("mcp", "-h")
+	_, errb, code := cli("mcp", "-h")
 	for _, name := range mcp.ToolNames() {
 		if !strings.Contains(errb, "  "+name+" ") {
 			t.Errorf("mcp -h lacks %s", name)
@@ -45,13 +45,13 @@ func TestMCPCommand(t *testing.T) {
 		!strings.Contains(errb, "claude mcp add weft -- weftbase mcp --url http://127.0.0.1:7331") {
 		t.Errorf("mcp -h = exit %d\n%s", code, errb)
 	}
-	if _, errb, code := weftbase("mcp", "--read-only=false"); code != 2 || !strings.Contains(errb, "no write mode") {
+	if _, errb, code := cli("mcp", "--read-only=false"); code != 2 || !strings.Contains(errb, "no write mode") {
 		t.Errorf("--read-only=false = exit %d %q", code, errb)
 	}
-	if _, errb, code := weftbase("mcp", "extra"); code != 2 || !strings.Contains(errb, "mcp takes no arguments") {
+	if _, errb, code := cli("mcp", "extra"); code != 2 || !strings.Contains(errb, "mcp takes no arguments") {
 		t.Errorf("an argument = exit %d %q", code, errb)
 	}
-	// No server answering /api/meta: it serves anyway (an MCP client
+	// No server answering /v1/meta: it serves anyway (an MCP client
 	// starts its servers once, maybe before the server), says so in one
 	// WARN, and each tool call isErrors with the line and its fix.
 	cmd := exec.Command(os.Args[0], "mcp", "--url", "http://127.0.0.1:1", "--token", "secret-tok")
@@ -69,12 +69,12 @@ func TestMCPCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := texts(t, res); !res.IsError || !strings.Contains(got[0], "no server answers /api/meta: weftbase not reachable at http://127.0.0.1:1") ||
+	if got := texts(t, res); !res.IsError || !strings.Contains(got[0], "no server answers /v1/meta: weftbase not reachable at http://127.0.0.1:1") ||
 		!strings.Contains(got[0], "the next call retries the --url given") || strings.Contains(got[0], "secret-tok") {
 		t.Errorf("a tool call with no server = %v %q, want the isError line with its fix", res.IsError, got)
 	}
 	_ = cs.Close()
-	if errb := stderr.String(); strings.Count(errb, "level=WARN") != 1 || !strings.Contains(errb, "no server answers /api/meta yet; tools will retry per call") ||
+	if errb := stderr.String(); strings.Count(errb, "level=WARN") != 1 || !strings.Contains(errb, "no server answers /v1/meta yet; tools will retry per call") ||
 		!strings.Contains(errb, "read-only tools over stdio") || strings.Contains(errb, "secret-tok") {
 		t.Errorf("no server: stderr %q, want one WARN and the start line, never the token", errb)
 	}

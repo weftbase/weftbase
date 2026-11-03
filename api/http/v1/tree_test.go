@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -152,7 +153,7 @@ func getJSON(t *testing.T, url string, v any) int {
 
 // TestSpansTreeFromARealRun (U9.1; UX-A-01, UX-E-34): the director run
 // of rw.deep-delegation's shape, recorded through the real pipeline:
-// GET /api/runs/{id}/spans?tree=1 answers its own spans and
+// GET /v1/runs/{id}/spans?tree=1 answers its own spans and
 // ops-manager's and worker's beside them — each keyed by run_id +
 // span_id with its run's parent_run_id, in start order, the child's
 // invoke_agent under the director's execute_tool span — from one
@@ -173,20 +174,12 @@ func TestSpansTreeFromARealRun(t *testing.T) {
 	ops := director + "/0/call_ops"
 	worker := ops + "/0/call_worker"
 
-	var meta struct {
-		Capabilities []string `json:"capabilities"`
-	}
-	getJSON(t, ts.URL+"/api/meta", &meta)
-	if !slices.Contains(meta.Capabilities, "spans_tree") {
-		t.Errorf("capabilities = %v, want spans_tree over sqlite", meta.Capabilities)
-	}
-
 	cdb.reset()
 	var doc struct {
 		Spans []treeSpanDoc     `json:"spans"`
 		Holes []json.RawMessage `json:"holes"`
 	}
-	if code := getJSON(t, ts.URL+"/api/runs/"+director+"/spans?tree=1", &doc); code != http.StatusOK {
+	if code := getJSON(t, ts.URL+"/v1/runs/"+url.PathEscape(director)+"/spans?tree=1", &doc); code != http.StatusOK {
 		t.Fatalf("?tree=1 = %d", code)
 	}
 	if doc.Holes == nil || len(doc.Holes) != 0 {
@@ -234,7 +227,7 @@ func TestSpansTreeFromARealRun(t *testing.T) {
 
 	// The plain route: the run's own spans, run_id on each, no parent.
 	doc.Spans = nil
-	getJSON(t, ts.URL+"/api/runs/"+director+"/spans", &doc)
+	getJSON(t, ts.URL+"/v1/runs/"+url.PathEscape(director)+"/spans", &doc)
 	for _, s := range doc.Spans {
 		if s.RunID != director || s.ParentRunID != "" {
 			t.Errorf("plain span %s: run_id %q parent %q, want the run's, none", s.Name, s.RunID, s.ParentRunID)
@@ -245,14 +238,14 @@ func TestSpansTreeFromARealRun(t *testing.T) {
 	}
 	// A child's tree is its own subtree.
 	doc.Spans = nil
-	getJSON(t, ts.URL+"/api/runs/"+ops+"/spans?tree=1", &doc)
+	getJSON(t, ts.URL+"/v1/runs/"+url.PathEscape(ops)+"/spans?tree=1", &doc)
 	if len(doc.Spans) != 6 || doc.Spans[0].RunID != ops {
 		t.Errorf("ops-manager's tree = %d spans from %q, want its 4 and worker's 2", len(doc.Spans), doc.Spans[0].RunID)
 	}
 	for path, want := range map[string]int{
-		"/api/runs/" + director + "/spans?tree=maybe": http.StatusBadRequest,
-		"/api/runs/nope/spans?tree=1":                 http.StatusNotFound,
-		"/api/runs/" + director + "/spans?tree=0":     http.StatusOK,
+		"/v1/runs/" + url.PathEscape(director) + "/spans?tree=maybe": http.StatusBadRequest,
+		"/v1/runs/nope/spans?tree=1":                                 http.StatusNotFound,
+		"/v1/runs/" + url.PathEscape(director) + "/spans?tree=0":     http.StatusOK,
 	} {
 		if code := getJSON(t, ts.URL+path, nil); code != want {
 			t.Errorf("GET %s = %d, want %d", path, code, want)
@@ -292,17 +285,17 @@ func TestRunsListReadsChildrenPerLevel(t *testing.T) {
 	}
 	cdb.reset()
 	var tree costs
-	if code := getJSON(t, ts.URL+"/api/runs", &tree); code != http.StatusOK || len(tree.Runs) != 3 {
-		t.Fatalf("/api/runs = %d, %d rows; want the 3 director runs", code, len(tree.Runs))
+	if code := getJSON(t, ts.URL+"/v1/runs", &tree); code != http.StatusOK || len(tree.Runs) != 3 {
+		t.Fatalf("/v1/runs = %d, %d rows; want the 3 director runs", code, len(tree.Runs))
 	}
 	perRun, _, childRuns, _, parents := cdb.reset()
 	if perRun != 0 {
-		t.Errorf("/api/runs read children per row %d times, want none", perRun)
+		t.Errorf("/v1/runs read children per row %d times, want none", perRun)
 	}
 	// Three levels: the page's 3 directors, their 3 ops-managers, their
 	// 3 workers (whose read finds no child and ends the walk).
 	if childRuns != 3 || len(parents) != 3 || len(parents[0]) != 3 || len(parents[1]) != 3 || len(parents[2]) != 3 {
-		t.Errorf("/api/runs read ChildRuns %d times over %v, want 3 reads of 3 parents (one per level)", childRuns, parents)
+		t.Errorf("/v1/runs read ChildRuns %d times over %v, want 3 reads of 3 parents (one per level)", childRuns, parents)
 	}
 	for _, r := range tree.Runs {
 		if r.DelegatedCostUSD == nil || !r.DelegatedKnown || r.CostBadge != "scripted" {
@@ -311,7 +304,7 @@ func TestRunsListReadsChildrenPerLevel(t *testing.T) {
 		}
 	}
 	// The run document: the run's tree from ChildRuns, no per-run read.
-	if code := getJSON(t, ts.URL+"/api/runs/"+directors[0], nil); code != http.StatusOK {
+	if code := getJSON(t, ts.URL+"/v1/runs/"+url.PathEscape(directors[0]), nil); code != http.StatusOK {
 		t.Fatalf("run document = %d", code)
 	}
 	if perRun, _, _, _, _ := cdb.reset(); perRun != 0 {
@@ -325,7 +318,7 @@ func TestRunsListReadsChildrenPerLevel(t *testing.T) {
 	t.Cleanup(ts2.Close)
 	t.Cleanup(func() { _ = srv2.Close() })
 	var flat costs
-	getJSON(t, ts2.URL+"/api/runs", &flat)
+	getJSON(t, ts2.URL+"/v1/runs", &flat)
 	a, _ := json.Marshal(tree)
 	b, _ := json.Marshal(flat)
 	if string(a) != string(b) {
@@ -334,18 +327,10 @@ func TestRunsListReadsChildrenPerLevel(t *testing.T) {
 	if perRun, _, _, _, _ := plain.reset(); perRun < 6 {
 		t.Errorf("the per-row path read children %d times, want one per run of the trees (the N+1 the tree reads remove)", perRun)
 	}
-	var meta struct {
-		Capabilities    []string          `json:"capabilities"`
-		CapabilitiesOff map[string]string `json:"capabilities_off"`
-	}
-	getJSON(t, ts2.URL+"/api/meta", &meta)
-	if slices.Contains(meta.Capabilities, "spans_tree") || !strings.Contains(meta.CapabilitiesOff["spans_tree"], "obsdb.TreeReader") {
-		t.Errorf("meta without a TreeReader: capabilities %v, off %v; want spans_tree off with its reason", meta.Capabilities, meta.CapabilitiesOff)
-	}
-	if code := getJSON(t, ts2.URL+"/api/runs/"+directors[0]+"/spans?tree=1", nil); code != http.StatusNotImplemented {
+	if code := getJSON(t, ts2.URL+"/v1/runs/"+url.PathEscape(directors[0])+"/spans?tree=1", nil); code != http.StatusNotImplemented {
 		t.Errorf("?tree=1 without a TreeReader = %d, want 501", code)
 	}
-	if code := getJSON(t, ts2.URL+"/api/runs/"+directors[0]+"/spans", nil); code != http.StatusOK {
+	if code := getJSON(t, ts2.URL+"/v1/runs/"+url.PathEscape(directors[0])+"/spans", nil); code != http.StatusOK {
 		t.Errorf("plain spans without a TreeReader = %d, want 200", code)
 	}
 }
@@ -403,11 +388,11 @@ func TestDelegatedCostReasonsOldestFirst(t *testing.T) {
 	var list struct {
 		Runs []figures `json:"runs"`
 	}
-	if code := getJSON(t, ts.URL+"/api/runs", &list); code != http.StatusOK || len(list.Runs) != 1 {
-		t.Fatalf("/api/runs = %d, %d rows; want the parent alone", code, len(list.Runs))
+	if code := getJSON(t, ts.URL+"/v1/runs", &list); code != http.StatusOK || len(list.Runs) != 1 {
+		t.Fatalf("/v1/runs = %d, %d rows; want the parent alone", code, len(list.Runs))
 	}
 	var doc figures
-	if code := getJSON(t, ts.URL+"/api/runs/"+parent, &doc); code != http.StatusOK {
+	if code := getJSON(t, ts.URL+"/v1/runs/"+url.PathEscape(parent), &doc); code != http.StatusOK {
 		t.Fatalf("run document = %d", code)
 	}
 	a, _ := json.Marshal(list.Runs[0])

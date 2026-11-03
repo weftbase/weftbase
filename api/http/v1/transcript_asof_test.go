@@ -28,7 +28,7 @@ type transcriptAsOfT struct {
 	Badge       string            `json:"badge"`
 }
 
-// TestTranscriptAsOfStep (ADR 0029): GET /api/runs/{id}/transcript
+// TestTranscriptAsOfStep (ADR 0029): GET /v1/runs/{id}/transcript
 // with ?step=N answers the bare route's batches and the messages step
 // N's model call carried. A9's step run compacts step 2 (a PrepareStep
 // trim): step 2's messages are the compacted ones — the user's prompt,
@@ -40,16 +40,16 @@ type transcriptAsOfT struct {
 func TestTranscriptAsOfStep(t *testing.T) {
 	ts, _ := requestsServer(t)
 	recordStepsRun(t, ts.URL, "r_steps", nil)
-	fetchJSON(t, ts, "/api/runs/r_steps", func(b string) bool { return strings.Contains(b, `"request_count":6`) })
+	fetchJSON(t, ts, "/v1/runs/r_steps", func(b string) bool { return strings.Contains(b, `"request_count":6`) })
 
-	body := fetchJSON(t, ts, "/api/runs/r_steps/transcript?step=2", nil)
+	body := fetchJSON(t, ts, "/v1/runs/r_steps/transcript?step=2", nil)
 	stepGolden(t, "transcript-as-of-step.golden.json", body)
 	var doc transcriptAsOfT
 	decode(t, body, &doc)
 	var run struct {
 		Compactions []runCompactionT `json:"compactions"`
 	}
-	decode(t, fetchJSON(t, ts, "/api/runs/r_steps", nil), &run)
+	decode(t, fetchJSON(t, ts, "/v1/runs/r_steps", nil), &run)
 	c := doc.CompactedAt
 	if c == nil || len(run.Compactions) != 1 || c.Index != *run.Compactions[0].Index || c.Hash != run.Compactions[0].Hash ||
 		c.Step != 2 || c.FromSeq != 1 || c.ToSeq != 3 || c.Replaced != 2 || c.Entries != 1 {
@@ -59,20 +59,20 @@ func TestTranscriptAsOfStep(t *testing.T) {
 		t.Errorf("step 2's messages = %+v, want [prompt, summary, step 1's call, its result]", doc.Messages)
 	}
 	var bare transcript
-	decode(t, fetchJSON(t, ts, "/api/runs/r_steps/transcript", nil), &bare)
+	decode(t, fetchJSON(t, ts, "/v1/runs/r_steps/transcript", nil), &bare)
 	if len(doc.Batches) != len(bare.Batches) {
 		t.Errorf("?step= batches = %d, the bare route's %d", len(doc.Batches), len(bare.Batches))
 	}
 
-	decode(t, fetchJSON(t, ts, "/api/runs/r_steps/transcript?step=1", nil), &doc)
+	decode(t, fetchJSON(t, ts, "/v1/runs/r_steps/transcript?step=1", nil), &doc)
 	if doc.CompactedAt != nil || len(doc.Messages) != 3 || doc.Step != 1 {
 		t.Errorf("step 1 = compacted_at %+v, %d messages; want the plain prefix of 3", doc.CompactedAt, len(doc.Messages))
 	}
 	for path, want := range map[string]int{
-		"/api/runs/r_steps/transcript?step=9":  http.StatusNotFound,
-		"/api/runs/r_steps/transcript?step=x":  http.StatusBadRequest,
-		"/api/runs/r_steps/transcript?step=-1": http.StatusBadRequest,
-		"/api/runs/r_nope/transcript?step=0":   http.StatusNotFound,
+		"/v1/runs/r_steps/transcript?step=9":  http.StatusNotFound,
+		"/v1/runs/r_steps/transcript?step=x":  http.StatusBadRequest,
+		"/v1/runs/r_steps/transcript?step=-1": http.StatusBadRequest,
+		"/v1/runs/r_nope/transcript?step=0":   http.StatusNotFound,
 	} {
 		resp, err := http.Get(ts.URL + path)
 		if err != nil {
@@ -111,10 +111,10 @@ func TestTranscriptAsOfStepHoles(t *testing.T) {
 		t.Fatal(err)
 	}
 	recordStepsRun(t, ts.URL, "r_off", nil, otel.NoContent())
-	fetchJSON(t, ts, "/api/runs/r_off", func(b string) bool { return strings.Contains(b, `"request_count":6`) })
+	fetchJSON(t, ts, "/v1/runs/r_off", func(b string) bool { return strings.Contains(b, `"request_count":6`) })
 	for path, hole := range map[string]obsdb.Hole{
-		"/api/runs/r_gap/transcript?step=0": obsdb.HoleGap,
-		"/api/runs/r_off/transcript?step=1": obsdb.HoleStripped,
+		"/v1/runs/r_gap/transcript?step=0": obsdb.HoleGap,
+		"/v1/runs/r_off/transcript?step=1": obsdb.HoleStripped,
 	} {
 		resp, err := http.Get(ts.URL + path)
 		if err != nil {
@@ -186,7 +186,7 @@ func TestFromStepAtTheStepCount(t *testing.T) {
 		count int
 		badge string
 	}{"failed": {5, ""}, "budget": {5, "derived"}} {
-		body := fetchJSON(t, ts, "/api/runs/r_"+shape+"/transcript?step=2", nil)
+		body := fetchJSON(t, ts, "/v1/runs/r_"+shape+"/transcript?step=2", nil)
 		var doc transcriptAsOfT
 		decode(t, body, &doc)
 		if len(doc.Messages) != want.count || doc.Badge != want.badge || doc.CompactedAt != nil ||

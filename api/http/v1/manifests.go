@@ -10,7 +10,7 @@ import (
 	"github.com/weftbase/weftbase/obsdb"
 )
 
-// The manifest store's route (U27; UX-E-16): GET /api/manifests/{hash}
+// The manifest store's route (U27; UX-E-16): GET /v1/manifests/{hash}
 // answers the agent configuration a run's manifest_hash names — the
 // one-agent core.Manifest document stored under that sha256 — after it
 // stopped being the current one. The server writes the store from the
@@ -21,25 +21,12 @@ import (
 // meta.capabilities_off says why when not.
 //
 // Retention: manifests are kept forever — one small row per distinct
-// agent configuration; DELETE /api/runs/{id}, DELETE
-// /api/sessions/{id} and Retain's sweeper never touch them, so a run
+// agent configuration; DELETE /v1/runs/{id}, DELETE
+// /v1/sessions/{id} and Retain's sweeper never touch them, so a run
 // that remains always resolves its hash (obsdb.ManifestStore).
-
-const offManifests = "the database cannot store manifests: its obsdb.DB does not implement obsdb.ManifestStore (obsdb/sqlite and obsdb/clickhouse both do)"
 
 // manifestFileWriteTimeout bounds New's write of the file's agents.
 const manifestFileWriteTimeout = 5 * time.Second
-
-// manifestsGroup is GET /api/manifests/{hash}.
-func manifestsGroup() routeGroup {
-	return routeGroup{
-		name:       "manifests",
-		capability: "manifests",
-		register: func(mux *http.ServeMux, s *Server) {
-			mux.HandleFunc("GET /api/manifests/{hash}", s.serveStoredManifest)
-		},
-	}
-}
 
 // manifestStore is the DB's manifest store; nil when it has none.
 func (s *Server) manifestStore() obsdb.ManifestStore {
@@ -72,7 +59,7 @@ func (s *Server) storeFileManifest() {
 	}
 }
 
-// storedManifestView is GET /api/manifests/{hash}'s answer.
+// storedManifestView is GET /v1/manifests/{hash}'s answer.
 type storedManifestView struct {
 	ManifestHash string `json:"manifest_hash"`
 	// Agent is the document's agent name ("" when it names none).
@@ -81,7 +68,7 @@ type storedManifestView struct {
 	Source    string    `json:"source"`
 	FirstSeen time.Time `json:"first_seen"`
 	// CurrentManifestHash is the hash the current manifest
-	// (/api/manifest's source, manifest_check's) gives this agent; ""
+	// (/v1/manifest's source, manifest_check's) gives this agent; ""
 	// when the current manifest names no such agent. Equal to
 	// ManifestHash when the run's configuration is the current one.
 	CurrentManifestHash string `json:"current_manifest_hash"`
@@ -93,7 +80,12 @@ type storedManifestView struct {
 // serveStoredManifest answers one stored manifest.
 func (s *Server) serveStoredManifest(w http.ResponseWriter, r *http.Request) {
 	hash := r.PathValue("hash")
-	m, found, err := s.manifestStore().Manifest(r.Context(), hash)
+	ms := s.manifestStore()
+	if ms == nil {
+		notImplemented(w, r, "the database cannot store manifests")
+		return
+	}
+	m, found, err := ms.Manifest(r.Context(), hash)
 	if err != nil {
 		dbError(w, r, "manifest", hash, err)
 		return

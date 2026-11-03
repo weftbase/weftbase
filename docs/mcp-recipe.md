@@ -369,12 +369,12 @@ steps.
 
 ## 6. Troubleshooting
 
-**`no server answers /api/meta: weftbase not reachable at
-http://127.0.0.1:7331: Get "http://127.0.0.1:7331/api/meta": dial tcp
+**`no server answers /v1/meta: weftbase not reachable at
+http://127.0.0.1:7331: Get "http://127.0.0.1:7331/v1/meta": dial tcp
 127.0.0.1:7331: connect: connection refused (weftbase dev starts one;
 --url or WEFTBASE_URL points at another); the next call looks again
 (WEFTBASE_URL, the discovery file): no restart needed`** as a tool's
-error (and a `level=WARN … no server answers /api/meta yet; tools will
+error (and a `level=WARN … no server answers /v1/meta yet; tools will
 retry per call` line in the client's MCP log at startup) — no server is
 running there. `weftbase mcp` does not exit: it serves, and the next tool
 call after a failure looks again — with no `--url`, it re-reads
@@ -387,7 +387,7 @@ file was not used: check that `WEFTBASE_DISCOVERY` is not `off` and
 `WEFTBASE_URL` is unset in the environment the client starts `weft
 mcp` in (Claude Code passes its own environment, plus `-e` pairs).
 
-**`weft: mcp: no server answers /api/meta: GET /api/meta: 401 the API
+**`weft: mcp: no server answers /v1/meta: GET /v1/meta: 401 the API
 requires a token: Authorization: Bearer <token> (--token or
 WEFTBASE_TOKEN)`** — that server walls its API
 and no token reached it. Give `-e WEFTBASE_TOKEN=…` or `--token`; with

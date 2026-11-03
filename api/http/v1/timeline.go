@@ -15,10 +15,10 @@ import (
 )
 
 // The session timeline (U12.2; UX-B-01, UX-B-02, UX-S3-01; A3, D6):
-// GET /api/sessions/{id}/timeline — the session's turns in order beside
+// GET /v1/sessions/{id}/timeline — the session's turns in order beside
 // its marks (thread's state-log records and compaction markers, in
 // record-time order, each placed on a lane) — and GET
-// /api/sessions/{id}/entries, the same records as a paged list. Both
+// /v1/sessions/{id}/entries, the same records as a paged list. Both
 // read obsdb only: the turns from DB.Session, the marks from the
 // session_events index (obsdb.SessionEventReader). The marks are an
 // index of the session file, never evidence (ADR 0021 §5).
@@ -167,7 +167,7 @@ type timelineLane struct {
 	Marks int    `json:"marks"`
 }
 
-// timelineDoc is GET /api/sessions/{id}/timeline: the session's
+// timelineDoc is GET /v1/sessions/{id}/timeline: the session's
 // identity, its turns (every one, in turn order), its marks (record
 // time order, at most timelineMarkCap), the lanes with their counts
 // (the six always, other when a mark sits on it), the session's whole
@@ -198,7 +198,7 @@ type timelineDoc struct {
 	Summarizer *summarizerCost `json:"summarizer,omitempty"`
 }
 
-// entriesDoc is GET /api/sessions/{id}/entries: one page of the
+// entriesDoc is GET /v1/sessions/{id}/entries: one page of the
 // session's marks in record-time order (offset, limit ≤ 1000), the
 // session's whole count, the next page's offset (null on the last) and
 // the holes the page carries (the timeline's, but truncated: a page is
@@ -444,12 +444,12 @@ func (mb *markBuilder) holes(runs []obsdb.RunRow, all, truncatedAt int, page boo
 	if truncatedAt > 0 {
 		hs[obsdb.HoleTruncated] = stepHole{Hole: string(obsdb.HoleTruncated), Cause: string(obsdb.CauseResponseCap),
 			Reason: fmt.Sprintf("the session has %d marks; this response reads the first %d — nothing was lost", all, truncatedAt),
-			Fix:    fmt.Sprintf("page the rest: GET /api/sessions/{id}/entries?offset=%d", truncatedAt)}
+			Fix:    fmt.Sprintf("page the rest: GET /v1/sessions/{id}/entries?offset=%d", truncatedAt)}
 	}
 	return hs.list()
 }
 
-// serveSessionTimeline answers api/sessions/{id}/timeline.
+// serveSessionTimeline answers /v1/sessions/{id}/timeline.
 func (s *Server) serveSessionTimeline(w http.ResponseWriter, r *http.Request, id string) {
 	er, ok := s.sessionEventsFor(w, r)
 	if !ok {
@@ -576,7 +576,7 @@ func (s *Server) lookUpForks(r *http.Request, doc *timelineDoc) {
 	}
 }
 
-// serveSessionEntries answers api/sessions/{id}/entries?offset=&limit=.
+// serveSessionEntries answers /v1/sessions/{id}/entries?offset=&limit=.
 func (s *Server) serveSessionEntries(w http.ResponseWriter, r *http.Request, id string) {
 	er, ok := s.sessionEventsFor(w, r)
 	if !ok {

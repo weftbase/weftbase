@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	v1 "github.com/weftbase/weftbase/api/http/v1"
+	"github.com/weftbase/weftbase"
 	"github.com/weftbase/weftbase/internal/listen"
 )
 
@@ -60,7 +60,7 @@ func occupy(t testing.TB, a string) {
 }
 
 // serveServer serves a server on a over path (token "" = none) and
-// returns once it has answered GET /api/meta: a fresh server's first
+// returns once it has answered GET /v1/meta: a fresh server's first
 // meta does one-time work (the embedded Console's version stamp is read
 // on first use — past 500 ms under -race on a loaded CI runner), and
 // the tests pin the port policy's verdicts, not a cold start's speed.
@@ -70,16 +70,21 @@ func serveServer(t testing.TB, a, path, token string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	opts := []v1.Option{v1.Base("/"), v1.Open(path)}
+	opts := []weftbase.Option{weftbase.DataDir(filepath.Dir(path)), weftbase.TraceDB("sqlite://" + path), weftbase.Console(false)}
 	if token != "" {
-		opts = append(opts, v1.Token(token))
+		opts = append(opts, weftbase.BootstrapKey(token))
+	} else {
+		opts = append(opts, weftbase.Open())
 	}
-	srv := v1.New(opts...)
+	srv, err := weftbase.New(opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
 	hs := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: time.Second}
 	go func() { _ = hs.Serve(ln) }()
-	t.Cleanup(func() { _ = hs.Close(); _ = srv.Close() })
+	t.Cleanup(func() { _ = hs.Close(); _ = srv.Shutdown(context.Background()) })
 	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		req, err := http.NewRequest(http.MethodGet, "http://"+a+"/api/meta", nil)
+		req, err := http.NewRequest(http.MethodGet, "http://"+a+"/v1/meta", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -94,7 +99,7 @@ func serveServer(t testing.TB, a, path, token string) {
 			}
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the server on %s never answered /api/meta: %v", a, err)
+			t.Fatalf("the server on %s never answered /v1/meta: %v", a, err)
 		}
 	}
 }
@@ -129,7 +134,7 @@ func TestFreeAddressIsBound(t *testing.T) {
 // or on loopback with no token — is reused, nothing is bound, and the
 // verdict names its URL and pid.
 func TestSameDBIsReused(t *testing.T) {
-	for _, token := range []string{"tok", ""} {
+	for _, token := range []string{"wb_sk_test_tok", ""} {
 		t.Run("token="+token, func(t *testing.T) {
 			host, port := freeBase(t, 2)
 			path := filepath.Join(t.TempDir(), "weft.db")
@@ -170,17 +175,17 @@ func TestBusyAddressMovesOn(t *testing.T) {
 			t.Cleanup(func() { _ = hs.Close() })
 		}, listen.Request{DBPath: "/x/weft.db"}, "not a weftbase server"},
 		{"a server on another database", func(t *testing.T, a string) {
-			serveServer(t, a, filepath.Join(t.TempDir(), "other.db"), "tok")
-		}, listen.Request{DBPath: "/x/weft.db", Token: "tok"}, "a server on another database, "},
+			serveServer(t, a, filepath.Join(t.TempDir(), "other.db"), "wb_sk_test_tok")
+		}, listen.Request{DBPath: "/x/weft.db", Token: "wb_sk_test_tok"}, "a server on another database, "},
 		{"a server with another token", func(t *testing.T, a string) {
-			serveServer(t, a, filepath.Join(t.TempDir(), "weft.db"), "theirs")
-		}, listen.Request{DBPath: "/x/weft.db", Token: "mine"}, "a server with another token"},
+			serveServer(t, a, filepath.Join(t.TempDir(), "weft.db"), "wb_sk_test_theirs")
+		}, listen.Request{DBPath: "/x/weft.db", Token: "wb_sk_test_mine"}, "a server with another token"},
 		{"a server that requires a token", func(t *testing.T, a string) {
-			serveServer(t, a, filepath.Join(t.TempDir(), "weft.db"), "theirs")
+			serveServer(t, a, filepath.Join(t.TempDir(), "weft.db"), "wb_sk_test_theirs")
 		}, listen.Request{DBPath: "/x/weft.db"}, "set WEFTBASE_TOKEN"},
 		{"a fileless command database never matches", func(t *testing.T, a string) {
-			serveServer(t, a, filepath.Join(t.TempDir(), "weft.db"), "tok")
-		}, listen.Request{Token: "tok"}, "a server on another database"},
+			serveServer(t, a, filepath.Join(t.TempDir(), "weft.db"), "wb_sk_test_tok")
+		}, listen.Request{Token: "wb_sk_test_tok"}, "a server on another database"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			host, port := freeBase(t, 2)
@@ -209,8 +214,8 @@ func TestPinnedBusyIsAnError(t *testing.T) {
 	host, port := freeBase(t, 2)
 	path := filepath.Join(t.TempDir(), "weft.db")
 	// Even the same server is not reused: a pin is a pin.
-	serveServer(t, addr(host, port), path, "tok")
-	c, err := choose(t, listen.Request{Addr: addr(host, port), Pinned: true, Span: 2, DBPath: path, Token: "tok"})
+	serveServer(t, addr(host, port), path, "wb_sk_test_tok")
+	c, err := choose(t, listen.Request{Addr: addr(host, port), Pinned: true, Span: 2, DBPath: path, Token: "wb_sk_test_tok"})
 	if err == nil || !strings.Contains(err.Error(), addr(host, port)) || !strings.Contains(err.Error(), "pinned") || c.Listener != nil || c.Reuse {
 		t.Errorf("pinned busy: %+v, %v; want an error naming %s", c, err, addr(host, port))
 	}
@@ -242,8 +247,8 @@ func TestSameFileThroughASymlink(t *testing.T) {
 		t.Skip("no symlinks here:", err)
 	}
 	host, port := freeBase(t, 2)
-	serveServer(t, addr(host, port), path, "tok")
-	c, err := choose(t, listen.Request{Addr: addr(host, port), Span: 2, DBPath: filepath.Join(link, "weft.db"), Token: "tok"})
+	serveServer(t, addr(host, port), path, "wb_sk_test_tok")
+	c, err := choose(t, listen.Request{Addr: addr(host, port), Span: 2, DBPath: filepath.Join(link, "weft.db"), Token: "wb_sk_test_tok"})
 	if err != nil || !c.Reuse {
 		t.Errorf("symlinked db path: %+v, %v; want a reuse", c, err)
 	}

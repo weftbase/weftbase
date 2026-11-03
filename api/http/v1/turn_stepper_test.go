@@ -13,7 +13,7 @@ import (
 )
 
 // TestRunsTurnBounds (U15.1-fix, UX-B-21): a turn page's stepper reads
-// its neighbours from GET /api/runs with session, turn_below /
+// its neighbours from GET /v1/runs with session, turn_below /
 // turn_above and limit=1 — one row each, whatever the session's length
 // (a 1,000-turn session here), and the pages' totals place the turn
 // ("turn 500 of 1000") — never the whole session document.
@@ -38,7 +38,7 @@ func TestRunsTurnBounds(t *testing.T) {
 	h := Handler(DB(db))
 	read := func(q string) (ids []string, total int) {
 		t.Helper()
-		code, _, body := get(t, h, "/weftbase/api/runs?session="+sid+"&limit=1&"+q)
+		code, _, body := get(t, h, "/weftbase/v1/runs?session="+sid+"&limit=1&"+q)
 		if code != http.StatusOK {
 			t.Fatalf("runs?%s: %d %s", q, code, body)
 		}
@@ -68,7 +68,7 @@ func TestRunsTurnBounds(t *testing.T) {
 		t.Errorf("turn_below=1 = %v (total %d), want none", first, total)
 	}
 	for _, q := range []string{"turn_below=0", "turn_above=x", "oldest=maybe"} {
-		if code, _, _ := get(t, h, "/weftbase/api/runs?session="+sid+"&"+q); code != http.StatusBadRequest {
+		if code, _, _ := get(t, h, "/weftbase/v1/runs?session="+sid+"&"+q); code != http.StatusBadRequest {
 			t.Errorf("runs?%s = %d, want 400", q, code)
 		}
 	}

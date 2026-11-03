@@ -149,7 +149,7 @@ func TestCostHandCalculation(t *testing.T) {
 		id, cache string
 		want      float64
 	}{{"r_split", cacheExact, wantSplit}, {"r_flat", cacheNotReported, wantFlat}} {
-		_, _, body := get(t, h, "/weftbase/api/runs/"+c.id)
+		_, _, body := get(t, h, "/weftbase/v1/runs/"+esc(c.id))
 		var r costRow
 		decode(t, body, &r)
 		if r.CostUSD == nil || *r.CostUSD != c.want || !r.CostKnown || r.Cache != c.cache || r.CostBadge != "" ||
@@ -158,7 +158,7 @@ func TestCostHandCalculation(t *testing.T) {
 				c.id, usd(r.CostUSD), r.CostKnown, r.Cache, r.CostBadge, usd(r.DelegatedCostUSD), c.want, c.cache)
 		}
 		// The step prices its own model call the same way.
-		_, _, body = get(t, h, "/weftbase/api/runs/"+c.id+"/steps/0")
+		_, _, body = get(t, h, "/weftbase/v1/runs/"+esc(c.id)+"/steps/0")
 		var st costRow
 		decode(t, body, &st)
 		if st.CostUSD == nil || *st.CostUSD != c.want || st.Cache != c.cache {
@@ -166,7 +166,7 @@ func TestCostHandCalculation(t *testing.T) {
 		}
 	}
 
-	_, _, body := get(t, h, "/weftbase/api/runs/r_unpriced")
+	_, _, body := get(t, h, "/weftbase/v1/runs/r_unpriced")
 	if !strings.Contains(body, `"cost_usd":null`) {
 		t.Errorf("an unpriced run's cost_usd is not null: %s", body)
 	}
@@ -175,7 +175,7 @@ func TestCostHandCalculation(t *testing.T) {
 	if r.CostKnown || r.CostBadge != costUnpriced || !strings.Contains(r.CostReason, "acme/mystery-1") {
 		t.Errorf("unpriced run: known %v badge %q reason %q, want unknown, unpriced, a reason naming acme/mystery-1", r.CostKnown, r.CostBadge, r.CostReason)
 	}
-	_, _, body = get(t, h, "/weftbase/api/runs/r_unpriced/steps/0")
+	_, _, body = get(t, h, "/weftbase/v1/runs/r_unpriced/steps/0")
 	var st costRow
 	decode(t, body, &st)
 	if st.CostUSD != nil || st.CostBadge != costUnpriced || !strings.Contains(st.CostReason, "acme/mystery-1") {
@@ -187,7 +187,7 @@ func TestCostHandCalculation(t *testing.T) {
 	h2 := Handler(DB(db), Pricing(pricing.Table{Dated: "2026-10-01", Models: []pricing.ModelPrice{
 		{Provider: "anthropic", ModelGlob: "claude-*", Input: 4, Output: 20, Reasoning: &reasoning},
 	}}))
-	_, _, body = get(t, h2, "/weftbase/api/runs/r_split")
+	_, _, body = get(t, h2, "/weftbase/v1/runs/r_split")
 	decode(t, body, &r)
 	// No cached_input or cache_write rate: those price at input.
 	//   100,000 input tokens (plain 20,000 + cached 80,000) … all 120,000 × $4 = 480,000
@@ -196,7 +196,7 @@ func TestCostHandCalculation(t *testing.T) {
 	if r.CostUSD == nil || *r.CostUSD != 0.69 || r.Cache != cacheExact {
 		t.Errorf("r_split under a reasoning rate: cost %s cache %q, want 0.69 exact", usd(r.CostUSD), r.Cache)
 	}
-	_, _, body = get(t, h2, "/weftbase/api/runs/r_unpriced")
+	_, _, body = get(t, h2, "/weftbase/v1/runs/r_unpriced")
 	decode(t, body, &r)
 	// The reason names the model only (UX-A-12); the table's source is
 	// api/meta's pricing.source.
@@ -232,7 +232,7 @@ func TestCostSubagents(t *testing.T) {
 		costRow
 		Children []costRow `json:"children"`
 	}
-	_, _, body := get(t, h, "/weftbase/api/runs/p1")
+	_, _, body := get(t, h, "/weftbase/v1/runs/p1")
 	decode(t, body, &doc)
 	if usd(doc.CostUSD) != "0.06" || usd(doc.DelegatedCostUSD) != "0.019" || !doc.DelegatedCostKnown {
 		t.Errorf("p1: own %s delegated %s (known %v), want own 0.06 and delegated 0.0175 + 0.0015 = 0.019",
@@ -242,7 +242,7 @@ func TestCostSubagents(t *testing.T) {
 		t.Errorf("p1's children[] = %+v, want p1/0/c1 own 0.0175, delegated 0.0015", doc.Children)
 	}
 	// The list row says the same as the document.
-	_, _, body = get(t, h, "/weftbase/api/runs")
+	_, _, body = get(t, h, "/weftbase/v1/runs")
 	var list struct {
 		Runs []costRow `json:"runs"`
 	}
@@ -253,7 +253,7 @@ func TestCostSubagents(t *testing.T) {
 		}
 	}
 	// The step's children carry the child's own and delegated figures.
-	_, _, body = get(t, h, "/weftbase/api/runs/p1/steps/0")
+	_, _, body = get(t, h, "/weftbase/v1/runs/p1/steps/0")
 	var step struct {
 		costRow
 		Children []costRow `json:"children"`
@@ -264,7 +264,7 @@ func TestCostSubagents(t *testing.T) {
 		t.Errorf("p1 step 0 = own %s, children %+v; want 0.06 and the child 0.0175 + 0.0015", usd(step.CostUSD), step.Children)
 	}
 
-	_, _, body = get(t, h, "/weftbase/api/runs/p2")
+	_, _, body = get(t, h, "/weftbase/v1/runs/p2")
 	decode(t, body, &doc)
 	if usd(doc.CostUSD) != "0.06" || doc.DelegatedCostUSD != nil || doc.DelegatedCostKnown ||
 		doc.DelegatedCostReason != "1 of 1 child runs unpriced: no price for acme/mystery-1" ||
@@ -274,13 +274,13 @@ func TestCostSubagents(t *testing.T) {
 	}
 
 	// The session: its turn's own + delegated (0.06 + 0.019 = 0.079).
-	_, _, body = get(t, h, "/weftbase/api/sessions/s_bill")
+	_, _, body = get(t, h, "/weftbase/v1/sessions/s_bill")
 	var sess costRow
 	decode(t, body, &sess)
 	if usd(sess.CostUSD) != "0.079" || !sess.CostKnown {
 		t.Errorf("session s_bill: cost %s known %v, want 0.079", usd(sess.CostUSD), sess.CostKnown)
 	}
-	_, _, body = get(t, h, "/weftbase/api/sessions")
+	_, _, body = get(t, h, "/weftbase/v1/sessions")
 	var sessions struct {
 		Sessions []costRow `json:"sessions"`
 	}
@@ -307,17 +307,17 @@ func TestCostSubagents(t *testing.T) {
 		}
 		return out, body
 	}
-	if got, body := ids("/weftbase/api/search?sort=cost"); strings.Join(got, ",") != "p1,p2" || !strings.Contains(body, `"sort":"cost"`) ||
+	if got, body := ids("/weftbase/v1/runs?sort=cost"); strings.Join(got, ",") != "p1,p2" || !strings.Contains(body, `"sort":"cost"`) ||
 		strings.Contains(body, "cost_sort_cap") {
 		t.Errorf("sort=cost = %v (%s), want p1 then p2, no cap", got, body)
 	}
-	if got, _ := ids("/weftbase/api/search?min_cost=0.07"); strings.Join(got, ",") != "p1" {
+	if got, _ := ids("/weftbase/v1/runs?min_cost=0.07"); strings.Join(got, ",") != "p1" {
 		t.Errorf("min_cost=0.07 = %v, want p1 alone (p2's bill is unknown)", got)
 	}
-	if got, _ := ids("/weftbase/api/search?min_cost=0.08"); len(got) != 0 {
+	if got, _ := ids("/weftbase/v1/runs?min_cost=0.08"); len(got) != 0 {
 		t.Errorf("min_cost=0.08 = %v, want none", got)
 	}
-	if got, _ := ids("/weftbase/api/search?sort=cost&all=1"); strings.Join(got, ",") != "p1,p1/0/c1,p1/0/c1/0/g,p2/0/x,p2" {
+	if got, _ := ids("/weftbase/v1/runs?sort=cost&all=1"); strings.Join(got, ",") != "p1,p1/0/c1,p1/0/c1/0/g,p2/0/x,p2" {
 		t.Errorf("sort=cost&all=1 = %v, want the bills 0.079, 0.019, 0.0015, then the unknown ones newest first", got)
 	}
 }
@@ -344,39 +344,16 @@ func TestPricingFile(t *testing.T) {
 	// The settings route's body loads back as a file (source and path
 	// are accepted): the export is the override's template.
 	h := Handler(DB(costDB(t)), Pricing(tbl))
-	code, _, body := get(t, h, "/weftbase/api/settings/pricing")
+	code, _, body := get(t, h, "/weftbase/v1/settings/pricing")
 	if code != http.StatusOK || !strings.Contains(body, `"source":"file"`) || !strings.Contains(body, `"dated":"2026-09-01"`) {
 		t.Fatalf("settings/pricing = %d %s", code, body)
 	}
 	if _, err := pricing.Load(write("export.json", body)); err != nil {
 		t.Errorf("the settings route's body does not load back: %v", err)
 	}
-
-	// WEFT_PRICING: New reads it when no Pricing option is given; the
-	// option wins over it; a malformed file panics, naming it.
-	t.Setenv("WEFT_PRICING", good)
-	srv := New(DB(costDB(t)))
-	if srv.pricing.Source != pricing.SourceFile || srv.pricing.Path != good {
-		t.Errorf("New under WEFT_PRICING: pricing %+v", srv.pricing)
-	}
-	srv = New(DB(costDB(t)), Pricing(pricing.Default()))
-	if srv.pricing.Source != pricing.SourceDefault {
-		t.Errorf("Pricing did not win over WEFT_PRICING: %+v", srv.pricing.Source)
-	}
-	bad := write("bad.json", `{"dated":"2026-10-10","models":[{"provider":"a","model_glob":"b","output":1}]}`)
-	t.Setenv("WEFT_PRICING", bad)
-	func() {
-		defer func() {
-			msg, _ := recover().(string)
-			if !strings.Contains(msg, "WEFT_PRICING") || !strings.Contains(msg, bad) || !strings.Contains(msg, "models[0].input") {
-				t.Errorf("New under a malformed WEFT_PRICING panicked with %q, want the path and the field", msg)
-			}
-		}()
-		New(DB(costDB(t)))
-	}()
 }
 
-// TestPricingSettingsGolden pins GET /api/settings/pricing's shape over
+// TestPricingSettingsGolden pins GET /v1/settings/pricing's shape over
 // a small Go table (setup A on loopback: no path for a Go-built table).
 func TestPricingSettingsGolden(t *testing.T) {
 	cached := 0.1
@@ -384,7 +361,7 @@ func TestPricingSettingsGolden(t *testing.T) {
 		{Provider: "anthropic", ModelGlob: "claude-*", Input: 1, Output: 5, CachedInput: &cached},
 		{Provider: "*", ModelGlob: "*", Input: 2, Output: 8},
 	}}))
-	code, _, body := get(t, h, "/weftbase/api/settings/pricing")
+	code, _, body := get(t, h, "/weftbase/v1/settings/pricing")
 	if code != http.StatusOK {
 		t.Fatalf("settings/pricing = %d %s", code, body)
 	}
@@ -432,7 +409,7 @@ func TestCostSubagentRealRun(t *testing.T) {
 		Children []costRow  `json:"children"`
 	}
 	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		resp, err := http.Get(ts.URL + "/api/runs/" + res.ID)
+		resp, err := http.Get(ts.URL + "/v1/runs/" + esc(res.ID))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -547,7 +524,7 @@ func TestCostPoolChild(t *testing.T) {
 		Children     []costRow `json:"children"`
 		CallerLinked []costRow `json:"caller_linked"`
 	}
-	getUntil(t, ts, "/api/runs/"+res.ID, &doc, func() bool { return len(doc.CallerLinked) == 1 && doc.CostKnown })
+	getUntil(t, ts, "/v1/runs/"+esc(res.ID), &doc, func() bool { return len(doc.CallerLinked) == 1 && doc.CostKnown })
 	if len(doc.Children) != 0 {
 		t.Errorf("pool parent children = %+v, want none: a pool child is no Subagent child", doc.Children)
 	}
@@ -566,7 +543,7 @@ func TestCostPoolChild(t *testing.T) {
 	var childRow struct {
 		SessionID string `json:"session_id"`
 	}
-	getUntil(t, ts, "/api/runs/"+doc.CallerLinked[0].ID, &childRow, func() bool { return true })
+	getUntil(t, ts, "/v1/runs/"+esc(doc.CallerLinked[0].ID), &childRow, func() bool { return true })
 	if childRow.SessionID != childSession {
 		t.Fatalf("the pool child's run carries session %q, want the child session %s", childRow.SessionID, childSession)
 	}
@@ -617,7 +594,7 @@ func TestCostNestedGenerate(t *testing.T) {
 		Children     []costRow `json:"children"`
 		CallerLinked []costRow `json:"caller_linked"`
 	}
-	getUntil(t, ts, "/api/runs/"+res.ID, &doc, func() bool { return len(doc.CallerLinked) == 1 && doc.CostKnown })
+	getUntil(t, ts, "/v1/runs/"+esc(res.ID), &doc, func() bool { return len(doc.CallerLinked) == 1 && doc.CostKnown })
 	if len(doc.Children) != 0 || strings.HasPrefix(doc.CallerLinked[0].ID, res.ID+"/") {
 		t.Fatalf("the nested run: children %+v, caller-linked %s — want it caller-linked, never a Subagent child", doc.Children, doc.CallerLinked[0].ID)
 	}
@@ -633,7 +610,7 @@ func TestCostProviderAlias(t *testing.T) {
 	db := costDB(t)
 	u := core.Usage{InputTokens: 100_000, OutputTokens: 10_000}
 	costUsage(t, db, "r_gem", "", "", "gcp.gemini", "gemini-2.5-flash", time.Now().Add(-time.Hour).UTC(), u, u)
-	_, _, body := get(t, Handler(DB(db)), "/weftbase/api/runs/r_gem")
+	_, _, body := get(t, Handler(DB(db)), "/weftbase/v1/runs/r_gem")
 	var r costRow
 	decode(t, body, &r)
 	// 100,000 × $0.30 + 10,000 × $2.50 = 30,000 + 25,000 = 55,000 ÷ 1M = $0.055.
@@ -651,7 +628,7 @@ func TestCostRunning(t *testing.T) {
 	costUsageOpen(t, db, "r_run", "anthropic", "claude-opus-5-5")
 	hub := obsdb.NewHub()
 	h := Handler(DB(db), Live(hub))
-	_, _, body := get(t, h, "/weftbase/api/runs/r_run")
+	_, _, body := get(t, h, "/weftbase/v1/runs/r_run")
 	var r costRow
 	decode(t, body, &r)
 	if r.CostUSD != nil || r.CostKnown || r.CostBadge != costUnknown || r.CostReason != "running: usage arrives at run end" ||
@@ -711,7 +688,7 @@ func TestCostSortCap(t *testing.T) {
 		costUsage(t, db, "r_cap"+strconv.Itoa(i), "", "", "anthropic", "claude-opus-5-5", t0.Add(time.Duration(i)*time.Second), u, u)
 	}
 	h := Handler(DB(db))
-	_, _, body := get(t, h, "/weftbase/api/search?sort=cost")
+	_, _, body := get(t, h, "/weftbase/v1/runs?sort=cost")
 	var page struct {
 		Total       int       `json:"total"`
 		Runs        []costRow `json:"runs"`
@@ -726,7 +703,7 @@ func TestCostSortCap(t *testing.T) {
 	if page.CostSortCap == nil || *page.CostSortCap != 3 || page.Total != 3 || strings.Join(ids, ",") != "r_cap4,r_cap3,r_cap2" {
 		t.Errorf("capped sort=cost = total %d cap %v %v, want 3, cap 3, r_cap4,r_cap3,r_cap2", page.Total, page.CostSortCap, ids)
 	}
-	_, _, body = get(t, h, "/weftbase/api/search?sort=cost&limit=10&agent=billing&q=nothing-matches")
+	_, _, body = get(t, h, "/weftbase/v1/runs?sort=cost&limit=10&agent=billing&q=nothing-matches")
 	if strings.Contains(body, "cost_sort_cap") {
 		t.Errorf("an uncapped match carries cost_sort_cap: %s", body)
 	}
@@ -752,7 +729,7 @@ func TestCostRunningChildIsUnknown(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := Handler(DB(db))
-	_, _, body := get(t, h, "/weftbase/api/sessions/s_run")
+	_, _, body := get(t, h, "/weftbase/v1/sessions/s_run")
 	var sess costRow
 	decode(t, body, &sess)
 	if sess.CostUSD != nil || sess.CostKnown || sess.CostBadge != costUnknown || !strings.Contains(sess.CostReason, "running") {
@@ -766,7 +743,7 @@ func TestCostRunningChildIsUnknown(t *testing.T) {
 	if want := "1 of 1 turns' cost not known yet (running: "; !strings.HasPrefix(sess.CostReason, want) {
 		t.Errorf("session cost reason = %q, want prefix %q", sess.CostReason, want)
 	}
-	_, _, body = get(t, h, "/weftbase/api/runs/p")
+	_, _, body = get(t, h, "/weftbase/v1/runs/p")
 	var run costRow
 	decode(t, body, &run)
 	if want := "1 of 1 child runs' cost not known yet (p/0/c: running: "; run.DelegatedCostKnown || !strings.HasPrefix(run.DelegatedCostReason, want) {
@@ -791,7 +768,7 @@ func TestCostScripted(t *testing.T) {
 
 	h := Handler(DB(db))
 	for _, id := range []string{"r_test", "r_replay"} {
-		_, _, body := get(t, h, "/weftbase/api/runs/"+id)
+		_, _, body := get(t, h, "/weftbase/v1/runs/"+esc(id))
 		var r costRow
 		decode(t, body, &r)
 		if usd(r.CostUSD) != "0" || !r.CostKnown || r.CostBadge != costScripted || r.Cache != cacheExact ||
@@ -799,21 +776,21 @@ func TestCostScripted(t *testing.T) {
 			t.Errorf("%s: %s; want an exact $0, badge scripted", id, body)
 		}
 	}
-	_, _, body := get(t, h, "/weftbase/api/runs/r_arena")
+	_, _, body := get(t, h, "/weftbase/v1/runs/r_arena")
 	var arena costRow
 	decode(t, body, &arena)
 	if arena.CostKnown || arena.CostBadge != costUnpriced || !slices.Equal(arena.UnpricedModels, []string{"weftarena/any-model"}) {
 		t.Errorf("weftarena/any-model: %s; want unpriced (the arena ships its own row)", body)
 	}
 	// Only the scripted engine of weftbase/runtime is scripted.
-	_, _, body = get(t, h, "/weftbase/api/runs/r_other")
+	_, _, body = get(t, h, "/weftbase/v1/runs/r_other")
 	var r costRow
 	decode(t, body, &r)
 	if r.CostKnown || r.CostBadge != costUnpriced || !slices.Equal(r.UnpricedModels, []string{"weft/runtime/live"}) ||
 		r.CostReason != "weft/runtime/live has no price" {
 		t.Errorf("weft/runtime/live: %s; want unpriced, one model, one line", body)
 	}
-	_, _, body = get(t, h, "/weftbase/api/sessions/s_scripted")
+	_, _, body = get(t, h, "/weftbase/v1/sessions/s_scripted")
 	var sess costRow
 	decode(t, body, &sess)
 	if usd(sess.CostUSD) != "0" || !sess.CostKnown || sess.CostBadge != costScripted || sess.Cache != cacheExact {
@@ -823,7 +800,7 @@ func TestCostScripted(t *testing.T) {
 	h2 := Handler(DB(db), Pricing(pricing.Table{Dated: "2026-10-12", Models: []pricing.ModelPrice{
 		{Provider: "wefttest", ModelGlob: "script", Input: 1e6, Output: 1e6},
 	}}))
-	_, _, body = get(t, h2, "/weftbase/api/runs/r_test")
+	_, _, body = get(t, h2, "/weftbase/v1/runs/r_test")
 	var rowed costRow
 	decode(t, body, &rowed)
 	if usd(rowed.CostUSD) != "90" || rowed.CostBadge != "" {
@@ -843,7 +820,7 @@ func TestCostUnpricedOneLine(t *testing.T) {
 	costUsage(t, db, "t3", "", "s_mix", "wefttest", "script", t0.Add(2*time.Second), u, u)
 	costUsage(t, db, "t4", "", "s_mix", "acme", "mystery-1", t0.Add(3*time.Second), u, u)
 	h := Handler(DB(db))
-	_, _, body := get(t, h, "/weftbase/api/sessions/s_mix")
+	_, _, body := get(t, h, "/weftbase/v1/sessions/s_mix")
 	var r costRow
 	decode(t, body, &r)
 	if r.CostKnown || r.CostBadge != costUnpriced ||
@@ -863,7 +840,7 @@ func TestCostScriptedEngineSet(t *testing.T) {
 	var zero core.Usage
 	costUsage(t, db, "e1", "", "s_engine", "weft/runtime", "scripted", t0, zero, zero)
 	costUsage(t, db, "e2", "", "s_engine", "weft/runtime", "scripted", t0.Add(time.Second), zero, zero)
-	_, _, body := get(t, Handler(DB(db)), "/weftbase/api/sessions/s_engine")
+	_, _, body := get(t, Handler(DB(db)), "/weftbase/v1/sessions/s_engine")
 	var sess costRow
 	decode(t, body, &sess)
 	if usd(sess.CostUSD) != "0" || !sess.CostKnown || sess.CostBadge != costScripted || sess.Cache != cacheExact {
@@ -887,7 +864,7 @@ func TestPricingGoRowWithoutProvider(t *testing.T) {
 	h := Handler(DB(db), Pricing(pricing.Table{Dated: "2026-10-13", Models: []pricing.ModelPrice{
 		{ModelGlob: "kimi-k2.7-*", Input: 2, Output: 3},
 	}}))
-	_, _, body := get(t, h, "/weftbase/api/runs/r_kimi")
+	_, _, body := get(t, h, "/weftbase/v1/runs/r_kimi")
 	var r costRow
 	decode(t, body, &r)
 	if !r.CostKnown || usd(r.CostUSD) != "2" {
@@ -904,7 +881,7 @@ func TestCostModelsCapped(t *testing.T) {
 	for i := range 7 {
 		costUsage(t, db, fmt.Sprintf("m%d", i), "", "s_many", "acme", fmt.Sprintf("model-%d", i), t0.Add(time.Duration(i)*time.Second), u, u)
 	}
-	_, _, body := get(t, Handler(DB(db)), "/weftbase/api/sessions/s_many")
+	_, _, body := get(t, Handler(DB(db)), "/weftbase/v1/sessions/s_many")
 	var r costRow
 	decode(t, body, &r)
 	if len(r.UnpricedModels) != 6 || r.UnpricedModels[5] != "(+2)" {

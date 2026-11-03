@@ -8,12 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -119,136 +116,6 @@ func TestParseArgs(t *testing.T) {
 	}
 }
 
-// waitMeta waits until GET /api/meta answers 200 at addr and returns
-// its body.
-func waitMeta(t *testing.T, addr string, done <-chan int, out *syncBuffer) string {
-	t.Helper()
-	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/api/meta", nil)
-		req.Header.Set("Authorization", "Bearer tok")
-		if resp, err := http.DefaultClient.Do(req); err == nil {
-			b, _ := io.ReadAll(resp.Body)
-			_ = resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				return string(b)
-			}
-		}
-		select {
-		case code := <-done:
-			t.Fatalf("weftbase dev exited %d before serving on %s (stdout %q)", code, addr, out.String())
-		default:
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("weftbase dev never served on %s (stdout %q)", addr, out.String())
-		}
-	}
-}
-
-// stopServer sends SIGTERM and waits for the command's exit code.
-func stopServer(t *testing.T, done <-chan int) int {
-	t.Helper()
-	signalSelf(t, syscall.SIGTERM)
-	select {
-	case code := <-done:
-		return code
-	case <-time.After(10 * time.Second):
-		t.Fatal("weftbase dev never returned after SIGTERM")
-		return -1
-	}
-}
-
-// TestServerCommand pins `weftbase dev` end to end (plan B1): the
-// manifest found upward from the working directory and said in one
-// line after the banner; --open hands the browser the UI link with the
-// token in the fragment once the port is bound — and, on a reuse, the
-// running server's link.
-func TestServerCommand(t *testing.T) {
-	skipWithoutSelfSignal(t)
-	tree := t.TempDir()
-	wd := filepath.Join(tree, "app", "cmd")
-	if err := os.MkdirAll(wd, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	manifest := filepath.Join(tree, "weft.json")
-	if err := os.WriteFile(manifest, []byte(`{"weft":1,"agents":[{"name":"found-upward"}]}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Chdir(wd)
-	t.Setenv("WEFT_MANIFEST", "")
-	t.Setenv("WEFTBASE_ADDR", "")
-	t.Setenv("WEFTBASE_TOKEN", "")
-	db := "sqlite://" + filepath.Join(t.TempDir(), "weft.db")
-
-	for _, c := range []struct {
-		name  string
-		extra []string
-		open  bool
-	}{
-		{"open", []string{"--open"}, true},
-		{"no open", nil, false},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			takeOpened()
-			addr := loop(freeBase(t, 1))
-			var out syncBuffer
-			done := make(chan int, 1)
-			args := append([]string{"dev", "--addr", addr, "--db", db, "--token", "tok"}, c.extra...)
-			go func() { done <- run(args, &out, io.Discard) }()
-			waitMeta(t, addr, done, &out)
-			// The manifest found upward is served.
-			req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/api/manifest", nil)
-			req.Header.Set("Authorization", "Bearer tok")
-			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				t.Fatal(err)
-			}
-			b, _ := io.ReadAll(resp.Body)
-			_ = resp.Body.Close()
-			if !strings.Contains(string(b), "found-upward") {
-				t.Errorf("api/manifest = %d %s, want the weft.json found upward", resp.StatusCode, b)
-			}
-			links := takeOpened()
-			if code := stopServer(t, done); code != 0 {
-				t.Errorf("exit %d after SIGTERM", code)
-			}
-			lines := strings.Split(out.String(), "\n")
-			if len(lines) < 4 || lines[0] != "weftbase: http://"+addr+"/" || lines[1] != "weftbase: token from --token" ||
-				lines[3] != "weftbase: manifest "+manifest+" (found upward)" {
-				t.Errorf("stdout:\n%s\nwant the banner, then the manifest line", out.String())
-			}
-			if c.open {
-				if len(links) != 1 || links[0] != "http://"+addr+"/#token=tok" {
-					t.Errorf("--open handed the browser %q, want the UI with the token in the fragment", links)
-				}
-			} else if len(links) != 0 {
-				t.Errorf("without --open (stdout not a terminal) the browser got %q", links)
-			}
-		})
-	}
-
-	// A second start on the same database is refused (UX-S5a-13): the
-	// running server's URL and pid, exit 1, nothing printed or opened.
-	t.Run("second start refused", func(t *testing.T) {
-		takeOpened()
-		base := freeBase(t, 2)
-		var first syncBuffer
-		stop := startServer(t, db, base, 2, loop(base), &first)
-		defer stop()
-		var second strings.Builder
-		err := serveWith(db, want{addr: loop(base), span: 2}, "tok", &second, afterBoot{notes: []string{"never printed"}, open: true})
-		if err == nil || !strings.Contains(err.Error(), "weftbase already running at http://"+loop(base)+" (pid "+strconv.Itoa(os.Getpid())+")") ||
-			!strings.Contains(err.Error(), "weftbase open --with-token") {
-			t.Errorf("second start = %v, want refused naming the running server", err)
-		}
-		if second.String() != "" {
-			t.Errorf("a refused start printed %q", second.String())
-		}
-		if links := takeOpened(); len(links) != 0 {
-			t.Errorf("a refused start handed the browser %q", links)
-		}
-	})
-}
-
 // ── the API clients, against a scripted server ─────────────────────
 
 type orderIn struct {
@@ -272,15 +139,12 @@ func ordersAgent(m core.Model, opts ...core.Option) *core.Agent {
 // transcript.
 func apiServer(t *testing.T, child bool) (string, []core.Message) {
 	t.Helper()
-	srv, err := newServer("sqlite://"+filepath.Join(t.TempDir(), "weft.db"), "tok")
-	if err != nil {
-		t.Fatal(err)
-	}
+	srv := newServer(t, tok)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(func() { ts.Close(); _ = srv.Close() })
 
 	ctx := context.Background()
-	p, err := exporter.Start(ctx, exporter.Remote(ts.URL, ""), otel.NoGlobal())
+	p, err := exporter.Start(ctx, exporter.Remote(ts.URL, tok), otel.NoGlobal())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +179,7 @@ func apiServer(t *testing.T, child bool) (string, []core.Message) {
 	if err := p.Shutdown(ctx); err != nil {
 		t.Fatal(err)
 	}
-	c := rest.New(ts.URL, "tok")
+	c := rest.New(ts.URL, tok)
 	for id, status := range settle {
 		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
 			b, err := c.Get(ctx, rest.RunPath(id), nil)
@@ -332,14 +196,14 @@ func apiServer(t *testing.T, child bool) (string, []core.Message) {
 
 // weftbase runs the command line and returns stdout, stderr and the exit
 // code.
-func weftbase(args ...string) (string, string, int) {
+func cli(args ...string) (string, string, int) {
 	var out, errb strings.Builder
 	code := run(args, &out, &errb)
 	return out.String(), errb.String(), code
 }
 
 // TestRunsCommand pins `weftbase runs`: one row per run, newest first, from
-// GET /api/runs; --agent and --failed filter on the server, --since and
+// GET /v1/runs; --agent and --failed filter on the server, --since and
 // --limit cut the paging (pinned across a one-run page, so the cursor
 // is followed), --json prints server's rows; the token comes from
 // --token or WEFTBASE_TOKEN and a missing one is server's 401.
@@ -348,7 +212,7 @@ func TestRunsCommand(t *testing.T) {
 	t.Setenv("WEFTBASE_TOKEN", "")
 	t.Setenv("WEFTBASE_URL", "")
 
-	out, errb, code := weftbase("runs", "--url", url, "--token", "tok")
+	out, errb, code := cli("runs", "--url", url, "--token", tok)
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	if code != 0 || len(lines) != 3 || !strings.HasPrefix(lines[0], "ID") ||
 		!strings.HasPrefix(lines[1], "r_fail") || !strings.Contains(lines[1], "triage") || !strings.Contains(lines[1], "failed") ||
@@ -421,10 +285,10 @@ func TestRunsCommand(t *testing.T) {
 	}
 
 	t.Setenv("WEFTBASE_URL", url) // the env mirrors --url
-	t.Setenv("WEFTBASE_TOKEN", "tok")
+	t.Setenv("WEFTBASE_TOKEN", tok)
 	rows := func(args ...string) []string {
 		t.Helper()
-		out, errb, code := weftbase(append([]string{"runs", "--json"}, args...)...)
+		out, errb, code := cli(append([]string{"runs", "--json"}, args...)...)
 		if code != 0 {
 			t.Fatalf("weftbase runs --json %v = exit %d %s", args, code, errb)
 		}
@@ -466,15 +330,15 @@ func TestRunsCommand(t *testing.T) {
 	// A word outside them is a usage error (exit 2) naming the words,
 	// before any request; so is --failed beside another status.
 	for _, args := range [][]string{{"runs", "--status", "bogus"}, {"runs", "--status", "parked", "--failed"}} {
-		if _, errb, code := weftbase(args...); code != 2 || !strings.Contains(errb, "--") {
+		if _, errb, code := cli(args...); code != 2 || !strings.Contains(errb, "--") {
 			t.Errorf("weft %v = exit %d %q, want a usage error", args, code, errb)
 		}
 	}
-	if _, errb, _ := weftbase("runs", "--status", "bogus"); !strings.Contains(errb, "running, succeeded, failed, interrupted, parked or cancelled") {
+	if _, errb, _ := cli("runs", "--status", "bogus"); !strings.Contains(errb, "running, succeeded, failed, interrupted, parked or cancelled") {
 		t.Errorf("--status bogus stderr = %q, want the allowed words", errb)
 	}
 	// --since between the two runs keeps the newer one only.
-	out, _, _ = weftbase("runs", "--json")
+	out, _, _ = cli("runs", "--json")
 	var both []runRow
 	if err := json.Unmarshal([]byte(out), &both); err != nil || len(both) != 2 || !both[0].Started.After(both[1].Started) {
 		t.Fatalf("rows %s: %v, want two runs started apart", out, err)
@@ -492,10 +356,10 @@ func TestRunsCommand(t *testing.T) {
 
 	// Truncation is visible: a limit that hid runs says so on stderr,
 	// --json too; one that hid nothing is silent.
-	if _, errb, _ := weftbase("runs", "--limit", "1"); !strings.HasPrefix(errb, "weftbase: showing the newest 1; --limit 0 lists all\n") {
+	if _, errb, _ := cli("runs", "--limit", "1"); !strings.HasPrefix(errb, "weftbase: showing the newest 1; --limit 0 lists all\n") {
 		t.Errorf("--limit 1 stderr = %q, want the notice", errb)
 	}
-	if _, errb, _ := weftbase("runs", "--limit", "2", "--json"); errb != "" {
+	if _, errb, _ := cli("runs", "--limit", "2", "--json"); errb != "" {
 		t.Errorf("--limit 2 (nothing hidden) stderr = %q", errb)
 	}
 	defer func(n int) { runsPageSize = n }(runsPageSize)
@@ -504,24 +368,24 @@ func TestRunsCommand(t *testing.T) {
 		t.Errorf("paged one run at a time = %q, want both", got)
 	}
 	// The limit lands on a page's last row: the cursor says more exist.
-	if out, errb, _ := weftbase("runs", "--limit", "1", "--json"); !strings.Contains(out, `"r_fail"`) || errb != "weftbase: showing the newest 1; --limit 0 lists all\n" {
+	if out, errb, _ := cli("runs", "--limit", "1", "--json"); !strings.Contains(out, `"r_fail"`) || errb != "weftbase: showing the newest 1; --limit 0 lists all\n" {
 		t.Errorf("paged --limit 1 = %q, stderr %q, want r_fail and the notice", out, errb)
 	}
 	if got := strings.Join(rows("--since", "1h"), ","); got != "r_fail,r_ok" {
 		t.Errorf("paged --since = %q, want both", got)
 	}
 
-	if out, errb, code := weftbase("runs", "--since", time.Now().Add(time.Hour).UTC().Format(time.RFC3339)); code != 0 || out != "" || errb != "weftbase: no runs match\n" {
+	if out, errb, code := cli("runs", "--since", time.Now().Add(time.Hour).UTC().Format(time.RFC3339)); code != 0 || out != "" || errb != "weftbase: no runs match\n" {
 		t.Errorf("no match = exit %d %q %q", code, out, errb)
 	}
-	if _, errb, code := weftbase("runs", "--since", "yesterday"); code != 2 || !strings.Contains(errb, "--since") {
+	if _, errb, code := cli("runs", "--since", "yesterday"); code != 2 || !strings.Contains(errb, "--since") {
 		t.Errorf("bad --since = exit %d %q, want 2", code, errb)
 	}
 	// A canceled run carries its cause on both outputs (U3-fix): the
 	// table's STOPPED BY cell names it, --json carries stopped_by and
 	// cancel_cause.
 	runsPageSize = 50
-	p, err := exporter.Start(context.Background(), exporter.Remote(url, ""), otel.NoGlobal())
+	p, err := exporter.Start(context.Background(), exporter.Remote(url, tok), otel.NoGlobal())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -535,7 +399,7 @@ func TestRunsCommand(t *testing.T) {
 	if err := p.Shutdown(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	c := rest.New(url, "tok")
+	c := rest.New(url, tok)
 	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
 		b, err := c.Get(context.Background(), rest.RunPath("r_cancel"), nil)
 		if err == nil && strings.Contains(string(b), `"cancel_cause":"weftbase.cancel"`) {
@@ -545,13 +409,13 @@ func TestRunsCommand(t *testing.T) {
 			t.Fatalf("r_cancel never settled with its cause: %s %v", b, err)
 		}
 	}
-	out, errb, code = weftbase("runs", "--agent", "support")
+	out, errb, code = cli("runs", "--agent", "support")
 	lines = strings.Split(strings.TrimSpace(out), "\n")
 	if code != 0 || len(lines) != 2 || !strings.HasPrefix(lines[1], "r_cancel") ||
 		!strings.Contains(lines[1], " canceled (weftbase.cancel) ") {
 		t.Errorf("weftbase runs --agent support = exit %d, want r_cancel's STOPPED BY \"canceled (weftbase.cancel)\"\n%s%s", code, out, errb)
 	}
-	out, _, _ = weftbase("runs", "--agent", "support", "--json")
+	out, _, _ = cli("runs", "--agent", "support", "--json")
 	var cr []runRow
 	if err := json.Unmarshal([]byte(out), &cr); err != nil || len(cr) != 1 ||
 		cr[0].StoppedBy != "canceled" || cr[0].CancelCause != "weftbase.cancel" ||
@@ -560,74 +424,66 @@ func TestRunsCommand(t *testing.T) {
 	}
 
 	t.Setenv("WEFTBASE_TOKEN", "")
-	if _, errb, code := weftbase("runs"); code != 1 || !strings.Contains(errb, "401") || !strings.Contains(errb, "WEFTBASE_TOKEN") {
+	if _, errb, code := cli("runs"); code != 1 || !strings.Contains(errb, "401") || !strings.Contains(errb, "WEFTBASE_TOKEN") {
 		t.Errorf("no token = exit %d %q, want 1 and server's 401", code, errb)
 	}
-	if _, errb, code := weftbase("runs", "--url", "http://127.0.0.1:1"); code != 1 || !strings.Contains(errb, "weftbase not reachable at http://127.0.0.1:1") {
+	if _, errb, code := cli("runs", "--url", "http://127.0.0.1:1"); code != 1 || !strings.Contains(errb, "weftbase not reachable at http://127.0.0.1:1") {
 		t.Errorf("unreachable = exit %d %q", code, errb)
 	}
 }
 
 // TestOpenCommand pins `weftbase open <id>`: the run is checked against
-// GET /api/runs/<id>, its page <url>/runs/<id> printed bare — the token
-// (maybe the scoped tokens' signing key) stays out of stdout unless
-// --with-token asks — and handed to the browser, token in the
-// fragment, only with --open; an unknown run is server's 404; a child
-// id travels escaped (GET /api/runs/p%2F0%2Fc).
+// GET /v1/runs/<id>, its page <url>/runs/<id> printed (never a
+// credential) and handed to the browser only with --open; an unknown
+// run is server's 404; a child id travels escaped (GET
+// /v1/runs/p%2F0%2Fc).
 func TestOpenCommand(t *testing.T) {
 	url, _ := apiServer(t, true)
 	t.Setenv("WEFTBASE_URL", url)
 	t.Setenv("WEFTBASE_TOKEN", "")
 	takeOpened()
-	out, errb, code := weftbase("open", "r_ok", "--token", "tok")
+	out, errb, code := cli("open", "r_ok", "--token", tok)
 	if want := url + "/runs/r_ok\n"; code != 0 || out != want {
 		t.Errorf("weftbase open = exit %d %q %q, want the bare %q", code, out, errb, want)
 	}
 	if links := takeOpened(); len(links) != 0 {
 		t.Errorf("without --open the browser got %q", links)
 	}
-	out, _, code = weftbase("open", "--with-token", "--token", "tok", "r_ok")
-	if want := url + "/runs/r_ok#token=tok\n"; code != 0 || out != want {
-		t.Errorf("--with-token = exit %d %q, want %q", code, out, want)
+	out, _, code = cli("open", "--open", "--token", tok, "r_ok")
+	if code != 0 || out != url+"/runs/r_ok\n" {
+		t.Errorf("--open = exit %d, stdout %q, want the link", code, out)
 	}
-	out, _, code = weftbase("open", "--open", "--token", "tok", "r_ok")
-	if code != 0 || strings.Contains(out, "tok\n") || out != url+"/runs/r_ok\n" {
-		t.Errorf("--open = exit %d, stdout %q, want the bare link", code, out)
-	}
-	if links := takeOpened(); len(links) != 1 || links[0] != url+"/runs/r_ok#token=tok" {
-		t.Errorf("--open handed the browser %q, want the link with the token", links)
+	if links := takeOpened(); len(links) != 1 || links[0] != url+"/runs/r_ok" {
+		t.Errorf("--open handed the browser %q, want the link", links)
 	}
 	// A child run's id carries slashes: escaped on the wire and in the link.
-	out, errb, code = weftbase("open", "p/0/c", "--token", "tok")
+	out, errb, code = cli("open", "p/0/c", "--token", tok)
 	if want := url + "/runs/p%2F0%2Fc\n"; code != 0 || out != want {
 		t.Errorf("child id = exit %d %q %q, want %q", code, out, errb, want)
 	}
 	// An id no kind knows names what was tried (UX-S5a-06).
-	if _, errb, code := weftbase("open", "p/9/nope", "--token", "tok"); code != 1 || !strings.Contains(errb, "p/9/nope is no run, public id, session, trace this server knows") {
+	if _, errb, code := cli("open", "p/9/nope", "--token", tok); code != 1 || !strings.Contains(errb, "p/9/nope is no run, public id, session, trace this server knows") {
 		t.Errorf("unknown child = exit %d %q, want the kinds tried", code, errb)
 	}
 	// A trace id opens the trace's page.
-	b, err := rest.New(url, "tok").Get(context.Background(), rest.RunPath("r_ok"), nil)
+	b, err := rest.New(url, tok).Get(context.Background(), rest.RunPath("r_ok"), nil)
 	var row struct {
 		TraceID string `json:"trace_id"`
 	}
 	if err != nil || json.Unmarshal(b, &row) != nil || row.TraceID == "" {
 		t.Fatalf("r_ok's trace id: %v %s", err, b)
 	}
-	if out, errb, code := weftbase("open", row.TraceID, "--token", "tok"); code != 0 || out != url+"/traces/"+row.TraceID+"\n" {
+	if out, errb, code := cli("open", row.TraceID, "--token", tok); code != 0 || out != url+"/traces/"+row.TraceID+"\n" {
 		t.Errorf("a trace id = exit %d %q %q, want its trace page", code, out, errb)
 	}
-	// No id: the server root (UX-S5a-02), signed in with --with-token.
-	if out, errb, code := weftbase("open", "--token", "tok"); code != 0 || out != url+"/\n" {
+	// No id: the server root, checked with the key.
+	if out, errb, code := cli("open", "--token", tok); code != 0 || out != url+"/\n" {
 		t.Errorf("no id = exit %d %q %q, want the root", code, out, errb)
 	}
-	if out, _, code := weftbase("open", "--with-token", "--token", "tok"); code != 0 || out != url+"/#token=tok\n" {
-		t.Errorf("no id --with-token = exit %d %q, want the root signed in", code, out)
-	}
-	if _, errb, code := weftbase("open", "a", "b"); code != 2 || !strings.Contains(errb, "at most one id") {
+	if _, errb, code := cli("open", "a", "b"); code != 2 || !strings.Contains(errb, "at most one id") {
 		t.Errorf("two ids = exit %d %q", code, errb)
 	}
-	if got := rest.RunLink("http://h", "p/1/c", "a b"); got != "http://h/runs/p%2F1%2Fc#token=a+b" {
+	if got := rest.RunLink("http://h", "p/1/c"); got != "http://h/runs/p%2F1%2Fc" {
 		t.Errorf("a child id's link = %s", got)
 	}
 }
@@ -643,11 +499,11 @@ func TestClientRedirectAndRedaction(t *testing.T) {
 		http.Redirect(w, r, target.URL+r.URL.Path, http.StatusFound)
 	}))
 	defer redir.Close()
-	_, errb, code := weftbase("runs", "--url", redir.URL, "--token", "tok")
+	_, errb, code := cli("runs", "--url", redir.URL, "--token", tok)
 	if code != 1 || !strings.Contains(errb, "302, a redirect to "+target.URL) || !strings.Contains(errb, "not followed") || followed {
 		t.Errorf("redirect = exit %d %q (followed %v), want an error, not followed", code, errb, followed)
 	}
-	_, errb, code = weftbase("runs", "--url", "http://user:s3cret@127.0.0.1:1")
+	_, errb, code = cli("runs", "--url", "http://user:s3cret@127.0.0.1:1")
 	if code != 1 || strings.Contains(errb, "s3cret") || !strings.Contains(errb, "weftbase not reachable at http://user:xxxxx@127.0.0.1:1") {
 		t.Errorf("unreachable with a password = exit %d %q, want it redacted", code, errb)
 	}
@@ -662,7 +518,7 @@ func TestRunsCursorThatDoesNotMove(t *testing.T) {
 		_, _ = io.WriteString(w, `{"total":9,"runs":[{"id":"r1","agent":"a","status":"succeeded","started":"2026-10-08T09:00:00Z","steps":1}],"next_before":"2026-10-08T09:00:00Z","next_before_id":"r1"}`)
 	}))
 	defer ts.Close()
-	out, errb, code := weftbase("runs", "--url", ts.URL, "--limit", "0")
+	out, errb, code := cli("runs", "--url", ts.URL, "--limit", "0")
 	if code != 0 || calls != 2 || strings.Count(out, "r1") != 2 || !strings.Contains(errb, "cursor did not move") {
 		t.Errorf("a stuck cursor = exit %d after %d calls\n%s%s", code, calls, out, errb)
 	}
@@ -672,28 +528,28 @@ func TestRunsCursorThatDoesNotMove(t *testing.T) {
 		_, _ = io.WriteString(w, `{"total":0,"runs":[],"next_before":"2026-10-08T09:00:00Z","next_before_id":null}`)
 	}))
 	defer empty.Close()
-	if _, _, code := weftbase("runs", "--url", empty.URL); code != 0 || calls != 1 {
+	if _, _, code := cli("runs", "--url", empty.URL); code != 0 || calls != 1 {
 		t.Errorf("an empty page with a cursor = exit %d after %d calls, want one call", code, calls)
 	}
 }
 
 // TestExportCommand: `weftbase export <id>` writes GET
-// /api/runs/<id>/export to stdout, json by default, jsonl and otlp on
+// /v1/runs/<id>/export to stdout, json by default, jsonl and otlp on
 // --format; any other format, no id, and an unknown flag are usage
 // errors; an unknown run is the server's 404.
 func TestExportCommand(t *testing.T) {
 	url, _ := apiServer(t, false)
 	t.Setenv("WEFTBASE_URL", url)
-	t.Setenv("WEFTBASE_TOKEN", "tok")
+	t.Setenv("WEFTBASE_TOKEN", tok)
 
-	out, errb, code := weftbase("export", "r_ok")
+	out, errb, code := cli("export", "r_ok")
 	if code != 0 || !strings.Contains(out, `"format":"weft.run.export/1"`) {
 		t.Errorf("export to stdout = exit %d %.200q %q", code, out, errb)
 	}
-	if out, _, code := weftbase("export", "r_ok", "--format", "jsonl"); code != 0 || strings.Count(out, "\n") < 3 {
+	if out, _, code := cli("export", "r_ok", "--format", "jsonl"); code != 0 || strings.Count(out, "\n") < 3 {
 		t.Errorf("jsonl = exit %d %.200q", code, out)
 	}
-	if out, _, code := weftbase("export", "r_ok", "--format", "otlp"); code != 0 || !strings.Contains(out, `"traces"`) {
+	if out, _, code := cli("export", "r_ok", "--format", "otlp"); code != 0 || !strings.Contains(out, `"traces"`) {
 		t.Errorf("otlp = exit %d %.200q", code, out)
 	}
 	for _, args := range [][]string{
@@ -702,11 +558,11 @@ func TestExportCommand(t *testing.T) {
 		{"export", "r_ok", "--wefttest", "dir"},
 		{"export"},
 	} {
-		if _, errb, code := weftbase(args...); code != 2 {
+		if _, errb, code := cli(args...); code != 2 {
 			t.Errorf("weft %q = exit %d %q, want a usage error", args, code, errb)
 		}
 	}
-	if _, errb, code := weftbase("export", "nope"); code != 1 || !strings.Contains(errb, "404") {
+	if _, errb, code := cli("export", "nope"); code != 1 || !strings.Contains(errb, "404") {
 		t.Errorf("unknown run = exit %d %q", code, errb)
 	}
 }
@@ -719,14 +575,11 @@ func TestExportCommand(t *testing.T) {
 // 1) beside a ModelRetry repair (no tool error) — and a clean field is
 // omitted.
 func TestRunsJSONCarriesProblems(t *testing.T) {
-	srv, err := newServer("sqlite://"+filepath.Join(t.TempDir(), "weft.db"), "tok")
-	if err != nil {
-		t.Fatal(err)
-	}
+	srv := newServer(t, tok)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(func() { ts.Close(); _ = srv.Close() })
 	ctx := context.Background()
-	p, err := exporter.Start(ctx, exporter.Remote(ts.URL, ""), otel.NoGlobal())
+	p, err := exporter.Start(ctx, exporter.Remote(ts.URL, tok), otel.NoGlobal())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -750,10 +603,10 @@ func TestRunsJSONCarriesProblems(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("WEFTBASE_URL", ts.URL)
-	t.Setenv("WEFTBASE_TOKEN", "tok")
+	t.Setenv("WEFTBASE_TOKEN", tok)
 	var rows []map[string]any
 	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		out, errb, code := weftbase("runs", "--json")
+		out, errb, code := cli("runs", "--json")
 		if code != 0 {
 			t.Fatalf("weftbase runs --json = exit %d %s", code, errb)
 		}
@@ -804,13 +657,13 @@ func TestUsageWords(t *testing.T) {
 		{[]string{"vacuum", "x"}, `vacuum takes no arguments (got "x")`},
 		{[]string{"doctor", "x"}, `doctor takes no arguments (got "x")`},
 	} {
-		_, errb, code := weftbase(c.args...)
+		_, errb, code := cli(c.args...)
 		if code != 2 || !strings.Contains(errb, c.want) || strings.Contains(errb, "[]") {
 			t.Errorf("weft %v = %d %q, want %q", c.args, code, errb, c.want)
 		}
 	}
 	for _, cmd := range []string{"open", "runs", "export", "doctor", "vacuum", "mcp", "dev"} {
-		_, errb, _ := weftbase(cmd, "-h")
+		_, errb, _ := cli(cmd, "-h")
 		for _, l := range strings.Split(errb, "\n") {
 			if strings.HasPrefix(l, "  -") && !strings.HasPrefix(l, "  --") {
 				t.Errorf("weft %s -h: %q spells a flag with one dash", cmd, l)

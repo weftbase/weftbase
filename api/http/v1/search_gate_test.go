@@ -23,7 +23,7 @@ import (
 // TestSearchRefundFailedAcrossRealRuns is the phase-5 gate's clause
 // "search 'refund failed' across runs" (plan A7) end to end: scripted
 // runs driven through the real pipeline (otel → OTLP ingest → obsdb),
-// then GET /api/search. A run matches when every term is in its prompt,
+// then GET /v1/search. A run matches when every term is in its prompt,
 // answer, error or a tool name — each term in any of them — and only
 // those: a system prompt or a tool result holding the words is no hit.
 // The gate's "sorted by cost" (plan A5): the scripted model is priced
@@ -123,7 +123,7 @@ func TestSearchRefundFailedAcrossRealRuns(t *testing.T) {
 		t.Helper()
 		var ids []string
 		for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
-			resp, err := http.Get(ts.URL + "/api/search?" + query)
+			resp, err := http.Get(ts.URL + "/v1/runs?" + query)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -12,7 +12,7 @@ import (
 	"github.com/weftbase/weftbase/obsdb/sqlite"
 )
 
-// TestRunsIDPrefix (U26; UX-A-13): GET /api/runs?id_prefix= finds a
+// TestRunsIDPrefix (U26; UX-A-13): GET /v1/runs?id_prefix= finds a
 // pasted short id — the ⌘K palette's lookup — top-level runs by
 // default and a subagent child under all=1, never a run merely
 // containing the text.
@@ -31,9 +31,9 @@ func TestRunsIDPrefix(t *testing.T) {
 	t.Cleanup(ts.Close)
 	t.Cleanup(func() { _ = srv.Close() })
 	for path, want := range map[string]string{
-		"/api/runs?id_prefix=1c06797f":       "1c06797fdirector",
-		"/api/runs?id_prefix=1c06797f&all=1": "1c06797fdirector 1c06797fworker",
-		"/api/runs?id_prefix=ffff":           "",
+		"/v1/runs?id_prefix=1c06797f":       "1c06797fdirector",
+		"/v1/runs?id_prefix=1c06797f&all=1": "1c06797fdirector 1c06797fworker",
+		"/v1/runs?id_prefix=ffff":           "",
 	} {
 		var page struct {
 			Runs []struct {

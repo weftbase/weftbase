@@ -14,7 +14,7 @@ import (
 // (with a server token, so a scoped token can be minted against it).
 func decisionsServer(t *testing.T, fixture string) http.Handler {
 	t.Helper()
-	srv := New(Open(t.TempDir()+"/dec.db"), Token("srv"))
+	srv := New(Open(t.TempDir() + "/dec.db"))
 	t.Cleanup(func() { _ = srv.Close() })
 	h := srv.Handler()
 	for _, k := range []string{"traces", "logs"} {
@@ -26,7 +26,7 @@ func decisionsServer(t *testing.T, fixture string) http.Handler {
 // runBlocks reads one run document's decided and resumes blocks.
 func runBlocks(t *testing.T, h http.Handler, id, bearer string) (decided, resumes json.RawMessage) {
 	t.Helper()
-	code, _, body := getWith(t, h, "/weftbase/api/runs/"+id, bearer, "")
+	code, _, body := getWith(t, h, "/weftbase/v1/runs/"+esc(id), bearer, "")
 	if code != http.StatusOK {
 		t.Fatalf("run %s: %d %s", id, code, body)
 	}
@@ -40,7 +40,7 @@ func runBlocks(t *testing.T, h http.Handler, id, bearer string) (decided, resume
 
 // TestRunDecisions pins the run document's decided / resumes blocks
 // (U13.2; UX-B-03, UX-H-17, UX-S3-04) over the record contract's
-// fixtures, one golden (testdata/api/decisions.golden.json) the web
+// fixtures, one golden (testdata/v1/decisions.golden.json) the web
 // tests on both surfaces read: thread_approvals' t1 — agent-7's deny,
 // "need a photo of the damage" — decided by t2, and t2 resuming it;
 // alice's signed approval (via signed, key k_alice); the resolve; a
@@ -147,7 +147,7 @@ func TestTimelineDecisionActor(t *testing.T) {
 		t.Fatalf("t1 decided names no actor: %s", decided)
 	}
 	for _, tok := range []string{"srv"} {
-		code, _, body := getWith(t, h, "/weftbase/api/sessions/"+sess+"/timeline", tok, "")
+		code, _, body := getWith(t, h, "/weftbase/v1/sessions/"+sess+"/timeline", tok, "")
 		if code != http.StatusOK {
 			t.Fatalf("timeline: %d %s", code, body)
 		}

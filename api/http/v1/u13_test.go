@@ -20,7 +20,7 @@ func TestResumeLinkFixtures(t *testing.T) {
 	h := srv.Handler()
 	ingestFile(t, h, "/weftbase/otlp/v1/traces", "../../../obsdb/testdata/contract/resumed/traces.json")
 	ingestFile(t, h, "/weftbase/otlp/v1/logs", "../../../obsdb/testdata/contract/resumed/logs.json")
-	_, _, runs := get(t, h, "/weftbase/api/runs")
+	_, _, runs := get(t, h, "/weftbase/v1/runs")
 	var list struct {
 		Runs []struct {
 			ID          string            `json:"id"`
@@ -42,11 +42,11 @@ func TestResumeLinkFixtures(t *testing.T) {
 	if resume.ResumedFrom != parked.ID || resume.ResumedBy != "" || resume.Meta["weft.approval.actor"] != "op_42" {
 		t.Errorf("resume row = %+v, want resumed_from %s and the actor in meta", resume, parked.ID)
 	}
-	_, _, doc := get(t, h, "/weftbase/api/runs/"+parked.ID)
+	_, _, doc := get(t, h, "/weftbase/v1/runs/"+esc(parked.ID))
 	if !strings.Contains(doc, `"resumed_by":"`+resume.ID+`"`) {
 		t.Errorf("parked run document lacks resumed_by: %s", doc)
 	}
-	_, _, spans := get(t, h, "/weftbase/api/runs/"+resume.ID+"/spans")
+	_, _, spans := get(t, h, "/weftbase/v1/runs/"+esc(resume.ID)+"/spans")
 	if !strings.Contains(spans, `"weft.resume.calls":"call_1=approved,call_2=resolved"`) ||
 		!strings.Contains(spans, `"weft.resumed_from":"`+parked.ID+`"`) {
 		t.Errorf("resume spans lack the link: %s", spans)
@@ -57,7 +57,7 @@ func TestResumeLinkFixtures(t *testing.T) {
 	h2 := srv2.Handler()
 	ingestFile(t, h2, "/weftbase/otlp/v1/traces", "../../../obsdb/testdata/contract/approval_denied/traces.json")
 	ingestFile(t, h2, "/weftbase/otlp/v1/logs", "../../../obsdb/testdata/contract/approval_denied/logs.json")
-	_, _, runs2 := get(t, h2, "/weftbase/api/runs")
+	_, _, runs2 := get(t, h2, "/weftbase/v1/runs")
 	var list2 struct {
 		Runs []struct {
 			ID     string `json:"id"`
@@ -68,7 +68,7 @@ func TestResumeLinkFixtures(t *testing.T) {
 	if len(list2.Runs) != 2 || list2.Runs[0].Denied != 2 {
 		t.Fatalf("runs = %s, want the resume with denied 2", runs2)
 	}
-	_, _, spans2 := get(t, h2, "/weftbase/api/runs/"+list2.Runs[0].ID+"/spans")
+	_, _, spans2 := get(t, h2, "/weftbase/v1/runs/"+esc(list2.Runs[0].ID)+"/spans")
 	for _, k := range []string{`"weft.tool.denied":true`, `"weft.tool.denied_kind":"denied"`, `"weft.tool.denied_kind":"no_decision"`} {
 		if !strings.Contains(spans2, k) {
 			t.Errorf("denied spans lack %s", k)

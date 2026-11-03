@@ -28,12 +28,12 @@ func searchIDs(t *testing.T, h http.Handler, path string) ([]string, int, *int) 
 	return ids, page.Total, page.NextOffset
 }
 
-// TestSearchGolden pins GET /api/search's shape (plan A7) over the
+// TestSearchGolden pins GET /v1/search's shape (plan A7) over the
 // fixture database: run rows — prompt_preview included — in the order
 // asked, the whole match's total, the order, next_offset.
 func TestSearchGolden(t *testing.T) {
 	h := Handler(DB(fixtureDB(t)), Manifest([]byte(fixtureManifest)))
-	code, _, body := get(t, h, "/weftbase/api/search?q=order&sort=tokens")
+	code, _, body := get(t, h, "/weftbase/v1/runs?q=order&sort=tokens")
 	if code != http.StatusOK {
 		t.Fatalf("search: %d %s", code, body)
 	}
@@ -98,7 +98,7 @@ func TestSearchRoute(t *testing.T) {
 		{"sort=cost", []string{"r_fail", "r_ok", "r_stale", "r_sub"}, 4, -1},
 		{"sort=cost&limit=1&offset=1", []string{"r_ok"}, 4, 2},
 	} {
-		ids, total, next := searchIDs(t, h, "/weftbase/api/search?"+c.path)
+		ids, total, next := searchIDs(t, h, searchPath("/weftbase", c.path))
 		if strings.Join(ids, ",") != strings.Join(c.want, ",") || total != c.total {
 			t.Errorf("search?%s = %v (total %d), want %v (total %d)", c.path, ids, total, c.want, c.total)
 		}
@@ -124,7 +124,7 @@ func TestSearchRoute(t *testing.T) {
 		{"all=maybe", "bad_request", "all must be"},
 		{"q=" + strings.Repeat("a+", 17), "bad_request", "invalid search"},
 	} {
-		code, _, body := get(t, h, "/weftbase/api/search?"+c.path)
+		code, _, body := get(t, h, searchPath("/weftbase", c.path))
 		if code != http.StatusBadRequest || !strings.Contains(body, `"code":"`+c.code+`"`) || !strings.Contains(body, c.msg) {
 			t.Errorf("search?%s = %d %s, want 400 %s %q", c.path, code, body, c.code, c.msg)
 		}

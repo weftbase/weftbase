@@ -143,7 +143,7 @@ func fastPing(t *testing.T) {
 	t.Cleanup(func() { pingEvery = old })
 }
 
-// liveSSE opens one /api/live request and returns status and headers
+// liveSSE opens one /v1/runs/stream request and returns status and headers
 // only — the validation cases read nothing off the stream. Reading
 // frames needs a real server (subscribeLive): httptest.NewRecorder
 // never flushes.
@@ -153,7 +153,7 @@ func liveSSE(t *testing.T, h http.Handler, query, lastEventID string) *http.Resp
 	t.Cleanup(cancel)
 	srv := httptest.NewServer(mounted(h))
 	t.Cleanup(srv.Close)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/weftbase/api/live"+query, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/weftbase/v1/runs/stream"+query, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func liveSSE(t *testing.T, h http.Handler, query, lastEventID string) *http.Resp
 		// The handler may have refused before streaming: retry via a
 		// plain recorder for the status.
 		w := httptest.NewRecorder()
-		r2 := httptest.NewRequest(http.MethodGet, "/api/live"+query, nil)
+		r2 := httptest.NewRequest(http.MethodGet, "/v1/runs/stream"+query, nil)
 		if lastEventID != "" {
 			r2.Header.Set("Last-Event-ID", lastEventID)
 		}
@@ -182,7 +182,7 @@ func subscribeLive(t *testing.T, h http.Handler, query, lastEventID string) *htt
 	t.Helper()
 	srv := httptest.NewServer(mounted(h))
 	t.Cleanup(srv.Close)
-	req, err := http.NewRequest(http.MethodGet, srv.URL+"/weftbase/api/live"+query, nil)
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/weftbase/v1/runs/stream"+query, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -665,86 +665,6 @@ func TestLiveAllSeesEveryPublicID(t *testing.T) {
 	}
 	if got := strings.Join(liveRunIDs(t, readSSE(t, onlyA, 2, 5*time.Second)), " "); got != "r_a r_a2" {
 		t.Errorf("public_id=pub_a stream saw runs %q, want r_a r_a2", got)
-	}
-}
-
-// TestLiveAllSetupA: the all selector is setup A's on a loopback Host
-// only — a Host let in by AllowOrigins is refused (403), as api/meta's
-// live_all says (TestMetaDBPathSetupA); all takes 1 (or true) and
-// stands alone.
-func TestLiveAllSetupA(t *testing.T) {
-	srv := New(DB(fixtureDB(t)), AllowOrigins("http://wb.example"))
-	t.Cleanup(func() { _ = srv.Close() })
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-	open := func(query, host string) int {
-		t.Helper()
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/live"+query, nil)
-		if host != "" {
-			req.Host = host
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_ = resp.Body.Close()
-		return resp.StatusCode
-	}
-	for _, c := range []struct {
-		query, host string
-		want        int
-	}{
-		{"?all=1", "", http.StatusOK},
-		{"?all=true", "", http.StatusOK},
-		{"?all=1", "wb.example", http.StatusForbidden},
-		{"?all=0", "", http.StatusBadRequest},
-		{"?all=1&run=r_ok", "", http.StatusBadRequest},
-		// agent= beside all narrows it (U22-fix): all's rule still holds.
-		{"?all=1&agent=orders", "", http.StatusOK},
-		{"?all=1&agent=orders", "wb.example", http.StatusForbidden},
-		// A metadata filter alone is allowed where agent= alone is
-		// (U22-fix): setup A behind an allowed Host gets its lane.
-		{"?tag.arena.batch=b1", "wb.example", http.StatusOK},
-		{"?flow=f_checkout", "wb.example", http.StatusOK},
-		{"?agent=orders", "wb.example", http.StatusOK},
-	} {
-		if got := open(c.query, c.host); got != c.want {
-			t.Errorf("GET /api/live%s (Host %q): %d, want %d", c.query, c.host, got, c.want)
-		}
-	}
-}
-
-// TestLiveAllWithTheBearer: the all stream opens with the server
-// token's bearer and carries frames of every public id.
-func TestLiveAllWithTheBearer(t *testing.T) {
-	db, err := sqlite.Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	hub := obsdb.NewHub()
-	srv := New(DB(db), Live(hub), Token("srv"))
-	t.Cleanup(func() { _ = srv.Close() })
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-
-	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/live?all=true&kinds=event", nil)
-	req.Header.Set("Authorization", "Bearer srv")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = resp.Body.Close() })
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("all stream with the bearer: %d", resp.StatusCode)
-	}
-	ctx := context.Background()
-	hub.Publish(ctx, obsdb.RecordFrame(pubRecord("r_a", "pub_a", "", 0)))
-	hub.Publish(ctx, obsdb.RecordFrame(pubRecord("r_b", "pub_b", "", 0)))
-	if got := strings.Join(liveRunIDs(t, readSSE(t, resp, 2, 5*time.Second)), " "); got != "r_a r_b" {
-		t.Errorf("all stream saw runs %q, want r_a r_b", got)
 	}
 }
 

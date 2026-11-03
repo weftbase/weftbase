@@ -34,9 +34,9 @@ func explainOn(t *testing.T, f fakeServer, id string) (string, explanation) {
 // answers no text — never the earlier turn's.
 func TestMCPExplainOwnTextOnly(t *testing.T) {
 	line, ex := explainOn(t, fakeServer{
-		"/api/runs/s-t3":         {200, `{"id":"s-t3","agent":"a","status":"succeeded","steps":1,"holes":[]}`},
-		"/api/runs/s-t3/steps/0": {200, `{"status":"ok","tool_calls":[],"holes":[]}`},
-		"/api/runs/s-t3/transcript": {200, `{"batches":[` +
+		"/v1/runs/s-t3":         {200, `{"id":"s-t3","agent":"a","status":"succeeded","steps":1,"holes":[]}`},
+		"/v1/runs/s-t3/steps/0": {200, `{"status":"ok","tool_calls":[],"holes":[]}`},
+		"/v1/runs/s-t3/transcript": {200, `{"batches":[` +
 			`{"index":0,"step":0,"input":true,"messages":[{"role":"user","content":[{"type":"text","text":"deploy"}]},{"role":"assistant","content":[{"type":"text","text":"Done: deployed to prod."}]},{"role":"user","content":[{"type":"text","text":"status?"}]}]},` +
 			`{"index":1,"step":0,"input":false,"messages":[{"role":"assistant","content":[{"type":"tool_call","id":"c","name":"status","args":{}}]}]}]}`},
 	}, "s-t3")
@@ -45,9 +45,9 @@ func TestMCPExplainOwnTextOnly(t *testing.T) {
 		t.Errorf("line %q, text %v note %q: want no text, never the earlier turn's", line, ex.LastAssistantText, ex.LastAssistantNote)
 	}
 	_, ex = explainOn(t, fakeServer{
-		"/api/runs/r":            {200, `{"id":"r","agent":"a","status":"succeeded","steps":1,"holes":[]}`},
-		"/api/runs/r/steps/0":    {200, `{"status":"ok","holes":[]}`},
-		"/api/runs/r/transcript": {200, `{"batches":[{"input":true,"messages":[{"role":"assistant","content":[{"type":"text","text":"old"}]}]},{"input":false,"messages":[{"role":"assistant","content":[{"type":"text","text":"mine"}]}]}]}`},
+		"/v1/runs/r":            {200, `{"id":"r","agent":"a","status":"succeeded","steps":1,"holes":[]}`},
+		"/v1/runs/r/steps/0":    {200, `{"status":"ok","holes":[]}`},
+		"/v1/runs/r/transcript": {200, `{"batches":[{"input":true,"messages":[{"role":"assistant","content":[{"type":"text","text":"old"}]}]},{"input":false,"messages":[{"role":"assistant","content":[{"type":"text","text":"mine"}]}]}]}`},
 	}, "r")
 	if ex.LastAssistantText == nil || *ex.LastAssistantText != "mine" {
 		t.Errorf("own text = %v, want mine", ex.LastAssistantText)
@@ -60,9 +60,9 @@ func TestMCPExplainOwnTextOnly(t *testing.T) {
 func TestMCPExplainDecided(t *testing.T) {
 	decided := `{"run":"s-t2","actor":"","source":"resume_calls","calls":[{"call_id":"d1","name":"deploy","outcome":"denied","via":"user","who":"alice","reason":"change freeze"}]}`
 	line, ex := explainOn(t, fakeServer{
-		"/api/runs/s-t1":            {200, `{"id":"s-t1","agent":"ops","status":"succeeded","steps":1,"pending":1,"resumed_by":"s-t2","holes":[],"decided":` + decided + `}`},
-		"/api/runs/s-t1/steps/0":    {200, `{"status":"parked","tool_calls":[{"call_id":"d1","name":"deploy","pending":true}],"holes":[]}`},
-		"/api/runs/s-t1/transcript": {200, `{"batches":[]}`},
+		"/v1/runs/s-t1":            {200, `{"id":"s-t1","agent":"ops","status":"succeeded","steps":1,"pending":1,"resumed_by":"s-t2","holes":[],"decided":` + decided + `}`},
+		"/v1/runs/s-t1/steps/0":    {200, `{"status":"parked","tool_calls":[{"call_id":"d1","name":"deploy","pending":true}],"holes":[]}`},
+		"/v1/runs/s-t1/transcript": {200, `{"batches":[]}`},
 	}, "s-t1")
 	for _, want := range []string{"parked, decided: deploy denied by alice: change freeze → resumed as s-t2", "tool calls: deploy denied by alice"} {
 		if !strings.Contains(line, want) {
@@ -76,18 +76,18 @@ func TestMCPExplainDecided(t *testing.T) {
 		t.Errorf("decisions %q resumed_by %q", ex.Decisions, ex.ResumedBy)
 	}
 	line, _ = explainOn(t, fakeServer{
-		"/api/runs/s-t2":            {200, `{"id":"s-t2","agent":"ops","status":"succeeded","steps":1,"resumed_from":"s-t1","holes":[],"resumes":` + decided + `}`},
-		"/api/runs/s-t2/steps/0":    {200, `{"status":"ok","holes":[]}`},
-		"/api/runs/s-t2/transcript": {200, `{"batches":[]}`},
+		"/v1/runs/s-t2":            {200, `{"id":"s-t2","agent":"ops","status":"succeeded","steps":1,"resumed_from":"s-t1","holes":[],"resumes":` + decided + `}`},
+		"/v1/runs/s-t2/steps/0":    {200, `{"status":"ok","holes":[]}`},
+		"/v1/runs/s-t2/transcript": {200, `{"batches":[]}`},
 	}, "s-t2")
 	if !strings.Contains(line, "resumed s-t1: deploy denied by alice: change freeze") {
 		t.Errorf("resume line %q", line)
 	}
 	// An undecided park still reads awaiting.
 	line, _ = explainOn(t, fakeServer{
-		"/api/runs/p":            {200, `{"id":"p","agent":"ops","status":"succeeded","steps":1,"pending":1,"holes":[]}`},
-		"/api/runs/p/steps/0":    {200, `{"status":"parked","tool_calls":[{"call_id":"d1","name":"deploy","pending":true}],"holes":[]}`},
-		"/api/runs/p/transcript": {200, `{"batches":[]}`},
+		"/v1/runs/p":            {200, `{"id":"p","agent":"ops","status":"succeeded","steps":1,"pending":1,"holes":[]}`},
+		"/v1/runs/p/steps/0":    {200, `{"status":"parked","tool_calls":[{"call_id":"d1","name":"deploy","pending":true}],"holes":[]}`},
+		"/v1/runs/p/transcript": {200, `{"batches":[]}`},
 	}, "p")
 	if !strings.Contains(line, "parked: 1 call awaiting a decision (deploy)") {
 		t.Errorf("undecided line %q", line)
@@ -100,15 +100,15 @@ func TestMCPExplainDecided(t *testing.T) {
 // error is the child's own, naming the child run and its step.
 func TestMCPExplainWalksStepsAndChildren(t *testing.T) {
 	line, ex := explainOn(t, fakeServer{
-		"/api/runs/r": {200, `{"id":"r","agent":"lead","status":"succeeded","steps":2,"holes":[],` +
+		"/v1/runs/r": {200, `{"id":"r","agent":"lead","status":"succeeded","steps":2,"holes":[],` +
 			`"children":[{"id":"r/0/w1","parent_call_id":"w1","agent":"worker","status":"failed","err":"weft: run failed at step 0: worker crashed","steps":0}]}`},
-		"/api/runs/r/steps/0": {200, `{"status":"ok","reason":"tool_calls","attempts":[{"attempt":1,"outcome":"ok"}],` +
+		"/v1/runs/r/steps/0": {200, `{"status":"ok","reason":"tool_calls","attempts":[{"attempt":1,"outcome":"ok"}],` +
 			`"tool_calls":[{"call_id":"w1","name":"work","child_run_id":"r/0/w1","result":{"content":"SUBAGENT_FAILED: worker crashed","is_error":true}}],"holes":[]}`},
-		"/api/runs/r/steps/1":             {200, `{"status":"ok","reason":"stop","holes":[]}`},
-		"/api/runs/r/transcript":          {200, `{"batches":[{"input":false,"messages":[{"role":"assistant","content":[{"type":"text","text":"worker failed, handling it myself"}]}]}]}`},
-		"/api/runs/r%2F0%2Fw1":            {200, `{"id":"r/0/w1","agent":"worker","status":"failed","err":"weft: run failed at step 0: worker crashed","steps":0,"holes":[]}`},
-		"/api/runs/r%2F0%2Fw1/steps/0":    {200, `{"status":"error","attempts":[{"attempt":1,"outcome":"error","error":"worker crashed"}],"holes":[]}`},
-		"/api/runs/r%2F0%2Fw1/transcript": {200, `{"batches":[]}`},
+		"/v1/runs/r/steps/1":             {200, `{"status":"ok","reason":"stop","holes":[]}`},
+		"/v1/runs/r/transcript":          {200, `{"batches":[{"input":false,"messages":[{"role":"assistant","content":[{"type":"text","text":"worker failed, handling it myself"}]}]}]}`},
+		"/v1/runs/r%2F0%2Fw1":            {200, `{"id":"r/0/w1","agent":"worker","status":"failed","err":"weft: run failed at step 0: worker crashed","steps":0,"holes":[]}`},
+		"/v1/runs/r%2F0%2Fw1/steps/0":    {200, `{"status":"error","attempts":[{"attempt":1,"outcome":"error","error":"worker crashed"}],"holes":[]}`},
+		"/v1/runs/r%2F0%2Fw1/transcript": {200, `{"batches":[]}`},
 	}, "r")
 	f := ex.FirstError
 	if f == nil || f.Run != "r/0/w1" || f.Step == nil || *f.Step != 0 || !strings.Contains(f.Error, "worker crashed") || f.Via != "step 0 work" {
@@ -264,15 +264,15 @@ func (c countingServer) get(ctx context.Context, path string, q url.Values) (int
 // digest names each child by its own step's tool, in step order.
 func TestMCPExplainReusedCallIDs(t *testing.T) {
 	_, ex := explainOn(t, fakeServer{
-		"/api/runs/r": {200, `{"id":"r","agent":"lead","status":"succeeded","steps":3,"holes":[],"children":[` +
+		"/v1/runs/r": {200, `{"id":"r","agent":"lead","status":"succeeded","steps":3,"holes":[],"children":[` +
 			`{"id":"r/1/call_1","parent_call_id":"call_1","agent":"auditor","status":"failed","err":"weft: run failed at step 0: ledger locked"},` +
 			`{"id":"r/0/call_1","parent_call_id":"call_1","agent":"researcher","status":"succeeded"}]}`},
-		"/api/runs/r/steps/0":              {200, `{"status":"ok","tool_calls":[{"call_id":"call_1","name":"research","result":{"content":"found it"}}],"holes":[]}`},
-		"/api/runs/r/steps/1":              {200, `{"status":"ok","tool_calls":[{"call_id":"call_1","name":"audit","result":{"content":"SUBAGENT_FAILED: ledger locked","is_error":true}}],"holes":[]}`},
-		"/api/runs/r/steps/2":              {200, `{"status":"ok","reason":"stop","holes":[]}`},
-		"/api/runs/r/transcript":           {200, `{"batches":[]}`},
-		"/api/runs/r%2F1%2Fcall_1":         {200, `{"id":"r/1/call_1","agent":"auditor","status":"failed","err":"weft: run failed at step 0: ledger locked","steps":0,"holes":[]}`},
-		"/api/runs/r%2F1%2Fcall_1/steps/0": {200, `{"status":"error","attempts":[{"attempt":1,"outcome":"error","error":"ledger locked"}],"holes":[]}`},
+		"/v1/runs/r/steps/0":              {200, `{"status":"ok","tool_calls":[{"call_id":"call_1","name":"research","result":{"content":"found it"}}],"holes":[]}`},
+		"/v1/runs/r/steps/1":              {200, `{"status":"ok","tool_calls":[{"call_id":"call_1","name":"audit","result":{"content":"SUBAGENT_FAILED: ledger locked","is_error":true}}],"holes":[]}`},
+		"/v1/runs/r/steps/2":              {200, `{"status":"ok","reason":"stop","holes":[]}`},
+		"/v1/runs/r/transcript":           {200, `{"batches":[]}`},
+		"/v1/runs/r%2F1%2Fcall_1":         {200, `{"id":"r/1/call_1","agent":"auditor","status":"failed","err":"weft: run failed at step 0: ledger locked","steps":0,"holes":[]}`},
+		"/v1/runs/r%2F1%2Fcall_1/steps/0": {200, `{"status":"error","attempts":[{"attempt":1,"outcome":"error","error":"ledger locked"}],"holes":[]}`},
 	}, "r")
 	if f := ex.FirstError; f == nil || f.Run != "r/1/call_1" || f.Via != "step 1 audit" {
 		t.Fatalf("first_error %+v, want step 1's child", ex.FirstError)
@@ -290,18 +290,18 @@ func TestMCPExplainReusedCallIDs(t *testing.T) {
 func TestMCPExplainPrefersUnrecovered(t *testing.T) {
 	steps := `{"status":"ok","attempts":[{"attempt":1,"outcome":"error","http_status":429,"error":"rate limited"},{"attempt":2,"outcome":"ok"}],"holes":[]}`
 	_, ex := explainOn(t, fakeServer{
-		"/api/runs/r":            {200, `{"id":"r","agent":"a","status":"succeeded","steps":2,"holes":[]}`},
-		"/api/runs/r/steps/0":    {200, steps},
-		"/api/runs/r/steps/1":    {200, `{"status":"ok","tool_calls":[{"call_id":"c","name":"refund","result":{"content":"card declined","is_error":true}}],"holes":[]}`},
-		"/api/runs/r/transcript": {200, `{"batches":[]}`},
+		"/v1/runs/r":            {200, `{"id":"r","agent":"a","status":"succeeded","steps":2,"holes":[]}`},
+		"/v1/runs/r/steps/0":    {200, steps},
+		"/v1/runs/r/steps/1":    {200, `{"status":"ok","tool_calls":[{"call_id":"c","name":"refund","result":{"content":"card declined","is_error":true}}],"holes":[]}`},
+		"/v1/runs/r/transcript": {200, `{"batches":[]}`},
 	}, "r")
 	if f := ex.FirstError; f == nil || f.Tool != "refund" || *f.Step != 1 {
 		t.Errorf("first_error %+v, want step 1's refund", ex.FirstError)
 	}
 	_, ex = explainOn(t, fakeServer{
-		"/api/runs/r":            {200, `{"id":"r","agent":"a","status":"succeeded","steps":1,"holes":[]}`},
-		"/api/runs/r/steps/0":    {200, steps},
-		"/api/runs/r/transcript": {200, `{"batches":[]}`},
+		"/v1/runs/r":            {200, `{"id":"r","agent":"a","status":"succeeded","steps":1,"holes":[]}`},
+		"/v1/runs/r/steps/0":    {200, steps},
+		"/v1/runs/r/transcript": {200, `{"batches":[]}`},
 	}, "r")
 	if f := ex.FirstError; f == nil || !strings.Contains(f.Error, "rate limited (retried, attempt 2 ok)") {
 		t.Errorf("first_error %+v, want the recovered attempt marked retried", ex.FirstError)
@@ -317,9 +317,9 @@ func TestMCPExplainDigestLineCap(t *testing.T) {
 		calls = append(calls, fmt.Sprintf(`{"call_id":"c%d","name":"lookup_%03d","result":{"content":"%s","is_error":true}}`, i, i, strings.Repeat("x", 100)))
 	}
 	f := fakeServer{
-		"/api/runs/r":            {200, `{"id":"r","agent":"a","status":"succeeded","steps":1,"holes":[]}`},
-		"/api/runs/r/steps/0":    {200, `{"status":"ok","tool_calls":[` + strings.Join(calls, ",") + `],"holes":[]}`},
-		"/api/runs/r/transcript": {200, `{"batches":[{"input":false,"messages":[{"role":"assistant","content":[{"type":"text","text":"done"}]}]}]}`},
+		"/v1/runs/r":            {200, `{"id":"r","agent":"a","status":"succeeded","steps":1,"holes":[]}`},
+		"/v1/runs/r/steps/0":    {200, `{"status":"ok","tool_calls":[` + strings.Join(calls, ",") + `],"holes":[]}`},
+		"/v1/runs/r/transcript": {200, `{"batches":[{"input":false,"messages":[{"role":"assistant","content":[{"type":"text","text":"done"}]}]}]}`},
 	}
 	_, ex := explainOn(t, f, "r")
 	if len(ex.Digest) == 0 || len(ex.Digest[0]) > explainLineBytes+80 || !strings.Contains(ex.Digest[0], "more (step {n:…} has them all)") {
@@ -341,34 +341,34 @@ func TestMCPExplainDigestLineCap(t *testing.T) {
 // every cap at the digest's end: the steps not walked, the children
 // not listed by id, the children the budget left unread by id.
 func TestMCPExplainCaps(t *testing.T) {
-	f := fakeServer{"/api/runs/r/transcript": {200, `{"batches":[]}`}}
+	f := fakeServer{"/v1/runs/r/transcript": {200, `{"batches":[]}`}}
 	var children, calls []string
 	for i := range 15 {
 		id := fmt.Sprintf("r/0/c%02d", i)
 		children = append(children, fmt.Sprintf(`{"id":%q,"parent_call_id":"c%02d","agent":"w","status":"succeeded","tool_errors":1,"steps":3}`, id, i))
 		calls = append(calls, fmt.Sprintf(`{"call_id":"c%02d","name":"work","child_run_id":%q,"result":{"content":"ok"}}`, i, id))
 		esc := strings.ReplaceAll(id, "/", "%2F")
-		f["/api/runs/"+esc] = struct {
+		f["/v1/runs/"+esc] = struct {
 			status int
 			body   string
 		}{200, fmt.Sprintf(`{"id":%q,"agent":"w","status":"succeeded","steps":3,"holes":[]}`, id)}
 		for n := range 3 {
-			f[fmt.Sprintf("/api/runs/%s/steps/%d", esc, n)] = struct {
+			f[fmt.Sprintf("/v1/runs/%s/steps/%d", esc, n)] = struct {
 				status int
 				body   string
 			}{200, `{"status":"ok","tool_calls":[{"call_id":"call_1","name":"lookup","result":{"content":"nope","is_error":true}}],"holes":[]}`}
 		}
 	}
-	f["/api/runs/r"] = struct {
+	f["/v1/runs/r"] = struct {
 		status int
 		body   string
 	}{200, `{"id":"r","agent":"lead","status":"succeeded","steps":30,"holes":[],"children":[` + strings.Join(children, ",") + `]}`}
-	f["/api/runs/r/steps/0"] = struct {
+	f["/v1/runs/r/steps/0"] = struct {
 		status int
 		body   string
 	}{200, `{"status":"ok","tool_calls":[` + strings.Join(calls, ",") + `],"holes":[]}`}
 	for n := 1; n < 30; n++ {
-		f[fmt.Sprintf("/api/runs/r/steps/%d", n)] = struct {
+		f[fmt.Sprintf("/v1/runs/r/steps/%d", n)] = struct {
 			status int
 			body   string
 		}{200, `{"status":"ok","holes":[]}`}

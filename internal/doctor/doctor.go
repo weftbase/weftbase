@@ -1,8 +1,8 @@
 // Package doctor is `weftbase doctor` (plan B5): it asks a running
 // server what it is and how it is wired, and prints one line per
-// check. Every line reads one field of GET /api/meta (Lines is the
-// table) — beside it, for the discovery check, the discovery file this
-// shell reads (Target.Discovery, the command's resolver's). The doctor
+// check. Every line reads fields of GET /v1/meta (Lines is the table)
+// or GET /readyz — beside them, for the discovery check, the discovery
+// file this shell reads (Target.Discovery, the command's resolver's). The doctor
 // computes nothing the server does not serve: a second source of truth
 // would drift.
 //
@@ -29,9 +29,10 @@ import (
 // hung server is a clear first line, never a hang.
 const Timeout = 5 * time.Second
 
-// Line is one check the doctor prints: its label and the /api/meta
-// fields (or "local:discovery" for the discovery file it reads, or "status" for
-// the meta response itself) it reads.
+// Line is one check the doctor prints: its label and the /v1/meta
+// fields (or "local:discovery" for the discovery file it reads,
+// "readyz" for GET /readyz, or "status" for the meta response itself)
+// it reads.
 type Line struct {
 	Label  string
 	Fields []string
@@ -40,34 +41,38 @@ type Line struct {
 // Lines is the doctor's line table, in print order.
 var Lines = []Line{
 	{"server", []string{"status", "weft_version", "server_version"}},
-	{"token", []string{"status", "auth_required"}},
-	{"discovery", []string{"discovery_file", "db.path", "local:discovery"}},
+	{"key", []string{"status", "principal.kind", "principal.id", "principal.scope"}},
+	{"ready", []string{"status", "readyz"}},
+	{"discovery", []string{"pid", "db.path", "local:discovery"}},
 	{"db", []string{"db.kind", "db.path", "db.size"}},
 	{"content", []string{"content.ingest", "content.latest.run_id", "content.latest.mark", "content.latest.note", "content.latest.fix", "content.error"}},
 	{"data", []string{"content.latest.started", "content.latest.weft_version", "content.latest.service", "weft_version"}},
-	{"otlp", []string{"ingest_open", "capabilities"}},
+	{"otlp", []string{"capabilities"}},
 	{"ingest", []string{"ingest.dropped", "ingest.accepted", "ingest.refused", "ingest.last_error", "ingest.last_at"}},
-	{"manifest", []string{"has_manifest", "manifest_check.source", "manifest_check.agents", "manifest_check.checked", "manifest_check.stale", "manifest_check.error"}},
+	{"manifest", []string{"manifest_check.source", "manifest_check.agents", "manifest_check.checked", "manifest_check.stale", "manifest_check.error"}},
 }
 
-// meta is the slice of GET /api/meta the doctor reads.
+// meta is the slice of GET /v1/meta the doctor reads.
 type meta struct {
 	WeftVersion   string          `json:"weft_version"`
 	ServerVersion string          `json:"server_version"`
 	DB            json.RawMessage `json:"db"`
-	HasManifest   bool            `json:"has_manifest"`
 	Capabilities  []string        `json:"capabilities"`
-	// CapabilitiesOff names why each capability is off, the flag that
-	// did included (plan B4): the otlp line says it.
-	CapabilitiesOff map[string]string `json:"capabilities_off"`
-	IngestOpen      bool              `json:"ingest_open"`
-	AuthRequired    bool              `json:"auth_required"`
-	// PID is the server's process id (db.path's rule).
-	PID int `json:"pid"`
-	// DiscoveryFile is the discovery file this server wrote (served
-	// under db.path's rule while it names the server's process).
-	DiscoveryFile string `json:"discovery_file"`
-	Content       struct {
+	// Principal is who the key authenticated as.
+	Principal struct {
+		Kind    string `json:"kind"`
+		ID      string `json:"id"`
+		KeyKind string `json:"key_kind"`
+		Scope   struct {
+			Project string `json:"project"`
+			Env     string `json:"env"`
+			Tenant  string `json:"tenant"`
+		} `json:"scope"`
+	} `json:"principal"`
+	// PID is the server's process id (served to a caller allowed the
+	// host's details).
+	PID     int `json:"pid"`
+	Content struct {
 		Ingest string `json:"ingest"`
 		Error  string `json:"error"`
 		Latest *struct {
@@ -148,7 +153,7 @@ func Run(ctx context.Context, w io.Writer, t Target) error {
 	where := url
 	ctx, cancel := context.WithTimeout(ctx, Timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url+"/api/meta", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url+"/v1/meta", nil)
 	if err != nil {
 		p.raw("weftbase not reachable at %s: %v", url, err)
 		return ErrUnhealthy
@@ -180,10 +185,10 @@ func Run(ctx context.Context, w io.Writer, t Target) error {
 	case http.StatusUnauthorized:
 		p.line(ok, "server", "reachable at %s", url)
 		if token == "" {
-			p.line(fail, "token", "server requires one: it is in <db>.token beside the database (the start banner names the file); set WEFTBASE_TOKEN or --token to it")
-			p.sub("or run `weftbase open --with-token` from the directory the server started in (where its discovery file is found), or pass --token \"$(cat <db>.token)\"")
+			p.line(fail, "key", "the server requires an API key: `weftbase dev` keeps its bootstrap key in <data>/bootstrap.key (the start banner names it); set WEFTBASE_TOKEN or --token to it")
+			p.sub("or run from the directory the server started in, where its discovery file is found")
 		} else {
-			p.line(fail, "token", "refused: it is not this server's token (WEFTBASE_TOKEN / --token)")
+			p.line(fail, "key", "refused: not a live key of this server (WEFTBASE_TOKEN / --token)")
 		}
 		return ErrUnhealthy
 	default:
@@ -192,21 +197,25 @@ func Run(ctx context.Context, w io.Writer, t Target) error {
 		if loc := resp.Header.Get("Location"); resp.StatusCode/100 == 3 {
 			msg = "a redirect to " + loc + ", not followed: point --url at the server itself"
 		}
-		p.line(fail, "token", "api/meta answered %d: %s", resp.StatusCode, msg)
+		p.line(fail, "key", "/v1/meta answered %d: %s", resp.StatusCode, msg)
 		return ErrUnhealthy
 	}
 	var m meta
 	if err := json.Unmarshal(body, &m); err != nil {
-		p.raw("weftbase not reachable at %s: api/meta is not JSON: %v", url, err)
+		p.raw("weftbase not reachable at %s: /v1/meta is not JSON: %v", url, err)
 		return ErrUnhealthy
 	}
 
 	p.line(ok, "server", "reachable at %s (weft %s, server %s)", where, m.WeftVersion, m.ServerVersion)
-	if m.AuthRequired {
-		p.line(ok, "token", "accepted")
-	} else {
-		p.line(ok, "token", "not required (no Token configured)")
+	who := m.Principal.Kind
+	if m.Principal.KeyKind != "" {
+		who += " " + m.Principal.KeyKind
 	}
+	if m.Principal.ID != "" {
+		who += " " + m.Principal.ID
+	}
+	p.line(ok, "key", "accepted: %s in %s/%s/%s", who, m.Principal.Scope.Project, m.Principal.Scope.Env, m.Principal.Scope.Tenant)
+	p.ready(ctx, client, url)
 	p.discovery(m, url, t.Discovery)
 	p.db(m.DB)
 	p.content(m)
@@ -346,7 +355,7 @@ func (p *printer) ingest(m meta) {
 			at = " at " + in.LastAt.Format(time.RFC3339)
 		}
 		p.sub("last refused%s: %s", at, in.LastError)
-		p.sub("fix: server's log names each refused batch with its request id (WARN \"weftbase: ingest batch refused\"); a 401 is the app's ingest token (exporter.Remote(url, key), v1.IngestToken)")
+		p.sub("fix: server's log names each refused batch with its request id (WARN \"weftbase: ingest batch refused\"); a 401 is the app's API key (exporter.Remote(url, key))")
 	}
 	if len(in.Dropped) > 0 {
 		for _, d := range in.Dropped {
@@ -368,10 +377,8 @@ func (p *printer) manifest(m meta) {
 	// "weft.json".
 	c := m.ManifestCheck
 	switch {
-	case !m.HasManifest:
-		p.line(ok, "manifest", "none: no weft.json configured (v1.Manifest, or --manifest / WEFT_MANIFEST), nothing to compare")
 	case c == nil:
-		p.line(ok, "manifest", "present (weft.json); not checked for this caller")
+		p.line(ok, "manifest", "none: no weft.json configured (weftbase.Manifest, or --manifest / WEFT_MANIFEST), nothing to compare")
 	case c.Error != "":
 		p.line(warn, "manifest", "the check failed: %s", c.Error)
 	case len(c.Stale) > 0:
@@ -420,12 +427,10 @@ func (p *printer) discovery(m meta, url string, d Discovery) {
 	switch {
 	case d.Off:
 		p.line(ok, "discovery", "WEFTBASE_DISCOVERY=off in this shell: no file read; apps and this command need WEFTBASE_URL=%s", url)
-	case d.Path == "" && m.DiscoveryFile != "":
-		p.line(warn, "discovery", "this server wrote %s, which this shell does not find: an app run here needs WEFTBASE_URL=%s", m.DiscoveryFile, url)
-		p.sub("./.weftbase is read from the working directory: run from the directory the server started in")
 	case d.Path == "":
-		p.line(warn, "discovery", "no discovery file: an app that sets no WEFTBASE_URL finds no server (weftbase dev write one; WEFTBASE_DISCOVERY=off writes none)")
-	case strings.TrimRight(d.URL, "/") == url || m.DiscoveryFile != "" && m.DiscoveryFile == d.Path || m.PID > 0 && m.PID == d.PID:
+		p.line(warn, "discovery", "no discovery file: an app that sets no WEFTBASE_URL finds no server (weftbase dev writes one; WEFTBASE_DISCOVERY=off writes none)")
+		p.sub("./.weftbase is read from the working directory: run from the directory the server started in")
+	case strings.TrimRight(d.URL, "/") == url || m.PID > 0 && m.PID == d.PID:
 		// This server, however its host is spelled (localhost,
 		// 127.0.0.1): the file it wrote, or its pid.
 		p.line(ok, "discovery", "%s -> %s (this server)", d.Path, d.URL)
@@ -480,21 +485,35 @@ func (p *printer) data(m meta) {
 	}
 }
 
-// otlp prints the OTLP ingest's door: open to a loopback app, walled
-// by an ingest token, or off.
+// otlp prints the OTLP ingest's door: served by this node (the ingest
+// role, an API key as the bearer), or not.
 func (p *printer) otlp(m meta, url string) {
-	switch {
-	case !slices.Contains(m.Capabilities, "ingest"):
-		why := m.CapabilitiesOff["ingest"]
-		if why == "" {
-			why = "OTLP ingest is off"
-		}
-		p.line(warn, "otlp", "%s: an app's spans cannot reach this server", why)
-	case m.IngestOpen:
-		p.line(ok, "otlp", "open: OTLP at %s/otlp/v1/traces and /otlp/v1/logs takes a loopback app's spans with no ingest token", url)
-	default:
-		p.line(ok, "otlp", "walled: OTLP at %s/otlp/v1/traces and /otlp/v1/logs needs the ingest token (exporter.Remote(url, key))", url)
+	if !slices.Contains(m.Capabilities, "ingest") {
+		p.line(warn, "otlp", "this node runs no ingest role: an app's spans cannot reach it here (serve --roles=…,ingest)")
+		return
 	}
+	p.line(ok, "otlp", "OTLP at %s/otlp/v1/traces and /otlp/v1/logs, an API key as the bearer (exporter.Remote(url, key); OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer%%20<key>)", url)
+}
+
+// ready prints GET /readyz: whether the node's stores answer.
+func (p *printer) ready(ctx context.Context, client *http.Client, url string) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url+"/readyz", nil)
+	if err != nil {
+		p.line(fail, "ready", "%v", err)
+		return
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		p.line(fail, "ready", "GET /readyz: %v", err)
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+	if resp.StatusCode != http.StatusOK {
+		p.line(fail, "ready", "GET /readyz answered %d: %s", resp.StatusCode, errorMessage(body))
+		return
+	}
+	p.line(ok, "ready", "the stores answer (GET /readyz)")
 }
 
 // errorMessage reads a server error body's message, or the body.

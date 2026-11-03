@@ -113,15 +113,15 @@ func TestFlowAndTagFilterTheReadAPI(t *testing.T) {
 		want  string
 		total int
 	}{
-		{"/weftbase/api/runs?flow=f_checkout", "r_b1a r_b1c r_b2", 3},
-		{"/weftbase/api/runs?tag.arena.batch=b1", "r_b1a r_b1b r_b1c", 3},
-		{"/weftbase/api/runs?tag.arena.batch=b1&flow=f_checkout", "r_b1a r_b1c", 2},
-		{"/weftbase/api/runs?tag.arena.batch=b1&agent=analyst", "r_b1b", 1},
-		{"/weftbase/api/runs?flow=f_checkout&public_id=arena:b2:x", "r_b2", 1},
-		{"/weftbase/api/runs?flow=f_nothing", "", 0},
-		{"/weftbase/api/runs?flow=", "r_b1a r_b1b r_b1c r_b2 r_none", 5}, // empty: no filter
-		{"/weftbase/api/search?flow=f_checkout", "r_b1a r_b1c r_b2", 3},
-		{"/weftbase/api/search?tag.arena.batch=b1&flow=f_checkout", "r_b1a r_b1c", 2},
+		{"/weftbase/v1/runs?flow=f_checkout", "r_b1a r_b1c r_b2", 3},
+		{"/weftbase/v1/runs?tag.arena.batch=b1", "r_b1a r_b1b r_b1c", 3},
+		{"/weftbase/v1/runs?tag.arena.batch=b1&flow=f_checkout", "r_b1a r_b1c", 2},
+		{"/weftbase/v1/runs?tag.arena.batch=b1&agent=analyst", "r_b1b", 1},
+		{"/weftbase/v1/runs?flow=f_checkout&public_id=arena:b2:x", "r_b2", 1},
+		{"/weftbase/v1/runs?flow=f_nothing", "", 0},
+		{"/weftbase/v1/runs?flow=", "r_b1a r_b1b r_b1c r_b2 r_none", 5}, // empty: no filter
+		{"/weftbase/v1/runs?sort=started&flow=f_checkout", "r_b1a r_b1c r_b2", 3},
+		{"/weftbase/v1/runs?sort=started&tag.arena.batch=b1&flow=f_checkout", "r_b1a r_b1c", 2},
 	} {
 		code, _, body := get(t, h, c.path)
 		if code != http.StatusOK {
@@ -137,9 +137,9 @@ func TestFlowAndTagFilterTheReadAPI(t *testing.T) {
 		path string
 		want string
 	}{
-		{"/weftbase/api/traces?flow=f_checkout", "r_b1a r_b1c r_b2"},
-		{"/weftbase/api/traces?tag.arena.batch=b1&flow=f_checkout", "r_b1a r_b1c"},
-		{"/weftbase/api/traces?tag.arena.batch=b2", "r_b2"},
+		{"/weftbase/v1/traces?flow=f_checkout", "r_b1a r_b1c r_b2"},
+		{"/weftbase/v1/traces?tag.arena.batch=b1&flow=f_checkout", "r_b1a r_b1c"},
+		{"/weftbase/v1/traces?tag.arena.batch=b2", "r_b2"},
 	} {
 		code, _, body := get(t, h, c.path)
 		if code != http.StatusOK {
@@ -164,12 +164,12 @@ func TestFlowAndTagFilterTheReadAPI(t *testing.T) {
 	}
 	// Sessions: flow= narrows them as tag.<k>= does (none of these runs
 	// is a session's turn: an empty list, not a 400).
-	if code, _, body := get(t, h, "/weftbase/api/sessions?flow=f_checkout&tag.arena.batch=b1"); code != http.StatusOK {
+	if code, _, body := get(t, h, "/weftbase/v1/sessions?flow=f_checkout&tag.arena.batch=b1"); code != http.StatusOK {
 		t.Errorf("sessions with flow and tag: %d %s", code, body)
 	}
 }
 
-// The Done line's live clause (A5): /api/live takes tag.<k>=<v> and
+// The Done line's live clause (A5): /v1/runs/stream takes tag.<k>=<v> and
 // flow= as a selector over run frames — alone (every run's frames,
 // filtered: setup A on loopback here) or narrowing another selector —
 // and passes the record frames of the runs it admitted.
@@ -248,7 +248,7 @@ func TestLiveTagAndFlowSelector(t *testing.T) {
 		{"?run=r_1&tag.k=v", http.StatusOK},
 	} {
 		if resp := liveSSE(t, h, c.q, ""); resp.StatusCode != c.want {
-			t.Errorf("GET /api/live%s: %d, want %d", c.q, resp.StatusCode, c.want)
+			t.Errorf("GET /v1/runs/stream%s: %d, want %d", c.q, resp.StatusCode, c.want)
 		}
 	}
 }

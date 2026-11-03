@@ -25,7 +25,7 @@ import (
 )
 
 // TestStatusFilterWords pins issue 003 (I3) on both routes and both
-// backends: /api/runs and /api/search share one status parser —
+// backends: /v1/runs and /v1/search share one status parser —
 // ?status=bogus is a 400 naming the allowed words on both, never an
 // empty 200 — and the read-time words filter server-side: parked lists
 // the contract's `parked` run (an open park) and not `resumed`'s parked
@@ -99,7 +99,7 @@ func TestStatusFilterWords(t *testing.T) {
 			} {
 				t.Run(c.fixture+"/"+c.status, func(t *testing.T) {
 					ts := serve(t, c.fixture)
-					for _, route := range []string{"/api/runs?all=1&status=", "/api/search?all=1&status="} {
+					for _, route := range []string{"/v1/runs?all=1&status=", "/v1/runs?sort=started&all=1&status="} {
 						got, total := ids(t, ts, route+c.status)
 						if strings.Join(got, ",") != strings.Join(c.want, ",") || total != len(c.want) {
 							t.Errorf("%s%s on %s = %v (total %d), want %v", route, c.status, c.fixture, got, total, c.want)
@@ -109,7 +109,7 @@ func TestStatusFilterWords(t *testing.T) {
 			}
 			t.Run("bogus", func(t *testing.T) {
 				ts := serve(t, "parked")
-				for _, route := range []string{"/api/runs?status=bogus", "/api/search?status=bogus", "/api/runs?status=completed"} {
+				for _, route := range []string{"/v1/runs?status=bogus", "/v1/runs?sort=started&status=bogus", "/v1/runs?status=completed"} {
 					resp, err := http.Get(ts.URL + route)
 					if err != nil {
 						t.Fatal(err)

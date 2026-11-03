@@ -19,7 +19,7 @@ import (
 	"github.com/weftbase/weftbase/obsdb"
 )
 
-// diffDocT is GET /api/diff as a client decodes it.
+// diffDocT is GET /v1/diff as a client decodes it.
 type diffDocT struct {
 	A, B struct {
 		RunID  string `json:"run_id"`
@@ -143,7 +143,7 @@ func recordDiffRunTo(t *testing.T, url, runID, third string, calls int, meta map
 // finish is stored (ingest lands asynchronously).
 func waitRun(t *testing.T, ts *httptest.Server, id string, steps int, bearer string) {
 	t.Helper()
-	fetchJSONAs(t, ts, "/api/runs/"+id, bearer, func(b string) bool {
+	fetchJSONAs(t, ts, "/v1/runs/"+esc(id), bearer, func(b string) bool {
 		return strings.Contains(b, `"steps":`+strconv.Itoa(steps)+`,`) && !strings.Contains(b, `"status":"running"`)
 	})
 }
@@ -163,7 +163,7 @@ func compacting() core.Option {
 
 func getDiff(t *testing.T, ts *httptest.Server, a, b, bearer string) (diffDocT, string) {
 	t.Helper()
-	body := fetchJSONAs(t, ts, "/api/diff?a="+a+"&b="+b, bearer, nil)
+	body := fetchJSONAs(t, ts, "/v1/diff?a="+a+"&b="+b, bearer, nil)
 	var d diffDocT
 	decode(t, body, &d)
 	checkDiffHoles(t, a+" vs "+b, d)
@@ -231,13 +231,13 @@ func TestDiffRoute(t *testing.T) {
 	}
 
 	for path, want := range map[string]int{
-		"/api/diff":                  http.StatusBadRequest,
-		"/api/diff?a=r_da":           http.StatusBadRequest,
-		"/api/diff?b=r_da":           http.StatusBadRequest,
-		"/api/diff?a=r_da&b=":        http.StatusBadRequest,
-		"/api/diff?a=r_da&b=nope":    http.StatusNotFound,
-		"/api/diff?a=nope&b=r_da":    http.StatusNotFound,
-		"/api/diff?a=r_da&b=r_db&x=": http.StatusOK,
+		"/v1/diff":                  http.StatusBadRequest,
+		"/v1/diff?a=r_da":           http.StatusBadRequest,
+		"/v1/diff?b=r_da":           http.StatusBadRequest,
+		"/v1/diff?a=r_da&b=":        http.StatusBadRequest,
+		"/v1/diff?a=r_da&b=nope":    http.StatusNotFound,
+		"/v1/diff?a=nope&b=r_da":    http.StatusNotFound,
+		"/v1/diff?a=r_da&b=r_db&x=": http.StatusOK,
 	} {
 		resp, err := http.Get(ts.URL + path)
 		if err != nil {
@@ -334,7 +334,7 @@ func TestDiffMarks(t *testing.T) {
 		})
 	}
 	waitRun(t, ts, "r_tool", 2, "")
-	fetchJSON(t, ts, "/api/runs/r_sub", func(b string) bool {
+	fetchJSON(t, ts, "/v1/runs/r_sub", func(b string) bool {
 		return strings.Contains(b, `"id":"r_sub/0/c_r"`) && strings.Contains(b, `"steps":2,`)
 	})
 	d, _ = getDiff(t, ts, "r_tool", "r_sub", "")
@@ -490,7 +490,7 @@ func TestDiffUnreadableTranscript(t *testing.T) {
 func TestDiffWalkResumes(t *testing.T) {
 	ts, srv := requestsServer(t)
 	recordStepsRun(t, ts.URL, "r_walk", nil)
-	fetchJSON(t, ts, "/api/runs/r_walk", func(b string) bool {
+	fetchJSON(t, ts, "/v1/runs/r_walk", func(b string) bool {
 		return strings.Contains(b, `"request_count":6`) && strings.Contains(b, `"id":"r_walk/1/c_sub"`)
 	})
 	ctx := context.Background()

@@ -8,7 +8,7 @@ package v1
 // recorded through the real pipeline (core → otel → OTLP ingest →
 // obsdb) and read back through the routes both renderers read: the
 // run document, events, transcript, spans, requests and every step.
-// One golden, api/http/v1/testdata/api/cards.golden.json, normalised to be
+// One golden, api/http/v1/testdata/v1/cards.golden.json, normalised to be
 // byte-stable; the web tests (src/test/cards-fixture.ts) draw each
 // shape on the run page and in the Console's Story and assert the named
 // fact. The Go half pins what the record says.
@@ -419,7 +419,7 @@ func runCardsGolden(t *testing.T, skew bool) {
 
 	out := map[string]shapeDoc{}
 	read := func(id string) shapeDoc {
-		run := fetchJSON(t, ts, "/api/runs/"+id, finished)
+		run := fetchJSON(t, ts, "/v1/runs/"+esc(id), finished)
 		var row struct {
 			Steps    int `json:"steps"`
 			Children []struct {
@@ -429,22 +429,22 @@ func runCardsGolden(t *testing.T, skew bool) {
 		decode(t, run, &row)
 		d := shapeDoc{
 			Run:        json.RawMessage(run),
-			Events:     json.RawMessage(fetchJSON(t, ts, "/api/runs/"+id+"/events?after=0&limit=500", nil)),
-			Transcript: json.RawMessage(fetchJSON(t, ts, "/api/runs/"+id+"/transcript", nil)),
-			Spans:      json.RawMessage(fetchJSON(t, ts, "/api/runs/"+id+"/spans", nil)),
-			Requests:   json.RawMessage(fetchJSON(t, ts, "/api/runs/"+id+"/requests?limit=1000", nil)),
-			Tools:      json.RawMessage(fetchJSON(t, ts, "/api/runs/"+id+"/tools", nil)),
+			Events:     json.RawMessage(fetchJSON(t, ts, "/v1/runs/"+esc(id)+"/events?after=0&limit=500", nil)),
+			Transcript: json.RawMessage(fetchJSON(t, ts, "/v1/runs/"+esc(id)+"/transcript", nil)),
+			Spans:      json.RawMessage(fetchJSON(t, ts, "/v1/runs/"+esc(id)+"/spans", nil)),
+			Requests:   json.RawMessage(fetchJSON(t, ts, "/v1/runs/"+esc(id)+"/requests?limit=1000", nil)),
+			Tools:      json.RawMessage(fetchJSON(t, ts, "/v1/runs/"+esc(id)+"/tools", nil)),
 		}
 		// A run that failed in its first model call counts no step;
 		// its step 0 still holds the attempts.
 		for n := 0; n < max(row.Steps, 1); n++ {
-			d.Steps = append(d.Steps, json.RawMessage(fetchJSON(t, ts, fmt.Sprintf("/api/runs/%s/steps/%d", id, n), nil)))
+			d.Steps = append(d.Steps, json.RawMessage(fetchJSON(t, ts, fmt.Sprintf("/v1/runs/%s/steps/%d", id, n), nil)))
 		}
 		for _, c := range row.Children {
 			if d.Children == nil {
 				d.Children = map[string]json.RawMessage{}
 			}
-			child := fetchJSON(t, ts, "/api/runs/"+c.ID, func(b string) bool { return strings.Contains(b, `"status":"failed"`) })
+			child := fetchJSON(t, ts, "/v1/runs/"+esc(c.ID), func(b string) bool { return strings.Contains(b, `"status":"failed"`) })
 			d.Children[c.ID] = json.RawMessage(child)
 		}
 		return d
@@ -545,7 +545,7 @@ func runCardsGolden(t *testing.T, skew bool) {
 		t.Fatal(err)
 	}
 	stable := normCards(pretty(t, string(b)))
-	wefttest.Golden(t, "testdata/api/cards.golden.json", []byte(stable))
+	wefttest.Golden(t, "testdata/v1/cards.golden.json", []byte(stable))
 }
 
 // normParallel makes a shape's record independent of how its parallel

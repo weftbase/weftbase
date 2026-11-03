@@ -48,7 +48,7 @@ func TestSessionTitlesAndQuery(t *testing.T) {
 	if err := db.Write(context.Background(), obsdb.Batch{Records: off}); err != nil {
 		t.Fatal(err)
 	}
-	srv := New(DB(db), Token(serverTok))
+	srv := New(DB(db))
 	t.Cleanup(func() { _ = srv.Close() })
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
@@ -77,7 +77,7 @@ func TestSessionTitlesAndQuery(t *testing.T) {
 		}
 		return got
 	}
-	all := list("/api/sessions")
+	all := list("/v1/sessions")
 	if r := all["conv_t"]; r.Title != "Order desk" || r.FirstPrompt != "secret of pub_a" || r.ContentOff {
 		t.Errorf("conv_t = %+v, want its title and first prompt", r)
 	}
@@ -87,18 +87,18 @@ func TestSessionTitlesAndQuery(t *testing.T) {
 	if r := all["conv_o"]; r.Title != "" || r.FirstPrompt != "" || !r.ContentOff {
 		t.Errorf("conv_o = %+v, want no title, no prompt, content_off", r)
 	}
-	if got := list("/api/sessions?q=order+DESK"); len(got) != 1 || got["conv_t"].ID == "" {
+	if got := list("/v1/sessions?q=order+DESK"); len(got) != 1 || got["conv_t"].ID == "" {
 		t.Errorf("?q=order DESK = %v, want conv_t by its title", got)
 	}
-	if got := list("/api/sessions?q=pub_b"); len(got) != 1 || got["conv_p"].ID == "" {
+	if got := list("/v1/sessions?q=pub_b"); len(got) != 1 || got["conv_p"].ID == "" {
 		t.Errorf("?q=pub_b = %v, want conv_p by its first prompt and public id", got)
 	}
 	// id_prefix (U30.2): the session ids that start with it, never one
 	// that holds it mid-id or a title or prompt that does.
-	if got := list("/api/sessions?id_prefix=conv_t"); len(got) != 1 || got["conv_t"].ID == "" {
+	if got := list("/v1/sessions?id_prefix=conv_t"); len(got) != 1 || got["conv_t"].ID == "" {
 		t.Errorf("?id_prefix=conv_t = %v, want conv_t", got)
 	}
-	if got := list("/api/sessions?id_prefix=onv_"); len(got) != 0 {
+	if got := list("/v1/sessions?id_prefix=onv_"); len(got) != 0 {
 		t.Errorf("?id_prefix=onv_ = %v, want none (a prefix, not a substring)", got)
 	}
 }
@@ -139,7 +139,7 @@ func TestSessionSummarizerUsage(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	srv := New(DB(db), Token(serverTok))
+	srv := New(DB(db))
 	t.Cleanup(func() { _ = srv.Close() })
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
@@ -166,7 +166,7 @@ func TestSessionSummarizerUsage(t *testing.T) {
 	var page struct {
 		Sessions []row `json:"sessions"`
 	}
-	read("/api/sessions", serverTok, &page)
+	read("/v1/sessions", serverTok, &page)
 	got := map[string]row{}
 	for _, r := range page.Sessions {
 		got[r.ID] = r
@@ -178,7 +178,7 @@ func TestSessionSummarizerUsage(t *testing.T) {
 		t.Errorf("list conv_n = %+v, want listed with no summarizer_usage", r)
 	}
 	var doc row
-	read("/api/sessions/conv_s", serverTok, &doc)
+	read("/v1/sessions/conv_s", serverTok, &doc)
 	if doc.Summ == nil || *doc.Summ != (usage{140, 7}) {
 		t.Errorf("doc conv_s summarizer_usage = %v, want 140/7", doc.Summ)
 	}

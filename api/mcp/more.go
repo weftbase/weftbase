@@ -94,7 +94,7 @@ func (m *mcpReader) trace(ctx context.Context, _ *sdk.CallToolRequest, in mcpTra
 	if err := needID("trace_id", in.TraceID); err != nil {
 		return nil, nil, err
 	}
-	b, err := m.get(ctx, "/api/traces/"+url.PathEscape(in.TraceID), nil)
+	b, err := m.get(ctx, "/v1/traces/"+url.PathEscape(in.TraceID), nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -141,13 +141,13 @@ func (m *mcpReader) transcript(ctx context.Context, _ *sdk.CallToolRequest, in m
 	return out(in.MaxBytes, s, b)
 }
 
-// live is the running runs, now: GET /api/runs?status=running&all=1 —
-// a snapshot, not the /api/live stream (an MCP answer is one response).
+// live is the running runs, now: GET /v1/runs?status=running&all=1 —
+// a snapshot, not the /v1/runs/stream stream (an MCP answer is one response).
 func (m *mcpReader) live(ctx context.Context, _ *sdk.CallToolRequest, in mcpLiveIn) (*sdk.CallToolResult, any, error) {
 	q := url.Values{"status": {"running"}, "all": {"1"}}
 	setStr(q, "agent", in.Agent)
 	setInt(q, "limit", int64(in.Limit))
-	b, err := m.get(ctx, "/api/runs", q)
+	b, err := m.get(ctx, "/v1/runs", q)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -155,7 +155,7 @@ func (m *mcpReader) live(ctx context.Context, _ *sdk.CallToolRequest, in mcpLive
 }
 
 func (m *mcpReader) agents(ctx context.Context, _ *sdk.CallToolRequest, in mcpMetaIn) (*sdk.CallToolResult, any, error) {
-	b, err := m.get(ctx, "/api/manifest", nil)
+	b, err := m.get(ctx, "/v1/manifest", nil)
 	if err != nil {
 		return nil, nil, err
 	}

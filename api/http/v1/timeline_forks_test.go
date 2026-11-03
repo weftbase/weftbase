@@ -116,7 +116,7 @@ func timelineForks(t *testing.T, base obsdb.DB) {
 	}
 	read := func(h http.Handler, tok string) []forkView {
 		t.Helper()
-		code, _, body := getWith(t, h, "/weftbase/api/sessions/s_trip/timeline", tok, "")
+		code, _, body := getWith(t, h, "/weftbase/v1/sessions/s_trip/timeline", tok, "")
 		if code != http.StatusOK {
 			t.Fatalf("timeline: %d %s", code, body)
 		}

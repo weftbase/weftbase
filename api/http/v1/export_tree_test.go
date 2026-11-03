@@ -19,7 +19,7 @@ func TestExportTree(t *testing.T) {
 	ts, _ := requestsServer(t)
 	recordStepsRun(t, ts.URL, "r_tree", nil)
 	const child = "r_tree/1/c_sub"
-	resp, body := exportGet(t, ts, "/api/runs/r_tree/export?format=json&tree=1", settled("r_tree"))
+	resp, body := exportGet(t, ts, "/v1/runs/r_tree/export?format=json&tree=1", settled("r_tree"))
 	if cd := resp.Header.Get("Content-Disposition"); cd != `attachment; filename="r_tree.tree.json"` {
 		t.Errorf("Content-Disposition = %q, want r_tree.tree.json", cd)
 	}
@@ -50,12 +50,12 @@ func TestExportTree(t *testing.T) {
 		t.Errorf("subagent_holes = %v, want [] for a whole tree", d.SubagentHoles)
 	}
 	// Without tree the document is unchanged: no subagents key.
-	_, plain := exportGet(t, ts, "/api/runs/r_tree/export?format=json", nil)
+	_, plain := exportGet(t, ts, "/v1/runs/r_tree/export?format=json", nil)
 	if strings.Contains(string(plain), `"subagents"`) {
 		t.Error("a plain json export carries subagents")
 	}
 
-	_, lines := exportGet(t, ts, "/api/runs/r_tree/export?format=jsonl&tree=1", nil)
+	_, lines := exportGet(t, ts, "/v1/runs/r_tree/export?format=jsonl&tree=1", nil)
 	var runs []string
 	for _, l := range strings.Split(strings.TrimSpace(string(lines)), "\n") {
 		var rec struct {
@@ -73,7 +73,7 @@ func TestExportTree(t *testing.T) {
 		t.Errorf("jsonl run records = %v, want the run then its subagent", runs)
 	}
 
-	_, otlpBody := exportGet(t, ts, "/api/runs/r_tree/export?format=otlp&tree=1", nil)
+	_, otlpBody := exportGet(t, ts, "/v1/runs/r_tree/export?format=otlp&tree=1", nil)
 	var parts struct {
 		Logs   json.RawMessage `json:"logs"`
 		Traces json.RawMessage `json:"traces"`
@@ -91,12 +91,12 @@ func TestExportTree(t *testing.T) {
 		}
 	}
 	// The subagent run re-ingested beside its parent.
-	exportGet(t, fresh, "/api/runs/"+child+"/export?format=json", nil)
+	exportGet(t, fresh, "/v1/runs/"+esc(child)+"/export?format=json", nil)
 
 	for path, want := range map[string]int{
-		"/api/runs/r_tree/export?format=wefttest&tree=1": http.StatusBadRequest,
-		"/api/runs/r_tree/export?format=json&tree=maybe": http.StatusBadRequest,
-		"/api/runs/r_tree/export?format=json&tree=0":     http.StatusOK,
+		"/v1/runs/r_tree/export?format=wefttest&tree=1": http.StatusBadRequest,
+		"/v1/runs/r_tree/export?format=json&tree=maybe": http.StatusBadRequest,
+		"/v1/runs/r_tree/export?format=json&tree=0":     http.StatusOK,
 	} {
 		resp, err := http.Get(ts.URL + path)
 		if err != nil {

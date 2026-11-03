@@ -21,10 +21,10 @@ func TestSubagentsOnThePage(t *testing.T) {
 	ts, _ := requestsServer(t)
 	recordStepsRun(t, ts.URL, "r_steps", nil)
 	const kid = "r_steps/1/c_sub"
-	fetchJSON(t, ts, "/api/runs/r_steps", func(b string) bool {
+	fetchJSON(t, ts, "/v1/runs/r_steps", func(b string) bool {
 		return strings.Contains(b, `"request_count":6`) && strings.Contains(b, `"id":"`+kid+`"`)
 	})
-	fetchJSON(t, ts, "/api/runs/"+kid, func(b string) bool { return strings.Contains(b, `"request_count":1`) })
+	fetchJSON(t, ts, "/v1/runs/"+esc(kid), func(b string) bool { return strings.Contains(b, `"request_count":1`) })
 
 	type row struct {
 		ID           string `json:"id"`
@@ -38,7 +38,7 @@ func TestSubagentsOnThePage(t *testing.T) {
 			Total int   `json:"total"`
 			Runs  []row `json:"runs"`
 		}
-		decode(t, fetchJSON(t, ts, "/api/runs"+q, nil), &page)
+		decode(t, fetchJSON(t, ts, "/v1/runs"+q, nil), &page)
 		if page.Total != len(page.Runs) {
 			t.Errorf("runs%s total %d, %d rows", q, page.Total, len(page.Runs))
 		}
@@ -50,7 +50,7 @@ func TestSubagentsOnThePage(t *testing.T) {
 	// The delegation shape on the row (H9, UX-A-19): the parent counts
 	// its one child, none failed; the child counts none. Search's rows
 	// carry the same.
-	for _, q := range []string{"/api/runs?all=1", "/api/search?all=1"} {
+	for _, q := range []string{"/v1/runs?all=1", "/v1/runs?sort=started&all=1"} {
 		var counts struct {
 			Runs []struct {
 				ID             string `json:"id"`
@@ -87,7 +87,7 @@ func TestSubagentsOnThePage(t *testing.T) {
 	}
 
 	// The child's prompt by the child's id, never the parent's.
-	body := fetchJSON(t, ts, "/api/runs/"+kid+"/requests", nil)
+	body := fetchJSON(t, ts, "/v1/runs/"+esc(kid)+"/requests", nil)
 	requestsGolden(t, "requests-child.golden.json", body)
 	var page requestsDoc
 	decode(t, body, &page)
@@ -101,7 +101,7 @@ func TestSubagentsOnThePage(t *testing.T) {
 	if strings.Contains(body, "You are a support agent.") {
 		t.Error("the child's request record carries the parent's prompt")
 	}
-	decode(t, fetchJSON(t, ts, "/api/runs/"+kid+"/requests?step=0", nil), &page)
+	decode(t, fetchJSON(t, ts, "/v1/runs/"+esc(kid)+"/requests?step=0", nil), &page)
 	if len(page.Requests) != 1 || page.Requests[0].Step != 0 {
 		t.Errorf("child requests?step=0 = %+v, want the one row", page.Requests)
 	}
@@ -123,7 +123,7 @@ func TestChildRowHoles(t *testing.T) {
 		} `json:"holes"`
 	}
 	read := func(id string) (string, []kid) {
-		body := fetchJSON(t, ts, "/api/runs/"+id, func(b string) bool {
+		body := fetchJSON(t, ts, "/v1/runs/"+esc(id), func(b string) bool {
 			return strings.Contains(b, `"request_count":6`) && strings.Contains(b, `"id":"`+id+`/1/c_sub"`)
 		})
 		var doc struct {
@@ -141,7 +141,7 @@ func TestChildRowHoles(t *testing.T) {
 	if len(on) != 1 || on[0].Holes != nil {
 		t.Errorf("content-on child row = %+v, want no holes field", on)
 	}
-	if list := fetchJSON(t, ts, "/api/runs?all=1", nil); strings.Contains(list, `"holes"`) {
+	if list := fetchJSON(t, ts, "/v1/runs?all=1", nil); strings.Contains(list, `"holes"`) {
 		t.Errorf("list rows carry holes: %s", list)
 	}
 }

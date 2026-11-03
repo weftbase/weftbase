@@ -147,19 +147,19 @@ func (d traceListDoc) ids() []string {
 	return out
 }
 
-// TestTracesGolden pins GET /api/traces's shape (plan A7) over the
+// TestTracesGolden pins GET /v1/traces's shape (plan A7) over the
 // fixture: newest first, the span counts and run ids each trace holds
 // (the subagent child beside its parent, the OTLP-ingested trace's
 // run under its non-weft root), the missing root as null with the gap
 // badge, error from any span.
 func TestTracesGolden(t *testing.T) {
 	h := tracesFixture(t)
-	code, _, body := get(t, h, "/weftbase/api/traces")
+	code, _, body := get(t, h, "/weftbase/v1/traces")
 	if code != http.StatusOK {
 		t.Fatalf("traces: %d %s", code, body)
 	}
 	golden(t, "traces.golden.json", body)
-	doc := traceList(t, h, "/weftbase/api/traces")
+	doc := traceList(t, h, "/weftbase/v1/traces")
 	if got, want := doc.ids(), []string{tlOther, tlOrphan, tlWeb, tlParent}; !reflect.DeepEqual(got, want) || doc.Total != 4 || doc.NextBefore != nil || doc.NextBeforeID != nil {
 		t.Fatalf("traces = %v total %d next %v/%v, want %v, one page", got, doc.Total, doc.NextBefore, doc.NextBeforeID, want)
 	}
@@ -216,38 +216,38 @@ func TestTracesRoute(t *testing.T) {
 		{"id_prefix=" + tlWeb, []string{tlWeb}},
 		{"id_prefix=" + tlWeb[:8] + "&service=orphan-svc", []string{}},
 	} {
-		doc := traceList(t, h, "/weftbase/api/traces?"+strings.ReplaceAll(c.query, "+", "%2B"))
+		doc := traceList(t, h, "/weftbase/v1/traces?"+strings.ReplaceAll(c.query, "+", "%2B"))
 		if got := doc.ids(); !reflect.DeepEqual(got, c.want) || doc.Total != len(c.want) {
 			t.Errorf("?%s = %v total %d, want %v", c.query, got, doc.Total, c.want)
 		}
 	}
 	// Two at a time: the (before, before_id) pair walks every trace once.
 	var walked []string
-	path := "/weftbase/api/traces?limit=2"
+	path := "/weftbase/v1/traces?limit=2"
 	for range 4 {
 		doc := traceList(t, h, path)
 		walked = append(walked, doc.ids()...)
 		if doc.NextBefore == nil {
 			break
 		}
-		path = "/weftbase/api/traces?limit=2&before=" + doc.NextBefore.Format(time.RFC3339Nano) + "&before_id=" + *doc.NextBeforeID
+		path = "/weftbase/v1/traces?limit=2&before=" + doc.NextBefore.Format(time.RFC3339Nano) + "&before_id=" + *doc.NextBeforeID
 		path = strings.ReplaceAll(path, "+", "%2B")
 	}
 	if want := []string{tlOther, tlOrphan, tlWeb, tlParent}; !reflect.DeepEqual(walked, want) {
 		t.Errorf("paged = %v, want %v", walked, want)
 	}
 	// before_id without before is ignored: the first page, not a cursor.
-	if doc := traceList(t, h, "/weftbase/api/traces?limit=2&before_id="+tlOrphan); !reflect.DeepEqual(doc.ids(), []string{tlOther, tlOrphan}) {
+	if doc := traceList(t, h, "/weftbase/v1/traces?limit=2&before_id="+tlOrphan); !reflect.DeepEqual(doc.ids(), []string{tlOther, tlOrphan}) {
 		t.Errorf("before_id alone = %v, want the first page [%s %s]", doc.ids(), tlOther, tlOrphan)
 	}
 	for _, q := range []string{"since=yesterday", "until=1", "before=x", "limit=-1", "limit=x"} {
-		if code, _, body := get(t, h, "/weftbase/api/traces?"+q); code != http.StatusBadRequest {
+		if code, _, body := get(t, h, "/weftbase/v1/traces?"+q); code != http.StatusBadRequest {
 			t.Errorf("?%s = %d %s, want 400", q, code, body)
 		}
 	}
-	// The bare path, never a redirect to the /api/traces/ subtree.
-	if code, _, _ := get(t, h, "/weftbase/api/traces/"); code != http.StatusNotFound {
-		t.Errorf("/api/traces/ = %d, want 404 (no trace id)", code)
+	// The bare path, never a redirect to the /v1/traces/ subtree.
+	if code, _, _ := get(t, h, "/weftbase/v1/traces/"); code != http.StatusNotFound {
+		t.Errorf("/v1/traces/ = %d, want 404 (no trace id)", code)
 	}
 }
 
@@ -272,7 +272,7 @@ func TestTracesRootPastPage(t *testing.T) {
 	if err := srv.db.Write(context.Background(), obsdb.Batch{Spans: spans}); err != nil {
 		t.Fatal(err)
 	}
-	code, _, body := get(t, srv.Handler(), "/weftbase/api/traces")
+	code, _, body := get(t, srv.Handler(), "/weftbase/v1/traces")
 	if code != http.StatusOK {
 		t.Fatalf("%d %s", code, body)
 	}

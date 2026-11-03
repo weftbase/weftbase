@@ -126,7 +126,7 @@ func stepGolden(t *testing.T, name, body string) {
 	for _, n := range stepNorm {
 		out = n.re.ReplaceAllString(out, n.with)
 	}
-	wefttest.Golden(t, "testdata/api/"+name, []byte(out))
+	wefttest.Golden(t, "testdata/v1/"+name, []byte(out))
 }
 
 // stepDocT is the step document as a client decodes it.
@@ -221,7 +221,7 @@ func (d stepDocT) holes() []string {
 	return out
 }
 
-// TestStepRoute pins GET /api/runs/{id}/steps/{n} (plan A7, A4's
+// TestStepRoute pins GET /v1/runs/{id}/steps/{n} (plan A7, A4's
 // attempts, A10's children) over a run recorded through the real
 // pipeline: step 0's four attempts (glm-a, glm-b, glm-a, glm-b — three
 // errors, glm-b answering) joined to their request records, step 1's
@@ -230,13 +230,13 @@ func (d stepDocT) holes() []string {
 func TestStepRoute(t *testing.T) {
 	ts, _ := requestsServer(t)
 	recordStepsRun(t, ts.URL, "r_steps", nil)
-	fetchJSON(t, ts, "/api/runs/r_steps", func(b string) bool {
+	fetchJSON(t, ts, "/v1/runs/r_steps", func(b string) bool {
 		return strings.Contains(b, `"request_count":6`) && strings.Contains(b, `"id":"r_steps/1/c_sub"`)
 	})
 
 	var docs [3]stepDocT
 	for n := range docs {
-		path := "/api/runs/r_steps/steps/" + string(rune('0'+n))
+		path := "/v1/runs/r_steps/steps/" + string(rune('0'+n))
 		body := fetchJSON(t, ts, path, nil)
 		stepGolden(t, "step-"+string(rune('0'+n))+".golden.json", body)
 		decode(t, body, &docs[n])
@@ -310,14 +310,14 @@ func TestStepRoute(t *testing.T) {
 
 	// Past the last step, a malformed ordinal, an unknown run.
 	for path, want := range map[string]int{
-		"/api/runs/r_steps/steps/3":         http.StatusNotFound,
-		"/api/runs/r_steps/steps/99":        http.StatusNotFound,
-		"/api/runs/nope/steps/0":            http.StatusNotFound,
-		"/api/runs/r_steps/steps/x":         http.StatusBadRequest,
-		"/api/runs/r_steps/steps/-1":        http.StatusBadRequest,
-		"/api/runs/r_steps/steps/01":        http.StatusBadRequest,
-		"/api/runs/r_steps/1/c_sub/steps/0": http.StatusOK,
-		"/api/runs/r_steps/1/c_sub/steps/1": http.StatusNotFound,
+		"/v1/runs/r_steps/steps/3":             http.StatusNotFound,
+		"/v1/runs/r_steps/steps/99":            http.StatusNotFound,
+		"/v1/runs/nope/steps/0":                http.StatusNotFound,
+		"/v1/runs/r_steps/steps/x":             http.StatusBadRequest,
+		"/v1/runs/r_steps/steps/-1":            http.StatusBadRequest,
+		"/v1/runs/r_steps/steps/01":            http.StatusBadRequest,
+		"/v1/runs/r_steps%2F1%2Fc_sub/steps/0": http.StatusOK,
+		"/v1/runs/r_steps%2F1%2Fc_sub/steps/1": http.StatusNotFound,
 	} {
 		resp, err := http.Get(ts.URL + path)
 		if err != nil {
@@ -328,17 +328,6 @@ func TestStepRoute(t *testing.T) {
 		if resp.StatusCode != want || (want != http.StatusOK && !strings.Contains(string(b), `"error":{"code":`)) {
 			t.Errorf("%s = %d %s, want %d in the error shape", path, resp.StatusCode, b, want)
 		}
-	}
-	// Setup A: the loopback Host only.
-	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/runs/r_steps/steps/0", nil)
-	req.Host = "evil.example"
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("steps with a foreign Host = %d, want 403", resp.StatusCode)
 	}
 }
 
@@ -368,16 +357,16 @@ func TestStepRunning(t *testing.T) {
 		t.Fatal(err)
 	}
 	var d stepDocT
-	decode(t, fetchJSON(t, ts, "/api/runs/r_live/steps/1", nil), &d)
+	decode(t, fetchJSON(t, ts, "/v1/runs/r_live/steps/1", nil), &d)
 	if d.Status != "running" || d.Finished != nil || d.Usage != (core.Usage{}) || len(d.Events) != 1 {
 		t.Errorf("running step = %+v, want running, unfinished, one event", d)
 	}
 	var d0 stepDocT
-	decode(t, fetchJSON(t, ts, "/api/runs/r_live/steps/0", nil), &d0)
+	decode(t, fetchJSON(t, ts, "/v1/runs/r_live/steps/0", nil), &d0)
 	if d0.Status != "ok" || d0.Usage.InputTokens != 3 || len(d0.Events) != 2 {
 		t.Errorf("finished step 0 of a running run = %+v, want ok with its usage", d0)
 	}
-	resp, err := http.Get(ts.URL + "/api/runs/r_live/steps/2")
+	resp, err := http.Get(ts.URL + "/v1/runs/r_live/steps/2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -395,10 +384,10 @@ func TestStepRunning(t *testing.T) {
 func TestStepContentOff(t *testing.T) {
 	ts, _ := requestsServer(t)
 	recordStepsRun(t, ts.URL, "r_off", nil, otel.NoContent())
-	fetchJSON(t, ts, "/api/runs/r_off", func(b string) bool {
+	fetchJSON(t, ts, "/v1/runs/r_off", func(b string) bool {
 		return strings.Contains(b, `"request_count":6`) && strings.Contains(b, `"id":"r_off/1/c_sub"`)
 	})
-	body := fetchJSON(t, ts, "/api/runs/r_off/steps/0", nil)
+	body := fetchJSON(t, ts, "/v1/runs/r_off/steps/0", nil)
 	stepGolden(t, "step-stripped.golden.json", body)
 	var d stepDocT
 	decode(t, body, &d)
@@ -420,7 +409,7 @@ func TestStepContentOff(t *testing.T) {
 		t.Errorf("content-off holes = %s, want stripped", got)
 	}
 	var d1 stepDocT
-	decode(t, fetchJSON(t, ts, "/api/runs/r_off/steps/1", nil), &d1)
+	decode(t, fetchJSON(t, ts, "/v1/runs/r_off/steps/1", nil), &d1)
 	if len(d1.Children) != 1 || d1.Children[0].ID != "r_off/1/c_sub" {
 		t.Errorf("content-off step 1 children = %+v, want the child", d1.Children)
 	}
@@ -490,7 +479,7 @@ func TestStepMaxTokensCalls(t *testing.T) {
 	run("r_max")
 	run("r_max_off", otel.NoContent())
 	for _, c := range []struct{ id, badge string }{{"r_max", "max_tokens"}, {"r_max_off", "stripped"}} {
-		d := getStep(t, ts, "/api/runs/"+c.id+"/steps/0", func(b string) bool { return strings.Contains(b, `"step_finish"`) })
+		d := getStep(t, ts, "/v1/runs/"+esc(c.id)+"/steps/0", func(b string) bool { return strings.Contains(b, `"step_finish"`) })
 		if d.Reason != "max_tokens" || !slices.Contains(d.holes(), "max_tokens") {
 			t.Errorf("%s step 0 = reason %q holes %v, want max_tokens", c.id, d.Reason, d.holes())
 		}
@@ -587,7 +576,7 @@ func TestStepLogsOnly(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	d := getStep(t, ts, "/api/runs/r_logs/steps/0", func(b string) bool { return strings.Contains(b, `"step_finish"`) })
+	d := getStep(t, ts, "/v1/runs/r_logs/steps/0", func(b string) bool { return strings.Contains(b, `"step_finish"`) })
 	if d.AttemptsBadge == nil || d.AttemptsBadge.Badge != "not_recorded" || d.AttemptsBadge.Fix != "install a tracer (otel.Install records spans)" {
 		t.Errorf("logs-only attempts_badge = %+v, want not_recorded with the tracer fix", d.AttemptsBadge)
 	}
@@ -620,8 +609,8 @@ func TestStepAttemptEdges(t *testing.T) {
 		ev(3, `{"type":"run_finish","run_id":"r_edge","usage":{"input_tokens":1,"output_tokens":1},"steps":1}`),
 	}, chat, att("a000000000000001", 1, 2), att("a000000000000002", 2, 1))
 	var reqs requestsDoc
-	decode(t, fetchJSON(t, ts, "/api/runs/r_edge/requests", nil), &reqs)
-	d := getStep(t, ts, "/api/runs/r_edge/steps/0", nil)
+	decode(t, fetchJSON(t, ts, "/v1/runs/r_edge/requests", nil), &reqs)
+	d := getStep(t, ts, "/v1/runs/r_edge/steps/0", nil)
 	if len(d.Attempts) != 2 || len(reqs.Requests) != 1 {
 		t.Fatalf("attempts = %+v (requests route: %d rows), want spans 1 and 2, the record joined to 1", d.Attempts, len(reqs.Requests))
 	}
@@ -648,7 +637,7 @@ func TestStepAttemptEdges(t *testing.T) {
 		ev(2, `{"type":"step_finish","run_id":"r_edge1","index":0,"reason":"stop","usage":{"input_tokens":1,"output_tokens":1}}`),
 		ev(3, `{"type":"run_finish","run_id":"r_edge1","usage":{"input_tokens":1,"output_tokens":1},"steps":1}`),
 	}, chat1)
-	d1 := getStep(t, ts, "/api/runs/r_edge1/steps/0", nil)
+	d1 := getStep(t, ts, "/v1/runs/r_edge1/steps/0", nil)
 	if len(d1.Attempts) != 1 || d1.Attempts[0].Attempt != 1 || d1.Attempts[0].SpanID != chat1.SpanID ||
 		d1.Attempts[0].RequestIndex == nil || d1.Attempts[0].Badge != "derived" {
 		t.Errorf("chat-span attempts = %+v, want one: attempt 1, the chat span, request 0, derived", d1.Attempts)
@@ -676,11 +665,11 @@ func TestStepLostStepStart(t *testing.T) {
 		ev(8, `{"type":"step_finish","run_id":"r_lost","index":1,"reason":"stop","usage":{"input_tokens":1,"output_tokens":1}}`),
 		ev(9, `{"type":"run_finish","run_id":"r_lost","usage":{"input_tokens":2,"output_tokens":2},"steps":2}`),
 	})
-	d0 := getStep(t, ts, "/api/runs/r_lost/steps/0", nil)
+	d0 := getStep(t, ts, "/v1/runs/r_lost/steps/0", nil)
 	if len(d0.Events) != 4 || len(d0.ToolCalls) != 1 || d0.ToolCalls[0].CallID != "c_a" || !slices.Contains(d0.holes(), "gap") {
 		t.Errorf("step 0 = %d events, calls %+v, holes %v; want its 4 events, c_a alone, and the gap", len(d0.Events), d0.ToolCalls, d0.holes())
 	}
-	d1 := getStep(t, ts, "/api/runs/r_lost/steps/1", nil)
+	d1 := getStep(t, ts, "/v1/runs/r_lost/steps/1", nil)
 	if !slices.Contains(d1.holes(), "gap") {
 		t.Errorf("step 1 holes = %v, want gap", d1.holes())
 	}
@@ -698,7 +687,7 @@ func TestStepInterruptedAndPreA4(t *testing.T) {
 		ev(0, `{"type":"run_start","id":"r_int","model":{"provider":"p","name":"m"},"agent":"hand"}`),
 		ev(1, `{"type":"step_start","run_id":"r_int","index":0}`),
 	}, chat)
-	d := getStep(t, ts, "/api/runs/r_int/steps/0", nil)
+	d := getStep(t, ts, "/v1/runs/r_int/steps/0", nil)
 	if d.Status != "error" || !slices.Contains(d.holes(), "interrupted") {
 		t.Errorf("interrupted step = status %q holes %v, want error with interrupted", d.Status, d.holes())
 	}
@@ -732,25 +721,25 @@ func TestStepRealEdges(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	d := getStep(t, ts, "/api/runs/r_edges/steps/0", func(b string) bool { return strings.Contains(b, `"steered"`) })
+	d := getStep(t, ts, "/v1/runs/r_edges/steps/0", func(b string) bool { return strings.Contains(b, `"steered"`) })
 	var truncated bool
 	for _, c := range d.ToolCalls {
 		truncated = truncated || (c.CallID == "c_big" && c.Result != nil && strings.Contains(c.Result.Content, "[truncated 90 bytes]"))
 	}
-	body := fetchJSON(t, ts, "/api/runs/r_edges/steps/0", nil)
+	body := fetchJSON(t, ts, "/v1/runs/r_edges/steps/0", nil)
 	if !truncated || !strings.Contains(body, `"truncated":true`) || !slices.Contains(d.holes(), "truncated") {
 		t.Errorf("capped result: calls %+v holes %v, want truncated", d.ToolCalls, d.holes())
 	}
 	if last := d.Events[len(d.Events)-1].Event.Type; last != "steered" {
 		t.Errorf("step 0's last event = %s, want the steer delivered after it", last)
 	}
-	d1 := getStep(t, ts, "/api/runs/r_edges/steps/1", nil)
+	d1 := getStep(t, ts, "/v1/runs/r_edges/steps/1", nil)
 	for _, e := range d1.Events {
 		if e.Event.Type == "steered" {
 			t.Error("the steer of step 0 is filed under step 1 too")
 		}
 	}
-	r0 := getStep(t, ts, "/api/runs/r_resume/steps/0", func(b string) bool { return strings.Contains(b, `"step_finish"`) })
+	r0 := getStep(t, ts, "/v1/runs/r_resume/steps/0", func(b string) bool { return strings.Contains(b, `"step_finish"`) })
 	if len(r0.Events) == 0 || r0.Events[0].Event.Type != "tool_start" || len(r0.ToolCalls) == 0 || r0.ToolCalls[0].CallID != "c_ref" ||
 		r0.ToolCalls[0].Result == nil || r0.ToolCalls[0].Result.Content != "refunded" {
 		t.Errorf("resume step 0 = events %+v calls %+v, want the approved refund ahead of step_start", r0.Events, r0.ToolCalls)
@@ -775,7 +764,7 @@ func TestStepOldContentOffCalls(t *testing.T) {
 		ev(4, `{"type":"step_finish","run_id":"r_oldoff","index":0,"reason":"tool_calls","usage":{"input_tokens":1,"output_tokens":1}}`),
 		ev(5, `{"type":"run_finish","run_id":"r_oldoff","usage":{"input_tokens":1,"output_tokens":1},"steps":1}`),
 	}, tool)
-	d := getStep(t, ts, "/api/runs/r_oldoff/steps/0", nil)
+	d := getStep(t, ts, "/v1/runs/r_oldoff/steps/0", nil)
 	if len(d.ToolCalls) != 1 || d.ToolCalls[0].Badge != "stripped" || d.ToolCalls[0].Result == nil || d.ToolCalls[0].Result.Bytes != 42 {
 		t.Errorf("old content-off call = %+v, want badge stripped, 42 bytes from the span", d.ToolCalls)
 	}
@@ -814,11 +803,11 @@ func TestStepChildrenByStep(t *testing.T) {
 		ev(0, `{"type":"run_start","id":"r_same/0/same","model":{"provider":"p","name":"m"},"agent":"hand"}`),
 		ev(1, `{"type":"run_finish","run_id":"r_same/0/same","usage":{"input_tokens":1,"output_tokens":1},"steps":1}`),
 	})
-	d0 := getStep(t, ts, "/api/runs/r_same/steps/0", nil)
+	d0 := getStep(t, ts, "/v1/runs/r_same/steps/0", nil)
 	if len(d0.Children) != 1 || d0.Children[0].ID != "r_same/0/same" || len(d0.ToolCalls) != 1 || d0.ToolCalls[0].ChildRunID != "r_same/0/same" {
 		t.Errorf("step 0 children %+v calls %+v, want the child joined to its call", d0.Children, d0.ToolCalls)
 	}
-	d1 := getStep(t, ts, "/api/runs/r_same/steps/1", nil)
+	d1 := getStep(t, ts, "/v1/runs/r_same/steps/1", nil)
 	if len(d1.Children) != 0 || len(d1.ToolCalls) != 1 || d1.ToolCalls[0].ChildRunID != "" {
 		t.Errorf("step 1 children %+v calls %+v, want none: the child is step 0's", d1.Children, d1.ToolCalls)
 	}
@@ -846,7 +835,7 @@ func TestStepRunningNoFalseHoles(t *testing.T) {
 		// pos 4 is in flight
 		ev(5, `{"type":"tool_start","run_id":"r_live","seq":1,"call_id":"c1","name":"t","args":{}}`),
 	}, chat)
-	d := getStep(t, ts, "/api/runs/r_live/steps/1", nil)
+	d := getStep(t, ts, "/v1/runs/r_live/steps/1", nil)
 	if d.Status != "running" || d.AttemptsBadge != nil || slices.Contains(d.holes(), "gap") {
 		t.Errorf("running step 1 = status %q attempts_badge %+v holes %v, want running, no badge, no gap", d.Status, d.AttemptsBadge, d.holes())
 	}
@@ -854,7 +843,7 @@ func TestStepRunningNoFalseHoles(t *testing.T) {
 		{kind: "event", pos: 0, body: `{"type":"run_start","id":"r_live2","model":{"provider":"p","name":"m"},"agent":"hand"}`, extra: hash},
 		{kind: "request", pos: 0, body: reqBody(0, `{"count":1}`), extra: map[string]any{"weft.step.index": int64(0)}},
 	})
-	d2 := getStep(t, ts, "/api/runs/r_live2/steps/0", nil)
+	d2 := getStep(t, ts, "/v1/runs/r_live2/steps/0", nil)
 	if d2.Status != "running" || d2.AttemptsBadge != nil || slices.Contains(d2.holes(), "gap") || slices.Contains(d2.holes(), "not_recorded") {
 		t.Errorf("running step 0 without its step_start = status %q attempts_badge %+v holes %v, want running, no badge, no gap",
 			d2.Status, d2.AttemptsBadge, d2.holes())
@@ -876,7 +865,7 @@ func TestStepCountedCallsBounded(t *testing.T) {
 		ev(2, `{"type":"step_finish","run_id":"r_huge","index":0,"reason":"max_tokens","usage":{"input_tokens":1,"output_tokens":1}}`),
 		ev(3, `{"type":"run_finish","run_id":"r_huge","usage":{"input_tokens":1,"output_tokens":1},"steps":1}`),
 	}, chat)
-	d := getStep(t, ts, "/api/runs/r_huge/steps/0", nil)
+	d := getStep(t, ts, "/v1/runs/r_huge/steps/0", nil)
 	if len(d.ToolCalls) != maxStepCountedCalls || !slices.Contains(d.holes(), "derived") {
 		t.Fatalf("calls = %d holes %v, want %d and derived", len(d.ToolCalls), d.holes(), maxStepCountedCalls)
 	}
@@ -900,7 +889,7 @@ func TestStepMessagesRefDropped(t *testing.T) {
 		ev(2, `{"type":"step_finish","run_id":"r_ref","index":0,"reason":"stop","usage":{"input_tokens":1,"output_tokens":1}}`),
 		ev(3, `{"type":"run_finish","run_id":"r_ref","usage":{"input_tokens":1,"output_tokens":1},"steps":1}`),
 	})
-	d := getStep(t, ts, "/api/runs/r_ref/steps/0", nil)
+	d := getStep(t, ts, "/v1/runs/r_ref/steps/0", nil)
 	if d.MessagesIn.Badge != "gap" || d.MessagesIn.Count != 2 || d.MessagesIn.Index == nil || *d.MessagesIn.Index != 5 || !slices.Contains(d.holes(), "gap") {
 		t.Errorf("messages_in = %+v holes %v, want index 5, count 2 under gap, gap listed", d.MessagesIn, d.holes())
 	}

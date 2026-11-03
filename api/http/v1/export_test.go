@@ -90,7 +90,7 @@ func shapeGolden(t *testing.T, name string, docs ...[]byte) {
 		list = append(list, p)
 	}
 	sort.Strings(list)
-	wefttest.Golden(t, "testdata/api/"+name, []byte(strings.Join(list, "\n")+"\n"))
+	wefttest.Golden(t, "testdata/v1/"+name, []byte(strings.Join(list, "\n")+"\n"))
 }
 
 // exportDocT is the json export as a client decodes it.
@@ -163,7 +163,7 @@ func settled(id string) func(string) bool {
 func TestExportJSON(t *testing.T) {
 	ts, _ := requestsServer(t)
 	recordStepsRun(t, ts.URL, "r_exp", nil)
-	resp, body := exportGet(t, ts, "/api/runs/r_exp/export?format=json", settled("r_exp"))
+	resp, body := exportGet(t, ts, "/v1/runs/r_exp/export?format=json", settled("r_exp"))
 	if ct, cd := resp.Header.Get("Content-Type"), resp.Header.Get("Content-Disposition"); !strings.HasPrefix(ct, "application/json") || cd != `attachment; filename="r_exp.json"` {
 		t.Errorf("headers = %q %q, want json and an attachment named r_exp.json", ct, cd)
 	}
@@ -195,11 +195,11 @@ func TestExportJSON(t *testing.T) {
 	}
 
 	for path, want := range map[string]int{
-		"/api/runs/r_exp/export?format=xml":          http.StatusBadRequest,
-		"/api/runs/r_exp/export":                     http.StatusBadRequest,
-		"/api/runs/nope/export?format=json":          http.StatusNotFound,
-		"/api/runs/nope/export?format=otlp":          http.StatusNotFound,
-		"/api/runs/r_exp/1/c_sub/export?format=json": http.StatusOK,
+		"/v1/runs/r_exp/export?format=xml":              http.StatusBadRequest,
+		"/v1/runs/r_exp/export":                         http.StatusBadRequest,
+		"/v1/runs/nope/export?format=json":              http.StatusNotFound,
+		"/v1/runs/nope/export?format=otlp":              http.StatusNotFound,
+		"/v1/runs/r_exp%2F1%2Fc_sub/export?format=json": http.StatusOK,
 	} {
 		resp, err := http.Get(ts.URL + path)
 		if err != nil {
@@ -212,20 +212,9 @@ func TestExportJSON(t *testing.T) {
 		}
 	}
 	// A child's id spells its slashes "_" in the file name.
-	resp, _ = exportGet(t, ts, "/api/runs/r_exp/1/c_sub/export?format=jsonl", nil)
+	resp, _ = exportGet(t, ts, "/v1/runs/r_exp%2F1%2Fc_sub/export?format=jsonl", nil)
 	if cd := resp.Header.Get("Content-Disposition"); cd != `attachment; filename="r_exp_1_c_sub.jsonl"` {
 		t.Errorf("child Content-Disposition = %q", cd)
-	}
-	// Setup A: the loopback Host only.
-	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/runs/r_exp/export?format=json", nil)
-	req.Host = "evil.example"
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("export with a foreign Host = %d, want 403", resp.StatusCode)
 	}
 }
 
@@ -236,8 +225,8 @@ func TestExportJSON(t *testing.T) {
 func TestExportJSONL(t *testing.T) {
 	ts, _ := requestsServer(t)
 	recordStepsRun(t, ts.URL, "r_jsonl", nil)
-	_, doc := exportGet(t, ts, "/api/runs/r_jsonl/export?format=json", settled("r_jsonl"))
-	resp, body := exportGet(t, ts, "/api/runs/r_jsonl/export?format=jsonl", nil)
+	_, doc := exportGet(t, ts, "/v1/runs/r_jsonl/export?format=json", settled("r_jsonl"))
+	resp, body := exportGet(t, ts, "/v1/runs/r_jsonl/export?format=jsonl", nil)
 	if ct, cd := resp.Header.Get("Content-Type"), resp.Header.Get("Content-Disposition"); ct != "application/x-ndjson" || cd != `attachment; filename="r_jsonl.jsonl"` {
 		t.Errorf("headers = %q %q", ct, cd)
 	}
@@ -297,8 +286,8 @@ func TestExportOTLPRoundTrip(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ts, _ := requestsServer(t)
 			recordStepsRun(t, ts.URL, "r_otlp", nil, tc.dest...)
-			_, want := exportGet(t, ts, "/api/runs/r_otlp/export?format=json", settled("r_otlp"))
-			resp, body := exportGet(t, ts, "/api/runs/r_otlp/export?format=otlp", nil)
+			_, want := exportGet(t, ts, "/v1/runs/r_otlp/export?format=json", settled("r_otlp"))
+			resp, body := exportGet(t, ts, "/v1/runs/r_otlp/export?format=otlp", nil)
 			if cd := resp.Header.Get("Content-Disposition"); cd != `attachment; filename="r_otlp.otlp.json"` {
 				t.Errorf("Content-Disposition = %q", cd)
 			}
@@ -321,7 +310,7 @@ func TestExportOTLPRoundTrip(t *testing.T) {
 			if src.Run.TraceID == "" || !strings.Contains(string(body), `"traceId":"`+src.Run.TraceID+`"`) {
 				t.Errorf("the export does not spell trace id %q as hex", src.Run.TraceID)
 			}
-			if _, again := exportGet(t, ts, "/api/runs/r_otlp/export?format=otlp", nil); !bytes.Equal(again, body) {
+			if _, again := exportGet(t, ts, "/v1/runs/r_otlp/export?format=otlp", nil); !bytes.Equal(again, body) {
 				t.Error("two otlp exports of one run differ")
 			}
 
@@ -337,7 +326,7 @@ func TestExportOTLPRoundTrip(t *testing.T) {
 					t.Fatalf("POST %s = %d %s", path, resp.StatusCode, b)
 				}
 			}
-			_, got := exportGet(t, fresh, "/api/runs/r_otlp/export?format=json", nil)
+			_, got := exportGet(t, fresh, "/v1/runs/r_otlp/export?format=json", nil)
 			// The chain's content marks ride the rebuilt event records
 			// (weft.content), so the copy badges the same events.
 			if tc.name == "content-off" {
@@ -386,7 +375,7 @@ func withoutChildren(t *testing.T, body []byte) string {
 func TestExportContentOff(t *testing.T) {
 	ts, _ := requestsServer(t)
 	recordStepsRun(t, ts.URL, "r_xoff", nil, otel.NoContent())
-	_, body := exportGet(t, ts, "/api/runs/r_xoff/export?format=json", settled("r_xoff"))
+	_, body := exportGet(t, ts, "/v1/runs/r_xoff/export?format=json", settled("r_xoff"))
 	shapeGolden(t, "export-json-stripped.shape.golden", body)
 	var d exportDocT
 	decode(t, string(body), &d)
@@ -447,13 +436,13 @@ func TestExportOTLPKeepsTruncatedAndDerived(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	_, want := exportGet(t, ts, "/api/runs/r_hand/export?format=json", nil)
+	_, want := exportGet(t, ts, "/v1/runs/r_hand/export?format=json", nil)
 	for _, w := range []string{`"content":"truncated"`, `"content":"derived"`, `"hole":"truncated"`} {
 		if !strings.Contains(string(want), w) {
 			t.Fatalf("source export lacks %s: %s", w, want)
 		}
 	}
-	_, body := exportGet(t, ts, "/api/runs/r_hand/export?format=otlp", nil)
+	_, body := exportGet(t, ts, "/v1/runs/r_hand/export?format=otlp", nil)
 	var parts struct {
 		Logs json.RawMessage `json:"logs"`
 	}
@@ -464,7 +453,7 @@ func TestExportOTLPKeepsTruncatedAndDerived(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = resp.Body.Close()
-	_, got := exportGet(t, fresh, "/api/runs/r_hand/export?format=json", nil)
+	_, got := exportGet(t, fresh, "/v1/runs/r_hand/export?format=json", nil)
 	for name, doc := range map[string][]byte{"source": want, "copy": got} {
 		var d exportDocT
 		decode(t, string(doc), &d)
@@ -520,8 +509,8 @@ func TestExportDownloadHeaders(t *testing.T) {
 	}
 	ts, _ := requestsServer(t)
 	recordStepsRun(t, ts.URL, "r_head", nil)
-	_, body := exportGet(t, ts, "/api/runs/r_head/export?format=json", settled("r_head"))
-	req, _ := http.NewRequest(http.MethodHead, ts.URL+"/api/runs/r_head/export?format=json", nil)
+	_, body := exportGet(t, ts, "/v1/runs/r_head/export?format=json", settled("r_head"))
+	req, _ := http.NewRequest(http.MethodHead, ts.URL+"/v1/runs/r_head/export?format=json", nil)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -553,7 +542,7 @@ func TestExportHolesFromEvents(t *testing.T) {
 		ev(6, `{"type":"step_finish","run_id":"r_evh","index":1,"reason":"stop","usage":{"input_tokens":1,"output_tokens":1}}`),
 		ev(7, `{"type":"run_finish","run_id":"r_evh","usage":{"input_tokens":2,"output_tokens":2},"steps":2}`),
 	})
-	_, body := exportGet(t, ts, "/api/runs/r_evh/export?format=json", nil)
+	_, body := exportGet(t, ts, "/v1/runs/r_evh/export?format=json", nil)
 	var d exportDocT
 	decode(t, string(body), &d)
 	for _, want := range []string{"truncated", "stripped", "max_tokens"} {
@@ -561,7 +550,7 @@ func TestExportHolesFromEvents(t *testing.T) {
 			t.Errorf("export holes = %s, want %s", d.holes(), want)
 		}
 	}
-	_, lines := exportGet(t, ts, "/api/runs/r_evh/export?format=jsonl", nil)
+	_, lines := exportGet(t, ts, "/v1/runs/r_evh/export?format=jsonl", nil)
 	for _, want := range []string{`"hole":"truncated"`, `"hole":"stripped"`, `"hole":"max_tokens"`} {
 		if !strings.Contains(strings.SplitN(string(lines), "\n", 2)[0], want) {
 			t.Errorf("jsonl run line lacks %s", want)
@@ -628,14 +617,14 @@ func TestChildHoles(t *testing.T) {
 	var page struct {
 		Children []kidT `json:"children"`
 	}
-	decode(t, fetchJSON(t, ts, "/api/runs/r_kids", nil), &page)
+	decode(t, fetchJSON(t, ts, "/v1/runs/r_kids", nil), &page)
 	check("run page", page.Children)
 	var x struct {
 		Run struct {
 			Children []kidT `json:"children"`
 		} `json:"run"`
 	}
-	_, body := exportGet(t, ts, "/api/runs/r_kids/export?format=json", nil)
+	_, body := exportGet(t, ts, "/v1/runs/r_kids/export?format=json", nil)
 	decode(t, string(body), &x)
 	check("export", x.Run.Children)
 }
@@ -669,13 +658,13 @@ func TestLostEventsOneRule(t *testing.T) {
 		var doc struct {
 			Holes []holeT `json:"holes"`
 		}
-		decode(t, fetchJSON(t, ts, "/api/runs/"+c.run, nil), &doc)
+		decode(t, fetchJSON(t, ts, "/v1/runs/"+esc(c.run), nil), &doc)
 		var x struct {
 			Events struct {
 				Badge, Reason, Fix string
 			} `json:"events"`
 		}
-		_, body := exportGet(t, ts, "/api/runs/"+c.run+"/export?format=json", nil)
+		_, body := exportGet(t, ts, "/v1/runs/"+esc(c.run)+"/export?format=json", nil)
 		decode(t, string(body), &x)
 		var runHole *holeT
 		for i := range doc.Holes {

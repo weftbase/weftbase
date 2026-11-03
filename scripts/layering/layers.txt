@@ -43,6 +43,9 @@ peer tenant/... events/...
 peer api/... console
 peer api/mcp/... api/http/...
 peer obsdb/... internal/...
+# The CLI and the examples embed the kernel.
+peer cmd/... .
+peer examples/... .
 
 # console embeds and serves; it imports the standard library only.
 stdlib-only console

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"testing"
 
@@ -94,7 +95,7 @@ func TestDecidedUndecidedCallFromARealResume(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resp, err := http.Get(ts.URL + "/api/runs/" + t1.RunID())
+	resp, err := http.Get(ts.URL + "/v1/runs/" + url.PathEscape(t1.RunID()))
 	if err != nil {
 		t.Fatal(err)
 	}

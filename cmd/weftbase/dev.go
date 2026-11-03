@@ -1,24 +1,16 @@
 package main
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"io"
-	"net"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
-
-	v1 "github.com/weftbase/weftbase/api/http/v1"
-	"github.com/weftbase/weftbase/client/discovery"
-	"github.com/weftbase/weftbase/internal/dblock"
-	"github.com/weftbase/weftbase/internal/listen"
 )
 
 // `weftbase dev` (plan B1.2, FEATURES D7): the server and the app in
@@ -26,10 +18,11 @@ import (
 //
 // Everything it does is something the app or the shell can do itself:
 // it is the server alone (`weftbase dev` without "--": the same flags,
-// the same port policy) plus the app run with four environment
-// variables set — WEFT_ENV=dev, WEFTBASE_URL and WEFTBASE_TOKEN (the
-// exporter's destination) and WEFTBASE_DB (the otel local sink's path:
-// the same file the server serves).
+// the same port policy) plus the app run with its environment set —
+// WEFT_ENV=dev, WEFTBASE_URL and WEFTBASE_TOKEN (client/exporter's
+// destination: the bootstrap key), and OTEL_EXPORTER_OTLP_ENDPOINT
+// (<url>/otlp) with OTEL_EXPORTER_OTLP_HEADERS (the key as the bearer)
+// for an app on any other OpenTelemetry SDK.
 
 const (
 	// devStopGrace is how long a stopping app has between the polite
@@ -63,21 +56,9 @@ var skipDirs = map[string]bool{
 // runDev is `weftbase dev [flags] -- command args…`: server and the app.
 func runDev(args []string, stdout, stderr io.Writer) error {
 	fs := newFlags("dev", stderr)
-	db := fs.String("db", "",
-		"`sqlite://path` or `clickhouse://user:pass@host:9000/db` (default: $WEFTBASE_DB or ./.weftbase/weftbase.db)")
-	addr := fs.String("addr", "",
-		"listen `address` (default: $WEFTBASE_ADDR, else "+defaultAddr+"); --addr pins; without it weftbase reuses a running one on the same DB or takes the next free port in 7331–7340")
-	token := fs.String("token", "",
-		"API token (default: $WEFTBASE_TOKEN, else the database's stable token, <db>.token); the app receives it as WEFTBASE_TOKEN")
-	manifest := fs.String("manifest", "",
-		"`path` to the app's weft.json (default: $WEFT_MANIFEST, else the nearest weft.json from the working directory upward)")
+	nf := addNodeFlags(fs)
 	open := fs.Bool("open", stdoutIsTTY(),
-		"open the browser on the UI, the token in the URL fragment (default: on when stdout is a terminal)")
-	rotate := fs.Bool("rotate-token", false,
-		"write a new stable dev token beside the database (<db>.token) before serving; an action, so no environment mirror")
-	retain := retainFlag(fs, "to keep runs after they were last seen: older ones that are not running are deleted from weftbase's tables")
-	pricing := pricingFlag(fs)
-	logs := addLogFlags(fs)
+		"open the browser on the Console's one-time sign-in link (default: on when stdout is a terminal)")
 	noWatch := fs.Bool("no-watch", false,
 		"do not restart the app on a .go change; weftbase dev exits with the app's exit code")
 	var roots []string
@@ -91,7 +72,7 @@ func runDev(args []string, stdout, stderr io.Writer) error {
 	if err := parse(fs, args); err != nil {
 		return err
 	}
-	restoreLog, err := logs.install(stderr)
+	restoreLog, err := nf.logs.install(stderr)
 	if err != nil {
 		return err
 	}
@@ -114,20 +95,10 @@ func runDev(args []string, stdout, stderr io.Writer) error {
 			}
 		}
 	}
-	opts, _, err := manifestOptions(*manifest, wd)
+	cfg, err := devConfig(nf, nil)
 	if err != nil {
 		return err
 	}
-	retainOpts, _, err := retainOptions(*retain)
-	if err != nil {
-		return err
-	}
-	opts = append(opts, retainOpts...)
-	pricingOpts, _, err := pricingOptions(*pricing)
-	if err != nil {
-		return err
-	}
-	opts = append(opts, pricingOpts...)
 
 	// Signals are ours from here on: Ctrl-C stops the app first, then
 	// the server. Armed before anything starts, so none is lost.
@@ -138,19 +109,27 @@ func runDev(args []string, stdout, stderr io.Writer) error {
 	defer signal.Stop(sigs)
 
 	out := &lockedWriter{w: stdout}
-	w := wantAddr(*addr, devDefaultAddr)
-	w.span = devSpan
-	st, err := devServer(*db, w, *token, *rotate, out, opts...)
+	cfg.out = out
+	cfg.reuse = true
+	st, err := startNode(cfg)
 	if err != nil {
 		return err
 	}
 	stopSig := os.Signal(syscall.SIGTERM)
 	defer func() { st.stop(stopSig) }()
-
-	if *open {
-		openBrowser(out, uiLink(st.addr, st.token))
-	} else if line := tokenLine(st, fixedToken(*token) != ""); line != "" {
-		_, _ = fmt.Fprintln(out, line)
+	if !st.reused {
+		devBanner(out, st, cfg)
+		if st.notes != "" {
+			_, _ = fmt.Fprintln(out, st.notes)
+		}
+	}
+	link := st.url + "/"
+	if st.signIn != "" {
+		if *open {
+			openBrowser(out, st.signIn)
+		} else {
+			_, _ = fmt.Fprintf(out, "weftbase: sign in to the Console: %s (one use, %s)\n", st.signIn, signInTTL)
+		}
 	}
 
 	var changes <-chan string
@@ -164,11 +143,11 @@ func runDev(args []string, stdout, stderr io.Writer) error {
 	}
 	d := &devLoop{
 		argv:    argv,
-		env:     devEnv(os.Environ(), st.url, st.token, st.dbPath),
+		env:     devEnv(os.Environ(), st.url, st.key),
 		stdout:  stdout,
 		stderr:  stderr,
 		out:     out,
-		link:    st.link,
+		link:    link,
 		noWatch: *noWatch,
 	}
 	err = d.run(sigs, changes)
@@ -179,23 +158,27 @@ func runDev(args []string, stdout, stderr io.Writer) error {
 }
 
 // devEnv is the app's environment: the parent's, plus WEFT_ENV=dev
-// (kept when already set to something), WEFTBASE_URL,
-// WEFTBASE_TOKEN and WEFTBASE_DB (when the server serves a file) —
-// those three override what the shell had, so the app and the server
-// agree.
-func devEnv(parent []string, url, token, dbPath string) []string {
+// (kept when already set to something), WEFTBASE_URL, WEFTBASE_TOKEN
+// (the bootstrap key), OTEL_EXPORTER_OTLP_ENDPOINT (<url>/otlp) and
+// OTEL_EXPORTER_OTLP_HEADERS (the key as the bearer, percent-encoded as
+// the OTel spec reads the variable) — those four override what the
+// shell had, so the app and the server agree. weft's otel pipeline
+// de-duplicates the OTLP destination against WEFTBASE_URL's by URL.
+func devEnv(parent []string, url, key string) []string {
+	ours := []string{"WEFTBASE_URL", "WEFTBASE_TOKEN", "OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_HEADERS"}
 	set := map[string]string{
-		"WEFTBASE_URL":   url,
-		"WEFTBASE_TOKEN": token,
+		"WEFTBASE_URL":                url,
+		"WEFTBASE_TOKEN":              key,
+		"OTEL_EXPORTER_OTLP_ENDPOINT": url + "/otlp",
 	}
-	if dbPath != "" {
-		set["WEFTBASE_DB"] = dbPath
+	if key != "" {
+		set["OTEL_EXPORTER_OTLP_HEADERS"] = "Authorization=Bearer%20" + key
 	}
 	envSet := false
 	var env []string
 	for _, kv := range parent {
 		k, v, _ := strings.Cut(kv, "=")
-		if _, ours := set[k]; ours {
+		if slices.Contains(ours, k) {
 			continue
 		}
 		if k == "WEFT_ENV" {
@@ -209,174 +192,12 @@ func devEnv(parent []string, url, token, dbPath string) []string {
 	if !envSet {
 		env = append(env, "WEFT_ENV=dev")
 	}
-	for _, k := range []string{"WEFTBASE_URL", "WEFTBASE_TOKEN", "WEFTBASE_DB"} {
-		if v, ok := set[k]; ok {
+	for _, k := range ours {
+		if v, ok := set[k]; ok && v != "" {
 			env = append(env, k+"="+v)
 		}
 	}
 	return env
-}
-
-// devServerRun is the server `weftbase dev` talks to: one it started in
-// this process, or a running one it reuses.
-type devServerRun struct {
-	addr, url, link, token, dbPath string
-	stop                           func(os.Signal) // stops a server this process started
-}
-
-// devServer applies `weftbase dev`'s port policy and starts server in
-// this process, or reuses one already serving the same database. The
-// probe carries the fixed token (--token, WEFTBASE_TOKEN), else the
-// database's stable token (plan B3) to an address this user's
-// discovery file names: a server on the same database serves exactly
-// that, so a reuse hands the app the token it needs. A
-// running server walled by another token answers 401 and is skipped
-// for the next port. A server this process starts writes the discovery
-// file; a reused one owns its own.
-func devServer(dbFlag string, w want, tokenFlag string, rotate bool, out io.Writer, opts ...v1.Option) (*devServerRun, error) {
-	dbPath, err := dbFile(dbFlag)
-	if err != nil {
-		return nil, err
-	}
-	choose := func() (listen.Choice, error) {
-		return listen.Choose(context.Background(), listen.Request{
-			Addr: w.addr, Pinned: w.pinned, Span: w.span, DBPath: dbPath,
-			Token: fixedToken(tokenFlag), TokenFor: stableProbe(dbPath),
-			Known: knownServer(dbPath),
-		})
-	}
-	reuse := func(addr string, pid int, tok string) *devServerRun {
-		// The app and the one line dial loopback.
-		dial := loopbackAddr(addr)
-		_, _ = fmt.Fprintln(out, listen.Choice{Addr: dial, Reuse: true, PID: pid}.ReuseLine())
-		reuseNotes(out, dial, rotate)
-		return &devServerRun{addr: dial, url: "http://" + dial, dbPath: dbPath, token: tok, link: uiLink(dial, ""), stop: func(os.Signal) {}}
-	}
-	// The database's lock first, as weftbase dev takes it (B7-fix2):
-	// held, the holder serves this file — reuse it when something
-	// trusted names it (dblock.ReadHolder's rules: this user's 0600
-	// file, a loopback IP, a live pid — it is handed the database's
-	// token), else let the port probe look for it.
-	lock, err := lockDB(dbPath)
-	if errors.Is(err, errHeld) {
-		if addr, pid, ok := dbHolder(dbPath); ok {
-			tok := fixedToken(tokenFlag)
-			if tok == "" {
-				tok = readTokenFile(tokenPath(dbPath))
-			}
-			return reuse(addr, pid, tok), nil
-		}
-		choice, cerr := choose()
-		if cerr != nil {
-			return nil, cerr
-		}
-		if !choice.Reuse {
-			_ = choice.Listener.Close()
-			return nil, heldError(dbPath)
-		}
-		return reuse(choice.Addr, choice.PID, probeToken(dbPath, tokenFlag, loopbackAddr(choice.Addr))), nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	choice, err := choose()
-	if err != nil {
-		lock.Release()
-		return nil, err
-	}
-	if choice.Reuse {
-		// A server serving the file without its lock (a weft before it,
-		// an app's embedded server): reused, as before the lock.
-		lock.Release()
-		return reuse(choice.Addr, choice.PID, probeToken(dbPath, tokenFlag, loopbackAddr(choice.Addr))), nil
-	}
-	// The app and the one line dial loopback: a server bound to every
-	// interface (--addr 0.0.0.0:7331) is reachable there, and otel's
-	// Server destination refuses plaintext to a non-loopback host.
-	dial := loopbackAddr(choice.Addr)
-	r := &devServerRun{addr: dial, url: "http://" + dial, dbPath: dbPath, stop: func(os.Signal) {}}
-	if choice.Note != "" {
-		_, _ = fmt.Fprintln(out, "weftbase: "+choice.Note)
-	}
-	// The banner is the one line's job here: serveBoot's goes nowhere.
-	srv, err := serveBootWith(dbFlag, choice.Addr, tokenFlag, rotate, io.Discard, append(discoveryOption(), opts...)...)
-	if err != nil {
-		_ = choice.Listener.Close()
-		lock.Release()
-		return nil, err
-	}
-	// Named once it can serve (never a server that failed to boot).
-	lock.SetHolder(dblock.Holder{URL: r.url, PID: os.Getpid()})
-	r.token = srv.token
-	// A fixed or stable token stays out of the log, link included
-	// (B1.1's rule; the stable token is the signing key too); only one
-	// generated for this process (a database with no file) is nobody's
-	// secret yet and opens the UI.
-	if srv.tok.printable() {
-		r.link = uiLink(dial, srv.token)
-	} else {
-		r.link = uiLink(dial, "")
-	}
-	if srv.tok.rotated {
-		_, _ = fmt.Fprintf(out, "weftbase: token rotated: a new one in %s\n", srv.tok.path)
-	}
-	var disc *discovery.Written
-	if discovery.Off(os.Getenv) {
-		_, _ = fmt.Fprintln(out, discoveryOffLine+"; the app gets WEFTBASE_URL regardless")
-	} else if w, derr := writeDiscovery(r.url, srv.token, dbPath); derr != nil {
-		_, _ = fmt.Fprintf(out, "weftbase: no discovery file (%v); the app gets WEFTBASE_URL regardless\n", derr)
-	} else {
-		disc = w
-	}
-	stopCh := make(chan os.Signal, 1)
-	done := make(chan error, 1)
-	go func() { done <- serveUntil(httpServer(choice.Addr, srv.Handler()), choice.Listener, out, stopCh) }()
-	stopFresh := keepFresh(disc)
-	r.stop = func(sig os.Signal) {
-		defer lock.Release()
-		defer disc.Remove()
-		defer stopFresh()
-		stopCh <- sig
-		if err := <-done; err != nil && !errors.Is(err, http.ErrServerClosed) {
-			_, _ = fmt.Fprintln(out, "weftbase dev: server:", err)
-		}
-		_ = srv.Close()
-	}
-	return r, nil
-}
-
-// tokenLine says where the UI's token is (UX-D-25) when no browser
-// opened with it and the link does not carry it: the database's stable
-// token file (weftbase open --with-token prints the signed-in link), or the
-// fixed token the flag or the environment set. "" when the link carries
-// the token (one generated for this process) or there is none.
-func tokenLine(st *devServerRun, fixed bool) string {
-	switch {
-	case st.token == "" || strings.Contains(st.link, "#token="):
-		return ""
-	case fixed:
-		return "weftbase: token: the one --token / WEFTBASE_TOKEN set"
-	case st.dbPath != "" && readTokenFile(tokenPath(st.dbPath)) == st.token:
-		return "weftbase: token: " + tokenPath(st.dbPath) + " (weftbase open --with-token)"
-	case st.dbPath != "":
-		// A reused server whose token is not the file's (its own
-		// discovery file names it): never a file that would not sign in.
-		return "weftbase: token: the running server's, not " + tokenPath(st.dbPath) + " (weftbase open --with-token)"
-	}
-	return ""
-}
-
-// loopbackAddr is addr with an unspecified host (0.0.0.0, ::, empty)
-// replaced by 127.0.0.1: where a client on this machine dials it.
-func loopbackAddr(addr string) string {
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return addr
-	}
-	if ip := net.ParseIP(host); host == "" || (ip != nil && ip.IsUnspecified()) {
-		return net.JoinHostPort("127.0.0.1", port)
-	}
-	return addr
 }
 
 // devLoop runs the app and restarts it: one child at a time.

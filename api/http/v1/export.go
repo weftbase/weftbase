@@ -28,13 +28,13 @@ import (
 
 // The run export (plan A7):
 //
-//	GET /api/runs/{id}/export?format=json|jsonl|otlp
+//	GET /v1/runs/{id}/export?format=json|jsonl|otlp
 //
 // The whole run as one download, read from obsdb's tables and nothing
 // else (decision 13: the export reads, never writes, and the server
 // never runs your agent — an export is data). Three formats:
 //
-//   - json: one document — the run as /api/runs/{id} serves it, every
+//   - json: one document — the run as /v1/runs/{id} serves it, every
 //     event, the transcript batches, the compactions, the request
 //     records with the prompts and catalogs they name (keyed by hash),
 //     the spans, and the holes. A block the run does not have is
@@ -76,7 +76,7 @@ var exportFormats = map[string]exportFormat{
 // exportVersion names the json and jsonl document shape.
 const exportVersion = "weft.run.export/1"
 
-// serveRunExport answers GET /api/runs/{id}/export?format=.
+// serveRunExport answers GET /v1/runs/{id}/export?format=.
 func (s *Server) serveRunExport(w http.ResponseWriter, r *http.Request, id string) {
 	name := r.URL.Query().Get("format")
 	f, ok := exportFormats[name]
@@ -305,9 +305,9 @@ type runExport struct {
 	prompts     []exportRef // in the order the requests first name them
 	catalogs    []exportRef
 	spans       []obsdb.Span
-	runHoles    []stepHole // the run's own (runHoles), as /api/runs/{id} serves them
-	children    []runRow   // the run's children with their holes (childRows), as /api/runs/{id} serves them
-	row         runRow     // the run's own row with its cost, as /api/runs/{id} serves it
+	runHoles    []stepHole // the run's own (runHoles), as /v1/runs/{id} serves them
+	children    []runRow   // the run's children with their holes (childRows), as /v1/runs/{id} serves them
+	row         runRow     // the run's own row with its cost, as /v1/runs/{id} serves it
 	// stripped is whether any request record came through a content-off
 	// chain.
 	stripped bool

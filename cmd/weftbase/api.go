@@ -47,7 +47,7 @@ func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
 
 // ── weftbase runs ──────────────────────────────────────────────────────
 
-// runRow is the part of GET /api/runs' row the table prints; --json
+// runRow is the part of GET /v1/runs' row the table prints; --json
 // prints the row as server serves it.
 type runRow struct {
 	ID          string     `json:"id"`
@@ -180,12 +180,12 @@ func cell(s string) string {
 	return s
 }
 
-// runsPageSize is the page each GET /api/runs asks for (a variable so
+// runsPageSize is the page each GET /v1/runs asks for (a variable so
 // a test pages through the cursor).
 var runsPageSize = 100
 
 // runRuns is `weftbase runs`: the newest top-level runs, one row each,
-// paged through GET /api/runs's cursor.
+// paged through GET /v1/runs's cursor.
 func runRuns(args []string, stdout, stderr io.Writer) error {
 	fs := newFlags("runs", stderr)
 	base, token := clientFlags(fs)
@@ -241,7 +241,7 @@ func runRuns(args []string, stdout, stderr io.Writer) error {
 pages:
 	for {
 		q.Set("limit", strconv.Itoa(runsPageSize))
-		body, err := c.Get(ctx, "/api/runs", q)
+		body, err := c.Get(ctx, "/v1/runs", q)
 		if err != nil {
 			return err
 		}
@@ -251,12 +251,12 @@ pages:
 			NextBeforeID *string           `json:"next_before_id"`
 		}
 		if err := json.Unmarshal(body, &page); err != nil {
-			return fmt.Errorf("GET /api/runs: %w", err)
+			return fmt.Errorf("GET /v1/runs: %w", err)
 		}
 		for i, raw := range page.Runs {
 			var r runRow
 			if err := json.Unmarshal(raw, &r); err != nil {
-				return fmt.Errorf("GET /api/runs: %w", err)
+				return fmt.Errorf("GET /v1/runs: %w", err)
 			}
 			// Newest first: the first run older than --since ends it.
 			if !after.IsZero() && r.Started.Before(after) {
@@ -355,13 +355,12 @@ func parseSince(v string, now time.Time) (time.Time, error) {
 // runOpen is `weftbase open [id]`: the page of a run, a conversation (a
 // public id), a session or a trace — the id is tried as each kind in
 // turn against the API (UX-S5a-06) — or, with no id, the server root
-// (UX-S5a-02: on a fresh server with no run, the one signed-in link a
-// terminal can print). The link is printed and with --open opened.
+// (checked to answer with the key). The link is printed and with --open
+// opened.
 func runOpen(args []string, stdout, stderr io.Writer) error {
 	fs := newFlags("open", stderr)
 	base, token := clientFlags(fs)
-	open := fs.Bool("open", false, "open the link in the browser too, the token in its fragment")
-	withToken := fs.Bool("with-token", false, "print the link with the token in its fragment (#token=), signed in; keep it out of logs")
+	open := fs.Bool("open", false, "open the link in the browser too")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return err
@@ -376,21 +375,18 @@ func runOpen(args []string, stdout, stderr io.Writer) error {
 		if page, err = pageOf(ctx, c, pos[0]); err != nil {
 			return err
 		}
-	} else if _, err := c.Get(ctx, "/api/meta", nil); err != nil {
+	} else if _, err := c.Get(ctx, "/v1/meta", nil); err != nil {
 		// The root: checked the server answers and the token opens it.
 		return err
 	}
-	// The printed link is bare unless asked: a fixed token stays out of
-	// logs (serveBoot's banner rule). The browser gets it in the fragment.
-	printed := rest.PageLink(c.Base(), page, "")
-	if *withToken {
-		printed = rest.PageLink(c.Base(), page, c.Token())
-	}
-	if _, err := fmt.Fprintln(stdout, printed); err != nil {
+	// The link carries no credential: the Console signs in with the
+	// one-time link `weftbase dev` prints.
+	link := rest.PageLink(c.Base(), page)
+	if _, err := fmt.Fprintln(stdout, link); err != nil {
 		return err
 	}
 	if *open {
-		openBrowser(stdout, rest.PageLink(c.Base(), page, c.Token()))
+		openBrowser(stdout, link)
 	}
 	return nil
 }
@@ -398,10 +394,10 @@ func runOpen(args []string, stdout, stderr io.Writer) error {
 // idKinds are the ids `weftbase open` takes, in the order it tries them:
 // the API route that knows the id and the UI page that shows it.
 var idKinds = []struct{ noun, route, page string }{
-	{"run", "/api/runs/", "/runs/"},
-	{"public id", "/api/public/", "/conversations/"},
-	{"session", "/api/sessions/", "/sessions/"},
-	{"trace", "/api/traces/", "/traces/"},
+	{"run", "/v1/runs/", "/runs/"},
+	{"public id", "/v1/public/", "/conversations/"},
+	{"session", "/v1/sessions/", "/sessions/"},
+	{"trace", "/v1/traces/", "/traces/"},
 }
 
 // pageOf is the UI page of id: the first kind whose route knows it. A
@@ -426,7 +422,7 @@ func pageOf(ctx context.Context, c *rest.Client, id string) (string, error) {
 
 // ── weftbase export ────────────────────────────────────────────────────
 
-// runExport is `weftbase export <id>`: GET /api/runs/<id>/export to
+// runExport is `weftbase export <id>`: GET /v1/runs/<id>/export to
 // stdout, as json, jsonl or otlp.
 func runExport(args []string, stdout, stderr io.Writer) error {
 	fs := newFlags("export", stderr)

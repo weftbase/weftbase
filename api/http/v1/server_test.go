@@ -459,7 +459,7 @@ func indent(t *testing.T, body string) string {
 
 func golden(t *testing.T, name, body string) {
 	t.Helper()
-	wefttest.Golden(t, "testdata/api/"+name, []byte(pretty(t, body)))
+	wefttest.Golden(t, "testdata/v1/"+name, []byte(pretty(t, body)))
 }
 
 // metaPIDRe finds api/meta's pid in an indented body.
@@ -467,7 +467,7 @@ var metaPIDRe = regexp.MustCompile(`"pid": \d+`)
 
 func TestMetaGolden(t *testing.T) {
 	h := Handler(DB(fixtureDB(t)), Manifest([]byte(fixtureManifest)))
-	code, _, body := get(t, h, "/weftbase/api/meta")
+	code, _, body := get(t, h, "/weftbase/v1/meta")
 	if code != http.StatusOK {
 		t.Fatalf("meta: %d", code)
 	}
@@ -482,86 +482,28 @@ func TestMetaGolden(t *testing.T) {
 	}
 	// Not golden(): weft_version is pinned too (version.Runtime is the
 	// tag under go test; the release bump regenerates this file).
-	wefttest.Golden(t, "testdata/api/meta.golden.json",
+	wefttest.Golden(t, "testdata/v1/meta.golden.json",
 		[]byte(metaPIDRe.ReplaceAllString(indent(t, body), `"pid": 1234`)))
 
-	// Capabilities are computed from the registered route groups: the
-	// read API names none; the request record's routes (requests, ADR
-	// 0028 §10), the step route (steps), the export and the app logs
-	// (export, logs), the run diff (diff), the trace list (traces), the
-	// manifest store (manifests, U27; the DB is an obsdb.ManifestStore),
-	// deletion (delete), live, the tag filters and ingest are
-	// registered, so the open handler reports exactly these.
-	_, _, plain := get(t, Handler(DB(fixtureDB(t))), "/weftbase/api/meta")
-	if !strings.Contains(plain, `"capabilities":["requests","steps","export","logs","diff","traces","search","stats","manifests","spans_tree","timeline","pricing","delete","live","scope_tags","ingest"]`) {
-		t.Errorf("default capabilities = %s, want [requests steps export logs diff traces search stats manifests spans_tree timeline pricing delete live scope_tags ingest]", plain)
+	// Capabilities are the optional features the kernel declares: none
+	// by default, the declared ones otherwise. The principal is the
+	// caller's (the tests' Local one in the default scope).
+	_, _, plain := get(t, Handler(DB(fixtureDB(t))), "/weftbase/v1/meta")
+	if !strings.Contains(plain, `"capabilities":[]`) {
+		t.Errorf("default capabilities = %s, want []", plain)
 	}
-	// Ingest is open on loopback without a token, and meta says so
-	// (S4.4); a configured token closes it.
-	if !strings.Contains(body, `"ingest_open":true`) {
-		t.Errorf("meta ingest_open: %s", body)
+	if !strings.Contains(plain, `"principal":{"kind":"local","id":"local","scope":{"project":"prj_default","env":"test","tenant":"ten_project"},"all_tenants":true}`) {
+		t.Errorf("meta principal = %s", plain)
 	}
-	_, _, tok := get(t, Handler(DB(fixtureDB(t)), IngestToken("s3cr3t")), "/weftbase/api/meta")
-	if !strings.Contains(tok, `"ingest_open":false`) {
-		t.Errorf("meta ingest_open with token: %s", tok)
-	}
-	// NoIngest drops the ingest group with its routes and capability.
-	_, _, ro := get(t, Handler(DB(fixtureDB(t)), NoIngest()), "/weftbase/api/meta")
-	if !strings.Contains(ro, `"capabilities":["requests","steps","export","logs","diff","traces","search","stats","manifests","spans_tree","timeline","pricing","delete","live","scope_tags"]`) || !strings.Contains(ro, `"ingest_open":false`) {
-		t.Errorf("NoIngest meta = %s, want capabilities [requests steps export logs diff traces search stats manifests spans_tree timeline pricing delete live scope_tags] and ingest_open false", ro)
-	}
-	if code, _, _ := post(t, Handler(DB(fixtureDB(t)), NoIngest()), "/weftbase/otlp/v1/logs", "application/json", "{}"); code != http.StatusNotFound {
-		t.Errorf("NoIngest /otlp/v1/logs: %d, want 404", code)
-	}
-	// A hosting wrapper declares its own verbs beside the groups'.
-	_, _, caps := get(t, Handler(DB(fixtureDB(t)), Capabilities("fleet")), "/weftbase/api/meta")
-	if !strings.Contains(caps, `"capabilities":["requests","steps","export","logs","diff","traces","search","stats","manifests","spans_tree","timeline","pricing","delete","live","scope_tags","ingest","fleet"]`) {
+	_, _, caps := get(t, Handler(DB(fixtureDB(t)), Capabilities("ingest", "clickhouse")), "/weftbase/v1/meta")
+	if !strings.Contains(caps, `"capabilities":["ingest","clickhouse"]`) {
 		t.Errorf("declared capabilities = %s", caps)
-	}
-}
-
-// TestIngestAuth pins S4.4's ingest auth through the server: the
-// configured token as a bearer, or — with none — loopback peers only.
-func TestIngestAuth(t *testing.T) {
-	pb, err := os.ReadFile(filepath.Join("..", "..", "..", "obsdb", "testdata", "logs.pb"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	postTo := func(h http.Handler, remote, bearer string) int {
-		req := httptest.NewRequest(http.MethodPost, "/otlp/v1/logs", bytes.NewReader(pb))
-		req.RemoteAddr = remote
-		if bearer != "" {
-			req.Header.Set("Authorization", "Bearer "+bearer)
-		}
-		req.Header.Set("Content-Type", "application/x-protobuf")
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, req)
-		return w.Code
-	}
-	// No token: loopback open (setup B), a remote peer refused.
-	open := New(DB(fixtureDB(t))).Handler()
-	if c := postTo(open, "127.0.0.1:51234", ""); c != http.StatusOK {
-		t.Errorf("loopback without token: %d", c)
-	}
-	if c := postTo(open, "10.0.0.5:51234", ""); c != http.StatusUnauthorized {
-		t.Errorf("remote without token: %d, want 401", c)
-	}
-	// With a token: only the bearer works, from anywhere.
-	tok := New(DB(fixtureDB(t)), IngestToken("s3cr3t")).Handler()
-	if c := postTo(tok, "127.0.0.1:51234", ""); c != http.StatusUnauthorized {
-		t.Errorf("loopback without bearer: %d, want 401", c)
-	}
-	if c := postTo(tok, "127.0.0.1:51234", "wrong"); c != http.StatusUnauthorized {
-		t.Errorf("wrong bearer: %d, want 401", c)
-	}
-	if c := postTo(tok, "10.0.0.5:51234", "s3cr3t"); c != http.StatusOK {
-		t.Errorf("remote with bearer: %d", c)
 	}
 }
 
 func TestRunsGolden(t *testing.T) {
 	h := Handler(DB(fixtureDB(t)), Manifest([]byte(fixtureManifest)))
-	code, _, body := get(t, h, "/weftbase/api/runs")
+	code, _, body := get(t, h, "/weftbase/v1/runs")
 	if code != http.StatusOK {
 		t.Fatalf("runs: %d", code)
 	}
@@ -618,33 +560,33 @@ func TestRunsParentFilter(t *testing.T) {
 		}
 		return false
 	}
-	if got := ids("/weftbase/api/runs"); has(got, "r_sub/0/call_3") || !has(got, "r_sub") {
+	if got := ids("/weftbase/v1/runs"); has(got, "r_sub/0/call_3") || !has(got, "r_sub") {
 		t.Errorf("default = %v, want top-level only", got)
 	}
-	if got := ids("/weftbase/api/runs?parent=r_sub"); len(got) != 1 || got[0] != "r_sub/0/call_3" {
+	if got := ids("/weftbase/v1/runs?parent=r_sub"); len(got) != 1 || got[0] != "r_sub/0/call_3" {
 		t.Errorf("parent=r_sub = %v, want its one child", got)
 	}
 	for _, q := range []string{"parent=*", "all=1", "all=true"} {
-		if got := ids("/weftbase/api/runs?" + q); !has(got, "r_sub/0/call_3") || !has(got, "r_sub") {
+		if got := ids("/weftbase/v1/runs?" + q); !has(got, "r_sub/0/call_3") || !has(got, "r_sub") {
 			t.Errorf("%s = %v, want every run, the child included", q, got)
 		}
 	}
-	if got := ids("/weftbase/api/runs?all=0"); has(got, "r_sub/0/call_3") {
+	if got := ids("/weftbase/v1/runs?all=0"); has(got, "r_sub/0/call_3") {
 		t.Errorf("all=0 = %v, want top-level only", got)
 	}
-	if got := ids("/weftbase/api/runs?all=1&parent=r_sub"); len(got) != 1 || got[0] != "r_sub/0/call_3" {
+	if got := ids("/weftbase/v1/runs?all=1&parent=r_sub"); len(got) != 1 || got[0] != "r_sub/0/call_3" {
 		t.Errorf("all=1&parent=r_sub = %v, want the parent filter to win", got)
 	}
-	if code, _, body := get(t, h, "/weftbase/api/runs?all=maybe"); code != http.StatusBadRequest || !strings.Contains(body, `"bad_request"`) {
+	if code, _, body := get(t, h, "/weftbase/v1/runs?all=maybe"); code != http.StatusBadRequest || !strings.Contains(body, `"bad_request"`) {
 		t.Errorf("all=maybe = %d %s, want 400", code, body)
 	}
-	_, _, body := get(t, h, "/weftbase/api/runs?parent=r_sub")
+	_, _, body := get(t, h, "/weftbase/v1/runs?parent=r_sub")
 	golden(t, "runs-children.golden.json", body)
 }
 
 func TestRunGolden(t *testing.T) {
 	h := Handler(DB(fixtureDB(t)), Manifest([]byte(fixtureManifest)))
-	code, _, body := get(t, h, "/weftbase/api/runs/r_sub")
+	code, _, body := get(t, h, "/weftbase/v1/runs/r_sub")
 	if code != http.StatusOK {
 		t.Fatalf("run: %d", code)
 	}
@@ -663,7 +605,7 @@ func TestRunGolden(t *testing.T) {
 
 	// A failed run's document keeps the error text; the result
 	// document died with the store — the transcript replaces it.
-	_, _, fail := get(t, h, "/weftbase/api/runs/r_fail")
+	_, _, fail := get(t, h, "/weftbase/v1/runs/r_fail")
 	for _, want := range []string{`"status":"failed"`, `"err":"wefttest: injected provider 500"`} {
 		if !strings.Contains(fail, want) {
 			t.Errorf("r_fail missing %s", want)
@@ -677,7 +619,7 @@ func TestRunGolden(t *testing.T) {
 
 func TestEventsGolden(t *testing.T) {
 	h := Handler(DB(fixtureDB(t)), Manifest([]byte(fixtureManifest)))
-	code, _, body := get(t, h, "/weftbase/api/runs/r_ok/events?limit=1000")
+	code, _, body := get(t, h, "/weftbase/v1/runs/r_ok/events?limit=1000")
 	if code != http.StatusOK {
 		t.Fatalf("events: %d", code)
 	}
@@ -686,12 +628,12 @@ func TestEventsGolden(t *testing.T) {
 	}
 	golden(t, "events-ok.golden.json", body)
 
-	_, _, paged := get(t, h, "/weftbase/api/runs/r_ok/events?after=2&limit=3")
+	_, _, paged := get(t, h, "/weftbase/v1/runs/r_ok/events?after=2&limit=3")
 	golden(t, "events-ok-paged.golden.json", paged)
 
 	// The subagent parent's stream: no Nested wrappers inline — the
 	// child run is a separate row joined by parent_call_id (S4.3).
-	_, _, sub := get(t, h, "/weftbase/api/runs/r_sub/events?limit=1000")
+	_, _, sub := get(t, h, "/weftbase/v1/runs/r_sub/events?limit=1000")
 	if strings.Contains(sub, `"nested"`) {
 		t.Errorf("parent stream carries nested wrappers: %s", sub)
 	}
@@ -701,11 +643,11 @@ func TestEventsGolden(t *testing.T) {
 	// and its page is a full run page (B7): the document and the events
 	// endpoint must both answer for it.
 	kid := childID(t, h, "r_sub")
-	if code, _, b := get(t, h, "/weftbase/api/runs/"+kid); code != http.StatusOK ||
+	if code, _, b := get(t, h, "/weftbase/v1/runs/"+esc(kid)); code != http.StatusOK ||
 		!strings.Contains(b, `"id":"`+kid+`"`) || !strings.Contains(b, `"parent_run_id":"r_sub"`) {
 		t.Errorf("child run document: %d %s", code, b)
 	}
-	if code, _, b := get(t, h, "/weftbase/api/runs/"+kid+"/events"); code != http.StatusOK ||
+	if code, _, b := get(t, h, "/weftbase/v1/runs/"+esc(kid)+"/events"); code != http.StatusOK ||
 		!strings.Contains(b, `"done":true`) {
 		t.Errorf("child run events: %d %s", code, b)
 	}
@@ -714,7 +656,7 @@ func TestEventsGolden(t *testing.T) {
 // childID returns the parent's first child run id from the run document.
 func childID(t *testing.T, h http.Handler, parent string) string {
 	t.Helper()
-	_, _, body := get(t, h, "/weftbase/api/runs/"+parent)
+	_, _, body := get(t, h, "/weftbase/v1/runs/"+esc(parent))
 	var doc struct {
 		Children []struct {
 			ID string `json:"id"`
@@ -748,7 +690,7 @@ func TestEventsPaging(t *testing.T) {
 	var walked int
 	after := 0
 	for {
-		_, _, body := get(t, h, fmt.Sprintf("/weftbase/api/runs/r_ok/events?after=%d&limit=2", after))
+		_, _, body := get(t, h, fmt.Sprintf("/weftbase/v1/runs/r_ok/events?after=%d&limit=2", after))
 		var page struct {
 			Events []struct {
 				Pos   int64           `json:"pos"`
@@ -784,14 +726,14 @@ func TestEventsPaging(t *testing.T) {
 	}
 
 	// -1 is the documented "from the start" default and reads like 0.
-	if code, _, b := get(t, h, "/weftbase/api/runs/r_ok/events?after=-1&limit=2"); code != http.StatusOK ||
+	if code, _, b := get(t, h, "/weftbase/v1/runs/r_ok/events?after=-1&limit=2"); code != http.StatusOK ||
 		!strings.Contains(b, `"pos":0`) {
 		t.Errorf("after=-1: %d %s", code, b)
 	}
 
 	// Past the end: empty page, no cursor, still done.
 	for _, after := range []int64{int64(total), int64(total) + 5, 1<<63 - 1} {
-		code, _, tail := get(t, h, fmt.Sprintf("/weftbase/api/runs/r_ok/events?after=%d", after))
+		code, _, tail := get(t, h, fmt.Sprintf("/weftbase/v1/runs/r_ok/events?after=%d", after))
 		if code != http.StatusOK || !strings.Contains(tail, `"events":[]`) ||
 			!strings.Contains(tail, `"next_after":null`) || !strings.Contains(tail, `"done":true`) {
 			t.Errorf("after=%d past the end: %d %s", after, code, tail)
@@ -810,12 +752,12 @@ func TestEventsPaging(t *testing.T) {
 	if err := db.Write(ctx, obsdb.Batch{Records: live}); err != nil {
 		t.Fatal(err)
 	}
-	_, _, body := get(t, h, "/weftbase/api/runs/r_live/events")
+	_, _, body := get(t, h, "/weftbase/v1/runs/r_live/events")
 	if !strings.Contains(body, `"done":false`) {
 		t.Errorf("live run reported done: %s", body)
 	}
 	// The stale orphan is finished-in-effect: done once drained.
-	_, _, stale := get(t, h, "/weftbase/api/runs/r_stale/events")
+	_, _, stale := get(t, h, "/weftbase/v1/runs/r_stale/events")
 	if !strings.Contains(stale, `"done":true`) {
 		t.Errorf("stale run not done: %s", stale)
 	}
@@ -823,52 +765,40 @@ func TestEventsPaging(t *testing.T) {
 
 func TestAPIErrors(t *testing.T) {
 	h := Handler(DB(fixtureDB(t)))
-	code, _, body := get(t, h, "/weftbase/api/runs/nope")
+	code, _, body := get(t, h, "/weftbase/v1/runs/nope")
 	if code != http.StatusNotFound || !strings.Contains(body, `"not_found"`) {
 		t.Errorf("unknown id: %d %s", code, body)
 	}
-	if code, _, b := get(t, h, "/weftbase/api/runs?before=yesterday"); code != http.StatusBadRequest || !strings.Contains(b, "bad_request") {
+	if code, _, b := get(t, h, "/weftbase/v1/runs?before=yesterday"); code != http.StatusBadRequest || !strings.Contains(b, "bad_request") {
 		t.Errorf("bad before: %d %s", code, b)
 	}
-	if code, _, b := get(t, h, "/weftbase/api/runs/r_ok/events?after=-2"); code != http.StatusBadRequest {
+	if code, _, b := get(t, h, "/weftbase/v1/runs/r_ok/events?after=-2"); code != http.StatusBadRequest {
 		t.Errorf("after=-2: %d %s", code, b)
 	}
-	if code, _, b := get(t, h, "/weftbase/api/runs?limit=lots"); code != http.StatusBadRequest {
+	if code, _, b := get(t, h, "/weftbase/v1/runs?limit=lots"); code != http.StatusBadRequest {
 		t.Errorf("bad limit: %d %s", code, b)
 	}
-	if code, _, b := get(t, h, "/weftbase/api/nope"); code != http.StatusNotFound {
+	if code, _, b := get(t, h, "/weftbase/v1/nope"); code != http.StatusNotFound {
 		t.Errorf("unknown api route: %d %s", code, b)
 	}
 
-	// POST is refused everywhere on the API: read routes answer the
-	// error shape (the registered patterns are GET-only), the UI says
-	// GET only with Allow.
+	// POST on a read route is 405 (the router answers it with Allow;
+	// api/http's tests pin the header).
 	srv := httptest.NewServer(mounted(h))
 	t.Cleanup(srv.Close)
-	resp, err := http.Post(srv.URL+"/weftbase/api/runs", "application/json", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Errorf("POST api/runs: %d", resp.StatusCode)
-	}
-	resp, err = http.Post(srv.URL+"/weftbase/runs", "application/json", nil)
+	resp, err := http.Post(srv.URL+"/weftbase/v1/runs", "application/json", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusMethodNotAllowed {
-		t.Errorf("POST ui: %d", resp.StatusCode)
-	}
-	if allow := resp.Header.Get("Allow"); allow != "GET, HEAD" {
-		t.Errorf("Allow = %q", allow)
+		t.Errorf("POST /v1/runs: %d", resp.StatusCode)
 	}
 
 	// A database that fails reads answers 500 internal naming the op —
 	// loud over silent.
 	stub := stubDB{err: errors.New("disk on fire")}
-	for _, path := range []string{"/weftbase/api/runs", "/weftbase/api/runs/r_x", "/weftbase/api/runs/r_x/events"} {
+	for _, path := range []string{"/weftbase/v1/runs", "/weftbase/v1/runs/r_x", "/weftbase/v1/runs/r_x/events"} {
 		code, _, b := get(t, Handler(DB(stub)), path)
 		if code != http.StatusInternalServerError || !strings.Contains(b, `"internal"`) {
 			t.Errorf("%s: %d %s", path, code, b)
@@ -892,35 +822,9 @@ func (s stubDB) Events(context.Context, string, int64, int) (obsdb.EventPage, er
 	return obsdb.EventPage{}, s.err
 }
 
-// TestOpenOption pins S4.1's Open and the $WEFTBASE_DB default: Open(path)
-// opens (creating) the sqlite file, and Handler without DB or Open
-// opens $WEFTBASE_DB.
-func TestOpenOption(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "sub", "dev.db") // Open creates the parent
-	h := Handler(Open(path))
-	code, _, body := get(t, h, "/weftbase/api/meta")
-	if code != http.StatusOK || !strings.Contains(body, `"db":{"kind":"sqlite"`) {
-		t.Errorf("Open: %d %s", code, body)
-	}
-	if _, err := os.Stat(path); err != nil {
-		t.Errorf("Open did not create %s: %v", path, err)
-	}
-
-	envDB := filepath.Join(dir, "env.db")
-	t.Setenv("WEFTBASE_DB", envDB)
-	_, _, body = get(t, Handler(), "/weftbase/api/meta")
-	if !strings.Contains(body, `"db":{"kind":"sqlite"`) {
-		t.Errorf("WEFTBASE_DB default: %s", body)
-	}
-	if _, err := os.Stat(envDB); err != nil {
-		t.Errorf("default did not open %s: %v", envDB, err)
-	}
-}
-
 func TestManifestEndpoint(t *testing.T) {
 	h := Handler(DB(fixtureDB(t)), Manifest([]byte(fixtureManifest)))
-	code, _, body := get(t, h, "/weftbase/api/manifest")
+	code, _, body := get(t, h, "/weftbase/v1/manifest")
 	if code != http.StatusOK {
 		t.Fatalf("manifest: %d", code)
 	}
@@ -936,50 +840,9 @@ func TestManifestEndpoint(t *testing.T) {
 	if err := json.Unmarshal([]byte(body), &doc); err != nil || len(doc.Sources) != 1 {
 		t.Errorf("manifest with sources: %v %s", err, body)
 	}
-	code, _, body = get(t, Handler(DB(fixtureDB(t))), "/weftbase/api/manifest")
+	code, _, body = get(t, Handler(DB(fixtureDB(t))), "/weftbase/v1/manifest")
 	if code != http.StatusNotFound {
 		t.Errorf("manifest without option: %d %s", code, body)
-	}
-}
-
-// TestShellAndFallback: every path outside the API and ingest trees is
-// the Console's (its shell, the <base href> the Base option names, the
-// Title option's <title>); an unknown /api or /v1 path is a JSON 404,
-// never the shell.
-func TestShellAndFallback(t *testing.T) {
-	h := Handler(DB(fixtureDB(t)), Base("/weftbase/"))
-	code, hdr, body := get(t, h, "/weftbase/")
-	if code != http.StatusOK {
-		t.Fatalf("shell: %d", code)
-	}
-	if !strings.Contains(body, `<base href="/weftbase/">`) {
-		t.Errorf("shell missing base rewrite: %s", body)
-	}
-	if ct := hdr.Get("Content-Type"); !strings.Contains(ct, "text/html") {
-		t.Errorf("shell content-type %q", ct)
-	}
-	if csp := hdr.Get("Content-Security-Policy"); !strings.HasPrefix(csp, "default-src 'self'") {
-		t.Errorf("CSP %q", csp)
-	}
-	if hdr.Get("X-Content-Type-Options") != "nosniff" || hdr.Get("Referrer-Policy") != "no-referrer" {
-		t.Errorf("security headers missing: %v", hdr)
-	}
-	// Deep links survive reload: every non-file GET is the shell.
-	for _, p := range []string{"/weftbase/runs", "/weftbase/runs/r_ok", "/weftbase/agents"} {
-		if _, _, b := get(t, h, p); !strings.Contains(b, `<base href="/weftbase/">`) {
-			t.Errorf("%s is not the shell", p)
-		}
-	}
-	if _, _, b := get(t, Handler(DB(fixtureDB(t)), Title("dev server")), "/weftbase/"); !strings.Contains(b, "<title>dev server</title>") {
-		t.Errorf("Title not rewritten: %s", b)
-	}
-	// An unknown API or ingest path is the error shape, never the shell.
-	for _, p := range []string{"/weftbase/api/nope", "/weftbase/v1/nope", "/weftbase/api/runs/r_ok/nope/deeper"} {
-		code, hdr, b := get(t, h, p)
-		if code != http.StatusNotFound || !strings.Contains(hdr.Get("Content-Type"), "application/json") ||
-			!strings.Contains(b, `"not_found"`) || strings.Contains(b, "<html") {
-			t.Errorf("%s = %d %q %s, want a JSON 404", p, code, hdr.Get("Content-Type"), b)
-		}
 	}
 }
 
@@ -996,7 +859,7 @@ func TestHandlerNilPanics(t *testing.T) {
 // server's handler and Close closes only what New opened.
 func TestServerLifecycle(t *testing.T) {
 	srv := New(DB(fixtureDB(t)))
-	code, _, body := get(t, srv.Handler(), "/weftbase/api/meta")
+	code, _, body := get(t, srv.Handler(), "/weftbase/v1/meta")
 	if code != http.StatusOK || !strings.Contains(body, `"server_version"`) {
 		t.Errorf("Server.Handler(): %d %s", code, body)
 	}
@@ -1043,7 +906,7 @@ func TestLiveDefault(t *testing.T) {
 func TestSessionsAndPublic(t *testing.T) {
 	h := Handler(DB(fixtureDB(t)))
 
-	code, _, body := get(t, h, "/weftbase/api/sessions")
+	code, _, body := get(t, h, "/weftbase/v1/sessions")
 	if code != http.StatusOK {
 		t.Fatalf("sessions: %d", code)
 	}
@@ -1060,16 +923,16 @@ func TestSessionsAndPublic(t *testing.T) {
 	golden(t, "sessions.golden.json", body)
 
 	// Filters: public_id and agent.
-	_, _, pub := get(t, h, "/weftbase/api/sessions?public_id=pub_research")
+	_, _, pub := get(t, h, "/weftbase/v1/sessions?public_id=pub_research")
 	if !strings.Contains(pub, `"total":1`) || !strings.Contains(pub, `"id":"s_research"`) {
 		t.Errorf("sessions?public_id: %s", pub)
 	}
-	_, _, ag := get(t, h, "/weftbase/api/sessions?agent=orders")
+	_, _, ag := get(t, h, "/weftbase/v1/sessions?agent=orders")
 	if strings.Contains(ag, `"id":"s_research"`) {
 		t.Errorf("sessions?agent=orders leaked s_research: %s", ag)
 	}
 
-	code, _, det := get(t, h, "/weftbase/api/sessions/s_orders")
+	code, _, det := get(t, h, "/weftbase/v1/sessions/s_orders")
 	if code != http.StatusOK {
 		t.Fatalf("session detail: %d %s", code, det)
 	}
@@ -1085,12 +948,12 @@ func TestSessionsAndPublic(t *testing.T) {
 	golden(t, "session-orders.golden.json", det)
 
 	// The public id resolves to the session.
-	code, _, res := get(t, h, "/weftbase/api/public/pub_orders")
+	code, _, res := get(t, h, "/weftbase/v1/public/pub_orders")
 	if code != http.StatusOK || !strings.Contains(res, `{"session_id":"s_orders"}`) {
 		t.Errorf("public resolve: %d %s", code, res)
 	}
 	golden(t, "public.golden.json", res)
-	if code, _, _ := get(t, h, "/weftbase/api/public/pub_nope"); code != http.StatusNotFound {
+	if code, _, _ := get(t, h, "/weftbase/v1/public/pub_nope"); code != http.StatusNotFound {
 		t.Errorf("unknown public id: %d", code)
 	}
 }
@@ -1099,11 +962,11 @@ func TestSessionsAndPublic(t *testing.T) {
 // (S4.2).
 func TestRunsFilters(t *testing.T) {
 	h := Handler(DB(fixtureDB(t)))
-	_, _, bySession := get(t, h, "/weftbase/api/runs?session=s_orders")
+	_, _, bySession := get(t, h, "/weftbase/v1/runs?session=s_orders")
 	if !strings.Contains(bySession, `"total":3`) || strings.Contains(bySession, `"id":"r_sub"`) {
 		t.Errorf("runs?session: %s", bySession)
 	}
-	_, _, byPub := get(t, h, "/weftbase/api/runs?public_id=pub_research")
+	_, _, byPub := get(t, h, "/weftbase/v1/runs?public_id=pub_research")
 	if !strings.Contains(byPub, `"total":1`) || !strings.Contains(byPub, `"id":"r_sub"`) {
 		t.Errorf("runs?public_id: %s", byPub)
 	}
@@ -1144,7 +1007,7 @@ func TestDBKind(t *testing.T) {
 func TestTranscriptAndSpans(t *testing.T) {
 	h := Handler(DB(fixtureDB(t)))
 
-	code, _, tr := get(t, h, "/weftbase/api/runs/r_ok/transcript")
+	code, _, tr := get(t, h, "/weftbase/v1/runs/r_ok/transcript")
 	if code != http.StatusOK {
 		t.Fatalf("transcript: %d", code)
 	}
@@ -1160,7 +1023,7 @@ func TestTranscriptAndSpans(t *testing.T) {
 	}
 	golden(t, "transcript-ok.golden.json", tr)
 
-	code, _, sp := get(t, h, "/weftbase/api/runs/r_sub/spans")
+	code, _, sp := get(t, h, "/weftbase/v1/runs/r_sub/spans")
 	if code != http.StatusOK {
 		t.Fatalf("spans: %d", code)
 	}
@@ -1178,14 +1041,14 @@ func TestTranscriptAndSpans(t *testing.T) {
 	golden(t, "spans-sub.golden.json", sp)
 
 	// A failed run's span reads error with the message.
-	_, _, failSp := get(t, h, "/weftbase/api/runs/r_fail/spans")
+	_, _, failSp := get(t, h, "/weftbase/v1/runs/r_fail/spans")
 	if !strings.Contains(failSp, `"status":"error"`) || !strings.Contains(failSp, "injected provider 500") {
 		t.Errorf("failed run spans: %s", failSp)
 	}
 
 	// The trace route: everything under the fixture trace id — the
 	// parent and the child's invoke_agent spans.
-	code, _, trace := get(t, h, "/weftbase/api/traces/"+fxTrace)
+	code, _, trace := get(t, h, "/weftbase/v1/traces/"+fxTrace)
 	if code != http.StatusOK {
 		t.Fatalf("trace: %d", code)
 	}
@@ -1193,7 +1056,7 @@ func TestTranscriptAndSpans(t *testing.T) {
 		t.Errorf("trace spans: %s", trace)
 	}
 	golden(t, "trace.golden.json", trace)
-	if code, _, _ := get(t, h, "/weftbase/api/traces/nope"); code != http.StatusNotFound {
+	if code, _, _ := get(t, h, "/weftbase/v1/traces/nope"); code != http.StatusNotFound {
 		t.Errorf("unknown trace: %d", code)
 	}
 }

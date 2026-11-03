@@ -65,9 +65,9 @@ func TestRouteClass(t *testing.T) {
 	if n := strings.Count(logged.String(), "ingest batch refused"); n != 1 {
 		t.Errorf("five distinct /otlp/v1/<x> 404s logged %d lines, want 1:\n%s", n, logged)
 	}
-	// A REST 4xx (/v1/, /api/) is no ingest batch: neither logged nor
+	// A REST 4xx (/v1/) is no ingest batch: neither logged nor
 	// counted.
-	for _, p := range []string{"/v1/runs", "/api/runs"} {
+	for _, p := range []string{"/v1/runs", "/v1/meta"} {
 		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, p, nil))
 	}
 	if n := strings.Count(logged.String(), "ingest batch refused"); n != 1 {
@@ -121,7 +121,7 @@ func TestAllowOverflow(t *testing.T) {
 func TestWrapLogsAPanic(t *testing.T) {
 	logged := capture(t)
 	h := New().Wrap(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("boom") }))
-	req := httptest.NewRequest(http.MethodGet, "/api/runs", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/runs", nil)
 	req.Header.Set(Header, "rid-1")
 	func() {
 		defer func() {
@@ -162,7 +162,7 @@ func TestWrapFlusherFollowsTheWriter(t *testing.T) {
 	h := New().Wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, got = w.(http.Flusher)
 	}))
-	req := httptest.NewRequest(http.MethodGet, "/api/live", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/runs/stream", nil)
 	h.ServeHTTP(&plainWriter{h: http.Header{}}, req)
 	if got {
 		t.Error("over a writer that cannot flush, the wrapper claims http.Flusher")
@@ -188,7 +188,7 @@ func TestCauseAndIngestCounts(t *testing.T) {
 	l := New()
 	h := l.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/runs/r1":
+		case "/v1/runs/r1":
 			Refuse(r.Context(), "internal", "read run r1 failed")
 			Cause(r.Context(), "read run r1: disk on fire")
 			w.WriteHeader(http.StatusInternalServerError)
@@ -199,7 +199,7 @@ func TestCauseAndIngestCounts(t *testing.T) {
 			}
 		}
 	}))
-	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/runs/r1", nil))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/v1/runs/r1", nil))
 	if l := logged.String(); !strings.Contains(l, `reason="read run r1: disk on fire"`) {
 		t.Errorf("the 5xx line lost the cause: %s", l)
 	}

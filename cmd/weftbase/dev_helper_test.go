@@ -15,7 +15,7 @@ import (
 // binary re-executed with WEFT_DEV_HELPER set (TestMain hands it here
 // before any test runs). Modes:
 //
-//	app        prints its pid and the four variables weftbase dev sets, then
+//	app        prints its pid and the variables weftbase dev sets, then
 //	           — per WEFT_DEV_HELPER_EXIT — exits with that code, or
 //	           sleeps until a signal; WEFT_DEV_HELPER_GRANDCHILD=<dir>
 //	           first starts a grandchild that writes <dir>/<app pid>.
@@ -35,8 +35,9 @@ func devHelper(mode string) int {
 	default:
 		return 8
 	}
-	fmt.Printf("helper pid=%d WEFT_ENV=%s WEFTBASE_URL=%s WEFTBASE_TOKEN=%s WEFTBASE_DB=%s\n", os.Getpid(),
-		os.Getenv("WEFT_ENV"), os.Getenv("WEFTBASE_URL"), os.Getenv("WEFTBASE_TOKEN"), os.Getenv("WEFTBASE_DB"))
+	fmt.Printf("helper pid=%d WEFT_ENV=%s WEFTBASE_URL=%s WEFTBASE_TOKEN=%s OTEL_EXPORTER_OTLP_ENDPOINT=%s OTEL_EXPORTER_OTLP_HEADERS=%s\n", os.Getpid(),
+		os.Getenv("WEFT_ENV"), os.Getenv("WEFTBASE_URL"), os.Getenv("WEFTBASE_TOKEN"),
+		os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"), os.Getenv("OTEL_EXPORTER_OTLP_HEADERS"))
 	if code := os.Getenv("WEFT_DEV_HELPER_EXIT"); code != "" {
 		n, _ := strconv.Atoi(code)
 		return n

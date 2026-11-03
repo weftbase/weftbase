@@ -11,7 +11,7 @@ import (
 	"github.com/weftbase/weftbase/obsdb"
 )
 
-// GET /api/traces (plan A7): the trace list — every trace the database
+// GET /v1/traces (plan A7): the trace list — every trace the database
 // holds, weft or not, one row each, newest first — what the trace page
 // and the command palette list, joined to run pages by run_ids.
 // Capability "traces".
@@ -172,7 +172,7 @@ func (s *Server) traceRuns(ctx context.Context, row *traceRow, pub string) error
 // read's own maximum).
 const traceFailedCap = 500
 
-// tracesPage is GET /api/traces's body, paged as runsPage is.
+// tracesPage is GET /v1/traces's body, paged as runsPage is.
 type tracesPage struct {
 	Total        int        `json:"total"`
 	Traces       []traceRow `json:"traces"`

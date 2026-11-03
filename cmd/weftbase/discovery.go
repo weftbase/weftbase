@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/weftbase/weft/version"
-	v1 "github.com/weftbase/weftbase/api/http/v1"
 	"github.com/weftbase/weftbase/client/discovery"
 )
 
@@ -84,26 +83,9 @@ func knownServer(dbPath string) string {
 	return u.Host
 }
 
-// discoveryOption names the discovery file a start is about to write to
-// its server (v1.DiscoveryFile: /api/meta's discovery_file, which
-// Server's connect lines print); none under WEFTBASE_DISCOVERY=off.
-func discoveryOption() []v1.Option {
-	if discovery.Off(os.Getenv) {
-		return nil
-	}
-	if p := discovery.Path(); p != "" {
-		return []v1.Option{v1.DiscoveryFile(p)}
-	}
-	return nil
-}
-
 // reuseNotes are the lines a reusing start adds after its reuse line:
-// --rotate-token was not applied (the running server serves its token),
-// and the running server's discovery file is missing, when it is.
-func reuseNotes(out io.Writer, addr string, rotate bool) {
-	if rotate {
-		_, _ = fmt.Fprintln(out, "weftbase: --rotate-token not applied: the running server keeps its token (stop it, then start with --rotate-token)")
-	}
+// the running server's discovery file is missing, when it is.
+func reuseNotes(out io.Writer, addr string) {
 	if discovery.Find("http://"+addr) == "" {
 		_, _ = fmt.Fprintf(out, "weftbase: the running server wrote no discovery file; apps need WEFTBASE_URL=http://%s\n", addr)
 	}
