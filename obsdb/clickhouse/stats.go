@@ -134,7 +134,7 @@ func statsBelow(runs, pub string, meta map[string]string) string {
 	}
 	cmeta, ccond := "", ""
 	if len(meta) > 0 {
-		cmeta = ", max(Meta) AS cmeta"
+		cmeta = ", " + metaUnion + " AS cmeta"
 		for range meta {
 			ccond += " AND JSONHas(c.cmeta, ?) AND JSONExtractString(c.cmeta, ?) = ?"
 		}
@@ -146,7 +146,7 @@ func statsBelow(runs, pub string, meta map[string]string) string {
 			in += " AND max(PublicID) = ?"
 		}
 		for range meta {
-			in += " AND JSONHas(max(Meta), ?) AND JSONExtractString(max(Meta), ?) = ?"
+			in += " AND JSONHas(" + metaUnion + ", ?) AND JSONExtractString(" + metaUnion + ", ?) = ?"
 		}
 		between = ` AND NOT hasAny(arrayFilter(a -> length(a) > length(d.dParent), d.dAnc),
 		(SELECT groupArray(RunId) FROM (SELECT RunId FROM weft_runs WHERE position(RunId, '/') > 0

@@ -364,13 +364,14 @@ func TestContractKeysMatchMetaOf(t *testing.T) {
 // The Runs meta filter compiles to a JSON condition over the metadata
 // column — the SQL shape of a MetaOf subset match — applied to the
 // grouped rows, never to weft_runs' stored ones; the row-level narrowing
-// beside it (idx_meta's LIKE, 0026) only picks the runs to collapse.
+// beside it (idx_meta_kv's LIKE over a row's union, 0034) only picks the
+// runs to collapse.
 func TestRunsInnerMetaFilter(t *testing.T) {
 	sql, _ := runsInner(obsdb.RunQuery{Meta: map[string]string{"tenant": "acme"}}, runsCut{})
 	for _, want := range []string{
 		"JSONHas(Meta, ?)",
 		"JSONExtractString(Meta, ?) = ?",
-		"FROM weft_runs WHERE RunId IN (SELECT t.RunId FROM weft_runs AS t WHERE t.Meta LIKE ?) GROUP BY RunId) WHERE ParentRunID = '' AND CallerRunID = '' AND JSONHas(Meta, ?)",
+		"FROM weft_runs WHERE RunId IN (SELECT t.RunId FROM weft_runs AS t WHERE toJSONString(CAST(t.MetaKV, 'Map(String, String)')) LIKE ?) GROUP BY RunId) WHERE ParentRunID = '' AND CallerRunID = '' AND JSONHas(Meta, ?)",
 	} {
 		if !strings.Contains(sql, want) {
 			t.Errorf("runsInner missing %q:\n%s", want, sql)

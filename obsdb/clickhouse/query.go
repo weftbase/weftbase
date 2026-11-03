@@ -26,7 +26,8 @@ import (
 // read FINAL, which is exact for ReplacingMergeTree duplicates and for
 // unmerged AggregatingMergeTree parts alike.
 
-// runColumns is weft_runs' column list as FINAL reads it.
+// runColumns is weft_runs' column list, the names a run row is read by
+// (a FINAL read selects runFinalColumns).
 const runColumns = `RunId, ParentRunID, ParentCallID, TraceID, Agent, Provider, Model,
 	ManifestHash, WeftVersion, Service, SessionID, PublicID, Turn, Playground,
 	ExperimentID, ForkedFrom, Meta, Started, Finished, LastSeen, FinishedOK,
@@ -36,15 +37,47 @@ const runColumns = `RunId, ParentRunID, ParentCallID, TraceID, Agent, Provider, 
 	StoppedBy, CancelCause, EventsEmitted, MessagesEmitted, ErrorType, Problems,
 	ResumedFrom, CallerRunID, CallerCallID, DerivedMessages`
 
+// runFinalColumns is runColumns as a FINAL read selects them: Meta
+// read from the row's MetaKV (rowMetaJSON) — the union FINAL's merge
+// keeps — never the Meta column, one row's map (migration 0034).
+var runFinalColumns = strings.Replace(runColumns, "ForkedFrom, Meta,", "ForkedFrom, "+rowMetaJSON("")+" AS Meta,", 1)
+
+// A run's metadata (migration 0034): the union of its rows' pairs,
+// MetaKV under maxMap — on a key two rows carry with different values
+// the greater value (SQLite: the later write). metaUnionMap is the
+// collapse's map (GROUP BY RunId), metaUnion its JSON — what Meta
+// held before, one row's map, which a merge made the run's for good.
+// Never alias anything MetaKV: ClickHouse aliases are query-global, and
+// the column is what every read here aggregates.
+const (
+	metaUnionMap = "CAST(maxMap(MetaKV), 'Map(String, String)')"
+	metaUnion    = "toJSONString(" + metaUnionMap + ")"
+)
+
+// rowMetaMap is one weft_runs row's metadata as a map — its MetaKV,
+// the union of the rows a merge folded into it; alias is the table's
+// ("t.", or "" for none). rowMetaJSON is its JSON, the expression
+// idx_meta_kv indexes (metaNarrow's LIKE asks it); rowMetaCond its
+// exact match of one pair, three binds (key, key, value).
+func rowMetaMap(alias string) string { return "CAST(" + alias + "MetaKV, 'Map(String, String)')" }
+
+func rowMetaJSON(alias string) string { return "toJSONString(" + rowMetaMap(alias) + ")" }
+
+func rowMetaCond(alias string) string {
+	m := rowMetaMap(alias)
+	return "mapContains(" + m + ", ?) AND " + m + "[?] = ?"
+}
+
 // runAggregates is the same list as a GROUP BY RunId select: max for
-// identity strings, flags, usage and last-seen; min for started — the
-// same aggregates the AggregatingMergeTree columns carry.
+// identity strings, flags, usage and last-seen; min for started; the
+// metadata's union (metaUnion) — the same aggregates the
+// AggregatingMergeTree columns carry.
 const runAggregates = `RunId, max(ParentRunID) AS ParentRunID, max(ParentCallID) AS ParentCallID,
 	max(TraceID) AS TraceID, max(Agent) AS Agent, max(Provider) AS Provider, max(Model) AS Model,
 	max(ManifestHash) AS ManifestHash, max(WeftVersion) AS WeftVersion, max(Service) AS Service,
 	max(SessionID) AS SessionID, max(PublicID) AS PublicID, max(Turn) AS Turn,
 	max(Playground) AS Playground, max(ExperimentID) AS ExperimentID, max(ForkedFrom) AS ForkedFrom,
-	max(Meta) AS Meta, min(Started) AS Started, max(Finished) AS Finished, max(LastSeen) AS LastSeen,
+	` + metaUnion + ` AS Meta, min(Started) AS Started, max(Finished) AS Finished, max(LastSeen) AS LastSeen,
 	max(FinishedOK) AS FinishedOK, max(Failed) AS Failed, max(Err) AS Err,
 	max(Steps) AS Steps, max(Pending) AS Pending, max(StopReason) AS StopReason,
 	max(InputTokens) AS InputTokens, max(OutputTokens) AS OutputTokens,
@@ -290,10 +323,11 @@ func runsInner(q obsdb.RunQuery, cut runsCut) (string, []any) {
 		conds = append(conds, "JSONHas(Meta, ?) AND JSONExtractString(Meta, ?) = ?")
 		args = append(args, k, k, v)
 	}
-	if like, largs := metaNarrow("t.Meta", q.Meta); like != "" {
+	if like, largs := metaNarrow(rowMetaJSON("t."), q.Meta); like != "" {
 		// The runs one of whose rows carries every pair's JSON text
-		// (idx_meta, 0026): a superset — the collapsed Meta is one row's
-		// (max) — the exact match above decides.
+		// (idx_meta_kv, 0034): a superset — a row holds the union of the
+		// rows merged into it, not yet the run's — the exact match above
+		// decides.
 		narrow = append(narrow, "RunId IN (SELECT t.RunId FROM weft_runs AS t WHERE "+like+")")
 		for _, a := range largs {
 			narrowArgs = append(narrowArgs, a)
@@ -304,11 +338,11 @@ func runsInner(q obsdb.RunQuery, cut runsCut) (string, []any) {
 		strings.Join(or1(conds), " AND ") + cut.where(), append(narrowArgs, args...)
 }
 
-// metaNarrow is the tag filters' index narrowing (migration 0026's
-// idx_meta): for each pair whose key and value hold only characters
-// toJSONString writes verbatim (printable ASCII but '"', '\' and '/'),
-// col LIKE '%"<k>":"<v>"%' — the pair's JSON text, a substring of every
-// Meta that carries it, so a superset of the exact JSONExtractString
+// metaNarrow is the tag filters' index narrowing (migration 0034's
+// idx_meta_kv over rowMetaJSON, col): for each pair whose key and value
+// hold only characters toJSONString writes verbatim (printable ASCII but
+// '"', '\' and '/'), col LIKE '%"<k>":"<v>"%' — the pair's JSON text, a
+// substring of every row's map that carries it, so a superset of the exact JSONExtractString
 // match the caller keeps beside it; the ngram bloom filter skips the
 // granules holding none of it. Pairs in key order; "" when no pair
 // qualifies. LIKE's own wildcards are escaped.
@@ -361,7 +395,7 @@ func (d *DB) Run(ctx context.Context, id string) (_ obsdb.RunDetail, err error) 
 	now := time.Now()
 	cut := d.runsCut(ctx)
 	rows, err := d.queryRunRows(ctx, now,
-		"SELECT "+runColumns+" FROM weft_runs FINAL WHERE RunId = ?"+cut.where(), id)
+		"SELECT "+runFinalColumns+" FROM weft_runs FINAL WHERE RunId = ?"+cut.where(), id)
 	if err != nil {
 		return obsdb.RunDetail{}, err
 	}
@@ -373,7 +407,7 @@ func (d *DB) Run(ctx context.Context, id string) (_ obsdb.RunDetail, err error) 
 	// equality then reads their merged rows. Without it FINAL merges
 	// the whole table for every run page.
 	children, err := d.queryRunRows(ctx, now,
-		"SELECT "+runColumns+" FROM weft_runs FINAL WHERE "+
+		"SELECT "+runFinalColumns+" FROM weft_runs FINAL WHERE "+
 			"RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.ParentRunID = ?) AND ParentRunID = ?"+cut.where()+
 			" ORDER BY Started, RunId", id, id)
 	if err != nil {
@@ -1049,7 +1083,7 @@ func (d *DB) RunTreeSpans(ctx context.Context, q obsdb.TreeQuery) (_ obsdb.RunTr
 // pins their indexes). A run's merged columns are read grouped by
 // RunId, in RunRow order, held to the retention cut (treeRowOrder).
 const (
-	treeRowColumns = "SELECT RunId, max(ParentRunID), max(PublicID), max(Meta), min(Started) AS started, " +
+	treeRowColumns = "SELECT RunId, max(ParentRunID), max(PublicID), " + metaUnion + ", min(Started) AS started, " +
 		"max(Failed), max(FinishedOK), max(RootEnded), max(LastSeen) FROM weft_runs WHERE "
 	// treeRowLimit bounds each row read: obsdb.TreeRowCap and one more.
 	treeRowLimit = " LIMIT ?"
@@ -1311,7 +1345,7 @@ func (d *DB) ChildRuns(ctx context.Context, parentIDs []string) (_ map[string][]
 // RunDetail.Children's order; cut the retention cut (DB.runsCut).
 func childRunsSQL(n int, cut runsCut) string {
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", n), ",")
-	return "SELECT " + runColumns + " FROM weft_runs FINAL WHERE " +
+	return "SELECT " + runFinalColumns + " FROM weft_runs FINAL WHERE " +
 		"RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.ParentRunID IN (" + placeholders + ")) " +
 		"AND ParentRunID IN (" + placeholders + ") AND ParentRunID != ''" + cut.where() + " ORDER BY Started, RunId"
 }
@@ -2100,10 +2134,10 @@ func (d *DB) fillSummarizerUsage(ctx context.Context, rows []obsdb.SessionRow, t
 		args = append(args, ts.pub)
 	}
 	for _, k := range slices.Sorted(maps.Keys(ts.meta)) {
-		// A raw row carrying the pair: a run's rows share its metadata
-		// (written once at its start), so the row read keeps the run the
-		// collapsed rule keeps.
-		scope += " AND JSONHas(r.Meta, ?) AND JSONExtractString(r.Meta, ?) = ?"
+		// A raw row carrying the pair (its MetaKV: the union of the rows
+		// merged into it): the run's union carries it too, so the row
+		// read keeps the run the collapsed rule keeps.
+		scope += " AND " + rowMetaCond("r.")
 		args = append(args, k, k, ts.meta[k])
 	}
 	tok := func(k string) string { return "sum(toInt64OrZero(SpanAttributes['" + k + "']))" }
@@ -2236,7 +2270,7 @@ func (t turnScope) narrow() ([]string, []any) {
 		out = append(out, "RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.PublicID = ?)")
 		args = append(args, t.pub)
 	}
-	if like, largs := metaNarrow("t.Meta", t.meta); like != "" {
+	if like, largs := metaNarrow(rowMetaJSON("t."), t.meta); like != "" {
 		out = append(out, "RunId IN (SELECT t.RunId FROM weft_runs AS t WHERE "+like+")")
 		for _, a := range largs {
 			args = append(args, a)
@@ -2279,7 +2313,7 @@ func sessionRuns(narrow, cond string, cut runsCut, meta bool) string {
 		// The run's metadata for turnScope's cond, under its own alias:
 		// Meta itself would shadow the column the Title and fork
 		// aggregates read (ClickHouse aliases are query-global).
-		runMeta = "max(Meta) AS RunMeta, "
+		runMeta = metaUnion + " AS RunMeta, "
 	}
 	return `(SELECT * FROM (SELECT RunId, ` + runMeta + `max(SessionID) AS SessionID, max(PublicID) AS PublicID,
 				max(Agent) AS Agent, max(ParentRunID) AS ParentRunID, max(CallerRunID) AS CallerRunID,
@@ -2289,12 +2323,12 @@ func sessionRuns(narrow, cond string, cut runsCut, meta bool) string {
 				max(InputTokens) AS InputTokens, max(OutputTokens) AS OutputTokens,
 				max(CachedInputTokens) AS CachedInputTokens, max(CacheWriteTokens) AS CacheWriteTokens,
 				max(ReasoningTokens) AS ReasoningTokens, max(Derived) AS Derived,
-				max(JSONExtractString(Meta, '` + obsdb.SessionTitleKey + `')) AS Title,
+				` + metaUnionMap + `['` + obsdb.SessionTitleKey + `'] AS Title,
 				max(SessionParent) AS SessionParent,
-				max(JSONExtractString(Meta, 'weft.session.parent_call')) AS SessionParentCall,
+				` + metaUnionMap + `['weft.session.parent_call'] AS SessionParentCall,
 				max(Pending) AS Pending, max(CancelCause) AS CancelCause,
 				max(ErrorType) AS ErrorType, max(ResumedFrom) AS ResumedFrom,
-				max(JSONExtractString(Meta, '` + obsdb.SessionForkedFromKey + `')) AS ForkedSession
+				` + metaUnionMap + `['` + obsdb.SessionForkedFromKey + `'] AS ForkedSession
 			FROM weft_runs` + narrow + `
 			GROUP BY RunId)
 		WHERE ` + ownTurnCH + ` AND Playground = 0 AND SessionID != ''` + cond + cut.where() + `)`
@@ -2367,7 +2401,7 @@ func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err
 	// 500 and silently dropped the newest. A caller that wants pages
 	// reads Runs with RunQuery.SessionID.
 	runs, err := d.queryRunRows(ctx, now,
-		`SELECT `+runColumns+` FROM weft_runs FINAL
+		`SELECT `+runFinalColumns+` FROM weft_runs FINAL
 		WHERE RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.SessionID = ?)
 			AND SessionID = ? AND `+ownTurnCH+` AND Playground = 0`+cut.where()+`
 		ORDER BY Turn, Started, RunId`, id, id)

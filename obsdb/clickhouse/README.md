@@ -76,13 +76,26 @@ caller cancelled holds nothing; with none known yet, or a window past
 about 100 years (DateTime's range), the reads cut nothing, as before
 the cut existed.
 
+A run's metadata (`RunRow.Meta`, and everything that filters or scopes
+by it: the tag filters, a tag-scoped panel token, session titles) is
+the union of its rows' pairs, as on SQLite (migration 0034): `MetaKV`,
+a `maxMap` over each row's pairs that an insert fills from the row's
+own `Meta`, so a background merge keeps every key any row carried. On
+a key two rows carry with different values the greater value wins
+(SQLite: the later write); the core stamps one map on every row of a
+run, so only an app's own attributes can disagree. Before 0034 a run's
+`meta` was one row's map (`max(Meta)`, the greatest JSON string), and a
+row with fewer pairs could drop the caller's tag; a run whose rows were
+merged before the upgrade keeps the one map that merge kept.
+
 The tag filters (`SessionQuery.Meta`, `RunQuery.Meta`) narrow their
-row scan on `idx_meta` (migration 0026), an ngram bloom filter over
-`Meta`: each pair whose key and value are printable ASCII without `"`,
-`\` or `/` also asks `Meta LIKE '%"<k>":"<v>"%'` (the pair's JSON
-text — a superset; the exact `JSONExtractString` match decides), so the
+row scan on `idx_meta_kv` (migration 0034; 0026's `idx_meta` over
+`Meta` is dropped), an ngram bloom filter over a row's `MetaKV` as
+JSON: each pair whose key and value are printable ASCII without `"`,
+`\` or `/` also asks that JSON `LIKE '%"<k>":"<v>"%'` (the pair's JSON
+text — a superset; the exact match on the union decides), so the
 granules holding none of it are skipped; any other pair reads every
-granule's Meta, as before.
+granule, as before.
 
 Deletion (`DeleteRun`, `DeleteSession`, `Sweep` — Studio's `DELETE`
 verbs and `studio.Retain`) is a lightweight `DELETE FROM … WHERE` on

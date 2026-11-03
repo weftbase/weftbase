@@ -11,12 +11,13 @@ import (
 	"github.com/weftbase/weftbase/obsdb"
 )
 
-// TestTagFilterUsesTheMetaIndex (P9-pre-go-fix2; migration 0026): the
+// TestTagFilterUsesTheMetaIndex (P9-pre-go-fix2; migrations 0026, 0034): the
 // tag filters' row-level narrowing — Sessions' tag.<k>=<v> and
-// RunQuery.Meta — asks idx_meta, the ngram bloom filter over Meta,
-// through metaNarrow's LIKE on the pair's JSON text: EXPLAIN indexes = 1
-// names the index and drops granules, and the filters still answer the
-// exact match (a value that only contains the wanted one is no match).
+// RunQuery.Meta — asks idx_meta_kv, the ngram bloom filter over a row's
+// metadata union (rowMetaJSON), through metaNarrow's LIKE on the pair's
+// JSON text: EXPLAIN indexes = 1 names the index and drops granules,
+// and the filters still answer the exact match (a value that only
+// contains the wanted one is no match).
 func TestTagFilterUsesTheMetaIndex(t *testing.T) {
 	db := freshDB(t)
 	ctx := context.Background()
@@ -44,7 +45,7 @@ func TestTagFilterUsesTheMetaIndex(t *testing.T) {
 		}
 	}
 	meta := map[string]string{"tenant": "acme"}
-	like, args := metaNarrow("t.Meta", meta)
+	like, args := metaNarrow(rowMetaJSON("t."), meta)
 	if like == "" || len(args) != 1 || args[0] != `%"tenant":"acme"%` {
 		t.Fatalf("metaNarrow = %q %q", like, args)
 	}
@@ -66,8 +67,8 @@ func TestTagFilterUsesTheMetaIndex(t *testing.T) {
 	}
 	_ = rows.Close()
 	p := strings.Join(plan, "\n")
-	if !strings.Contains(p, "idx_meta") {
-		t.Errorf("the tag narrowing's plan names no idx_meta:\n%s", p)
+	if !strings.Contains(p, "idx_meta_kv") {
+		t.Errorf("the tag narrowing's plan names no idx_meta_kv:\n%s", p)
 	}
 	t.Logf("EXPLAIN indexes = 1:\n%s", p)
 
