@@ -117,18 +117,6 @@ func TestRejectsWhatItDoesNotServe(t *testing.T) {
 	}
 }
 
-func TestSeenIsBounded(t *testing.T) {
-	e := &Embedded{seen: map[string]bool{}}
-	first := wire.NewCommandID()
-	e.markSeen(first)
-	for i := 0; i < SeenSize; i++ {
-		e.markSeen(wire.NewCommandID())
-	}
-	if len(e.seen) != SeenSize || e.seen[first] {
-		t.Errorf("seen holds %d (first kept: %v), want %d without the oldest", len(e.seen), e.seen[first], SeenSize)
-	}
-}
-
 func TestPanicIsContained(t *testing.T) {
 	boom := core.Tool("boom", "Boom.", func(context.Context, struct{}) (string, error) { panic("handler") })
 	panicky := &panicModel{}

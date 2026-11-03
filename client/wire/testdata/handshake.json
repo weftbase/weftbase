@@ -1,0 +1,36 @@
+[
+  {
+    "token": "wbt_secret",
+    "registration": {
+      "placement": "local",
+      "build": {
+        "digest": "sha256:abc",
+        "kind": "binary"
+      },
+      "agents": [
+        {
+          "name": "support",
+          "manifest": {},
+          "manifest_hash": "f00d"
+        }
+      ],
+      "capabilities": [
+        "run",
+        "cancel",
+        "steer"
+      ],
+      "heartbeat_ms": 60000
+    }
+  },
+  {
+    "worker_id": "wk_1",
+    "ping_ms": 15000
+  },
+  {
+    "error": "token refused"
+  },
+  {
+    "reason": "the child exited: exit status 2",
+    "lost": true
+  }
+]

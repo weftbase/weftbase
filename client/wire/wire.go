@@ -180,6 +180,41 @@ func (c Command) Validate() error {
 	return nil
 }
 
+// Steer delivers user messages into a running run at its next drain
+// point (P§7.5): after a step's tool batch, or at a final step, which
+// then takes one more step. It is run-scoped (it goes to the worker
+// holding the run) and answered accepted or rejected.
+type Steer struct {
+	CommandID string `json:"command_id"`
+	RunID     string `json:"run_id"`
+	// Messages are weft Message JSON, every one role user.
+	Messages []json.RawMessage `json:"messages"`
+}
+
+// Validate reports a malformed steer.
+func (s Steer) Validate() error {
+	switch {
+	case !ValidCommandID(s.CommandID):
+		return fmt.Errorf("wire: command id %q is not cmd_<ulid>", s.CommandID)
+	case s.RunID == "":
+		return errors.New("wire: a steer needs a run id")
+	case len(s.Messages) == 0:
+		return errors.New("wire: a steer carries no message")
+	}
+	for i, m := range s.Messages {
+		var probe struct {
+			Role string `json:"role"`
+		}
+		if err := json.Unmarshal(m, &probe); err != nil {
+			return fmt.Errorf("wire: steer message %d: %w", i, err)
+		}
+		if probe.Role != "user" {
+			return fmt.Errorf("wire: steer message %d has role %q; only user messages steer", i, probe.Role)
+		}
+	}
+	return nil
+}
+
 // Cancel causes (P§6.3).
 const (
 	CauseUser           = "user"
@@ -260,16 +295,45 @@ func (a Ack) Final() bool {
 	return a.State == AckFinished || a.State == AckRejected || a.State == AckBusy
 }
 
-// Frame events: what travels on a worker's stream, down (ping, run,
-// cancel, drain) and up (register, ack).
+// Frame events: what travels on a worker's stream, down (welcome,
+// ping, run, cancel, steer, drain) and up (register, ack). disconnected
+// never crosses a socket: an executor yields it from Events when its
+// worker's link ended.
 const (
-	EventPing     = "ping"
-	EventRun      = "run"
-	EventCancel   = "cancel"
-	EventDrain    = "drain"
-	EventRegister = "register"
-	EventAck      = "ack"
+	EventPing         = "ping"
+	EventRun          = "run"
+	EventCancel       = "cancel"
+	EventSteer        = "steer"
+	EventDrain        = "drain"
+	EventRegister     = "register"
+	EventWelcome      = "welcome"
+	EventAck          = "ack"
+	EventDisconnected = "disconnected"
 )
+
+// Hello is a worker's register frame on a socket: the per-child token
+// its supervisor handed it (WEFTBASE_TOKEN) and its registration.
+type Hello struct {
+	Token        string       `json:"token,omitempty"`
+	Registration Registration `json:"registration"`
+}
+
+// Welcome is the server's answer to a register frame: the worker's id
+// and how often the server pings. A non-empty Error refuses the
+// registration; the worker stops.
+type Welcome struct {
+	WorkerID string `json:"worker_id,omitempty"`
+	PingMS   int64  `json:"ping_ms,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
+// Disconnected is what an executor reports when its worker's link
+// ended. Lost is true when the runs in the worker's hands ended with it
+// (the process exited): they will never report.
+type Disconnected struct {
+	Reason string `json:"reason"`
+	Lost   bool   `json:"lost"`
+}
 
 // MaxFrameBytes is the largest frame either side accepts.
 const MaxFrameBytes = 8 << 20

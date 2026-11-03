@@ -74,6 +74,16 @@ func TestGoldens(t *testing.T) {
 		t.Fatal(err)
 	}
 	golden(t, "frames", []Frame{f, AckFrame(Ack{CommandID: cmdID, State: AckAccepted}), {Event: EventPing}})
+	golden(t, "steer", Steer{CommandID: cmdID, RunID: "run_1",
+		Messages: []json.RawMessage{json.RawMessage(`{"role":"user","content":[{"type":"text","text":"only EU orders"}]}`)}})
+	golden(t, "handshake", []any{
+		Hello{Token: "wbt_secret", Registration: Registration{Placement: PlacementLocal, Build: Build{Digest: "sha256:abc", Kind: BuildBinary},
+			Agents:       []AgentRegistration{{Name: "support", Manifest: json.RawMessage(`{}`), ManifestHash: "f00d"}},
+			Capabilities: []string{EventRun, EventCancel, EventSteer}, HeartbeatMS: 60000}},
+		Welcome{WorkerID: "wk_1", PingMS: 15000},
+		Welcome{Error: "token refused"},
+		Disconnected{Reason: "the child exited: exit status 2", Lost: true},
+	})
 }
 
 func TestRoundTrip(t *testing.T) {
@@ -143,6 +153,21 @@ func TestValidate(t *testing.T) {
 	}
 	if (Registration{Build: Build{Digest: "md5:x"}}).Validate() == nil {
 		t.Error("a non-sha256 digest validated")
+	}
+	user := json.RawMessage(`{"role":"user","content":[{"type":"text","text":"hi"}]}`)
+	if err := (Steer{CommandID: cmdID, RunID: "r", Messages: []json.RawMessage{user}}).Validate(); err != nil {
+		t.Errorf("a user steer: %v", err)
+	}
+	for i, st := range []Steer{
+		{RunID: "r", Messages: []json.RawMessage{user}},
+		{CommandID: cmdID, Messages: []json.RawMessage{user}},
+		{CommandID: cmdID, RunID: "r"},
+		{CommandID: cmdID, RunID: "r", Messages: []json.RawMessage{json.RawMessage(`{"role":"assistant"}`)}},
+		{CommandID: cmdID, RunID: "r", Messages: []json.RawMessage{json.RawMessage(`[`)}},
+	} {
+		if st.Validate() == nil {
+			t.Errorf("bad steer %d validated", i)
+		}
 	}
 	if !(Ack{State: AckFinished}).Final() || (Ack{State: AckHeartbeat}).Final() {
 		t.Error("Final")

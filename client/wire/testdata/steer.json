@@ -1,0 +1,15 @@
+{
+  "command_id": "cmd_01JB0000000000000000000000",
+  "run_id": "run_1",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "only EU orders"
+        }
+      ]
+    }
+  ]
+}
