@@ -120,3 +120,8 @@ diff, holes), `observe/export`, `sessions` (timeline, export, delete),
 
 | Commit | Step | Summary |
 |---|---|---|
+| e96e5d4c | 2 | delete the devtools, trim obsdb, squash its migrations |
+| fb1fbcd8 | 3 | moves, the client module and go.work |
+| 0a54548c | 4 | the layering check |
+| 744f3519 | 5 | kernel, control store, outbox, keys, authz and /v1 |
+| a7ec3c35 | 6 (part) | wire, registry, queue, run ledger, hub, embedded executor |
