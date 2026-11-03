@@ -1,6 +1,6 @@
 // Package studio is the Inspector: the UI, the JSON API, the live
 // stream and the OTLP receiver over one observability database
-// (weft/obsdb), served by Go alone.
+// (weftbase/obsdb), served by Go alone.
 //
 // # The three setups (S4.6)
 //

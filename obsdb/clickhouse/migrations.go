@@ -122,7 +122,7 @@ func rederiveStock(ctx context.Context, conn ch.Conn, from int) error {
 	if len(traces) == 0 {
 		return nil
 	}
-	slog.Default().InfoContext(ctx, fmt.Sprintf("weft/obsdb/clickhouse: migrating: re-deriving %d stock traces (ClickHouse 0031); Open waits for it", len(traces)),
+	slog.Default().InfoContext(ctx, fmt.Sprintf("obsdb/clickhouse: migrating: re-deriving %d stock traces (ClickHouse 0031); Open waits for it", len(traces)),
 		"traces", len(traces))
 	began := time.Now()
 	ctx = ch.Context(ctx, ch.WithSettings(ch.Settings{"async_insert": 0, "max_partitions_per_insert_block": 0}))
@@ -134,7 +134,7 @@ func rederiveStock(ctx context.Context, conn ch.Conn, from int) error {
 		}
 		traces = traces[n:]
 	}
-	slog.Default().InfoContext(ctx, "weft/obsdb/clickhouse: migration 0031 re-derive done",
+	slog.Default().InfoContext(ctx, "obsdb/clickhouse: migration 0031 re-derive done",
 		"duration", time.Since(began).Round(time.Millisecond).String())
 	return nil
 }

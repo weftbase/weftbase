@@ -120,7 +120,7 @@ func (w *spanStatWriter) writeSaved(ctx context.Context, s obsdb.Span) error {
 			return rerr
 		}
 		spanStatsWarn.Do(func() {
-			slog.Default().WarnContext(ctx, "weft/obsdb/sqlite: span_stats rollup write failed; the span is stored, the stats skip it (further failures are not logged)",
+			slog.Default().WarnContext(ctx, "obsdb/sqlite: span_stats rollup write failed; the span is stored, the stats skip it (further failures are not logged)",
 				"trace_id", s.TraceID, "span_id", s.SpanID, "error", err)
 		})
 	}
@@ -192,13 +192,13 @@ func backfillSpanStats(tx *sql.Tx) (err error) {
 	if spans == 0 {
 		return nil
 	}
-	slog.Default().InfoContext(ctx, "weft/obsdb/sqlite: migration 0023 backfills the span_stats rollup; Open waits for it", "spans", spans)
+	slog.Default().InfoContext(ctx, "obsdb/sqlite: migration 0023 backfills the span_stats rollup; Open waits for it", "spans", spans)
 	began := time.Now()
 	defer func() {
 		if err != nil {
 			return
 		}
-		slog.Default().InfoContext(ctx, "weft/obsdb/sqlite: migration 0023 backfill done", "spans", spans, "duration", time.Since(began).Round(time.Millisecond).String())
+		slog.Default().InfoContext(ctx, "obsdb/sqlite: migration 0023 backfill done", "spans", spans, "duration", time.Since(began).Round(time.Millisecond).String())
 	}()
 	// The lower bound is a separate condition, never "first OR (…) >
 	// (…)": an OR with a bind defeats the primary key range, and every

@@ -242,7 +242,7 @@ type Server struct {
 // New builds a Studio server over one obsdb.DB (S4.1). Handler()
 // serves the UI, the panel, the JSON API, the live stream and —
 // unless disabled — OTLP ingest. Runtime() is the runtime link
-// server's in-process side, which weft/runtime takes in setup A; nil
+// server's in-process side, which weftbase/runtime takes in setup A; nil
 // unless Playground(true) built it.
 func New(opts ...Option) *Server {
 	c := config{base: "/studio/", title: defaultTitle}
@@ -315,7 +315,7 @@ func Handler(opts ...Option) http.Handler {
 }
 
 // Runtime returns the runtime link server's in-process side (what
-// weft/runtime's runtime.Local takes): the server Playground(true)
+// weftbase/runtime's runtime.Local takes): the server Playground(true)
 // built, nil without the option — and without it the playground
 // routes do not exist either.
 func (s *Server) Runtime() *RuntimeServer { return s.runtimeSrv }

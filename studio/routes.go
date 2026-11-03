@@ -328,7 +328,7 @@ func registerIngest(mux *http.ServeMux, s *Server) {
 
 // RuntimeServer is the runtime link server's in-process side
 // (studio/runtime): the registry of connected runtimes that
-// weft/runtime's runtime.Local(srv) drives and Server.Runtime
+// weftbase/runtime's runtime.Local(srv) drives and Server.Runtime
 // returns — an alias, so the S4.1 name stays in this package while
 // the type lives where the routes do. Nil on a Server built without
 // Playground(true); the runtime-link routes register with the

@@ -89,7 +89,7 @@ import (
 // models: a sixth and more read as one last element "(+n)".
 //
 // A scripted model — every model of the wefttest provider, and the
-// playground's scripted engine (weft/runtime + scripted) — that no row
+// playground's scripted engine (weftbase/runtime + scripted) — that no row
 // of the table matches is priced by a built-in
 // rule: an exact $0 (cost_known true, cache "exact") with cost_badge
 // "scripted". Nothing bills it; the rule is Go code, not a pricing.json

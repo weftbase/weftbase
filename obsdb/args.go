@@ -17,7 +17,7 @@ import (
 // CheckToolArgs checks a tool call's arguments against the tool's
 // input schema as a tools record stores it (ToolEntry.Schema): the
 // check a playground `tool_args` transcript edit passes before it is
-// accepted (ADR 0029 §8), on both of its surfaces — weft/runtime's
+// accepted (ADR 0029 §8), on both of its surfaces — weftbase/runtime's
 // authoritative copy and Studio's mirror — so the two refuse in one
 // wording. A nil error means the arguments fit.
 //

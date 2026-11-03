@@ -71,7 +71,7 @@ type fixtureSource struct {
 	// both routes refuse it 400 with derivedBadge, before the builder.
 	derived bool
 	// stampModel, when set, replaces the scripted engine's ModelInfo
-	// (weft/runtime/scripted) on a fixture: a scripted replay's fresh
+	// (weftbase/runtime/scripted) on a fixture: a scripted replay's fresh
 	// steps are stamped with the source's model, the one whose answers
 	// they replay (UX-C-30).
 	stampModel *core.ModelInfo
@@ -366,7 +366,7 @@ func buildFixtures(src fixtureSource) (*fixtureSet, error) {
 				// The step's request carried a view (ADR 0028 §8): the
 				// fixture keys on what the model saw — obsdb's one
 				// assembly, shared with the transcript route's ?step=
-				// and weft/runtime's replay prefix (ADR 0029).
+				// and weftbase/runtime's replay prefix (ADR 0029).
 				seen, err := obsdb.ApplyView(msgs[:i], v)
 				if err != nil {
 					return nil, derivedError("step %d: %v", step, err)
@@ -624,7 +624,7 @@ func fixtureSetOf(src fixtureSource) (*fixtureSet, *fixtureRefusal) {
 	return set, nil
 }
 
-// scriptedEngineModel is weft/runtime's scripted engine's ModelInfo
+// scriptedEngineModel is weftbase/runtime's scripted engine's ModelInfo
 // (runtime/scripted.go).
 var scriptedEngineModel = core.ModelInfo{Provider: "weft/runtime", Name: "scripted"}
 

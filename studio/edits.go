@@ -39,7 +39,7 @@ import (
 // no step (a ClickHouse row from before 0004, a producer that never
 // stamped one) is numbered by order — each assistant message opens the
 // next step, what precedes the first is step 0's — the same rule as
-// weft/runtime's orderSteps, so the two never disagree on a command.
+// weftbase/runtime's orderSteps, so the two never disagree on a command.
 
 // stepMessage is one of the run's own messages and the step it joined.
 type stepMessage struct {
@@ -123,7 +123,7 @@ func compactedRangeOf(batches []obsdb.TranscriptBatch, sm obsdb.StepMessages) *c
 }
 
 // compactedEditError is the refusal of an edit to a message the
-// compacted prefix no longer holds — weft/runtime's copy words it
+// compacted prefix no longer holds — weftbase/runtime's copy words it
 // identically (edits.go's compactedEditError; both tests pin the text).
 func compactedEditError(what string, step, fromStep int, c *compactedRange) error {
 	return fmt.Errorf("%s of step %d was compacted away before step %d's request (messages [%d, %d) replaced by %d): the model never saw it there; edit from an earlier from_step",
@@ -150,7 +150,7 @@ func (f schemaOf) of(step int, name string) json.RawMessage {
 	return f(step, name)
 }
 
-// Edit kinds (ADR 0029 §8) — weft/runtime's names. An edit without one
+// Edit kinds (ADR 0029 §8) — weftbase/runtime's names. An edit without one
 // is read as before F2: tool_result + call_id is a result patch,
 // content a reply rewrite.
 const (
@@ -162,7 +162,7 @@ const (
 )
 
 // editKindOf resolves an edit's kind and checks that it carries the
-// fields its kind takes, no other — weft/runtime's editKind, word for
+// fields its kind takes, no other — weftbase/runtime's editKind, word for
 // word.
 func editKindOf(e linkruntime.TranscriptEdit) (string, error) {
 	kind := e.Kind
@@ -236,7 +236,7 @@ type insertAt struct {
 	msg core.Message
 }
 
-// editedPrefix is weft/runtime's applyEdits over Studio's records: the
+// editedPrefix is weftbase/runtime's applyEdits over Studio's records: the
 // kept prefix — the run's input, then its own messages through step
 // from_step − 1 — with every edit but the inserts applied, and the
 // inserts placed (seq in the prefix's own numbering), before any
@@ -256,7 +256,7 @@ func editedPrefix(input []core.Message, steps []stepMessage, fromStep int, edits
 		return nil, nil, fmt.Errorf("transcript_edits need from_step > 0 (0 re-runs the whole turn, nothing is kept)")
 	}
 	// from_step at the step count is fresh only when the last kept step
-	// ended in answered tool calls (weft/runtime's endsInAnsweredCalls).
+	// ended in answered tool calls (weftbase/runtime's endsInAnsweredCalls).
 	if n := stepCount(steps); fromStep > n || fromStep == n && !endsInAnsweredCalls(steps) {
 		return nil, nil, fmt.Errorf("from_step %d is beyond the source run's last step (it recorded %d; a run past the end has nothing fresh to answer)",
 			fromStep, n)
@@ -399,7 +399,7 @@ func runInput(batches []obsdb.TranscriptBatch) ([]core.Message, error) {
 	return out, nil
 }
 
-// userSeqs is weft/runtime's userMessages: the prefix seqs of step's
+// userSeqs is weftbase/runtime's userMessages: the prefix seqs of step's
 // user messages — for step 0 the turn's prompt first (the input's last
 // message when it is a user message), then the user messages the
 // step's records hold.
@@ -416,7 +416,7 @@ func userSeqs(input []core.Message, steps []stepMessage, step int) []int {
 	return out
 }
 
-// rewriteText is weft/runtime's: the first text part takes text, the
+// rewriteText is weftbase/runtime's: the first text part takes text, the
 // other text parts go, every other part stays.
 func rewriteText(parts []core.Part, text string) []core.Part {
 	out := make([]core.Part, 0, len(parts)+1)
@@ -453,7 +453,7 @@ func findCall(steps []stepMessage, step int, callID string) (mi, pi int, name st
 	return -1, -1, ""
 }
 
-// placeInserts is weft/runtime's: the inserts added to seen (the
+// placeInserts is weftbase/runtime's: the inserts added to seen (the
 // prefix as the model sees it) before their boundaries, moved past a
 // spliced view's range (v nil: none).
 func placeInserts(seen []core.Message, inserts []insertAt, v *obsdb.Compaction) []core.Message {
@@ -485,7 +485,7 @@ func placeInserts(seen []core.Message, inserts []insertAt, v *obsdb.Compaction) 
 
 // endsInAnsweredCalls reports whether the run's own messages end in a
 // step whose assistant message made tool calls that all have results
-// after it — weft/runtime's copy of the same name.
+// after it — weftbase/runtime's copy of the same name.
 func endsInAnsweredCalls(steps []stepMessage) bool {
 	last := -1
 	for i, m := range steps {
@@ -518,7 +518,7 @@ func endsInAnsweredCalls(steps []stepMessage) bool {
 
 // cutTranscriptAtStep is §5.1's from_step cut over a run's own steps:
 // the index of step fromStep's assistant message (its model call), so
-// what lies before it is steps 0..fromStep−1 complete — weft/runtime's
+// what lies before it is steps 0..fromStep−1 complete — weftbase/runtime's
 // cutAt.
 func cutTranscriptAtStep(steps []stepMessage, fromStep int) int {
 	if fromStep < 0 {

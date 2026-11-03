@@ -293,13 +293,13 @@ func rederiveStock(tx *sql.Tx, from int) error {
 	if len(traces) == 0 {
 		return nil
 	}
-	slog.Default().InfoContext(ctx, fmt.Sprintf("weft/obsdb/sqlite: migrating: re-deriving %d stock traces (SQLite 0026); Open waits for it", len(traces)),
+	slog.Default().InfoContext(ctx, fmt.Sprintf("obsdb/sqlite: migrating: re-deriving %d stock traces (SQLite 0026); Open waits for it", len(traces)),
 		"traces", len(traces))
 	began := time.Now()
 	if _, _, err := deriveStock(ctx, tx, traces); err != nil {
 		return err
 	}
-	slog.Default().InfoContext(ctx, "weft/obsdb/sqlite: migration 0026 re-derive done",
+	slog.Default().InfoContext(ctx, "obsdb/sqlite: migration 0026 re-derive done",
 		"traces", len(traces), "duration", time.Since(began).Round(time.Millisecond).String())
 	return nil
 }

@@ -1,7 +1,7 @@
 // Package discovery is how an app finds the running Studio with no
 // configuration (plan B3): `weftbase dev` write a small
 // file, studio.json, naming the Studio they serve, and weft/otel and
-// weft/runtime read it when nothing else names one.
+// weftbase/runtime read it when nothing else names one.
 //
 // The file is {"url","token","db","pid","started","version"}, mode
 // 0600, written after the listener is bound (so the port in it is the
@@ -33,9 +33,9 @@
 // always wins (the reader does not look), WEFTBASE_DISCOVERY=off turns the
 // read off and the write too (Off: weftbase dev write no
 // file), and runtime.Studio(url, tok) / exporter.Studio(url, tok) name a
-// Studio in code. weft/exporter skips the read when the pipeline names an
+// Studio in code. weftbase/exporter skips the read when the pipeline names an
 // exporter.Studio or an exporter.Local, or under exporter.NoDiscovery / NoEnv;
-// weft/runtime skips it when the installed pipeline has a Local and no
+// weftbase/runtime skips it when the installed pipeline has a Local and no
 // Studio (docs/cli.md "When exporter reads the file"). The core
 // never imports this package.
 package discovery

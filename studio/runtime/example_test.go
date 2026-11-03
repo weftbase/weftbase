@@ -42,7 +42,7 @@ func ExampleRuntimeServer() {
 	// runtimes: 1 rt_demo acme-support
 }
 
-// ExampleReasonOf reads a failed scripted command's error — weft/runtime's
+// ExampleReasonOf reads a failed scripted command's error — weftbase/runtime's
 // miss, wrapped by the run error — into the structured why and the one
 // sentence both Studio surfaces render.
 func ExampleReasonOf() {

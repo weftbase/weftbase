@@ -1,6 +1,6 @@
-# weft/obsdb/clickhouse
+# obsdb/clickhouse
 
-The hosted backend of `weft/obsdb` (ADR 0024, S3.6): the observability
+The hosted backend of `obsdb` (ADR 0024, S3.6): the observability
 schema as ClickHouse tables that a stock OTel Collector can also feed.
 
 ```go

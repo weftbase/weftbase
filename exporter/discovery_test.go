@@ -117,7 +117,7 @@ func TestDiscoveryJoinsTheRunningStudio(t *testing.T) {
 
 // TestDiscoveryInstallJoins: the Done line's app — Install with no
 // options and no environment — exports to the running Studio, which
-// exporter.StudioEndpoint (what weft/runtime dials) reports.
+// exporter.StudioEndpoint (what weftbase/runtime dials) reports.
 func TestDiscoveryInstallJoins(t *testing.T) {
 	t.Setenv("WEFTBASE_URL", "")
 	t.Setenv("WEFTBASE_TOKEN", "")

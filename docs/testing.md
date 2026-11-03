@@ -6,7 +6,7 @@ Go suite's conventions, the offline gate, `wefttest`, fuzzing, the
 record-contract fixtures' rules, API stability) are weft's
 `docs/testing.md`; this page is what moved with Studio, the store and
 the CLI. The sources are the `Makefile`, `.github/workflows/ci.yml`,
-`scripts/` and the test helpers. When this page and one of them
+`studio/web/scripts/` and the test helpers. When this page and one of them
 disagree, the source wins; fix this page in the same change.
 
 Every Go command here runs through the development workspace (README
@@ -139,7 +139,7 @@ This is the phase 6 gate's third clause.
 make mcp-check   # WEFT_MODEL_REQUESTS=deny go test -tags livecheck -run '^TestMCPLiveCheck$' -count=1 -v ./cmd/weftbase/
 ```
 
-The test builds `weft` and starts a real `weftbase dev` on a free
+The test builds `weftbase` and starts a real `weftbase dev` on a free
 loopback port over a scratch SQLite file (`WEFTBASE_DISCOVERY=off`). It
 seeds the studio with the record-contract fixtures through `/v1/traces`
 and `/v1/logs`, then runs four investigation shapes on wefttest
@@ -153,7 +153,7 @@ error, `agentic.chaos` its four failure shapes, the denied turn
 model calls. It sits behind the `livecheck` tag and stays out of
 `make test` because it listens on a port. It is not in CI. Run it before
 a release and after touching `cmd/weftbase/mcp*.go` or a route it reads.
-**Measured:** 2 s (the test itself took 1.3 s), with `weft` already
+**Measured:** 2 s (the test itself took 1.3 s), with `weftbase` already
 built in the cache.
 ## 4. The arena (`../weft-arena`)
 

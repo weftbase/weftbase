@@ -313,7 +313,7 @@ func attrIntOr(m map[string]any, k string, def int) int {
 
 // attrBool reads a boolean attribute; anything but a present true is
 // false. The string "true" counts as true for attrIntOr's reason: the
-// flags weft's own modules set travel as run metadata (weft/runtime
+// flags weft's own modules set travel as run metadata (weftbase/runtime
 // stamps "weft.playground": "true"), and the core renders every
 // metadata value as a string attribute — so the string spelling is the
 // one the pipeline produces and the bool the one fixtures hand-build.

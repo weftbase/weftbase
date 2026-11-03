@@ -2807,7 +2807,7 @@ func runBridgeStripped(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *o
 
 // runQueueBreakpoints drives the queue_breakpoints case: a queued call
 // (weft.tool.queue_ms) and a playground breakpoint park
-// (weft.playground.breakpoints), the metadata weft/runtime stamps.
+// (weft.playground.breakpoints), the metadata weftbase/runtime stamps.
 func runQueueBreakpoints(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
 	held := core.Tool("lookup_order", "Look up an order by ID.", func(_ context.Context, in lookupIn) (string, error) {
 		if in.OrderID == "6" {
@@ -2839,7 +2839,7 @@ func runQueueBreakpoints(t *testing.T, ctx context.Context, p *otel.Pipeline, _ 
 		t.Fatalf("the breakpoint run parked %d calls, want 1", len(parked.Pending))
 	}
 	// The playground's continue on a runtime-started run, as
-	// weft/runtime's executor resumes it (approvedByRuntime): the
+	// weftbase/runtime's executor resumes it (approvedByRuntime): the
 	// approval names its provenance, runtime, and no grant.
 	resumed := mustRun(t, ctx, debugged, core.Messages(parked.Messages...),
 		core.ApproveBy(parked.Pending[0].ID, "runtime", ""), core.ResumeOf(parked.ID), playground)

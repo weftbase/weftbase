@@ -3,7 +3,7 @@ package studio
 // The Live page's cancel (plan H6): POST /api/runs/{id}/cancel asks
 // the runtime that started a run to stop it. Studio never runs your
 // agent, so it never kills one either: the runtime link already
-// carries a cancel frame for a command (weft/runtime cancels that
+// carries a cancel frame for a command (weftbase/runtime cancels that
 // command's own context), and the run then ends as the core ends any
 // canceled run — a *RunError with the partial transcript, its records
 // saying so, its command finished failed. A playground verb: the

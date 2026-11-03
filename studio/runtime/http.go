@@ -12,7 +12,7 @@ import (
 
 // The package's own small plumbing: the error shape every Studio
 // route answers with ({"error":{code,message}}, S4.2), and the
-// command-id mint. The weft/runtime module mirrors both; the JSON
+// command-id mint. The weftbase/runtime module mirrors both; the JSON
 // between the two sides is the contract, pinned by tests.
 
 // writeJSON writes v as the route's JSON body.

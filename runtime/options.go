@@ -306,7 +306,7 @@ func Install(opts ...Option) (shutdown func()) {
 	}
 	if c.local == nil && url == "" && exporter.LocalDB() != nil {
 		// The pipeline records into a Local store and names no Studio
-		// (issue 001): weft/exporter did not join the file's Studio, so the
+		// (issue 001): weftbase/exporter did not join the file's Studio, so the
 		// link must not either — a Studio that starts runs whose spans
 		// never reach it. One WARN; no link.
 		slog.Warn("weft/runtime: the pipeline records only into a Local store (exporter.Local, or exporter.Install's default) and names no Studio: no link opened",

@@ -22,7 +22,7 @@ import (
 // ordinal is the step's id everywhere, here the alignment key; A8,
 // UX-C-04). A replay numbers its own steps from 0 — its step 0 is the
 // fresh step from_step of its source — so when one side's run row
-// carries weft.forked_from "<other side>#<n>" (weft/runtime stamps it,
+// carries weft.forked_from "<other side>#<n>" (weftbase/runtime stamps it,
 // ADR 0029) that side's step k aligns with the other's step n+k, and
 // the source's steps before n are rows marked kept: not re-run, the
 // replay's prefix (the replay side null, nothing compared, never a

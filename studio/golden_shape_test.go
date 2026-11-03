@@ -586,7 +586,7 @@ func TestPreviewGoldenMatchesARealRun(t *testing.T) {
 
 // TestReplayViewGoldenMatchesARealRun is the shape row of
 // run-replay-view.golden.json (ADR 0029 §2): a run carrying
-// weft/runtime's replay marks (weft.playground, weft.forked_from,
+// weftbase/runtime's replay marks (weft.playground, weft.forked_from,
 // weft.replay.view = unknown) driven through the real pipeline reads
 // back with every field the golden pins, the derived hole among its
 // holes with the golden's reason.

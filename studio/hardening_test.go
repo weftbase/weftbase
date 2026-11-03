@@ -818,7 +818,7 @@ var multiTurnBodies = []string{
 }
 
 // TestTranscriptEditsCountTheRunsOwnSteps pins the step numbering the
-// runtime applies (weft/runtime edits.go, transcript.go): the first
+// runtime applies (weftbase/runtime edits.go, transcript.go): the first
 // messages record is the run's input — context, never a step — and
 // from_step, an edit's step and a tool-result patch count over the
 // run's own steps, the patch scoped to the step it names. Studio

@@ -485,7 +485,7 @@ func (s *Server) checkCommandWarn(ctx context.Context, req *runRequest, preview,
 		// would silently replay the old answer — refused. Changes
 		// that alter the key miss instead and fail the step with
 		// "no recorded turn" — except a transcript edit, refused here
-		// in weft/runtime's words (executor.go's scriptedEdits).
+		// in weftbase/runtime's words (executor.go's scriptedEdits).
 		if req.Overrides.Instructions != "" {
 			if e := trap("scripted cannot try a changed system prompt: the recorded answers ignore the prompt, so it would replay the old answer — run on live, or drop the prompt change"); e != nil {
 				return nil, e
@@ -506,7 +506,7 @@ func (s *Server) checkCommandWarn(ctx context.Context, req *runRequest, preview,
 		}
 		// from_step at the step count is the step the source never
 		// answered (ADR 0029): nothing recorded to replay — refused in
-		// weft/runtime's words (executor.go's scriptedAtCount). A
+		// weftbase/runtime's words (executor.go's scriptedAtCount). A
 		// transcript that does not read leaves it to the runtime.
 		if n := req.Source.FromStep; n > 0 {
 			if batches, terr := s.db.TranscriptBatches(ctx, req.Source.RunID); terr == nil {
@@ -850,7 +850,7 @@ func actorOf(r *http.Request) string {
 }
 
 // toolOverrides checks the option lab's tool-shaped overrides against
-// the agent's manifest tools (known) — weft/runtime's validToolOverrides,
+// the agent's manifest tools (known) — weftbase/runtime's validToolOverrides,
 // answered as §10.4's statuses: msg is empty when they pass; widens
 // marks the 403 (only_tools outside tools_enabled), every other refusal
 // is a 400. Without a tool_choice override the agent's registered
@@ -907,7 +907,7 @@ func toolOverrides(o linkruntime.Overrides, agent string, known map[string]bool,
 }
 
 // parkedChoice is the refusal of a named tool_choice — the command's or
-// the agent's default — that park_on parks, in weft/runtime's words
+// the agent's default — that park_on parks, in weftbase/runtime's words
 // (executor.go's parkedChoice; TestOneSentenceOnBothSides).
 func parkedChoice(name string) string {
 	return "tool_choice names " + name + ", which park_on parks: every forced call would park"
@@ -934,7 +934,7 @@ func orAuto(mode string) string {
 }
 
 // paramsOverride checks the sampling override (neutral knobs) as
-// weft/runtime's validParams does: top_p inside 0..1, a positive
+// weftbase/runtime's validParams does: top_p inside 0..1, a positive
 // max_tokens, at most four non-empty stop sequences; any seed. Empty
 // when it passes.
 func paramsOverride(p *linkruntime.Params) string {

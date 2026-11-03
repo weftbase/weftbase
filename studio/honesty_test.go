@@ -567,7 +567,7 @@ func TestStepHolesBothCuts(t *testing.T) {
 }
 
 // TestRunHolesReplayView: a playground replay whose prefix no request
-// record placed — weft/runtime's weft.replay.view derived or unknown
+// record placed — weftbase/runtime's weft.replay.view derived or unknown
 // (ADR 0029 §2) — carries the derived hole on its run document, its
 // reason naming the mark and the source step (weft.forked_from), with a
 // fix; a replay on a placed prefix (transcript, compacted:<index>)

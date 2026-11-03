@@ -120,7 +120,7 @@ type metaRuntimeLink struct {
 }
 
 // runtimeLink reads this process's open runtime links (internal/linkreg,
-// which weft/runtime keeps): nil when none is open.
+// which weftbase/runtime keeps): nil when none is open.
 func (s *Server) runtimeLink() *metaRuntimeLink {
 	var out metaRuntimeLink
 	for _, l := range linkreg.All() {

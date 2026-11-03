@@ -687,7 +687,7 @@ func TestUpgradeTo0023LogsTheBackfill(t *testing.T) {
 	}
 	defer func() { _ = d.Close() }()
 	out := logged.String()
-	if !strings.Contains(out, "level=INFO msg=\"weft/obsdb/sqlite: migration 0023 backfills the span_stats rollup; Open waits for it\" spans="+strconv.Itoa(len(spans))) ||
+	if !strings.Contains(out, "level=INFO msg=\"obsdb/sqlite: migration 0023 backfills the span_stats rollup; Open waits for it\" spans="+strconv.Itoa(len(spans))) ||
 		!strings.Contains(out, "migration 0023 backfill done") || !strings.Contains(out, "duration=") {
 		t.Errorf("the backfill's INFO lines:\n%s", out)
 	}

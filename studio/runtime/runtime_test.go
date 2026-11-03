@@ -638,7 +638,7 @@ func TestFullFeedEndsStalledStream(t *testing.T) {
 // ack window: a command the lost sweep took (no accepted ack in time)
 // is never revived by a late accepted ack — the user may already have
 // re-issued it, and both would run. The late ack is 409 and the row
-// stays lost (weft/runtime runs nothing on a non-200 accepted ack); a
+// stays lost (weftbase/runtime runs nothing on a non-200 accepted ack); a
 // finished ack still records what did run.
 func TestLateAcceptedAckIsRefused(t *testing.T) {
 	rs := fastServer()

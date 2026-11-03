@@ -6,7 +6,7 @@ import (
 )
 
 // TestReasonOfReadsEveryMissShape pins the contract between
-// weft/runtime's scripted miss text and Studio's reading of it: the
+// weftbase/runtime's scripted miss text and Studio's reading of it: the
 // step (or none), every component word, and nil for any other error.
 func TestReasonOfReadsEveryMissShape(t *testing.T) {
 	for _, c := range []struct {

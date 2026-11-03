@@ -48,8 +48,7 @@ store reads are weft's `docs/record-contract.md`;
 //    // WEFTBASE_URL > the file: any of them switches the read off, as do
 //    // exporter.NoDiscovery() (the file alone), WEFTBASE_DISCOVERY=off and otel.NoEnv();
 //    // NoGlobal() does not. Local + a Studio: name both (docs/cli.md "When exporter
-//    // reads the file"). Layering: framework packages never import exporter, obsdb,
-//    // studio, runtime or scope — `make layering` (scripts/check-layering.sh) fails if one does.
+//    // reads the file"). Layering: weft never imports weftbase.
 //    weft.Metadata(map[string]string{"cwd": wd})  // run option: caller pairs on every record/span of the run
 //    // (inherited by subagents; thread sessions stamp weft.session.id,
 //    // weft.public_id, weft.turn — block 8).

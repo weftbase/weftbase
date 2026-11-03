@@ -132,7 +132,7 @@ func TestTranscriptAsOfStepHoles(t *testing.T) {
 // TestPlaygroundEditInsideCompactionRefused (ADR 0029): from_step 2 of
 // A9's step run replays the compacted prefix step 2's request carried,
 // which no longer holds step 0's lookup call and result — an edit of
-// that result is a 400 in weft/runtime's exact words (its
+// that result is a 400 in weftbase/runtime's exact words (its
 // TestReplayAcrossCompactionReproducesTheModelsInput pins the same
 // sentence). Step 1's research call lies outside the replaced range:
 // its edit passes the transcript checks.
@@ -264,7 +264,7 @@ func TestFromStepAtTheStepCount(t *testing.T) {
 		}
 	}
 	// The scripted engine has nothing recorded for the step the source
-	// never answered: 400 in weft/runtime's words; from a recorded step
+	// never answered: 400 in weftbase/runtime's words; from a recorded step
 	// it is accepted.
 	for from, want := range map[int]int{2: http.StatusBadRequest, 1: http.StatusAccepted} {
 		code, out := pt.post(t, fmt.Sprintf(`{"runtime":"rt_test","agent":"acme-support","source":{"run_id":"r_failed","from_step":%d},`+

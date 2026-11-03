@@ -821,7 +821,7 @@ func TestDiffSideHiddenChildrenCount(t *testing.T) {
 	}
 }
 
-// recordReplayOf records what weft/runtime's scripted replay of
+// recordReplayOf records what weftbase/runtime's scripted replay of
 // recordDiffRun's two-step run (calls 1: lookup_order at step 0, "all
 // looked up" at step 1) from step 1 records: the source's input and
 // step 0 as the prefix, the recorded reply as the one fresh step, zero
@@ -943,7 +943,7 @@ func ordersPrefix(n int) []core.Message {
 }
 
 // recordFork records a scripted replay of recordDiffRun's agent as
-// weft/runtime would: forked_from ff, the prefix as its input, turns
+// weftbase/runtime would: forked_from ff, the prefix as its input, turns
 // answered at zero usage.
 func recordFork(t *testing.T, url, runID, ff string, prefix []core.Message, turns ...wefttest.Turn) {
 	t.Helper()

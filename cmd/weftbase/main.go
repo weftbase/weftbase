@@ -33,7 +33,7 @@
 //
 // # weftbase dev
 //
-// Without "--" (weft's `weft studio`): setup B (S4.6, §10.1): the UI, OTLP ingest, SQLite and a dev token on
+// Without "--": setup B (S4.6, §10.1): the UI, OTLP ingest, SQLite and a dev token on
 // 127.0.0.1:7331 — the zero-infra Studio for any language's OTel app
 // (traces and runs; the playground, breakpoints and approvals need a
 // runtime link, Go only today):
@@ -68,7 +68,7 @@
 // is loopback, it is fresh and, on unix, it is 0600 and the reader's,
 // so an app joins this Studio with no configuration (WEFTBASE_DISCOVERY=off
 // turns the read off). The playground is on (studio.Playground):
-// inert until an app's runtime (weft/runtime) dials in; --no-playground
+// inert until an app's runtime (weftbase/runtime) dials in; --no-playground
 // turns it off. The manifest served at /api/manifest is --manifest
 // (default $WEFT_MANIFEST), else the nearest weft.json from the working
 // directory upward; one line says which file was loaded, or that none

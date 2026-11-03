@@ -180,7 +180,7 @@ func TestPreviewScriptedCheck(t *testing.T) {
 }
 
 // TestCommandReasonNamesScriptedMiss pins R2's server half: a finished
-// command whose run failed with weft/runtime's scripted miss carries
+// command whose run failed with weftbase/runtime's scripted miss carries
 // reason{kind, step, components, message} — Studio's one sentence for
 // the Studio UI and the panel — beside the raw error; any other error
 // carries no reason.

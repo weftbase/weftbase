@@ -29,13 +29,13 @@ type Reason struct {
 	Message    string   `json:"message"`
 }
 
-// scriptedMissText matches weft/runtime's scripted miss inside any
+// scriptedMissText matches weftbase/runtime's scripted miss inside any
 // error that wraps it (a run error's "weft: run failed at step N:
 // model stream: …"): the source step, or "this request", and the
 // bracketed component list.
 var scriptedMissText = regexp.MustCompile(`no recorded turn for (?:step (\d+)|this request) \(scripted engine, key [0-9a-f]+\): [^\[]*\[([a-z_]+(?:, [a-z_]+)*)\]`)
 
-// ReasonOf reads an error text: a scripted miss (weft/runtime's
+// ReasonOf reads an error text: a scripted miss (weftbase/runtime's
 // wording, the step and the components) becomes its Reason; any other
 // text, or none, is nil.
 func ReasonOf(errText string) *Reason {

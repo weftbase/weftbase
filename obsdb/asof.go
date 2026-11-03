@@ -61,7 +61,7 @@ func stepErr(step int, h Hole, format string, args ...any) error {
 // MessagesAsOf answers the messages step step of run runID's model call
 // carried (StepMessages), read through TranscriptBatches, Requests and
 // Compactions — one assembly (AssembleStep) for every backend and every
-// reader: Studio's transcript route with ?step=, weft/runtime's replay
+// reader: Studio's transcript route with ?step=, weftbase/runtime's replay
 // prefix, the wefttest fixtures. ErrNotFound for an unknown run and for
 // a step the run never reached (no request record and no assistant
 // message of that step); an error wrapping ErrStepMessages when the

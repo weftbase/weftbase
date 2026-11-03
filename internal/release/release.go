@@ -1,5 +1,5 @@
 // Package release is weftbase's own version. weftbase has its own
-// version line (it started at v0.1.0, WEFTBASE-REPO-SPLIT.md D4) and
+// version line (it started at v0.1.0) and
 // reports the weft version it embeds beside it: that one is weft's
 // version package (github.com/weftbase/weft/version), which Studio's
 // api/meta, the devtools panel and the runtime link keep stamping —

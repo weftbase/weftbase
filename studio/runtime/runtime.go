@@ -1,6 +1,6 @@
 // Package runtime is the runtime link's server side (WEFT-PLAYGROUND
 // §10.3, S4.2): the registry of connected runtimes and the three
-// routes a weft/runtime client speaks to — register, the SSE command
+// routes a weftbase/runtime client speaks to — register, the SSE command
 // stream, acks. Studio decides (the playground routes in
 // studio/playground.go enqueue commands against a registered agent);
 // the runtime in your app executes.
@@ -39,7 +39,7 @@
 // rules). Without a store everything lives in memory and a restart
 // forgets it.
 //
-// Runtime ids are the runtime's to choose: weft/runtime derives one
+// Runtime ids are the runtime's to choose: weftbase/runtime derives one
 // stable per (service, cwd, agent set), so an app restarted in the same
 // place registers under the same id and a link to /runtimes/<id>
 // survives it. A registration under an id another process holds a live
@@ -65,7 +65,7 @@ import (
 )
 
 // The wire vocabulary (§10.3). Mirrored — deliberately, with the JSON
-// pinned by tests — in the weft/runtime module, which must not import
+// pinned by tests — in the weftbase/runtime module, which must not import
 // this package (its studio imports stay at *studio.Server alone).
 
 // Registration is the POST /api/runtime/register body.
@@ -942,7 +942,7 @@ func (rs *RuntimeServer) MountGuarded(mux *http.ServeMux, guard func(http.Handle
 // self-description. Sent on connect and after every reconnect, so
 // this handler may overwrite a previous registration freely.
 //
-// The id is the runtime's (weft/runtime derives it from service, cwd
+// The id is the runtime's (weftbase/runtime derives it from service, cwd
 // and agents, so it is stable across app restarts), with one
 // exception: an id another process holds — a live stream on it, or,
 // disconnected, work still in that process's hands (a queued or
@@ -1328,7 +1328,7 @@ func (rs *RuntimeServer) serveAcks(w http.ResponseWriter, r *http.Request) {
 		// already have re-issued it: a late accepted ack must not revive
 		// it, or the command would run twice (with side_effects allow,
 		// twice for real). 409, and the runtime runs nothing
-		// (weft/runtime's dispatch). A finished ack still records what
+		// (weftbase/runtime's dispatch). A finished ack still records what
 		// did run; a rejected one what was refused.
 		writeErr(w, r, http.StatusConflict, "conflict",
 			"command "+a.CommandID+" was marked lost before this accepted ack ("+row.errText+"): it must not run")

@@ -13,7 +13,7 @@ import (
 // The preview's scripted check (A6, UX-D-03, UX-C-06): before Run,
 // whether the scripted engine holds a recorded answer for each step the
 // replay would ask, computed from recorded facts and the registration —
-// the scripted engine's own key (weft/runtime's scriptedKeyDoc: the
+// the scripted engine's own key (weftbase/runtime's scriptedKeyDoc: the
 // messages verbatim, the tool names, thinking, tool choice, the
 // sequential flag; never the system prompt), never by calling a model.
 // The engine keys every recorded turn with the registered agent's tool

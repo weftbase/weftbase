@@ -309,7 +309,7 @@ func (s *Server) assemblePreview(ctx context.Context, doc *previewDoc, req runRe
 		return &cmdError{http.StatusInternalServerError, "internal", "read step " + fmt.Sprint(from) + " of run " + run + " failed"}
 	}
 
-	// What the replay is fed (weft/runtime's runPrefix): from_step 0 is
+	// What the replay is fed (weftbase/runtime's runPrefix): from_step 0 is
 	// the turn from its input, the new input replacing its prompt; past
 	// it, the kept prefix with the edits, the view spliced in.
 	var will []core.Message
@@ -618,7 +618,7 @@ func (b recordedBlocks) request() previewRequest {
 
 // willSend lays the command's overrides over the agent's defaults —
 // the registered agent's when a runtime holds it (today's code), else
-// the recorded request's — as weft/runtime applies them (ADR 0029
+// the recorded request's — as weftbase/runtime applies them (ADR 0029
 // decision 7: a sent field replaces the agent's, an absent one keeps it).
 func willSend(req runRequest, agent *linkruntime.AgentRegistration, rec recordedBlocks) previewRequest {
 	pr := rec.request()

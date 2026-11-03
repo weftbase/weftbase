@@ -58,7 +58,7 @@ CORS headers and the browser hides a foreign page's answer.
 non-Go app gets today: its OTel traces, the runs derived from them
 (docs/record-contract.md §9) and the devtools panel through `panel.js`
 — not the playground, breakpoints or approvals, which need a runtime
-link (`weft/runtime`: Go only today; non-Go clients are backlog I2):
+link (`weftbase/runtime`: Go only today; non-Go clients are backlog I2):
 
 ```sh
 go install github.com/weftbase/weftbase/cmd/weftbase@latest
@@ -111,7 +111,7 @@ error, never a fallback; `--db sqlite://path` picks the
 file, `--db clickhouse://user:pass@host:9000/db` the hosted backend
 (`obsdb/clickhouse`, the one place the driver is imported). The
 playground is on (`studio.Playground(true)`), inert until an app's
-`weft/runtime` connects; `--no-playground` turns it off. The manifest
+`weftbase/runtime` connects; `--no-playground` turns it off. The manifest
 is `--manifest` (`WEFT_MANIFEST`), else the nearest `weft.json` from
 the working directory upward — one line says which file, or that none
 was found. `--open` (default on when stdout is a terminal) opens the
@@ -877,7 +877,7 @@ knob, so keep `data-weft` on it — it is how the panel finds its own tag
 
 The panel follows a scope,
 `pub_…;session=s_…;flow=f_…;run=r_…;agent=…;tag.<k>=<v>`
-(`src/lib/scope.ts`, `weft/scope`'s `Scope`; one golden pins both).
+(`src/lib/scope.ts`, `weftbase/scope`'s `Scope`; one golden pins both).
 The public id selects the conversation; `run` pins the selected turn,
 and its live tail, to that run once (your clicks own the selection
 afterwards), or says `run r_… not in this conversation` when it is not
@@ -955,7 +955,7 @@ it may be a wrong id (UX-D-37).
 | 3 | the DOM marker: `data-weft-scope="pub_…;session=…;flow=…;run=…"` on any element of the page — the framework helpers (`useWeftDevtools` for React and Vue, the Svelte `weftDevtools` action) set it on the element they are given | by default everywhere except a page off loopback under a read-scoped panel token (a playground-scoped panel token, the dev token, no token, or any token on loopback keep it on); anywhere with `data-detect="markers"` (or `"headers,markers"`, `mount({detect: "markers"})`) | `data-scope` |
 | 4 | the page URL — the zero-code rung: `?weft_scope=…` (read first), else `#weft_scope=…` — the same string form, URL-decoded (`#weft_scope=pub_x%3Bflow%3Df_1`, `?weft_scope=tag.arena.batch%3Db1`); a value naming neither a public id nor a tag, agent or flow is ignored | always, every setup and token, `data-detect="off"` included; below rung 1, above rungs 2 and 3; re-read on `hashchange` and `popstate` | `data-scope` |
 | 4b | a panel token's claims (UX-D-09, I4): a `wb_pt.` token's `public_id` claim and its `tags` (each a `tag.<k>=<v>`), read as a hint (Studio still enforces the token) — the conversation or the batch it can read anyway | when 1–4 name nothing and the token is a panel token | `data-scope` |
-| 5 | the fallback: no rung names a scope — the header reads "no conversation detected on this page · how to scope" and lists the newest runs, each with its agent, none selected and no summed cost | when 1–4 name nothing | any line under "how to scope": `add ?weft_scope=pub_… to this page's URL (no code)`, `data-scope="pub_…" on the panel's <script> tag (or <weft-devtools>)`, `scope("pub_…") from @weftgo/devtools`, `data-weft-scope="pub_…" on the chat's element`, `scope.Header(h, …) on the app's handler (Go, package weft/scope)` — and an "all rungs ⤢" link to this table; a batch of runs is named by its tags (above) |
+| 5 | the fallback: no rung names a scope — the header reads "no conversation detected on this page · how to scope" and lists the newest runs, each with its agent, none selected and no summed cost | when 1–4 name nothing | any line under "how to scope": `add ?weft_scope=pub_… to this page's URL (no code)`, `data-scope="pub_…" on the panel's <script> tag (or <weft-devtools>)`, `scope("pub_…") from @weftgo/devtools`, `data-weft-scope="pub_…" on the chat's element`, `scope.Header(h, …) on the app's handler (Go, package weftbase/scope)` — and an "all rungs ⤢" link to this table; a batch of runs is named by its tags (above) |
 
 Rung 3 trusts the page's DOM: a `data-weft-scope` attribute anywhere
 in it names a conversation, and an HTML sanitizer (DOMPurify among
@@ -2939,7 +2939,7 @@ components are `tools`, `thinking`, `tool_choice`, `sequential`,
 query and fragment).
 
 **Wire (for future non-Go clients — not shipped; backlog I2).** Today
-`weft/runtime` (Go) is the only runtime-link client. The registration gains
+`weftbase/runtime` (Go) is the only runtime-link client. The registration gains
 `cwd` (string, optional) and `instance` (string: a random value per link,
 kept across its reconnects — with host and pid it is what makes a
 re-registration "the same process"). A client **must** send `instance`

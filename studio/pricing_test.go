@@ -884,7 +884,7 @@ func TestCostRunningChildIsUnknown(t *testing.T) {
 }
 
 // TestCostScripted (U7: UX-D-21, UX-C-17): a scripted model — wefttest's,
-// the playground's weft/runtime scripted engine — that no row matches is
+// the playground's weftbase/runtime scripted engine — that no row matches is
 // an exact $0 with the scripted badge, never "unpriced"; a set of
 // scripted turns is scripted too; a row that matches wins. A provider
 // outside this repository (weftarena wraps any model) is never assumed
@@ -914,7 +914,7 @@ func TestCostScripted(t *testing.T) {
 	if arena.CostKnown || arena.CostBadge != costUnpriced || !slices.Equal(arena.UnpricedModels, []string{"weftarena/any-model"}) {
 		t.Errorf("weftarena/any-model: %s; want unpriced (the arena ships its own row)", body)
 	}
-	// Only the scripted engine of weft/runtime is scripted.
+	// Only the scripted engine of weftbase/runtime is scripted.
 	_, _, body = get(t, h, "/studio/api/runs/r_other")
 	var r costRow
 	decode(t, body, &r)

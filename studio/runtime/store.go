@@ -74,7 +74,7 @@ import (
 //     is left of the window. Its runtime's id stays the old process's
 //     while the row is live (serveRegister: another process registering
 //     under it gets `<id>-<pid>`), so the backlog re-sends it to that
-//     process alone, whose at-most-once set (weft/runtime's admit)
+//     process alone, whose at-most-once set (weftbase/runtime's admit)
 //     refuses a frame it already admitted — the re-send runs a command
 //     only if its frame never arrived;
 //   - an accepted command is watched from its stored last word,
@@ -105,7 +105,7 @@ import (
 // are the runtime's: a client that sends no Registration.Instance and
 // comes back under a reused pid reads as the same process (so a client
 // must send one; Studio WARNs once without it), and a process's
-// at-most-once set is bounded (4096 ids in weft/runtime).
+// at-most-once set is bounded (4096 ids in weftbase/runtime).
 
 // Option configures New.
 type Option func(*RuntimeServer)

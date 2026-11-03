@@ -84,7 +84,7 @@ func (s *swap) set(h http.Handler) {
 	s.h.Store(&h)
 }
 
-// repeatLog notes the command ids weft/runtime's admit refused as
+// repeatLog notes the command ids weftbase/runtime's admit refused as
 // repeated ("repeated command id ignored", at Debug).
 type repeatLog struct {
 	mu  sync.Mutex
@@ -131,7 +131,7 @@ func waitFor(t *testing.T, what string, ok func() bool) {
 	}
 }
 
-// TestRestartNeverRunsTwice drives a real weft/runtime link through a
+// TestRestartNeverRunsTwice drives a real weftbase/runtime link through a
 // Studio restart over the same database. Two commands are running in
 // the runtime when Studio goes away: one stored accepted (as Studio took
 // its ack), one rewritten to queued — the state a failed write-through

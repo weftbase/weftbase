@@ -1794,7 +1794,7 @@ func (s *Server) runHoles(ctx context.Context, rec obsdb.RunRow) ([]stepHole, er
 	return holes.list(), nil
 }
 
-// attrReplayView is weft/runtime's mark on a playground replay from a
+// attrReplayView is weftbase/runtime's mark on a playground replay from a
 // step > 0 (ADR 0029 §2): transcript | compacted:<index> | derived |
 // unknown — how its prefix knows what the source's model saw there.
 const attrReplayView = "weft.replay.view"

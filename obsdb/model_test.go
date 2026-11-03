@@ -180,7 +180,7 @@ func TestDeriveAbsentStepAndToolSeq(t *testing.T) {
 }
 
 // The string spelling of weft.playground is the one the real chain
-// produces: weft/runtime stamps it as run metadata
+// produces: weftbase/runtime stamps it as run metadata
 // ("weft.playground": "true" in executor.go) and the core renders every
 // metadata value as attribute.String — the turn-as-string bug's
 // sibling. Derive* must read "true" as true, or every playground run

@@ -163,7 +163,7 @@ func TestDNSRebindingForwardedHost(t *testing.T) {
 
 // TestDNSRebindingInProcess: a request that never crossed a socket (no
 // RemoteAddr, as an adapter may hand one over) gets no exemption — only
-// its Host decides. weft/runtime's runtime.Local transport says
+// its Host decides. weftbase/runtime's runtime.Local transport says
 // localhost and passes; any other Host is refused.
 func TestDNSRebindingInProcess(t *testing.T) {
 	h := New(Open(t.TempDir() + "/inproc.db")).Handler()

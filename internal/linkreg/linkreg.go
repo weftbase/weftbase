@@ -1,13 +1,13 @@
 // Package linkreg is the process's open runtime links as an embedded
-// Studio sees them (U20.2, UX-D-01): weft/runtime adds a link when
-// Install opens it and removes it when the link stops, and weft/studio
+// Studio sees them (U20.2, UX-D-01): weftbase/runtime adds a link when
+// Install opens it and removes it when the link stops, and weftbase/studio
 // reads the list for /api/meta's runtime_link — whether this process's
 // link talks to this very server in-process, or which Studio it dialled
 // instead. An app that embeds Studio (setup A) and whose link dialled
 // another Studio (weftbase dev's) can then say where its runtime went,
 // instead of reading as an app whose link is closed.
 //
-// It exists because weft/runtime imports weft/studio (runtime.Local
+// It exists because weftbase/runtime imports weftbase/studio (runtime.Local
 // takes a *studio.Server), so studio cannot ask runtime directly.
 package linkreg
 

@@ -485,7 +485,7 @@ type RunRow struct {
 	Playground                                                 bool
 	ExperimentID, ForkedFrom                                   string
 	// ResumedFrom is the run this one resumes — its weft.resumed_from
-	// (core.ResumeOf; thread and weft/runtime pass it, an app passes
+	// (core.ResumeOf; thread and weftbase/runtime pass it, an app passes
 	// the parked RunResult.ID) — and ResumedBy, on a parked run, the
 	// run that resumed it: the latest run by start time whose
 	// ResumedFrom names this run (a tie: the larger id), derived at read time on both backends, so a resumer

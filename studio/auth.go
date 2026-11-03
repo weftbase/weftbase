@@ -827,7 +827,7 @@ func crossOriginWrite(origins []string, r *http.Request) bool {
 // [::1], any port — or the host[:port] of an AllowOrigins entry
 // ("*" lets every Host through, as it lets every origin). Proxy
 // headers (X-Forwarded-Host, Forwarded) are never read: anyone can
-// send them. No request is exempt: weft/runtime's in-process
+// send them. No request is exempt: weftbase/runtime's in-process
 // runtime.Local transport addresses the handler as localhost.
 func hostAllowed(origins []string, r *http.Request) bool {
 	if isLoopbackName(hostOnly(r.Host)) {
