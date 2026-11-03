@@ -1,0 +1,35 @@
+{
+  "default-src": [
+    "'self'"
+  ],
+  "script-src": [
+    "'self'",
+    "'sha256-Ng1EraLad94Be5lFrtI+9K03sMUx0kKDEMv2LizIlBo='",
+    "'sha256-zFML+AEdb/HsbX66VlYzBOqJKNNHs5/WNGYP8JiblyY='",
+    "'sha256-JJxNsdc37vYRFSHyTbbehy09/V7q9n0Ky/vcwIHzUwY='",
+    "'sha256-REkTQ3mZNdOnZ0xWxlKdqBEAWdIVpJdIT6tm57gvq8Y='"
+  ],
+  "style-src": [
+    "'self'",
+    "'unsafe-inline'"
+  ],
+  "img-src": [
+    "'self'",
+    "data:"
+  ],
+  "font-src": [
+    "'self'"
+  ],
+  "connect-src": [
+    "'self'"
+  ],
+  "frame-ancestors": [
+    "'none'"
+  ],
+  "base-uri": [
+    "'self'"
+  ],
+  "form-action": [
+    "'self'"
+  ]
+}
