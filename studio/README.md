@@ -73,7 +73,7 @@ the bare origin, to which the exporter adds `/v1/traces` and `/v1/logs`
 itself, and Python's exporter, which defaults to gRPC, needs
 `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf` (the JS one defaults to it).
 A stock `invoke_agent` span makes a run, and `gen_ai.conversation.id`
-groups runs into a session ([record-contract §9](../docs/record-contract.md#9-deriving-a-run-from-stock-spans));
+groups runs into a session ([weft's record-contract §9](https://github.com/weftbase/weft/blob/main/docs/record-contract.md#9-deriving-a-run-from-stock-spans));
 any other span is a trace (`/traces`). Such a session is marked "derived
 (stock OTel)" on the sessions list and its page (the session row's
 `derived: true`), and its page numbers its turns by start order (the
