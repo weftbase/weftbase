@@ -1,10 +1,12 @@
 # Rebuild progress
 
-Resumable state of the rebuild on branch `rebuild` (from `main`
-`feef5feb`; the old code is on `legacy` and tag `archive/studio-v0`).
-The plan is WEFTBASE-ARCHITECTURE.md (weft-server-research, beside this
-repository); `docs/architecture.md` is the in-repo summary. Step numbers
-are the plan's §9.
+Resumable state of the rebuild. It started on branch `rebuild` (from
+`main` `feef5feb`) and is now merged: `main` is the rebuild. The old
+code is on the `legacy` branch and the `archive/studio-v0` tag; it was
+never released, and the first weftbase release will be v0.1.0 from
+`main`. The plan is in the design docs (private);
+`docs/architecture.md` is the in-repo summary. Step numbers are the
+plan's migration steps.
 
 Rule for every commit: `go build ./... && go vet ./... && go test -race ./...`
 green in both modules (`make build vet test`), plus the step's gate.

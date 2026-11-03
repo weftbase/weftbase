@@ -8,12 +8,11 @@ product. It is not a database-as-a-service: the store exists to serve
 agents, their runs, sessions and approvals.
 
 The full design, the file-by-file disposition of the old code and the
-migration plan are in **WEFTBASE-ARCHITECTURE.md** (the
-`weft-server-research` notes beside this repository, 2026-11-03), with
-its companions WEFTBASE-MODES.md, WEFTBASE-PROTOCOL.md and
-WEFTBASE-NEXT-STEPS.md. This page is the short version the code
-follows. Rebuild progress is tracked in `REBUILD-TODO.md` at the
-repository root.
+migration plan are in the design docs (private). This page is the
+short version the code follows. Rebuild progress is tracked in
+`REBUILD-TODO.md` at the repository root. `main` is the rebuild; the
+old code is on the `legacy` branch (and its archive tag), never
+released.
 
 ## Two modules
 
