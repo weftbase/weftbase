@@ -17,20 +17,20 @@ import (
 	"github.com/weftbase/weft/core"
 	"github.com/weftbase/weft/core/wefttest"
 	"github.com/weftbase/weft/otel"
-	"github.com/weftbase/weftbase/exporter"
-	"github.com/weftbase/weftbase/internal/discovery"
+	v1 "github.com/weftbase/weftbase/api/http/v1"
+	"github.com/weftbase/weftbase/client/discovery"
+	"github.com/weftbase/weftbase/client/exporter"
 	"github.com/weftbase/weftbase/internal/doctor"
 	"github.com/weftbase/weftbase/obsdb"
 	"github.com/weftbase/weftbase/obsdb/sqlite"
-	"github.com/weftbase/weftbase/studio"
 )
 
 const tok = "dev-token"
 
-// newStudio serves a setup-B Studio (a dev token) over a temp file.
-func newStudio(t *testing.T, opts ...studio.Option) *httptest.Server {
+// newServer serves a setup-B server (a dev token) over a temp file.
+func newServer(t *testing.T, opts ...v1.Option) *httptest.Server {
 	t.Helper()
-	srv := studio.New(append([]studio.Option{studio.Open(filepath.Join(t.TempDir(), "weft.db")), studio.Token(tok)}, opts...)...)
+	srv := v1.New(append([]v1.Option{v1.Open(filepath.Join(t.TempDir(), "weft.db")), v1.Token(tok)}, opts...)...)
 	t.Cleanup(func() { _ = srv.Close() })
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
@@ -46,7 +46,7 @@ func run(t *testing.T, url, token string) (string, error) {
 
 // TestEveryLineMapsToMeta: every check line's label is in Lines, in
 // Lines' order, every label prints, and every field a line names exists
-// in the /api/meta answer of a Studio where each field is present (the
+// in the /api/meta answer of a server where each field is present (the
 // server token, a manifest, a content-off run with its fix).
 func TestEveryLineMapsToMeta(t *testing.T) {
 	agent := []core.Option{core.Name("orders")}
@@ -56,9 +56,9 @@ func TestEveryLineMapsToMeta(t *testing.T) {
 	}
 	// A discovery file naming this process: meta serves discovery_file.
 	discPath := writeDiscovery(t, discovery.Info{URL: "http://127.0.0.1:1"})
-	ts := newStudio(t, studio.Manifest(manifest), studio.IngestToken("ing"), studio.DiscoveryFile(discPath))
+	ts := newServer(t, v1.Manifest(manifest), v1.IngestToken("ing"), v1.DiscoveryFile(discPath))
 	ctx := context.Background()
-	p, err := exporter.Start(ctx, exporter.Studio(ts.URL, "ing", otel.NoContent()), otel.NoGlobal())
+	p, err := exporter.Start(ctx, exporter.Remote(ts.URL, "ing", otel.NoContent()), otel.NoGlobal())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestEveryLineMapsToMeta(t *testing.T) {
 	}
 	// One refused batch (no ingest token): ingest.last_error / last_at
 	// are omitempty, served once a refusal happened.
-	refused, err := http.Post(ts.URL+"/v1/traces", "application/x-protobuf", strings.NewReader(""))
+	refused, err := http.Post(ts.URL+"/otlp/v1/traces", "application/x-protobuf", strings.NewReader(""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,9 +101,9 @@ func TestEveryLineMapsToMeta(t *testing.T) {
 			t.Fatalf("meta never read the stripped run: %s", b)
 		}
 	}
-	// The error fields are omitempty: a second Studio whose reads fail
+	// The error fields are omitempty: a second server whose reads fail
 	// and whose manifest does not parse serves them.
-	broken := metaJSON(t, newStudio(t, studio.DB(failingDB{memDB(t)}), studio.Manifest([]byte(`{"weft":`))))
+	broken := metaJSON(t, newServer(t, v1.DB(failingDB{memDB(t)}), v1.Manifest([]byte(`{"weft":`))))
 	has := func(doc map[string]any, f string) bool {
 		var v any = doc
 		for _, k := range strings.Split(f, ".") {
@@ -132,7 +132,7 @@ func TestEveryLineMapsToMeta(t *testing.T) {
 				t.Errorf("line %q reads %s, which /api/meta does not serve: %v / %v", l.Label, f, healthy, broken)
 			}
 		}
-		// Every line reads Studio; the shell's env only beside it.
+		// Every line reads server; the shell's env only beside it.
 		if meta == 0 {
 			t.Errorf("line %q names no /api/meta field (status or a body field): %v", l.Label, l.Fields)
 		}
@@ -160,14 +160,14 @@ func TestEveryLineMapsToMeta(t *testing.T) {
 	if !slices.Equal(labels, want) {
 		t.Errorf("doctor printed checks %v, want Lines' %v:\n%s", labels, want, out)
 	}
-	for _, s := range []string{"content   studio stores content as received; latest run", ": stripped", "fix: drop otel.NoContent()",
-		"ok   data      newest run ", " by weft ", "ok   otlp      walled: OTLP at " + ts.URL + "/v1/traces",
-		"warn discovery this Studio wrote " + discPath + ", which this shell does not find",
+	for _, s := range []string{"content   server stores content as received; latest run", ": stripped", "fix: drop otel.NoContent()",
+		"ok   data      newest run ", " by weft ", "ok   otlp      walled: OTLP at " + ts.URL + "/otlp/v1/traces",
+		"warn discovery this server wrote " + discPath + ", which this shell does not find",
 		"db        sqlite /", "manifest  weft.json: 1 agent, 1 checked against their latest runs: current",
 		// The ingest counters (UX-E-37): the app's batches accepted, the
 		// one refused above, and the refusal with its fix.
 		"warn ingest    ", " OTLP batches accepted, 1 refused; no app reported lost records",
-		"- last refused at ", ": 401 ", "fix: studio's log names each refused batch with its request id"} {
+		"- last refused at ", ": 401 ", "fix: server's log names each refused batch with its request id"} {
 		if !strings.Contains(out, s) {
 			t.Errorf("output lacks %q:\n%s", s, out)
 		}
@@ -175,11 +175,11 @@ func TestEveryLineMapsToMeta(t *testing.T) {
 }
 
 // TestUnreachable: a closed port is the clear first line and
-// ErrUnhealthy (exit 1), within the timeout; a Studio that never
+// ErrUnhealthy (exit 1), within the timeout; a server that never
 // answers ends with the caller's deadline, never a hang.
 func TestUnreachable(t *testing.T) {
 	out, err := run(t, "http://127.0.0.1:1", "")
-	if !errors.Is(err, doctor.ErrUnhealthy) || !strings.HasPrefix(out, "studio not reachable at http://127.0.0.1:1: ") {
+	if !errors.Is(err, doctor.ErrUnhealthy) || !strings.HasPrefix(out, "weftbase not reachable at http://127.0.0.1:1: ") {
 		t.Errorf("closed port: %v\n%s", err, out)
 	}
 
@@ -190,26 +190,26 @@ func TestUnreachable(t *testing.T) {
 	var b strings.Builder
 	start := time.Now()
 	err = doctor.Run(ctx, &b, doctor.Target{URL: hang.URL})
-	if !errors.Is(err, doctor.ErrUnhealthy) || !strings.HasPrefix(b.String(), "studio not reachable at "+hang.URL+": ") || time.Since(start) > 2*time.Second {
-		t.Errorf("hung studio: %v after %v\n%s", err, time.Since(start), b.String())
+	if !errors.Is(err, doctor.ErrUnhealthy) || !strings.HasPrefix(b.String(), "weftbase not reachable at "+hang.URL+": ") || time.Since(start) > 2*time.Second {
+		t.Errorf("hung server: %v after %v\n%s", err, time.Since(start), b.String())
 	}
 }
 
-// TestToken: no token against a Studio that wants one, and a wrong
+// TestToken: no token against a server that wants one, and a wrong
 // one, are failed token lines naming WEFTBASE_TOKEN; setup A (no
 // Token, loopback) needs none.
 func TestToken(t *testing.T) {
-	ts := newStudio(t)
+	ts := newServer(t)
 	for _, c := range []struct{ token, want string }{
-		{"", "FAIL token     studio requires one: it is in <db>.token beside the database (the start banner names the file); set WEFTBASE_TOKEN or --token to it\n               - or run `weftbase open --with-token` from the directory the Studio started in"},
-		{"wrong", "FAIL token     refused: it is not this studio's token (WEFTBASE_TOKEN / --token)"},
+		{"", "FAIL token     server requires one: it is in <db>.token beside the database (the start banner names the file); set WEFTBASE_TOKEN or --token to it\n               - or run `weftbase open --with-token` from the directory the server started in"},
+		{"wrong", "FAIL token     refused: it is not this server's token (WEFTBASE_TOKEN / --token)"},
 	} {
 		out, err := run(t, ts.URL, c.token)
 		if !errors.Is(err, doctor.ErrUnhealthy) || !strings.Contains(out, c.want) {
 			t.Errorf("token %q: %v\n%s", c.token, err, out)
 		}
 	}
-	srv := studio.New(studio.Open(filepath.Join(t.TempDir(), "weft.db")))
+	srv := v1.New(v1.Open(filepath.Join(t.TempDir(), "weft.db")))
 	t.Cleanup(func() { _ = srv.Close() })
 	open := httptest.NewServer(srv.Handler())
 	t.Cleanup(open.Close)
@@ -219,7 +219,7 @@ func TestToken(t *testing.T) {
 	}
 }
 
-// metaJSON reads a test Studio's /api/meta as the server token.
+// metaJSON reads a test server's /api/meta as the server token.
 func metaJSON(t *testing.T, ts *httptest.Server) map[string]any {
 	t.Helper()
 	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/meta", nil)
@@ -254,17 +254,17 @@ func (failingDB) Runs(context.Context, obsdb.RunQuery) (obsdb.RunPage, error) {
 	return obsdb.RunPage{}, errors.New("disk on fire")
 }
 
-// TestReadErrorsWarn: a Studio whose reads fail, or whose manifest does
+// TestReadErrorsWarn: a server whose reads fail, or whose manifest does
 // not parse, is a warn line carrying meta's error — not "no run stored
 // yet" — and the doctor still passes (warnings do not fail it).
 func TestReadErrorsWarn(t *testing.T) {
-	ts := newStudio(t, studio.DB(failingDB{memDB(t)}), studio.Manifest([]byte(`{"weft":`)))
+	ts := newServer(t, v1.DB(failingDB{memDB(t)}), v1.Manifest([]byte(`{"weft":`)))
 	out, err := run(t, ts.URL, tok)
 	if err != nil {
 		t.Fatalf("doctor: %v\n%s", err, out)
 	}
 	for _, want := range []string{
-		"warn content   studio stores content as received; the latest run could not be read: content: read the latest run: disk on fire",
+		"warn content   server stores content as received; the latest run could not be read: content: read the latest run: disk on fire",
 		"warn manifest  the check failed: manifest_check: the manifest does not parse",
 	} {
 		if !strings.Contains(out, want) {
@@ -283,9 +283,9 @@ func TestStaleManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := newStudio(t, studio.Manifest(older), studio.IngestToken("ing"))
+	ts := newServer(t, v1.Manifest(older), v1.IngestToken("ing"))
 	ctx := context.Background()
-	p, err := exporter.Start(ctx, exporter.Studio(ts.URL, "ing"), otel.NoGlobal())
+	p, err := exporter.Start(ctx, exporter.Remote(ts.URL, "ing"), otel.NoGlobal())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +311,7 @@ func TestStaleManifest(t *testing.T) {
 	}
 }
 
-// TestRedirectNotFollowed: the doctor talks to --url only — a Studio
+// TestRedirectNotFollowed: the doctor talks to --url only — a server
 // URL that redirects elsewhere is a failed line naming the target, and
 // the target is never asked.
 func TestRedirectNotFollowed(t *testing.T) {
@@ -329,16 +329,16 @@ func TestRedirectNotFollowed(t *testing.T) {
 	}
 }
 
-// TestTokenNotRequired: a token sent to a Studio with no Token is never
+// TestTokenNotRequired: a token sent to a server with no Token is never
 // read, so the doctor does not call it accepted.
 func TestTokenNotRequired(t *testing.T) {
-	srv := studio.New(studio.Open(filepath.Join(t.TempDir(), "weft.db")))
+	srv := v1.New(v1.Open(filepath.Join(t.TempDir(), "weft.db")))
 	t.Cleanup(func() { _ = srv.Close() })
 	open := httptest.NewServer(srv.Handler())
 	t.Cleanup(open.Close)
 	out, err := run(t, open.URL, "some-token")
 	if err != nil || strings.Contains(out, "token     accepted") || !strings.Contains(out, "ok   token     not required (no Token configured)") {
-		t.Errorf("token to an open studio: %v\n%s", err, out)
+		t.Errorf("token to an open server: %v\n%s", err, out)
 	}
 }
 
@@ -351,7 +351,7 @@ func TestIngestRefusalWindow(t *testing.T) {
 	}{{2 * time.Minute, "warn ingest    "}, {2 * time.Hour, "ok   ingest    "}} {
 		at := time.Now().Add(-c.ago).UTC().Format(time.RFC3339)
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_, _ = io.WriteString(w, `{"auth_required":true,"weft_version":"v","studio_version":"s",`+
+			_, _ = io.WriteString(w, `{"auth_required":true,"weft_version":"v","server_version":"s",`+
 				`"db":{"kind":"sqlite"},"content":{"ingest":"as_received"},`+
 				`"ingest":{"dropped":[],"accepted":7,"refused":1,"last_error":"401 unauthorized: no token","last_at":"`+at+`"}}`)
 		}))
@@ -364,11 +364,11 @@ func TestIngestRefusalWindow(t *testing.T) {
 }
 
 // TestControlCharactersStripped: what the doctor prints comes from
-// Studio — a service name an OTLP sender chose among it — and a control
+// Server — a service name an OTLP sender chose among it — and a control
 // character in it never reaches the terminal raw.
 func TestControlCharactersStripped(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, `{"auth_required":true,"weft_version":"v\u001b[2J","studio_version":"s",`+
+		_, _ = io.WriteString(w, `{"auth_required":true,"weft_version":"v\u001b[2J","server_version":"s",`+
 			`"db":{"kind":"sqlite"},"content":{"ingest":"as_received"},`+
 			`"ingest":{"dropped":[{"service":"evil\u001b]0;owned\u0007\rsvc","records":3,"last_heard":"2026-10-13T00:00:00Z"}],`+
 			`"accepted":7,"refused":2,"last_error":"401 unauthorized: bad\u001b[2Jtoken","last_at":"2026-10-13T00:00:01Z"}}`)
@@ -409,14 +409,14 @@ func writeDiscovery(t *testing.T, info discovery.Info) string {
 }
 
 // TestDiscoveryLine (UX-S5a-01, UX-S5a-08): the discovery line says
-// which Studio the file this shell reads names — this one, another
+// which server the file this shell reads names — this one, another
 // (and two on one database), none, or none read under
-// WEFTBASE_DISCOVERY=off. The same Studio reached by another spelling of
-// its host is this Studio (its pid). The source is the command's
+// WEFTBASE_DISCOVERY=off. The same server reached by another spelling of
+// its host is this server (its pid). The source is the command's
 // stderr line, never repeated on stdout.
 func TestDiscoveryLine(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "weft.db")
-	srv := studio.New(studio.Open(db), studio.Token(tok))
+	srv := v1.New(v1.Open(db), v1.Token(tok))
 	t.Cleanup(func() { _ = srv.Close() })
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
@@ -433,21 +433,21 @@ func TestDiscoveryLine(t *testing.T) {
 			}
 		}
 	}
-	check(doctor.Discovery{Path: "/run/weft/studio.json", URL: ts.URL, DB: db, PID: 7},
-		"ok   studio    reachable at "+ts.URL+" (weft ",
-		"ok   discovery /run/weft/studio.json -> "+ts.URL+" (this Studio)")
+	check(doctor.Discovery{Path: "/run/weft/dev.json", URL: ts.URL, DB: db, PID: 7},
+		"ok   server    reachable at "+ts.URL+" (weft ",
+		"ok   discovery /run/weft/dev.json -> "+ts.URL+" (this server)")
 	other := strings.Replace(ts.URL, "127.0.0.1", "localhost", 1)
-	check(doctor.Discovery{Path: "/run/weft/studio.json", URL: other, DB: db, PID: os.Getpid()},
-		"ok   discovery /run/weft/studio.json -> "+other+" (this Studio)")
-	check(doctor.Discovery{Path: "/run/weft/studio.json", URL: "http://127.0.0.1:7347", DB: db, PID: 42},
-		"warn discovery /run/weft/studio.json -> http://127.0.0.1:7347, ANOTHER Studio (pid 42, db "+db+")",
-		"- two Studios serve "+db+": stop one")
+	check(doctor.Discovery{Path: "/run/weft/dev.json", URL: other, DB: db, PID: os.Getpid()},
+		"ok   discovery /run/weft/dev.json -> "+other+" (this server)")
+	check(doctor.Discovery{Path: "/run/weft/dev.json", URL: "http://127.0.0.1:7347", DB: db, PID: 42},
+		"warn discovery /run/weft/dev.json -> http://127.0.0.1:7347, ANOTHER server (pid 42, db "+db+")",
+		"- two servers serve "+db+": stop one")
 	check(doctor.Discovery{Off: true}, "ok   discovery WEFTBASE_DISCOVERY=off in this shell")
 	check(doctor.Discovery{}, "warn discovery no discovery file")
 
 	var out strings.Builder
 	err := doctor.Run(context.Background(), &out, doctor.Target{URL: "http://127.0.0.1:1"})
-	if !errors.Is(err, doctor.ErrUnhealthy) || !strings.HasPrefix(out.String(), "studio not reachable at http://127.0.0.1:1: ") {
+	if !errors.Is(err, doctor.ErrUnhealthy) || !strings.HasPrefix(out.String(), "weftbase not reachable at http://127.0.0.1:1: ") {
 		t.Errorf("unreachable default: %v\n%s", err, out.String())
 	}
 }
@@ -456,8 +456,8 @@ func TestDiscoveryLine(t *testing.T) {
 // to reach it without the resolver (--token "$(cat <db>.token)"), not
 // a command that shares it.
 func TestTokenAdvice(t *testing.T) {
-	out, _ := run(t, newStudio(t).URL, "")
-	if !strings.Contains(out, "from the directory the Studio started in (where its discovery file is found), or pass --token \"$(cat <db>.token)\"") {
+	out, _ := run(t, newServer(t).URL, "")
+	if !strings.Contains(out, "from the directory the server started in (where its discovery file is found), or pass --token \"$(cat <db>.token)\"") {
 		t.Errorf("401 advice:\n%s", out)
 	}
 }
@@ -473,20 +473,20 @@ func TestDataAndOtlpLines(t *testing.T) {
 		return out
 	}
 	at := time.Now().Add(-2 * time.Minute).UTC().Format(time.RFC3339)
-	out := serve(`{"auth_required":true,"weft_version":"v0.19.0","studio_version":"v0.19.0",` +
+	out := serve(`{"auth_required":true,"weft_version":"v0.19.0","server_version":"v0.19.0",` +
 		`"db":{"kind":"sqlite"},"capabilities":["ingest"],"ingest_open":true,` +
 		`"content":{"ingest":"as_received","latest":{"run_id":"r1","mark":"full","note":"n","started":"` + at + `","weft_version":"v0.15.0","service":"shop"}}}`)
 	for _, want := range []string{
-		"warn data      newest run 2m0s ago by weft v0.15.0 (service shop), this Studio is weft v0.19.0: the versions differ",
+		"warn data      newest run 2m0s ago by weft v0.15.0 (service shop), this server is weft v0.19.0: the versions differ",
 		"ok   otlp      open: OTLP at ",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
 	}
-	out = serve(`{"auth_required":true,"weft_version":"v","studio_version":"s","db":{"kind":"sqlite"},` +
-		`"capabilities":[],"capabilities_off":{"ingest":"OTLP ingest is off: studio.NoIngest() turned it off"},"content":{"ingest":"as_received"}}`)
-	if !strings.Contains(out, "warn otlp      OTLP ingest is off: studio.NoIngest() turned it off: an app's spans cannot reach this Studio") ||
+	out = serve(`{"auth_required":true,"weft_version":"v","server_version":"s","db":{"kind":"sqlite"},` +
+		`"capabilities":[],"capabilities_off":{"ingest":"OTLP ingest is off: v1.NoIngest() turned it off"},"content":{"ingest":"as_received"}}`)
+	if !strings.Contains(out, "warn otlp      OTLP ingest is off: v1.NoIngest() turned it off: an app's spans cannot reach this server") ||
 		!strings.Contains(out, "ok   data      no run stored yet") {
 		t.Errorf("ingest off:\n%s", out)
 	}

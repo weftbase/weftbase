@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	v1 "github.com/weftbase/weftbase/api/http/v1"
 	"github.com/weftbase/weftbase/internal/doctor"
-	"github.com/weftbase/weftbase/studio"
 )
 
 // ExampleRun checks a server with nothing connected to it: one line
@@ -18,7 +18,7 @@ import (
 func ExampleRun() {
 	dir, _ := os.MkdirTemp("", "doctor")
 	defer func() { _ = os.RemoveAll(dir) }()
-	srv := studio.New(studio.Open(filepath.Join(dir, "weft.db")))
+	srv := v1.New(v1.Open(filepath.Join(dir, "weft.db")))
 	defer func() { _ = srv.Close() }()
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -32,7 +32,7 @@ func ExampleRun() {
 	}
 	fmt.Println("err:", err)
 	// Output:
-	// ok studio
+	// ok server
 	// ok token
 	// warn discovery
 	// ok db

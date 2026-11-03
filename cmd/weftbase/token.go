@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/weftbase/weftbase/internal/discovery"
-	"github.com/weftbase/weftbase/studio"
+	v1 "github.com/weftbase/weftbase/api/http/v1"
+	"github.com/weftbase/weftbase/client/discovery"
 )
 
 // The dev token (plan B3): stable per database. On a database file's
@@ -65,7 +65,7 @@ func resolveToken(dbFlag, flagTok string, rotate bool) (resolvedToken, error) {
 		return resolvedToken{}, err
 	}
 	if dbPath == "" {
-		return resolvedToken{value: studio.DevToken(), source: tokenGenerated}, nil
+		return resolvedToken{value: v1.DevToken(), source: tokenGenerated}, nil
 	}
 	path := tokenPath(dbPath)
 	if rotate {
@@ -86,7 +86,7 @@ func tokenPath(dbPath string) string { return dbPath + ".token" }
 // TokenFor): the database's stable token, only for an address a
 // trusted discovery file of this user names — the token is long-lived,
 // so whatever else holds a port is
-// probed bare (a token-walled Studio there is skipped for the next
+// probed bare (a token-walled server there is skipped for the next
 // port, as before B3). nil without a database file.
 func stableProbe(dbPath string) func(addr string) string {
 	if dbPath == "" {
@@ -102,7 +102,7 @@ func stableProbe(dbPath string) func(addr string) string {
 
 // probeToken is the bearer a probe of addr sends: the fixed token
 // (--token, WEFTBASE_TOKEN), else stableProbe's answer — what a
-// reused Studio on the same database serves.
+// reused server on the same database serves.
 func probeToken(dbPath, flagTok, addr string) string {
 	if tok := fixedToken(flagTok); tok != "" {
 		return tok

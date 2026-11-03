@@ -6,7 +6,7 @@ import (
 )
 
 // TestMain turns the discovery file off for this package's tests: no
-// test run joins (and pours its runs into) a Studio the developer
+// test run joins (and pours its runs into) a server the developer
 // happens to be running — exporter.Install/Start read the file when
 // WEFTBASE_URL is unset (plan B3).
 func TestMain(m *testing.M) {

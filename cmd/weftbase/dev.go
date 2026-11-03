@@ -15,10 +15,10 @@ import (
 	"syscall"
 	"time"
 
+	v1 "github.com/weftbase/weftbase/api/http/v1"
+	"github.com/weftbase/weftbase/client/discovery"
 	"github.com/weftbase/weftbase/internal/dblock"
-	"github.com/weftbase/weftbase/internal/discovery"
 	"github.com/weftbase/weftbase/internal/listen"
-	"github.com/weftbase/weftbase/studio"
 )
 
 // `weftbase dev` (plan B1.2, FEATURES D7): the server and the app in
@@ -60,7 +60,7 @@ var skipDirs = map[string]bool{
 	"testdata": true, ".weftbase": true, "dist": true,
 }
 
-// runDev is `weftbase dev [flags] -- command args…`: Studio and the app.
+// runDev is `weftbase dev [flags] -- command args…`: server and the app.
 func runDev(args []string, stdout, stderr io.Writer) error {
 	fs := newFlags("dev", stderr)
 	db := fs.String("db", "",
@@ -140,7 +140,7 @@ func runDev(args []string, stdout, stderr io.Writer) error {
 	out := &lockedWriter{w: stdout}
 	w := wantAddr(*addr, devDefaultAddr)
 	w.span = devSpan
-	st, err := devStudio(*db, w, *token, *rotate, out, opts...)
+	st, err := devServer(*db, w, *token, *rotate, out, opts...)
 	if err != nil {
 		return err
 	}
@@ -217,23 +217,23 @@ func devEnv(parent []string, url, token, dbPath string) []string {
 	return env
 }
 
-// devStudioRun is the Studio `weftbase dev` talks to: one it started in
+// devServerRun is the server `weftbase dev` talks to: one it started in
 // this process, or a running one it reuses.
-type devStudioRun struct {
+type devServerRun struct {
 	addr, url, link, token, dbPath string
-	stop                           func(os.Signal) // stops a Studio this process started
+	stop                           func(os.Signal) // stops a server this process started
 }
 
-// devStudio applies `weftbase dev`'s port policy and starts Studio in
+// devServer applies `weftbase dev`'s port policy and starts server in
 // this process, or reuses one already serving the same database. The
 // probe carries the fixed token (--token, WEFTBASE_TOKEN), else the
 // database's stable token (plan B3) to an address this user's
-// discovery file names: a Studio on the same database serves exactly
+// discovery file names: a server on the same database serves exactly
 // that, so a reuse hands the app the token it needs. A
-// running Studio walled by another token answers 401 and is skipped
-// for the next port. A Studio this process starts writes the discovery
+// running server walled by another token answers 401 and is skipped
+// for the next port. A server this process starts writes the discovery
 // file; a reused one owns its own.
-func devStudio(dbFlag string, w want, tokenFlag string, rotate bool, out io.Writer, opts ...studio.Option) (*devStudioRun, error) {
+func devServer(dbFlag string, w want, tokenFlag string, rotate bool, out io.Writer, opts ...v1.Option) (*devServerRun, error) {
 	dbPath, err := dbFile(dbFlag)
 	if err != nil {
 		return nil, err
@@ -242,15 +242,15 @@ func devStudio(dbFlag string, w want, tokenFlag string, rotate bool, out io.Writ
 		return listen.Choose(context.Background(), listen.Request{
 			Addr: w.addr, Pinned: w.pinned, Span: w.span, DBPath: dbPath,
 			Token: fixedToken(tokenFlag), TokenFor: stableProbe(dbPath),
-			Known: knownStudio(dbPath),
+			Known: knownServer(dbPath),
 		})
 	}
-	reuse := func(addr string, pid int, tok string) *devStudioRun {
+	reuse := func(addr string, pid int, tok string) *devServerRun {
 		// The app and the one line dial loopback.
 		dial := loopbackAddr(addr)
 		_, _ = fmt.Fprintln(out, listen.Choice{Addr: dial, Reuse: true, PID: pid}.ReuseLine())
 		reuseNotes(out, dial, rotate)
-		return &devStudioRun{addr: dial, url: "http://" + dial, dbPath: dbPath, token: tok, link: uiLink(dial, ""), stop: func(os.Signal) {}}
+		return &devServerRun{addr: dial, url: "http://" + dial, dbPath: dbPath, token: tok, link: uiLink(dial, ""), stop: func(os.Signal) {}}
 	}
 	// The database's lock first, as weftbase dev takes it (B7-fix2):
 	// held, the holder serves this file — reuse it when something
@@ -285,18 +285,18 @@ func devStudio(dbFlag string, w want, tokenFlag string, rotate bool, out io.Writ
 		return nil, err
 	}
 	if choice.Reuse {
-		// A Studio serving the file without its lock (a weft before it,
-		// an app's embedded Studio): reused, as before the lock.
+		// A server serving the file without its lock (a weft before it,
+		// an app's embedded server): reused, as before the lock.
 		lock.Release()
 		return reuse(choice.Addr, choice.PID, probeToken(dbPath, tokenFlag, loopbackAddr(choice.Addr))), nil
 	}
-	// The app and the one line dial loopback: a Studio bound to every
+	// The app and the one line dial loopback: a server bound to every
 	// interface (--addr 0.0.0.0:7331) is reachable there, and otel's
-	// Studio destination refuses plaintext to a non-loopback host.
+	// Server destination refuses plaintext to a non-loopback host.
 	dial := loopbackAddr(choice.Addr)
-	r := &devStudioRun{addr: dial, url: "http://" + dial, dbPath: dbPath, stop: func(os.Signal) {}}
+	r := &devServerRun{addr: dial, url: "http://" + dial, dbPath: dbPath, stop: func(os.Signal) {}}
 	if choice.Note != "" {
-		_, _ = fmt.Fprintln(out, "studio: "+choice.Note)
+		_, _ = fmt.Fprintln(out, "weftbase: "+choice.Note)
 	}
 	// The banner is the one line's job here: serveBoot's goes nowhere.
 	srv, err := serveBootWith(dbFlag, choice.Addr, tokenFlag, rotate, io.Discard, append(discoveryOption(), opts...)...)
@@ -305,7 +305,7 @@ func devStudio(dbFlag string, w want, tokenFlag string, rotate bool, out io.Writ
 		lock.Release()
 		return nil, err
 	}
-	// Named once it can serve (never a Studio that failed to boot).
+	// Named once it can serve (never a server that failed to boot).
 	lock.SetHolder(dblock.Holder{URL: r.url, PID: os.Getpid()})
 	r.token = srv.token
 	// A fixed or stable token stays out of the log, link included
@@ -318,13 +318,13 @@ func devStudio(dbFlag string, w want, tokenFlag string, rotate bool, out io.Writ
 		r.link = uiLink(dial, "")
 	}
 	if srv.tok.rotated {
-		_, _ = fmt.Fprintf(out, "studio: token rotated: a new one in %s\n", srv.tok.path)
+		_, _ = fmt.Fprintf(out, "weftbase: token rotated: a new one in %s\n", srv.tok.path)
 	}
 	var disc *discovery.Written
 	if discovery.Off(os.Getenv) {
 		_, _ = fmt.Fprintln(out, discoveryOffLine+"; the app gets WEFTBASE_URL regardless")
 	} else if w, derr := writeDiscovery(r.url, srv.token, dbPath); derr != nil {
-		_, _ = fmt.Fprintf(out, "studio: no discovery file (%v); the app gets WEFTBASE_URL regardless\n", derr)
+		_, _ = fmt.Fprintf(out, "weftbase: no discovery file (%v); the app gets WEFTBASE_URL regardless\n", derr)
 	} else {
 		disc = w
 	}
@@ -338,7 +338,7 @@ func devStudio(dbFlag string, w want, tokenFlag string, rotate bool, out io.Writ
 		defer stopFresh()
 		stopCh <- sig
 		if err := <-done; err != nil && !errors.Is(err, http.ErrServerClosed) {
-			_, _ = fmt.Fprintln(out, "weftbase dev: studio:", err)
+			_, _ = fmt.Fprintln(out, "weftbase dev: server:", err)
 		}
 		_ = srv.Close()
 	}
@@ -350,18 +350,18 @@ func devStudio(dbFlag string, w want, tokenFlag string, rotate bool, out io.Writ
 // token file (weftbase open --with-token prints the signed-in link), or the
 // fixed token the flag or the environment set. "" when the link carries
 // the token (one generated for this process) or there is none.
-func tokenLine(st *devStudioRun, fixed bool) string {
+func tokenLine(st *devServerRun, fixed bool) string {
 	switch {
 	case st.token == "" || strings.Contains(st.link, "#token="):
 		return ""
 	case fixed:
-		return "studio: token: the one --token / WEFTBASE_TOKEN set"
+		return "weftbase: token: the one --token / WEFTBASE_TOKEN set"
 	case st.dbPath != "" && readTokenFile(tokenPath(st.dbPath)) == st.token:
-		return "studio: token: " + tokenPath(st.dbPath) + " (weftbase open --with-token)"
+		return "weftbase: token: " + tokenPath(st.dbPath) + " (weftbase open --with-token)"
 	case st.dbPath != "":
-		// A reused Studio whose token is not the file's (its own
+		// A reused server whose token is not the file's (its own
 		// discovery file names it): never a file that would not sign in.
-		return "studio: token: the running Studio's, not " + tokenPath(st.dbPath) + " (weftbase open --with-token)"
+		return "weftbase: token: the running server's, not " + tokenPath(st.dbPath) + " (weftbase open --with-token)"
 	}
 	return ""
 }
@@ -394,7 +394,7 @@ type devLoop struct {
 // stops first, with the same signal; nil) or — under --no-watch — the
 // app's own exit (its exit code).
 func (d *devLoop) run(sigs <-chan os.Signal, changes <-chan string) error {
-	// A Ctrl-C buffered while Studio started (the port probes, the
+	// A Ctrl-C buffered while server started (the port probes, the
 	// database) ends here: the app is never started only to be killed.
 	select {
 	case sig := <-sigs:
@@ -462,8 +462,8 @@ func (d *devLoop) start() *child {
 	}
 	// The one line for the app:
 	//
-	//	studio <link> · app pid <n>
-	_, _ = fmt.Fprintf(d.out, "studio %s · app pid %d\n", d.link, c.pid)
+	//	server <link> · app pid <n>
+	_, _ = fmt.Fprintf(d.out, "weftbase %s · app pid %d\n", d.link, c.pid)
 	return c
 }
 

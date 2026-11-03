@@ -17,12 +17,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/weftbase/weftbase/client/rest"
+
 	"github.com/weftbase/weft/core"
 	"github.com/weftbase/weft/core/mw"
 	"github.com/weftbase/weft/core/wefttest"
 	"github.com/weftbase/weft/otel"
-	"github.com/weftbase/weftbase/exporter"
-	"github.com/weftbase/weftbase/internal/discovery"
+	"github.com/weftbase/weftbase/client/discovery"
+	"github.com/weftbase/weftbase/client/exporter"
 )
 
 // opened records what the command handed the browser opener: no test
@@ -51,7 +53,7 @@ func TestMain(m *testing.M) {
 		os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 	}
 	stdoutIsTTY = func() bool { return false }
-	// Every discovery file the tests' Studios write (and every read)
+	// Every discovery file the tests' servers write (and every read)
 	// goes to a directory of this process's own, never the developer's
 	// ./.weftbase, $XDG_RUNTIME_DIR/weftbase or user cache directory.
 	discDir, err := os.MkdirTemp("", "weft-discovery-")
@@ -142,8 +144,8 @@ func waitMeta(t *testing.T, addr string, done <-chan int, out *syncBuffer) strin
 	}
 }
 
-// stopStudio sends SIGTERM and waits for the command's exit code.
-func stopStudio(t *testing.T, done <-chan int) int {
+// stopServer sends SIGTERM and waits for the command's exit code.
+func stopServer(t *testing.T, done <-chan int) int {
 	t.Helper()
 	signalSelf(t, syscall.SIGTERM)
 	select {
@@ -155,12 +157,12 @@ func stopStudio(t *testing.T, done <-chan int) int {
 	}
 }
 
-// TestStudioCommand pins `weftbase dev` end to end (plan B1): the
+// TestServerCommand pins `weftbase dev` end to end (plan B1): the
 // manifest found upward from the working directory and said in one
 // line after the banner; --open hands the browser the UI link with the
 // token in the fragment once the port is bound — and, on a reuse, the
-// running Studio's link.
-func TestStudioCommand(t *testing.T) {
+// running server's link.
+func TestServerCommand(t *testing.T) {
 	skipWithoutSelfSignal(t)
 	tree := t.TempDir()
 	wd := filepath.Join(tree, "app", "cmd")
@@ -206,12 +208,12 @@ func TestStudioCommand(t *testing.T) {
 				t.Errorf("api/manifest = %d %s, want the weft.json found upward", resp.StatusCode, b)
 			}
 			links := takeOpened()
-			if code := stopStudio(t, done); code != 0 {
+			if code := stopServer(t, done); code != 0 {
 				t.Errorf("exit %d after SIGTERM", code)
 			}
 			lines := strings.Split(out.String(), "\n")
-			if len(lines) < 4 || lines[0] != "studio: http://"+addr+"/" || lines[1] != "studio: token from --token" ||
-				lines[3] != "studio: manifest "+manifest+" (found upward)" {
+			if len(lines) < 4 || lines[0] != "weftbase: http://"+addr+"/" || lines[1] != "weftbase: token from --token" ||
+				lines[3] != "weftbase: manifest "+manifest+" (found upward)" {
 				t.Errorf("stdout:\n%s\nwant the banner, then the manifest line", out.String())
 			}
 			if c.open {
@@ -225,18 +227,18 @@ func TestStudioCommand(t *testing.T) {
 	}
 
 	// A second start on the same database is refused (UX-S5a-13): the
-	// running Studio's URL and pid, exit 1, nothing printed or opened.
+	// running server's URL and pid, exit 1, nothing printed or opened.
 	t.Run("second start refused", func(t *testing.T) {
 		takeOpened()
 		base := freeBase(t, 2)
 		var first syncBuffer
-		stop := startStudio(t, db, base, 2, loop(base), &first)
+		stop := startServer(t, db, base, 2, loop(base), &first)
 		defer stop()
 		var second strings.Builder
 		err := serveWith(db, want{addr: loop(base), span: 2}, "tok", &second, afterBoot{notes: []string{"never printed"}, open: true})
-		if err == nil || !strings.Contains(err.Error(), "studio already running at http://"+loop(base)+" (pid "+strconv.Itoa(os.Getpid())+")") ||
+		if err == nil || !strings.Contains(err.Error(), "weftbase already running at http://"+loop(base)+" (pid "+strconv.Itoa(os.Getpid())+")") ||
 			!strings.Contains(err.Error(), "weftbase open --with-token") {
-			t.Errorf("second start = %v, want refused naming the running Studio", err)
+			t.Errorf("second start = %v, want refused naming the running server", err)
 		}
 		if second.String() != "" {
 			t.Errorf("a refused start printed %q", second.String())
@@ -247,7 +249,7 @@ func TestStudioCommand(t *testing.T) {
 	})
 }
 
-// ── the API clients, against a scripted Studio ─────────────────────
+// ── the API clients, against a scripted server ─────────────────────
 
 type orderIn struct {
 	OrderID string `json:"order_id" jsonschema:"the order"`
@@ -262,13 +264,13 @@ func ordersAgent(m core.Model, opts ...core.Option) *core.Agent {
 	return core.New(m, append([]core.Option{core.Name("orders"), core.Instructions("You are a support agent."), lookup}, opts...)...)
 }
 
-// apiStudio is setup B's server (newServer, the token wall on) under
+// apiServer is setup B's server (newServer, the token wall on) under
 // httptest, with two runs ingested through the otel pipeline: r_ok
 // (orders: a tool call, then an answer) and r_fail (triage: the model
 // fails), started apart. With child, a third run p (lead) delegates to
 // a subagent: its child run p/0/c. It returns the server URL and r_ok's
 // transcript.
-func apiStudio(t *testing.T, child bool) (string, []core.Message) {
+func apiServer(t *testing.T, child bool) (string, []core.Message) {
 	t.Helper()
 	srv, err := newServer("sqlite://"+filepath.Join(t.TempDir(), "weft.db"), "tok")
 	if err != nil {
@@ -278,7 +280,7 @@ func apiStudio(t *testing.T, child bool) (string, []core.Message) {
 	t.Cleanup(func() { ts.Close(); _ = srv.Close() })
 
 	ctx := context.Background()
-	p, err := exporter.Start(ctx, exporter.Studio(ts.URL, ""), otel.NoGlobal())
+	p, err := exporter.Start(ctx, exporter.Remote(ts.URL, ""), otel.NoGlobal())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,10 +315,10 @@ func apiStudio(t *testing.T, child bool) (string, []core.Message) {
 	if err := p.Shutdown(ctx); err != nil {
 		t.Fatal(err)
 	}
-	c := newClient(ts.URL, "tok")
+	c := rest.New(ts.URL, "tok")
 	for id, status := range settle {
 		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-			b, err := c.get(ctx, runPath(id), nil)
+			b, err := c.Get(ctx, rest.RunPath(id), nil)
 			if err == nil && strings.Contains(string(b), status) {
 				break
 			}
@@ -339,10 +341,10 @@ func weftbase(args ...string) (string, string, int) {
 // TestRunsCommand pins `weftbase runs`: one row per run, newest first, from
 // GET /api/runs; --agent and --failed filter on the server, --since and
 // --limit cut the paging (pinned across a one-run page, so the cursor
-// is followed), --json prints Studio's rows; the token comes from
-// --token or WEFTBASE_TOKEN and a missing one is Studio's 401.
+// is followed), --json prints server's rows; the token comes from
+// --token or WEFTBASE_TOKEN and a missing one is server's 401.
 func TestRunsCommand(t *testing.T) {
-	url, _ := apiStudio(t, false)
+	url, _ := apiServer(t, false)
 	t.Setenv("WEFTBASE_TOKEN", "")
 	t.Setenv("WEFTBASE_URL", "")
 
@@ -443,7 +445,7 @@ func TestRunsCommand(t *testing.T) {
 		{nil, "r_fail,r_ok"},
 		{[]string{"--failed"}, "r_fail"},
 		// --status takes the API's words (I3): sent as status=, the
-		// read-time ones filtered by Studio.
+		// read-time ones filtered by server.
 		{[]string{"--status", "failed"}, "r_fail"},
 		{[]string{"--status", "failed", "--failed"}, "r_fail"},
 		{[]string{"--status", "succeeded"}, "r_ok"},
@@ -477,7 +479,7 @@ func TestRunsCommand(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &both); err != nil || len(both) != 2 || !both[0].Started.After(both[1].Started) {
 		t.Fatalf("rows %s: %v, want two runs started apart", out, err)
 	}
-	// --json carries Studio's stopped_by (U3.2), omitted when none was
+	// --json carries server's stopped_by (U3.2), omitted when none was
 	// recorded: r_ok's final_answer, nothing on r_fail.
 	if both[1].ID != "r_ok" || both[1].StoppedBy != "final_answer" || both[0].StoppedBy != "" ||
 		!strings.Contains(out, `"stopped_by": "final_answer"`) || strings.Count(out, `"stopped_by"`) != 1 || strings.Contains(out, `"cancel_cause"`) {
@@ -519,12 +521,12 @@ func TestRunsCommand(t *testing.T) {
 	// table's STOPPED BY cell names it, --json carries stopped_by and
 	// cancel_cause.
 	runsPageSize = 50
-	p, err := exporter.Start(context.Background(), exporter.Studio(url, ""), otel.NoGlobal())
+	p, err := exporter.Start(context.Background(), exporter.Remote(url, ""), otel.NoGlobal())
 	if err != nil {
 		t.Fatal(err)
 	}
 	cctx, cancel := context.WithCancelCause(context.Background())
-	cancel(core.CancelCause("studio.cancel"))
+	cancel(core.CancelCause("weftbase.cancel"))
 	canceled := core.New(wefttest.Script(wefttest.Say("never")), core.Name("support"),
 		core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()))
 	if _, err := canceled.Generate(cctx, core.RunID("r_cancel"), core.Prompt("stop")); !errors.Is(err, context.Canceled) {
@@ -533,10 +535,10 @@ func TestRunsCommand(t *testing.T) {
 	if err := p.Shutdown(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	c := newClient(url, "tok")
+	c := rest.New(url, "tok")
 	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		b, err := c.get(context.Background(), runPath("r_cancel"), nil)
-		if err == nil && strings.Contains(string(b), `"cancel_cause":"studio.cancel"`) {
+		b, err := c.Get(context.Background(), rest.RunPath("r_cancel"), nil)
+		if err == nil && strings.Contains(string(b), `"cancel_cause":"weftbase.cancel"`) {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -546,34 +548,34 @@ func TestRunsCommand(t *testing.T) {
 	out, errb, code = weftbase("runs", "--agent", "support")
 	lines = strings.Split(strings.TrimSpace(out), "\n")
 	if code != 0 || len(lines) != 2 || !strings.HasPrefix(lines[1], "r_cancel") ||
-		!strings.Contains(lines[1], " canceled (studio.cancel) ") {
-		t.Errorf("weftbase runs --agent support = exit %d, want r_cancel's STOPPED BY \"canceled (studio.cancel)\"\n%s%s", code, out, errb)
+		!strings.Contains(lines[1], " canceled (weftbase.cancel) ") {
+		t.Errorf("weftbase runs --agent support = exit %d, want r_cancel's STOPPED BY \"canceled (weftbase.cancel)\"\n%s%s", code, out, errb)
 	}
 	out, _, _ = weftbase("runs", "--agent", "support", "--json")
 	var cr []runRow
 	if err := json.Unmarshal([]byte(out), &cr); err != nil || len(cr) != 1 ||
-		cr[0].StoppedBy != "canceled" || cr[0].CancelCause != "studio.cancel" ||
-		!strings.Contains(out, `"stopped_by": "canceled"`) || !strings.Contains(out, `"cancel_cause": "studio.cancel"`) {
-		t.Errorf("--json for r_cancel = %v\n%s, want stopped_by canceled and cancel_cause studio.cancel", err, out)
+		cr[0].StoppedBy != "canceled" || cr[0].CancelCause != "weftbase.cancel" ||
+		!strings.Contains(out, `"stopped_by": "canceled"`) || !strings.Contains(out, `"cancel_cause": "weftbase.cancel"`) {
+		t.Errorf("--json for r_cancel = %v\n%s, want stopped_by canceled and cancel_cause weftbase.cancel", err, out)
 	}
 
 	t.Setenv("WEFTBASE_TOKEN", "")
 	if _, errb, code := weftbase("runs"); code != 1 || !strings.Contains(errb, "401") || !strings.Contains(errb, "WEFTBASE_TOKEN") {
-		t.Errorf("no token = exit %d %q, want 1 and Studio's 401", code, errb)
+		t.Errorf("no token = exit %d %q, want 1 and server's 401", code, errb)
 	}
-	if _, errb, code := weftbase("runs", "--url", "http://127.0.0.1:1"); code != 1 || !strings.Contains(errb, "studio not reachable at http://127.0.0.1:1") {
+	if _, errb, code := weftbase("runs", "--url", "http://127.0.0.1:1"); code != 1 || !strings.Contains(errb, "weftbase not reachable at http://127.0.0.1:1") {
 		t.Errorf("unreachable = exit %d %q", code, errb)
 	}
 }
 
 // TestOpenCommand pins `weftbase open <id>`: the run is checked against
 // GET /api/runs/<id>, its page <url>/runs/<id> printed bare — the token
-// (maybe the panel tokens' signing key) stays out of stdout unless
+// (maybe the scoped tokens' signing key) stays out of stdout unless
 // --with-token asks — and handed to the browser, token in the
-// fragment, only with --open; an unknown run is Studio's 404; a child
+// fragment, only with --open; an unknown run is server's 404; a child
 // id travels escaped (GET /api/runs/p%2F0%2Fc).
 func TestOpenCommand(t *testing.T) {
-	url, _ := apiStudio(t, true)
+	url, _ := apiServer(t, true)
 	t.Setenv("WEFTBASE_URL", url)
 	t.Setenv("WEFTBASE_TOKEN", "")
 	takeOpened()
@@ -601,11 +603,11 @@ func TestOpenCommand(t *testing.T) {
 		t.Errorf("child id = exit %d %q %q, want %q", code, out, errb, want)
 	}
 	// An id no kind knows names what was tried (UX-S5a-06).
-	if _, errb, code := weftbase("open", "p/9/nope", "--token", "tok"); code != 1 || !strings.Contains(errb, "p/9/nope is no run, public id, session, trace this Studio knows") {
+	if _, errb, code := weftbase("open", "p/9/nope", "--token", "tok"); code != 1 || !strings.Contains(errb, "p/9/nope is no run, public id, session, trace this server knows") {
 		t.Errorf("unknown child = exit %d %q, want the kinds tried", code, errb)
 	}
 	// A trace id opens the trace's page.
-	b, err := newClient(url, "tok").get(context.Background(), runPath("r_ok"), nil)
+	b, err := rest.New(url, "tok").Get(context.Background(), rest.RunPath("r_ok"), nil)
 	var row struct {
 		TraceID string `json:"trace_id"`
 	}
@@ -615,7 +617,7 @@ func TestOpenCommand(t *testing.T) {
 	if out, errb, code := weftbase("open", row.TraceID, "--token", "tok"); code != 0 || out != url+"/traces/"+row.TraceID+"\n" {
 		t.Errorf("a trace id = exit %d %q %q, want its trace page", code, out, errb)
 	}
-	// No id: the Studio root (UX-S5a-02), signed in with --with-token.
+	// No id: the server root (UX-S5a-02), signed in with --with-token.
 	if out, errb, code := weftbase("open", "--token", "tok"); code != 0 || out != url+"/\n" {
 		t.Errorf("no id = exit %d %q %q, want the root", code, out, errb)
 	}
@@ -625,7 +627,7 @@ func TestOpenCommand(t *testing.T) {
 	if _, errb, code := weftbase("open", "a", "b"); code != 2 || !strings.Contains(errb, "at most one id") {
 		t.Errorf("two ids = exit %d %q", code, errb)
 	}
-	if got := runLink("http://h", "p/1/c", "a b"); got != "http://h/runs/p%2F1%2Fc#token=a+b" {
+	if got := rest.RunLink("http://h", "p/1/c", "a b"); got != "http://h/runs/p%2F1%2Fc#token=a+b" {
 		t.Errorf("a child id's link = %s", got)
 	}
 }
@@ -646,12 +648,12 @@ func TestClientRedirectAndRedaction(t *testing.T) {
 		t.Errorf("redirect = exit %d %q (followed %v), want an error, not followed", code, errb, followed)
 	}
 	_, errb, code = weftbase("runs", "--url", "http://user:s3cret@127.0.0.1:1")
-	if code != 1 || strings.Contains(errb, "s3cret") || !strings.Contains(errb, "studio not reachable at http://user:xxxxx@127.0.0.1:1") {
+	if code != 1 || strings.Contains(errb, "s3cret") || !strings.Contains(errb, "weftbase not reachable at http://user:xxxxx@127.0.0.1:1") {
 		t.Errorf("unreachable with a password = exit %d %q, want it redacted", code, errb)
 	}
 }
 
-// TestRunsCursorThatDoesNotMove: a Studio whose cursor repeats ends
+// TestRunsCursorThatDoesNotMove: a server whose cursor repeats ends
 // the listing instead of looping.
 func TestRunsCursorThatDoesNotMove(t *testing.T) {
 	var calls int
@@ -680,7 +682,7 @@ func TestRunsCursorThatDoesNotMove(t *testing.T) {
 // --format; any other format, no id, and an unknown flag are usage
 // errors; an unknown run is the server's 404.
 func TestExportCommand(t *testing.T) {
-	url, _ := apiStudio(t, false)
+	url, _ := apiServer(t, false)
 	t.Setenv("WEFTBASE_URL", url)
 	t.Setenv("WEFTBASE_TOKEN", "tok")
 
@@ -710,7 +712,7 @@ func TestExportCommand(t *testing.T) {
 }
 
 // TestRunsJSONCarriesProblems pins `weftbase runs --json` (U4-fix): the rows
-// are Studio's, so a failed run's error_type and a run's problem
+// are server's, so a failed run's error_type and a run's problem
 // counters ride them — a Fallback answering both steps after the
 // primary's failed try (attempts_retried 2, fallbacks 2, keyed on the
 // attempt's weft.attempt.layer), a call to an unknown tool (tool_errors
@@ -724,7 +726,7 @@ func TestRunsJSONCarriesProblems(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(func() { ts.Close(); _ = srv.Close() })
 	ctx := context.Background()
-	p, err := exporter.Start(ctx, exporter.Studio(ts.URL, ""), otel.NoGlobal())
+	p, err := exporter.Start(ctx, exporter.Remote(ts.URL, ""), otel.NoGlobal())
 	if err != nil {
 		t.Fatal(err)
 	}

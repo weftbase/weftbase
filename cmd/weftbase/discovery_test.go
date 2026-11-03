@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/weftbase/weft/version"
-	"github.com/weftbase/weftbase/internal/discovery"
+	"github.com/weftbase/weftbase/client/discovery"
 )
 
 // Plan B3 at the command: the discovery file and the stable per-DB
@@ -31,10 +31,10 @@ func discoveryDir(t *testing.T) string {
 	return dir
 }
 
-// bareStudio runs serveWith with tokenFlag (may be "") in the
+// bareServer runs serveWith with tokenFlag (may be "") in the
 // background and waits until something answers HTTP on wantAt; stop
 // sends SIGTERM and waits for it to return.
-func bareStudio(t *testing.T, db string, base, span int, wantAt, tokenFlag string, rotate bool, out *syncBuffer) (stop func()) {
+func bareServer(t *testing.T, db string, base, span int, wantAt, tokenFlag string, rotate bool, out *syncBuffer) (stop func()) {
 	t.Helper()
 	skipWithoutSelfSignal(t)
 	done := make(chan error, 1)
@@ -53,7 +53,7 @@ func bareStudio(t *testing.T, db string, base, span int, wantAt, tokenFlag strin
 		default:
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("studio never served on %s (stdout %q)", wantAt, out.String())
+			t.Fatalf("weftbase never served on %s (stdout %q)", wantAt, out.String())
 		}
 	}
 	stopped := false
@@ -114,7 +114,7 @@ func readDiscovery(t *testing.T, dir string) (discovery.Info, map[string]any) {
 // bound — the real address, its stable token, the database, this pid,
 // the version — 0600 and exactly the six fields; the banner names it; a
 // second start on the same database (no token flag, no env) reuses the
-// running Studio — possible now that the token is stable, the B2 proof —
+// running server — possible now that the token is stable, the B2 proof —
 // and writes nothing; the clean exit removes the file.
 func TestDiscoveryFileWrittenAndRemoved(t *testing.T) {
 	dir := discoveryDir(t)
@@ -122,7 +122,7 @@ func TestDiscoveryFileWrittenAndRemoved(t *testing.T) {
 	base := freeBase(t, 2)
 	dbPath := filepath.Join(t.TempDir(), "weft.db")
 	var first syncBuffer
-	stop := bareStudio(t, "sqlite://"+dbPath, base, 2, loop(base), "", false, &first)
+	stop := bareServer(t, "sqlite://"+dbPath, base, 2, loop(base), "", false, &first)
 
 	info, raw := readDiscovery(t, dir)
 	tok, _ := os.ReadFile(dbPath + ".token")
@@ -139,7 +139,7 @@ func TestDiscoveryFileWrittenAndRemoved(t *testing.T) {
 	} else if _, err := time.Parse(time.RFC3339, s); err != nil {
 		t.Errorf("started %q is not RFC 3339", s)
 	}
-	if !strings.Contains(first.String(), "studio: apps find this Studio through "+filepath.Join(dir, discovery.FileName)) {
+	if !strings.Contains(first.String(), "weftbase: apps find this server through "+filepath.Join(dir, discovery.FileName)) {
 		t.Errorf("the banner does not name the discovery file:\n%s", first.String())
 	}
 	if metaStatus(t, loop(base), info.Token) != http.StatusOK {
@@ -157,31 +157,31 @@ func TestDiscoveryFileWrittenAndRemoved(t *testing.T) {
 
 	stop()
 	if _, err := os.Stat(filepath.Join(dir, discovery.FileName)); !os.IsNotExist(err) {
-		t.Errorf("the discovery file outlived the Studio: %v", err)
+		t.Errorf("the discovery file outlived the server: %v", err)
 	}
 }
 
-// TestReuseSaysMissingDiscovery: a reused Studio whose file is gone is
+// TestReuseSaysMissingDiscovery: a reused server whose file is gone is
 // said in one line.
 func TestReuseSaysMissingDiscovery(t *testing.T) {
 	dir := discoveryDir(t)
 	base := freeBase(t, 2)
 	db := "sqlite://" + filepath.Join(t.TempDir(), "weft.db")
 	var first syncBuffer
-	bareStudio(t, db, base, 2, loop(base), "tok", false, &first)
+	bareServer(t, db, base, 2, loop(base), "tok", false, &first)
 	if err := os.Remove(filepath.Join(dir, discovery.FileName)); err != nil {
 		t.Fatal(err)
 	}
 	// weftbase dev -- cmd reuses (weftbase dev alone refuses): its reuse says the file
 	// is missing.
 	var second syncBuffer
-	if _, err := devStudio(db, want{addr: loop(base), span: 2}, "tok", true, &second); err != nil {
+	if _, err := devServer(db, want{addr: loop(base), span: 2}, "tok", true, &second); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
 		"reusing\n",
-		"studio: --rotate-token not applied: the running Studio keeps its token",
-		"studio: the running Studio wrote no discovery file; apps need WEFTBASE_URL=http://" + loop(base) + "\n",
+		"weftbase: --rotate-token not applied: the running server keeps its token",
+		"weftbase: the running server wrote no discovery file; apps need WEFTBASE_URL=http://" + loop(base) + "\n",
 	} {
 		if !strings.Contains(second.String(), want) {
 			t.Errorf("reuse output %q, want %q", second.String(), want)
@@ -190,7 +190,7 @@ func TestReuseSaysMissingDiscovery(t *testing.T) {
 }
 
 // TestDiscoveryFollowsTheMove: the B2 proof — a foreign process on the
-// base port moves Studio to the next one, and the discovery file names
+// base port moves server to the next one, and the discovery file names
 // that port.
 func TestDiscoveryFollowsTheMove(t *testing.T) {
 	dir := discoveryDir(t)
@@ -204,8 +204,8 @@ func TestDiscoveryFollowsTheMove(t *testing.T) {
 	defer func() { _ = hs.Close() }()
 
 	var out syncBuffer
-	bareStudio(t, "sqlite://"+filepath.Join(t.TempDir(), "weft.db"), base, 2, loop(base+1), "", false, &out)
-	if !strings.HasPrefix(out.String(), "studio: "+loop(base)+" is busy (not a weft Studio)") {
+	bareServer(t, "sqlite://"+filepath.Join(t.TempDir(), "weft.db"), base, 2, loop(base+1), "", false, &out)
+	if !strings.HasPrefix(out.String(), "weftbase: "+loop(base)+" is busy (not a weftbase server)") {
 		t.Errorf("stdout %q, want the move explained", out.String())
 	}
 	if info, _ := readDiscovery(t, dir); info.URL != "http://"+loop(base+1) {
@@ -224,7 +224,7 @@ func TestWriterReplacesStale(t *testing.T) {
 	}
 	base := freeBase(t, 1)
 	var out syncBuffer
-	bareStudio(t, "sqlite://"+filepath.Join(t.TempDir(), "weft.db"), base, 1, loop(base), "tok", false, &out)
+	bareServer(t, "sqlite://"+filepath.Join(t.TempDir(), "weft.db"), base, 1, loop(base), "tok", false, &out)
 	if info, _ := readDiscovery(t, dir); info.URL != "http://"+loop(base) || info.PID != os.Getpid() {
 		t.Errorf("the stale file was not replaced: %+v", info)
 	}
@@ -242,7 +242,7 @@ func TestStableTokenSurvivesRestart(t *testing.T) {
 	base := freeBase(t, 1)
 	start := func(tokenFlag string, rotate bool) (*syncBuffer, func()) {
 		var out syncBuffer
-		return &out, bareStudio(t, db, base, 1, loop(base), tokenFlag, rotate, &out)
+		return &out, bareServer(t, db, base, 1, loop(base), tokenFlag, rotate, &out)
 	}
 	fileTok := func() string {
 		b, err := os.ReadFile(dbPath + ".token")
@@ -263,7 +263,7 @@ func TestStableTokenSurvivesRestart(t *testing.T) {
 	if got := fileTok(); got != first || metaStatus(t, loop(base), first) != http.StatusOK {
 		t.Errorf("the token changed across a restart: %q, then %q", first, got)
 	}
-	if !strings.Contains(out.String(), "studio: token from "+dbPath+".token (stable for this database") {
+	if !strings.Contains(out.String(), "weftbase: token from "+dbPath+".token (stable for this database") {
 		t.Errorf("second banner %q", out.String())
 	}
 	stop()
@@ -273,7 +273,7 @@ func TestStableTokenSurvivesRestart(t *testing.T) {
 	if rotated == first || metaStatus(t, loop(base), rotated) != http.StatusOK || metaStatus(t, loop(base), first) != http.StatusUnauthorized {
 		t.Errorf("--rotate-token: %q (was %q)", rotated, first)
 	}
-	if !strings.Contains(out.String(), "studio: token rotated: a new one in "+dbPath+".token") || strings.Contains(out.String(), rotated) {
+	if !strings.Contains(out.String(), "weftbase: token rotated: a new one in "+dbPath+".token") || strings.Contains(out.String(), rotated) {
 		t.Errorf("rotate banner %q", out.String())
 	}
 	stop()
@@ -286,7 +286,7 @@ func TestStableTokenSurvivesRestart(t *testing.T) {
 }
 
 // TestProbeSendsStableTokenOnlyToDiscovered (review finding 4): the
-// stable token is long-lived and the panel tokens' signing key — a
+// stable token is long-lived and the scoped tokens' signing key — a
 // bare start probes a busy port bare unless this user's discovery file
 // names that address, and then it sends the stable token.
 func TestProbeSendsStableTokenOnlyToDiscovered(t *testing.T) {
@@ -318,10 +318,10 @@ func TestProbeSendsStableTokenOnlyToDiscovered(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_ = w // the Studio below displaces it; nothing to restore after the test
+			_ = w // the server below displaces it; nothing to restore after the test
 		}
 		var out syncBuffer
-		stop := bareStudio(t, "sqlite://"+dbPath, base, 2, loop(base+1), "", false, &out)
+		stop := bareServer(t, "sqlite://"+dbPath, base, 2, loop(base+1), "", false, &out)
 		stop()
 		_ = hs.Close()
 		mu.Lock()
@@ -378,7 +378,7 @@ func TestTokenCreateRace(t *testing.T) {
 // TestFixedTokenReusesOverStableFile (round 2, finding 1): a fixed
 // token always wins the probe — a database whose <db>.token holds
 // another (stable) token is still found by a second `--token X` start
-// (and that start refused: one Studio per database file).
+// (and that start refused: one server per database file).
 func TestFixedTokenReusesOverStableFile(t *testing.T) {
 	discoveryDir(t)
 	t.Setenv("WEFTBASE_TOKEN", "")
@@ -388,13 +388,13 @@ func TestFixedTokenReusesOverStableFile(t *testing.T) {
 	}
 	base := freeBase(t, 2)
 	var first syncBuffer
-	bareStudio(t, "sqlite://"+dbPath, base, 2, loop(base), "X", false, &first)
+	bareServer(t, "sqlite://"+dbPath, base, 2, loop(base), "X", false, &first)
 	var second syncBuffer
 	wantRefused(t, serveWith("sqlite://"+dbPath, want{addr: loop(base), span: 2}, "X", &second, afterBoot{}), &second, loop(base))
 }
 
 // TestDiscoveryRefreshedWhileServing (round 2, finding 2): a serving
-// Studio re-stamps its file's started time on refreshEvery.
+// Server re-stamps its file's started time on refreshEvery.
 func TestDiscoveryRefreshedWhileServing(t *testing.T) {
 	dir := discoveryDir(t)
 	oldEvery := refreshEvery
@@ -402,7 +402,7 @@ func TestDiscoveryRefreshedWhileServing(t *testing.T) {
 	t.Cleanup(func() { refreshEvery = oldEvery })
 	base := freeBase(t, 1)
 	var out syncBuffer
-	bareStudio(t, "sqlite://"+filepath.Join(t.TempDir(), "weft.db"), base, 1, loop(base), "tok", false, &out)
+	bareServer(t, "sqlite://"+filepath.Join(t.TempDir(), "weft.db"), base, 1, loop(base), "tok", false, &out)
 	first, _ := readDiscovery(t, dir)
 	deadline := time.Now().Add(10 * time.Second)
 	for {
@@ -417,17 +417,17 @@ func TestDiscoveryRefreshedWhileServing(t *testing.T) {
 }
 
 // TestDiscoveryOffWritesNone: under WEFTBASE_DISCOVERY=off neither `weft
-// studio` nor `weftbase dev`'s in-process Studio writes the discovery file
+// server` nor `weftbase dev`'s in-process server writes the discovery file
 // — the switch that turns the read off turns the write off too — and
 // each start says so in one line.
 func TestDiscoveryOffWritesNone(t *testing.T) {
 	t.Setenv("WEFTBASE_DISCOVERY", "off")
 	t.Setenv("WEFTBASE_TOKEN", "")
-	t.Run("studio", func(t *testing.T) {
+	t.Run("server", func(t *testing.T) {
 		dir := discoveryDir(t)
 		base := freeBase(t, 2)
 		var out syncBuffer
-		stop := bareStudio(t, "sqlite://"+filepath.Join(t.TempDir(), "weft.db"), base, 2, loop(base), "", false, &out)
+		stop := bareServer(t, "sqlite://"+filepath.Join(t.TempDir(), "weft.db"), base, 2, loop(base), "", false, &out)
 		defer stop()
 		if _, err := os.Stat(filepath.Join(dir, discovery.FileName)); !os.IsNotExist(err) {
 			t.Errorf("weftbase dev wrote a discovery file under WEFTBASE_DISCOVERY=off: %v", err)
@@ -440,7 +440,7 @@ func TestDiscoveryOffWritesNone(t *testing.T) {
 		dir := discoveryDir(t)
 		base := freeBase(t, 2)
 		var out syncBuffer
-		r, err := devStudio("sqlite://"+filepath.Join(t.TempDir(), "weft.db"), want{addr: loop(base), span: 2}, "", false, &out)
+		r, err := devServer("sqlite://"+filepath.Join(t.TempDir(), "weft.db"), want{addr: loop(base), span: 2}, "", false, &out)
 		if err != nil {
 			t.Fatal(err)
 		}

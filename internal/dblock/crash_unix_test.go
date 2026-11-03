@@ -31,7 +31,7 @@ func TestMain(m *testing.M) {
 
 // TestReleasedOnCrash: flock belongs to the open file; the kernel drops
 // it when the holder's process dies, however it dies — a SIGKILLed
-// Studio leaves no stale lock (the file stays, naming a dead holder,
+// Server leaves no stale lock (the file stays, naming a dead holder,
 // and the next Acquire takes it).
 func TestReleasedOnCrash(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "weft.db")

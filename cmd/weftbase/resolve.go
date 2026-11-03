@@ -8,18 +8,18 @@ import (
 	"os"
 	"strings"
 
-	"github.com/weftbase/weftbase/internal/discovery"
+	"github.com/weftbase/weftbase/client/discovery"
 	"github.com/weftbase/weftbase/internal/doctor"
 )
 
 // The one resolver every API client of the command line shares — runs,
-// open, export, doctor and mcp (UX-S5a-01, A10): the Studio is --url,
+// open, export, doctor and mcp (UX-S5a-01, A10): the server is --url,
 // else WEFTBASE_URL, else the discovery file a running `weftbase dev`
 // or `weftbase dev` wrote (internal/discovery's reader and trust rules —
 // loopback, fresh, 0600 and this user's — and WEFTBASE_DISCOVERY=off), else
 // the one default address. The token is --token, else
 // WEFTBASE_TOKEN, else the discovery file's when that file names the
-// resolved Studio: a token goes only to the Studio it belongs to.
+// resolved server: a token goes only to the server it belongs to.
 
 // Where a target's URL came from.
 const (
@@ -29,8 +29,8 @@ const (
 	fromDefault   = "the default address"
 )
 
-// studioTarget is the Studio a client talks to and why.
-type studioTarget struct {
+// serverTarget is the server a client talks to and why.
+type serverTarget struct {
 	base, token string
 	from        string // fromFlag | fromEnv | fromDiscovery | fromDefault
 	tokenFrom   string // "--token", "WEFTBASE_TOKEN", "the discovery file", "none"
@@ -41,12 +41,12 @@ type studioTarget struct {
 	off  bool
 }
 
-// resolveStudio is the one resolver.
-func resolveStudio(urlFlag, tokenFlag string) studioTarget {
-	t := studioTarget{off: discovery.Off(os.Getenv)}
+// resolveServer is the one resolver.
+func resolveServer(urlFlag, tokenFlag string) serverTarget {
+	t := serverTarget{off: discovery.Off(os.Getenv)}
 	if !t.off {
 		// Read the file whatever named the URL: its token is used only
-		// when it names the same Studio, and doctor reports it.
+		// when it names the same server, and doctor reports it.
 		t.info, t.file, _ = discovery.Lookup(func(k string) string {
 			if k == "WEFTBASE_URL" {
 				return ""
@@ -78,16 +78,16 @@ func resolveStudio(urlFlag, tokenFlag string) studioTarget {
 }
 
 // namedByFile reports whether the discovery file names the resolved
-// Studio.
-func (t studioTarget) namedByFile() bool {
+// Server.
+func (t serverTarget) namedByFile() bool {
 	return t.file != "" && strings.TrimRight(t.info.URL, "/") == strings.TrimRight(t.base, "/")
 }
 
-// explicit is whether the user named the Studio (--url, WEFTBASE_URL).
-func (t studioTarget) explicit() bool { return t.from == fromFlag || t.from == fromEnv }
+// explicit is whether the user named the server (--url, WEFTBASE_URL).
+func (t serverTarget) explicit() bool { return t.from == fromFlag || t.from == fromEnv }
 
 // source is the target's origin in words, for the stderr line.
-func (t studioTarget) source() string {
+func (t serverTarget) source() string {
 	switch t.from {
 	case fromDiscovery:
 		return "discovery file " + t.file
@@ -102,16 +102,16 @@ func (t studioTarget) source() string {
 	return t.from
 }
 
-// say prints the one stderr line naming the Studio and where it came
+// say prints the one stderr line naming the server and where it came
 // from, when the user did not name it (the discovery file, or the
-// default address): `weftbase: Studio http://127.0.0.1:7347 (discovery
-// file …)`. A Studio named by --url or WEFTBASE_URL is not repeated
+// default address): `weftbase: server http://127.0.0.1:7347 (discovery
+// file …)`. A server named by --url or WEFTBASE_URL is not repeated
 // back.
-func (t studioTarget) say(stderr io.Writer) {
+func (t serverTarget) say(stderr io.Writer) {
 	if t.explicit() {
 		return
 	}
-	_, _ = fmt.Fprintf(stderr, "weftbase: Studio %s (%s)\n", redactURL(t.base), t.source())
+	_, _ = fmt.Fprintf(stderr, "weftbase: server %s (%s)\n", redactURL(t.base), t.source())
 }
 
 // redactURL is a URL for a message: a password in its userinfo is
@@ -125,7 +125,7 @@ func redactURL(raw string) string {
 }
 
 // discovery is the discovery file as the doctor reports it.
-func (t studioTarget) discovery() doctor.Discovery {
+func (t serverTarget) discovery() doctor.Discovery {
 	d := doctor.Discovery{Off: t.off}
 	if t.file != "" {
 		d.Path, d.URL, d.DB, d.PID = t.file, t.info.URL, t.info.DB, t.info.PID

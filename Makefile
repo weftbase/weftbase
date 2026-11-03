@@ -103,8 +103,8 @@ layering:
 client-deps:
 	$(GO) run ./scripts/layering -client-only
 
-# The Go vocabulary audit: the retired product words ("Studio",
-# "panel", "playground", "devtools", "studio.cancel") appear nowhere in
+# The Go vocabulary audit: the retired product words (the vocab lines
+# of scripts/layering/layers.txt) appear nowhere in
 # Go code, comments or stored values.
 vocab:
 	$(GO) run ./scripts/layering -vocab-only

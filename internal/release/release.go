@@ -1,8 +1,8 @@
 // Package release is weftbase's own version. weftbase has its own
 // version line (it started at v0.1.0) and
 // reports the weft version it embeds beside it: that one is weft's
-// version package (github.com/weftbase/weft/version), which Studio's
-// api/meta, the devtools panel and the runtime link keep stamping —
+// version package (github.com/weftbase/weft/version), which server's
+// api/meta, the Console and the runtime link keep stamping —
 // the apps they talk to speak weft's records.
 package release
 

@@ -1,4 +1,4 @@
-// Package listen is the Studio command's port policy (plan B2): one
+// Package listen is the server command's port policy (plan B2): one
 // default port, 7331, stable and reusable, never silently different.
 //
 // Given the address the command wants, Choose either binds it or
@@ -7,15 +7,15 @@
 //   - The address is free: it is bound.
 //   - It is busy and pinned (--addr or WEFTBASE_ADDR set
 //     explicitly): an error naming the address. No probe, no fallback.
-//   - It is busy and a weft Studio answers GET /api/meta there with the
+//   - It is busy and a weftbase server answers GET /api/meta there with the
 //     same database file (db.path, which B5 serves to loopback and the
 //     dev token only): Choose binds nothing and returns a reuse verdict
-//     naming that Studio's URL and pid.
-//   - Before any of these, a Studio the user's discovery file names
+//     naming that server's URL and pid.
+//   - Before any of these, a server the user's discovery file names
 //     (Request.Known) is asked the same question: the same database
 //     file there is the reuse verdict too, whatever its port.
-//   - It is busy with anything else — another program, a Studio on
-//     another database, a Studio whose meta this token cannot read
+//   - It is busy with anything else — another program, a server on
+//     another database, a server whose meta this token cannot read
 //     (401/403) or that serves no db.path — the next port of the range
 //     is tried (7331–7340 by default), and the Choice's Note says which
 //     addresses were skipped and why. All of them busy is an error
@@ -28,8 +28,8 @@
 // machine for whatever holds that port — so it is never reused: the
 // db.path a reuse needs is served to loopback or the token alone.
 //
-// The policy is the command's, not the library's: studio.New gains
-// nothing, and an app's embedded Studio (setup A) is the app's own
+// The policy is the command's, not the library's: v1.New gains
+// nothing, and an app's embedded server (setup A) is the app's own
 // listener on the app's own port. The logic lives here, apart from the
 // command wiring (cmd/weftbase), so the commands share it.
 package listen
@@ -53,14 +53,14 @@ import (
 )
 
 const (
-	// DefaultAddr is Studio's one default address.
+	// DefaultAddr is server's one default address.
 	DefaultAddr = "127.0.0.1:7331"
 	// DefaultSpan is how many ports an unpinned Choose tries, from the
 	// wanted one up: 7331–7340.
 	DefaultSpan = 10
 	// ProbeTimeout bounds each /api/meta probe: a port held by
 	// something that accepts and never answers costs at most this,
-	// never a hang. Shorter than the doctor's 5 s: a Studio on loopback
+	// never a hang. Shorter than the doctor's 5 s: a server on loopback
 	// answers meta in milliseconds, and a start may probe the whole
 	// range.
 	ProbeTimeout = 2 * time.Second
@@ -78,7 +78,7 @@ type Request struct {
 	// Choose tries (0 = DefaultSpan).
 	Span int
 	// DBPath is the command's own database file, absolute. "" (an
-	// in-memory or fileless database) never matches a running Studio's.
+	// in-memory or fileless database) never matches a running server's.
 	DBPath string
 	// Token is the bearer the probe sends ("" sends none and relies on
 	// the loopback rule): the command's own --token / WEFTBASE_TOKEN,
@@ -92,11 +92,11 @@ type Request struct {
 	// address its user's discovery file names (plan B3), so that
 	// long-lived token never goes to whatever else holds a port.
 	TokenFor func(addr string) string
-	// Known is the address (host:port) of a Studio the user's discovery
+	// Known is the address (host:port) of a server the user's discovery
 	// file names, "" when none: Choose probes it first, before binding,
-	// pinned or not, and a Studio there serving the same database is the
-	// reuse verdict whatever its port — a Studio started with --addr, or
-	// moved to 7332–7340, is found, and never gets a second Studio on its
+	// pinned or not, and a server there serving the same database is the
+	// reuse verdict whatever its port — a server started with --addr, or
+	// moved to 7332–7340, is found, and never gets a second server on its
 	// file (UX-S5a-13). Anything else found there is ignored: the policy
 	// goes on as without it.
 	Known string
@@ -104,18 +104,18 @@ type Request struct {
 	Timeout time.Duration
 }
 
-// Choice is Choose's verdict: a listener, or a Studio to reuse.
+// Choice is Choose's verdict: a listener, or a server to reuse.
 type Choice struct {
 	// Listener is bound on Addr; nil when Reuse is set. The caller
 	// serves on it and closes it.
 	Listener net.Listener
 	// Addr is the address listened on — or, with Reuse, the running
-	// Studio's.
+	// Server's.
 	Addr string
-	// Reuse is set when a Studio on the same database already serves
+	// Reuse is set when a server on the same database already serves
 	// Addr: nothing was bound.
 	Reuse bool
-	// PID is the reused Studio's process id (api/meta's pid; 0 when it
+	// PID is the reused server's process id (api/meta's pid; 0 when it
 	// served none).
 	PID int
 	// Note is one line saying why the wanted address was not used —
@@ -132,7 +132,7 @@ func (c Choice) ReuseLine() string {
 	if c.PID > 0 {
 		pid = "pid " + strconv.Itoa(c.PID)
 	}
-	return fmt.Sprintf("studio already running at %s (%s), reusing", c.URL(), pid)
+	return fmt.Sprintf("weftbase already running at %s (%s), reusing", c.URL(), pid)
 }
 
 // Choose applies the port policy to r. ctx bounds the probes.
@@ -223,7 +223,7 @@ func probe(ctx context.Context, addr string, r Request) verdict {
 	}
 	req, err := probeRequest(ctx, addr, r.Token)
 	if err != nil {
-		return verdict{why: "not a weft Studio"}
+		return verdict{why: "not a weftbase server"}
 	}
 	sentToken := req.Header.Get("Authorization") != ""
 	client := &http.Client{
@@ -232,15 +232,15 @@ func probe(ctx context.Context, addr string, r Request) verdict {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return verdict{why: "not a weft Studio"}
+		return verdict{why: "not a weftbase server"}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return verdict{why: "not a weft Studio"}
+		return verdict{why: "not a weftbase server"}
 	}
 	var m struct {
-		StudioVersion string `json:"studio_version"`
+		ServerVersion string `json:"server_version"`
 		PID           int    `json:"pid"`
 		DB            struct {
 			Path string `json:"path"`
@@ -248,32 +248,32 @@ func probe(ctx context.Context, addr string, r Request) verdict {
 	}
 	switch resp.StatusCode {
 	case http.StatusOK:
-		if json.Unmarshal(body, &m) != nil || m.StudioVersion == "" {
-			return verdict{why: "not a weft Studio"}
+		if json.Unmarshal(body, &m) != nil || m.ServerVersion == "" {
+			return verdict{why: "not a weftbase server"}
 		}
 	case http.StatusUnauthorized, http.StatusForbidden:
 		if r.Token != "" && !sentToken {
-			return verdict{why: "a Studio that requires a token, which goes to loopback only"}
+			return verdict{why: "a server that requires a token, which goes to loopback only"}
 		}
 		if r.Token == "" {
-			return verdict{why: "a Studio that requires a token: set WEFTBASE_TOKEN to its token to compare its database"}
+			return verdict{why: "a server that requires a token: set WEFTBASE_TOKEN to its token to compare its database"}
 		}
-		return verdict{why: "a Studio with another token"}
+		return verdict{why: "a server with another token"}
 	default:
-		return verdict{why: "not a weft Studio"}
+		return verdict{why: "not a weftbase server"}
 	}
 	switch {
 	case m.DB.Path == "":
-		return verdict{why: "a Studio that serves no database path"}
+		return verdict{why: "a server that serves no database path"}
 	case r.DBPath == "":
-		return verdict{why: "a Studio on another database, " + m.DB.Path}
+		return verdict{why: "a server on another database, " + m.DB.Path}
 	}
 	same, err := sameFile(m.DB.Path, r.DBPath)
 	switch {
 	case err != nil:
-		return verdict{why: "a Studio on " + m.DB.Path + " (could not compare: " + err.Error() + ")"}
+		return verdict{why: "a server on " + m.DB.Path + " (could not compare: " + err.Error() + ")"}
 	case !same:
-		return verdict{why: "a Studio on another database, " + m.DB.Path}
+		return verdict{why: "a server on another database, " + m.DB.Path}
 	}
 	return verdict{reuse: true, pid: m.PID}
 }

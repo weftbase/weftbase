@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"time"
 
+	v1 "github.com/weftbase/weftbase/api/http/v1"
 	"github.com/weftbase/weftbase/internal/listen"
-	"github.com/weftbase/weftbase/studio"
 )
 
-// ExampleChoose starts a Studio the way the command does — Choose,
+// ExampleChoose starts a server the way the command does — Choose,
 // then serve on the Choice's listener — and starts it again on the
 // same database: the second Choose binds nothing and names the running
 // one to reuse. (The command wants listen.DefaultAddr; the example
@@ -32,7 +32,7 @@ func ExampleChoose() {
 		fmt.Println(err)
 		return
 	}
-	srv := studio.New(studio.Base("/"), studio.Open(path), studio.Token("dev-token"))
+	srv := v1.New(v1.Base("/"), v1.Open(path), v1.Token("dev-token"))
 	defer func() { _ = srv.Close() }()
 	hs := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: time.Second}
 	go func() { _ = hs.Serve(first.Listener) }()

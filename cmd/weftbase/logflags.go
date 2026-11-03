@@ -9,7 +9,7 @@ import (
 )
 
 // logFlags are --log-level and --log-format on `weftbase dev` and
-// `weftbase dev` (UX-E-37): the Studio server's log — the refused ingest
+// `weftbase dev` (UX-E-37): the server server's log — the refused ingest
 // batches, the 5xx lines with their request ids, the sweeper — goes
 // through slog.Default, and these pick its handler. Each mirrors an
 // environment variable one to one (WEFT_LOG_LEVEL, WEFT_LOG_FORMAT; the

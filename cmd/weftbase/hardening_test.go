@@ -33,7 +33,7 @@ func TestHTTPServerTimeouts(t *testing.T) {
 
 // TestBannerDoesNotPrintAFixedToken: the banner printed whatever token
 // was in force as "dev token" — including one the operator fixed
-// through WEFTBASE_TOKEN or --token, which is also the panel
+// through WEFTBASE_TOKEN or --token, which is also the Console
 // tokens' signing key (S4.6 setup C) and has no business in a log.
 // Only a generated dev token is printed: nobody knows it otherwise.
 func TestBannerDoesNotPrintAFixedToken(t *testing.T) {
@@ -51,16 +51,16 @@ func TestBannerDoesNotPrintAFixedToken(t *testing.T) {
 		if strings.Contains(banner.String(), "s3cr3t-signing-key") {
 			t.Errorf("%s: the banner prints the configured token:\n%s", name, banner.String())
 		}
-		if !strings.Contains(banner.String(), "studio: token from ") {
+		if !strings.Contains(banner.String(), "weftbase: token from ") {
 			t.Errorf("%s: the banner does not say where the token comes from:\n%s", name, banner.String())
 		}
 	}
 }
 
-// TestBadDatabaseIsAnErrorNotAPanic: studio.New panics when it cannot
+// TestBadDatabaseIsAnErrorNotAPanic: v1.New panics when it cannot
 // open its database (a construction error, for a library). The binary
 // turned a mistyped --db path into a goroutine dump instead of
-// "studio: …" and exit 1.
+// "weftbase: …" and exit 1.
 func TestBadDatabaseIsAnErrorNotAPanic(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -100,11 +100,11 @@ func TestBannerLinkCarriesAGeneratedToken(t *testing.T) {
 	_ = srv.Close()
 	var token string
 	for _, line := range strings.Split(banner.String(), "\n") {
-		if rest, ok := strings.CutPrefix(line, "studio: dev token "); ok {
+		if rest, ok := strings.CutPrefix(line, "weftbase: dev token "); ok {
 			token = strings.TrimSpace(strings.TrimSuffix(rest, "(WEFTBASE_TOKEN fixes it)"))
 		}
 	}
-	if token == "" || !strings.Contains(banner.String(), "studio: http://127.0.0.1:7331/#token="+token+"\n") {
+	if token == "" || !strings.Contains(banner.String(), "weftbase: http://127.0.0.1:7331/#token="+token+"\n") {
 		t.Errorf("the banner's link does not carry the dev token %q:\n%s", token, banner.String())
 	}
 
@@ -114,7 +114,7 @@ func TestBannerLinkCarriesAGeneratedToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = srv.Close()
-	if strings.Contains(banner.String(), "#token=") || !strings.Contains(banner.String(), "studio: http://127.0.0.1:7331/\n") {
+	if strings.Contains(banner.String(), "#token=") || !strings.Contains(banner.String(), "weftbase: http://127.0.0.1:7331/\n") {
 		t.Errorf("a fixed token's banner:\n%s", banner.String())
 	}
 }

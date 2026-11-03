@@ -10,13 +10,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftbase/weftbase/internal/discovery"
+	"github.com/weftbase/weftbase/client/discovery"
 )
 
-// TestStudioStopsOnSIGHUP (review finding 5): `weftbase dev` stops
+// TestServerStopsOnSIGHUP (review finding 5): `weftbase dev` stops
 // gracefully on SIGHUP (the terminal closing) like SIGINT and SIGTERM,
 // so its discovery file is removed.
-func TestStudioStopsOnSIGHUP(t *testing.T) {
+func TestServerStopsOnSIGHUP(t *testing.T) {
 	skipWithoutSelfSignal(t)
 	dir := discoveryDir(t)
 	base := freeBase(t, 1)
@@ -31,7 +31,7 @@ func TestStudioStopsOnSIGHUP(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("studio never served: %s", out.String())
+			t.Fatalf("weftbase never served: %s", out.String())
 		}
 	}
 	if _, err := os.Stat(filepath.Join(dir, discovery.FileName)); err != nil {

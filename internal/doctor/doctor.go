@@ -26,7 +26,7 @@ import (
 )
 
 // Timeout bounds the one request the doctor makes: an unreachable or
-// hung Studio is a clear first line, never a hang.
+// hung server is a clear first line, never a hang.
 const Timeout = 5 * time.Second
 
 // Line is one check the doctor prints: its label and the /api/meta
@@ -39,7 +39,7 @@ type Line struct {
 
 // Lines is the doctor's line table, in print order.
 var Lines = []Line{
-	{"studio", []string{"status", "weft_version", "studio_version"}},
+	{"server", []string{"status", "weft_version", "server_version"}},
 	{"token", []string{"status", "auth_required"}},
 	{"discovery", []string{"discovery_file", "db.path", "local:discovery"}},
 	{"db", []string{"db.kind", "db.path", "db.size"}},
@@ -53,7 +53,7 @@ var Lines = []Line{
 // meta is the slice of GET /api/meta the doctor reads.
 type meta struct {
 	WeftVersion   string          `json:"weft_version"`
-	StudioVersion string          `json:"studio_version"`
+	ServerVersion string          `json:"server_version"`
 	DB            json.RawMessage `json:"db"`
 	HasManifest   bool            `json:"has_manifest"`
 	Capabilities  []string        `json:"capabilities"`
@@ -62,10 +62,10 @@ type meta struct {
 	CapabilitiesOff map[string]string `json:"capabilities_off"`
 	IngestOpen      bool              `json:"ingest_open"`
 	AuthRequired    bool              `json:"auth_required"`
-	// PID is the Studio's process id (db.path's rule).
+	// PID is the server's process id (db.path's rule).
 	PID int `json:"pid"`
-	// DiscoveryFile is the discovery file this Studio wrote (served
-	// under db.path's rule while it names the Studio's process).
+	// DiscoveryFile is the discovery file this server wrote (served
+	// under db.path's rule while it names the server's process).
 	DiscoveryFile string `json:"discovery_file"`
 	Content       struct {
 		Ingest string `json:"ingest"`
@@ -76,7 +76,7 @@ type meta struct {
 			Note  string `json:"note"`
 			Fix   string `json:"fix"`
 			// Started, WeftVersion and Service are the newest run's own:
-			// the data line (absent from a Studio older than it).
+			// the data line (absent from a server older than it).
 			Started     time.Time `json:"started"`
 			WeftVersion string    `json:"weft_version"`
 			Service     string    `json:"service"`
@@ -90,9 +90,9 @@ type meta struct {
 			Records   int64     `json:"records"`
 			LastHeard time.Time `json:"last_heard"`
 		} `json:"dropped"`
-		// Accepted and Refused count the OTLP batches Studio answered
+		// Accepted and Refused count the OTLP batches server answered
 		// 2xx and 4xx/5xx since it started, LastError / LastAt the last
-		// refusal (UX-E-37): nil from a Studio older than them.
+		// refusal (UX-E-37): nil from a server older than them.
 		Accepted  *int64     `json:"accepted"`
 		Refused   *int64     `json:"refused"`
 		LastError string     `json:"last_error"`
@@ -109,12 +109,12 @@ type meta struct {
 	} `json:"manifest_check"`
 }
 
-// Target is the Studio the doctor checks, found by cmd/weftbase's one
+// Target is the server the doctor checks, found by cmd/weftbase's one
 // resolver (--url, WEFTBASE_URL, the discovery file, the default
 // address), which names the source on stderr itself: the doctor's own
 // lines do not repeat it.
 type Target struct {
-	// URL is the Studio's root URL.
+	// URL is the server's root URL.
 	URL string
 	// Token is the bearer to send, "" for none.
 	Token string
@@ -137,7 +137,7 @@ type Discovery struct {
 // ErrUnhealthy is Run's error when any check failed: the command exits 1.
 var ErrUnhealthy = errors.New("doctor: a check failed")
 
-// Run checks the Studio t names (t.Token "" sends none) and prints one
+// Run checks the server t names (t.Token "" sends none) and prints one
 // line per check to w. It returns ErrUnhealthy when a check failed —
 // the server not reachable, the token refused — and nil otherwise;
 // warnings (content stripped, a stale weft.json, a discovery file
@@ -150,7 +150,7 @@ func Run(ctx context.Context, w io.Writer, t Target) error {
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url+"/api/meta", nil)
 	if err != nil {
-		p.raw("studio not reachable at %s: %v", url, err)
+		p.raw("weftbase not reachable at %s: %v", url, err)
 		return ErrUnhealthy
 	}
 	if token != "" {
@@ -164,44 +164,44 @@ func Run(ctx context.Context, w io.Writer, t Target) error {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		p.raw("studio not reachable at %s: %v", where, err)
+		p.raw("weftbase not reachable at %s: %v", where, err)
 		p.sub("start one with `weftbase dev`, or point --url (WEFTBASE_URL) at the one you run")
 		return ErrUnhealthy
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		p.raw("studio not reachable at %s: %v", url, err)
+		p.raw("weftbase not reachable at %s: %v", url, err)
 		return ErrUnhealthy
 	}
 
 	switch resp.StatusCode {
 	case http.StatusOK:
 	case http.StatusUnauthorized:
-		p.line(ok, "studio", "reachable at %s", url)
+		p.line(ok, "server", "reachable at %s", url)
 		if token == "" {
-			p.line(fail, "token", "studio requires one: it is in <db>.token beside the database (the start banner names the file); set WEFTBASE_TOKEN or --token to it")
-			p.sub("or run `weftbase open --with-token` from the directory the Studio started in (where its discovery file is found), or pass --token \"$(cat <db>.token)\"")
+			p.line(fail, "token", "server requires one: it is in <db>.token beside the database (the start banner names the file); set WEFTBASE_TOKEN or --token to it")
+			p.sub("or run `weftbase open --with-token` from the directory the server started in (where its discovery file is found), or pass --token \"$(cat <db>.token)\"")
 		} else {
-			p.line(fail, "token", "refused: it is not this studio's token (WEFTBASE_TOKEN / --token)")
+			p.line(fail, "token", "refused: it is not this server's token (WEFTBASE_TOKEN / --token)")
 		}
 		return ErrUnhealthy
 	default:
-		p.line(ok, "studio", "reachable at %s", url)
+		p.line(ok, "server", "reachable at %s", url)
 		msg := errorMessage(body)
 		if loc := resp.Header.Get("Location"); resp.StatusCode/100 == 3 {
-			msg = "a redirect to " + loc + ", not followed: point --url at the Studio itself"
+			msg = "a redirect to " + loc + ", not followed: point --url at the server itself"
 		}
 		p.line(fail, "token", "api/meta answered %d: %s", resp.StatusCode, msg)
 		return ErrUnhealthy
 	}
 	var m meta
 	if err := json.Unmarshal(body, &m); err != nil {
-		p.raw("studio not reachable at %s: api/meta is not JSON: %v", url, err)
+		p.raw("weftbase not reachable at %s: api/meta is not JSON: %v", url, err)
 		return ErrUnhealthy
 	}
 
-	p.line(ok, "studio", "reachable at %s (weft %s, studio %s)", where, m.WeftVersion, m.StudioVersion)
+	p.line(ok, "server", "reachable at %s (weft %s, server %s)", where, m.WeftVersion, m.ServerVersion)
 	if m.AuthRequired {
 		p.line(ok, "token", "accepted")
 	} else {
@@ -227,7 +227,7 @@ const (
 )
 
 // printer writes the doctor's lines. Every line passes termsafe.Text:
-// what it prints comes from Studio (service names, run ids, notes,
+// what it prints comes from server (service names, run ids, notes,
 // error text an OTLP sender may have chosen), and a control character
 // never reaches the terminal raw.
 type printer struct {
@@ -260,10 +260,10 @@ func (p *printer) db(raw json.RawMessage) {
 		Size *int64 `json:"size"`
 	}
 	if err := json.Unmarshal(raw, &db); err != nil {
-		// A Studio older than this doctor serves db as the kind alone.
+		// A server older than this doctor serves db as the kind alone.
 		var kind string
 		_ = json.Unmarshal(raw, &kind)
-		p.line(ok, "db", "%s (this studio predates db.path)", kind)
+		p.line(ok, "db", "%s (this server predates db.path)", kind)
 		return
 	}
 	switch {
@@ -277,9 +277,9 @@ func (p *printer) db(raw json.RawMessage) {
 }
 
 func (p *printer) content(m meta) {
-	policy := "studio stores content as received"
+	policy := "server stores content as received"
 	if m.Content.Ingest != "as_received" {
-		policy = "studio ingest policy " + m.Content.Ingest
+		policy = "server ingest policy " + m.Content.Ingest
 	}
 	l := m.Content.Latest
 	if m.Content.Error != "" {
@@ -307,7 +307,7 @@ func (p *printer) content(m meta) {
 // ingest line to warn.
 const refusalWindow = time.Hour
 
-// ingest prints the ingest health: the OTLP batches this Studio
+// ingest prints the ingest health: the OTLP batches this server
 // accepted and refused (and the last refusal), then the services whose
 // heartbeats said their destination lost records on the way
 // (weft.records.dropped). A warning, not a failure: the runs say which
@@ -315,7 +315,7 @@ const refusalWindow = time.Hour
 // Refusals warn only within refusalWindow of the last one.
 func (p *printer) ingest(m meta) {
 	if m.Ingest == nil {
-		p.line(ok, "ingest", "not served (no ingest.dropped): a studio older than ingest health")
+		p.line(ok, "ingest", "not served (no ingest.dropped): a server older than ingest health")
 		return
 	}
 	in := m.Ingest
@@ -326,7 +326,7 @@ func (p *printer) ingest(m meta) {
 	}
 	// A refusal warns while it is recent: the last one within the hour
 	// (refusalWindow), or one with no time said. The counts are since
-	// Studio started, so one refused batch long ago reads ok, its line
+	// Server started, so one refused batch long ago reads ok, its line
 	// still printed below.
 	if refused && in.LastAt != nil && time.Since(*in.LastAt) > refusalWindow {
 		refused = false
@@ -346,7 +346,7 @@ func (p *printer) ingest(m meta) {
 			at = " at " + in.LastAt.Format(time.RFC3339)
 		}
 		p.sub("last refused%s: %s", at, in.LastError)
-		p.sub("fix: studio's log names each refused batch with its request id (WARN \"weftbase: ingest batch refused\"); a 401 is the app's ingest token (exporter.Studio(url, token), studio.IngestToken)")
+		p.sub("fix: server's log names each refused batch with its request id (WARN \"weftbase: ingest batch refused\"); a 401 is the app's ingest token (exporter.Remote(url, key), v1.IngestToken)")
 	}
 	if len(in.Dropped) > 0 {
 		for _, d := range in.Dropped {
@@ -369,7 +369,7 @@ func (p *printer) manifest(m meta) {
 	c := m.ManifestCheck
 	switch {
 	case !m.HasManifest:
-		p.line(ok, "manifest", "none: no weft.json configured (studio.Manifest, or --manifest / WEFT_MANIFEST), nothing to compare")
+		p.line(ok, "manifest", "none: no weft.json configured (v1.Manifest, or --manifest / WEFT_MANIFEST), nothing to compare")
 	case c == nil:
 		p.line(ok, "manifest", "present (weft.json); not checked for this caller")
 	case c.Error != "":
@@ -405,10 +405,10 @@ func lastRunHash(stale []string, latest map[string]string) string {
 	return fmt.Sprintf(" (the latest run of %s ran manifest %s)", stale[0], h)
 }
 
-// discovery prints how apps find this Studio: the discovery file this
-// shell reads, against the one this Studio says it wrote. Another
-// Studio's file is a warning — apps that set no WEFTBASE_URL send
-// there — and two Studios on one database a second one.
+// discovery prints how apps find this server: the discovery file this
+// shell reads, against the one this server says it wrote. Another
+// Server's file is a warning — apps that set no WEFTBASE_URL send
+// there — and two servers on one database a second one.
 func (p *printer) discovery(m meta, url string, d Discovery) {
 	var dbPath string
 	var db struct {
@@ -421,18 +421,18 @@ func (p *printer) discovery(m meta, url string, d Discovery) {
 	case d.Off:
 		p.line(ok, "discovery", "WEFTBASE_DISCOVERY=off in this shell: no file read; apps and this command need WEFTBASE_URL=%s", url)
 	case d.Path == "" && m.DiscoveryFile != "":
-		p.line(warn, "discovery", "this Studio wrote %s, which this shell does not find: an app run here needs WEFTBASE_URL=%s", m.DiscoveryFile, url)
-		p.sub("./.weftbase is read from the working directory: run from the directory the Studio started in")
+		p.line(warn, "discovery", "this server wrote %s, which this shell does not find: an app run here needs WEFTBASE_URL=%s", m.DiscoveryFile, url)
+		p.sub("./.weftbase is read from the working directory: run from the directory the server started in")
 	case d.Path == "":
-		p.line(warn, "discovery", "no discovery file: an app that sets no WEFTBASE_URL finds no Studio (weftbase dev write one; WEFTBASE_DISCOVERY=off writes none)")
+		p.line(warn, "discovery", "no discovery file: an app that sets no WEFTBASE_URL finds no server (weftbase dev write one; WEFTBASE_DISCOVERY=off writes none)")
 	case strings.TrimRight(d.URL, "/") == url || m.DiscoveryFile != "" && m.DiscoveryFile == d.Path || m.PID > 0 && m.PID == d.PID:
-		// This Studio, however its host is spelled (localhost,
+		// This server, however its host is spelled (localhost,
 		// 127.0.0.1): the file it wrote, or its pid.
-		p.line(ok, "discovery", "%s -> %s (this Studio)", d.Path, d.URL)
+		p.line(ok, "discovery", "%s -> %s (this server)", d.Path, d.URL)
 	default:
-		p.line(warn, "discovery", "%s -> %s, ANOTHER Studio (pid %d, db %s): an app that sets no WEFTBASE_URL sends there, not to %s", d.Path, d.URL, d.PID, orNone(d.DB), url)
+		p.line(warn, "discovery", "%s -> %s, ANOTHER server (pid %d, db %s): an app that sets no WEFTBASE_URL sends there, not to %s", d.Path, d.URL, d.PID, orNone(d.DB), url)
 		if dbPath != "" && d.DB != "" && filepath.Clean(d.DB) == filepath.Clean(dbPath) {
-			p.sub("two Studios serve %s: stop one (each has its own live stream; an app's live frames reach only the one it dials)", dbPath)
+			p.sub("two servers serve %s: stop one (each has its own live stream; an app's live frames reach only the one it dials)", dbPath)
 		}
 	}
 }
@@ -445,7 +445,7 @@ func orNone(s string) string {
 }
 
 // data prints the newest stored run: when it arrived, which weft and
-// service sent it — a warning when that weft is not this Studio's (runs
+// service sent it — a warning when that weft is not this server's (runs
 // from an older weft lack what it added; their gaps are badged).
 func (p *printer) data(m meta) {
 	l := m.Content.Latest
@@ -454,10 +454,10 @@ func (p *printer) data(m meta) {
 		p.line(warn, "data", "the newest run could not be read (the content line says why)")
 		return
 	case l == nil:
-		p.line(ok, "data", "no run stored yet: an app that records to this Studio fills it")
+		p.line(ok, "data", "no run stored yet: an app that records to this server fills it")
 		return
 	case l.Started.IsZero():
-		p.line(ok, "data", "newest run %s (this studio predates content.latest.started)", l.RunID)
+		p.line(ok, "data", "newest run %s (this server predates content.latest.started)", l.RunID)
 		return
 	}
 	ago := time.Since(l.Started)
@@ -474,7 +474,7 @@ func (p *printer) data(m meta) {
 	case l.WeftVersion == "":
 		p.line(ok, "data", "newest run %s ago%s carries no weft version: a non-weft exporter", ago, svc)
 	case l.WeftVersion != m.WeftVersion:
-		p.line(warn, "data", "newest run %s ago by weft %s%s, this Studio is weft %s: the versions differ — what one records and the other does not read is badged on the run", ago, l.WeftVersion, svc, m.WeftVersion)
+		p.line(warn, "data", "newest run %s ago by weft %s%s, this server is weft %s: the versions differ — what one records and the other does not read is badged on the run", ago, l.WeftVersion, svc, m.WeftVersion)
 	default:
 		p.line(ok, "data", "newest run %s ago by weft %s%s", ago, l.WeftVersion, svc)
 	}
@@ -489,15 +489,15 @@ func (p *printer) otlp(m meta, url string) {
 		if why == "" {
 			why = "OTLP ingest is off"
 		}
-		p.line(warn, "otlp", "%s: an app's spans cannot reach this Studio", why)
+		p.line(warn, "otlp", "%s: an app's spans cannot reach this server", why)
 	case m.IngestOpen:
-		p.line(ok, "otlp", "open: OTLP at %s/v1/traces and /v1/logs takes a loopback app's spans with no ingest token", url)
+		p.line(ok, "otlp", "open: OTLP at %s/otlp/v1/traces and /otlp/v1/logs takes a loopback app's spans with no ingest token", url)
 	default:
-		p.line(ok, "otlp", "walled: OTLP at %s/v1/traces and /v1/logs needs the ingest token (exporter.Studio(url, token))", url)
+		p.line(ok, "otlp", "walled: OTLP at %s/otlp/v1/traces and /otlp/v1/logs needs the ingest token (exporter.Remote(url, key))", url)
 	}
 }
 
-// errorMessage reads a Studio error body's message, or the body.
+// errorMessage reads a server error body's message, or the body.
 func errorMessage(body []byte) string {
 	var e struct {
 		Error struct {

@@ -11,13 +11,13 @@ import (
 	"strings"
 	"time"
 
+	v1 "github.com/weftbase/weftbase/api/http/v1"
 	"github.com/weftbase/weftbase/obsdb"
 	"github.com/weftbase/weftbase/obsdb/clickhouse"
 	"github.com/weftbase/weftbase/obsdb/sqlite"
-	"github.com/weftbase/weftbase/studio"
 )
 
-// retainFlag adds --retain to a flag set: studio.Retain's duration,
+// retainFlag adds --retain to a flag set: v1.Retain's duration,
 // mirroring WEFT_RETAIN one to one (resolveRetain reads both).
 func retainFlag(fs *flag.FlagSet, what string) *string {
 	return fs.String("retain", "", "`duration` (Go syntax: 720h, 168h30m; at least 1h) "+what+
@@ -26,7 +26,7 @@ func retainFlag(fs *flag.FlagSet, what string) *string {
 
 // resolveRetain is --retain, else WEFT_RETAIN, as a duration: 0 when
 // neither is set (off). A value that does not parse, a negative one, or
-// one under an hour (studio.Retain's floor, the same words) is a usage
+// one under an hour (v1.Retain's floor, the same words) is a usage
 // error naming where it came from.
 func resolveRetain(flagVal string) (time.Duration, error) {
 	val, from := flagVal, "--retain"
@@ -49,20 +49,20 @@ func resolveRetain(flagVal string) (time.Duration, error) {
 	return d, nil
 }
 
-// retainFloorMsg is studio.Retain's refusal under an hour, word for
-// word (TestRetainFloorMatchesStudio pins it to the panic New raises).
+// retainFloorMsg is v1.Retain's refusal under an hour, word for
+// word (TestRetainFloorMatchesServer pins it to the panic New raises).
 const retainFloorMsg = "retention must be at least 1h: the sweeper's not-running rule counts a run silent for 30 s " +
 	"as interrupted, so a short retention would sweep a live run paused at a breakpoint"
 
-// retainOptions turns --retain / WEFT_RETAIN into studio options and the
+// retainOptions turns --retain / WEFT_RETAIN into server options and the
 // line the banner prints ("" when off).
-func retainOptions(flagVal string) ([]studio.Option, string, error) {
+func retainOptions(flagVal string) ([]v1.Option, string, error) {
 	d, err := resolveRetain(flagVal)
 	if err != nil || d == 0 {
 		return nil, "", err
 	}
-	return []studio.Option{studio.Retain(d)}, "studio: retention " + d.String() +
-		": runs that are not running and were last seen longer ago are deleted (studio's tables only)", nil
+	return []v1.Option{v1.Retain(d)}, "weftbase: retention " + d.String() +
+		": runs that are not running and were last seen longer ago are deleted (server's tables only)", nil
 }
 
 // runVacuum is `weftbase vacuum`: one retention sweep when a retention is
@@ -78,7 +78,7 @@ func runVacuum(args []string, stdout, stderr io.Writer) error {
 	retain := retainFlag(fs, "to sweep first: delete the runs not running last seen longer ago")
 	fs.Usage = func() {
 		_, _ = fmt.Fprintln(fs.Output(), "Usage: weftbase vacuum [--db sqlite://path|clickhouse://…] [--retain duration]")
-		_, _ = fmt.Fprintln(fs.Output(), "One retention sweep (with --retain or WEFT_RETAIN), then VACUUM (SQLite) or OPTIMIZE TABLE … FINAL (ClickHouse); studio's tables only.")
+		_, _ = fmt.Fprintln(fs.Output(), "One retention sweep (with --retain or WEFT_RETAIN), then VACUUM (SQLite) or OPTIMIZE TABLE … FINAL (ClickHouse); server's tables only.")
 		printDefaults(fs)
 	}
 	if err := parse(fs, args); err != nil {
@@ -116,7 +116,7 @@ func runVacuum(args []string, stdout, stderr io.Writer) error {
 		afterMain, afterWAL := fileSizes(path)
 		_, _ = fmt.Fprintf(stdout, "vacuum: %s %d → %d bytes (WAL %d → %d bytes)\n", path, beforeMain, afterMain, beforeWAL, afterWAL)
 		if afterWAL > 0 {
-			_, _ = fmt.Fprintln(stdout, "vacuum: the WAL is not checkpointed yet (a live reader or writer holds it — a running Studio): the next checkpoint folds it into the file")
+			_, _ = fmt.Fprintln(stdout, "vacuum: the WAL is not checkpointed yet (a live reader or writer holds it — a running server): the next checkpoint folds it into the file")
 		}
 	} else {
 		_, _ = fmt.Fprintf(stdout, "vacuum: %s optimized\n", dbLabel(*dbFlag))
@@ -124,7 +124,7 @@ func runVacuum(args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
-// openVacuumDB opens --db as the studio subcommand reads it, returning
+// openVacuumDB opens --db as the server subcommand reads it, returning
 // the SQLite file's path ("" for ClickHouse).
 func openVacuumDB(dbFlag string) (obsdb.DB, string, error) {
 	switch {

@@ -33,7 +33,7 @@ func TestTokenGoesToLoopbackOnly(t *testing.T) {
 		{"192.168.1.5:7331", false},
 		{"10.0.0.5:7331", false},
 		{"[2001:db8::1]:7331", false},
-		{"studio.example:7331", false},
+		{"wb.example:7331", false},
 		{"localhost.evil.example:7331", false},
 	} {
 		req, err := probeRequest(context.Background(), c.addr, "fixed-token")
@@ -91,13 +91,13 @@ func TestSameFileReasons(t *testing.T) {
 	if same || err == nil {
 		t.Fatalf("unstat-able running path: %v, %v; want an error", same, err)
 	}
-	// The verdict probe returns for it, from a Studio's meta naming it.
+	// The verdict probe returns for it, from a server's meta naming it.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"studio_version": "v0", "pid": 42, "db": map[string]string{"kind": "sqlite", "path": hidden}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"server_version": "v0", "pid": 42, "db": map[string]string{"kind": "sqlite", "path": hidden}})
 	}))
 	defer ts.Close()
 	v := probe(context.Background(), strings.TrimPrefix(ts.URL, "http://"), Request{DBPath: a, Timeout: time.Second})
-	if want := "a Studio on " + hidden + " (could not compare: "; v.reuse || !strings.HasPrefix(v.why, want) || strings.Contains(v.why, "another database") {
+	if want := "a server on " + hidden + " (could not compare: "; v.reuse || !strings.HasPrefix(v.why, want) || strings.Contains(v.why, "another database") {
 		t.Errorf("verdict %+v, want %q…", v, want)
 	}
 }

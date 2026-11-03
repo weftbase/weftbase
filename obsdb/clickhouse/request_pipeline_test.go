@@ -13,9 +13,9 @@ import (
 	"github.com/weftbase/weft/core"
 	"github.com/weftbase/weft/core/wefttest"
 	"github.com/weftbase/weft/otel"
-	"github.com/weftbase/weftbase/exporter"
 	"github.com/weftbase/weftbase/obsdb"
 	"github.com/weftbase/weftbase/obsdb/sqlite"
+	"github.com/weftbase/weftbase/observe/local"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
@@ -49,7 +49,7 @@ func (c *capture) ForceFlush(context.Context) error { return nil }
 func (c *capture) batch() obsdb.Batch {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return obsdb.Batch{Spans: exporter.FromSDKSpans(c.spans), Records: exporter.FromSDKRecords(c.logs)}
+	return obsdb.Batch{Spans: local.FromSDKSpans(c.spans), Records: local.FromSDKRecords(c.logs)}
 }
 
 // ADR 0028 through the real pipeline, on both backends: one 50-step
@@ -64,7 +64,7 @@ func TestRequestRecordsBackendsAgree(t *testing.T) {
 	}
 	ctx := context.Background()
 	on, off := &capture{}, &capture{}
-	p, err := exporter.Start(ctx, otel.NoGlobal(), otel.NoEnv(), otel.Heartbeat(0),
+	p, err := local.Start(ctx, otel.NoGlobal(), otel.NoEnv(), otel.Heartbeat(0),
 		otel.Exporters(on, on, otel.WithContent()), otel.Exporters(off, off))
 	if err != nil {
 		t.Fatal(err)

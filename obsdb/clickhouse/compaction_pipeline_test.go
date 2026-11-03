@@ -15,9 +15,9 @@ import (
 	"github.com/weftbase/weft/core/wefttest"
 	"github.com/weftbase/weft/otel"
 	"github.com/weftbase/weft/thread"
-	"github.com/weftbase/weftbase/exporter"
 	"github.com/weftbase/weftbase/obsdb"
 	"github.com/weftbase/weftbase/obsdb/sqlite"
+	"github.com/weftbase/weftbase/observe/local"
 )
 
 // ADR 0028 §8 through the real pipeline, on both backends: a run whose
@@ -33,7 +33,7 @@ import (
 func TestCompactionBackendsAgree(t *testing.T) {
 	ctx := context.Background()
 	on := &capture{}
-	p, err := exporter.Start(ctx, otel.NoGlobal(), otel.NoEnv(), otel.Heartbeat(0), otel.Exporters(on, on, otel.WithContent()))
+	p, err := local.Start(ctx, otel.NoGlobal(), otel.NoEnv(), otel.Heartbeat(0), otel.Exporters(on, on, otel.WithContent()))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -69,10 +69,10 @@ func freeBase(t *testing.T, n int) int {
 
 func loop(port int) string { return "127.0.0.1:" + strconv.Itoa(port) }
 
-// startStudio runs serve in the background on base and waits until
+// startServer runs serve in the background on base and waits until
 // api/meta answers on wantAt; stop sends SIGTERM (serveOn's graceful
 // stop) and waits for serve to return.
-func startStudio(t *testing.T, db string, base, span int, wantAt string, out *syncBuffer) (stop func()) {
+func startServer(t *testing.T, db string, base, span int, wantAt string, out *syncBuffer) (stop func()) {
 	t.Helper()
 	skipWithoutSelfSignal(t)
 	done := make(chan error, 1)
@@ -93,7 +93,7 @@ func startStudio(t *testing.T, db string, base, span int, wantAt string, out *sy
 		default:
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("studio never served on %s: %v (stdout %q)", wantAt, err, out.String())
+			t.Fatalf("weftbase never served on %s: %v (stdout %q)", wantAt, err, out.String())
 		}
 	}
 	return func() {
@@ -109,12 +109,12 @@ func startStudio(t *testing.T, db string, base, span int, wantAt string, out *sy
 	}
 }
 
-// wantRefused checks a second start on a database a running Studio
-// serves: refused (UX-S5a-13), the error naming that Studio's URL and
+// wantRefused checks a second start on a database a running server
+// serves: refused (UX-S5a-13), the error naming that server's URL and
 // pid, nothing printed.
 func wantRefused(t *testing.T, err error, out fmt.Stringer, addr string) {
 	t.Helper()
-	if want := "studio already running at http://" + addr + " (pid " + strconv.Itoa(os.Getpid()) + ") on "; err == nil || !strings.HasPrefix(err.Error(), want) {
+	if want := "weftbase already running at http://" + addr + " (pid " + strconv.Itoa(os.Getpid()) + ") on "; err == nil || !strings.HasPrefix(err.Error(), want) {
 		t.Errorf("second start = %v, want refused: %q…", err, want)
 	}
 	if out.String() != "" {
@@ -129,9 +129,9 @@ func TestSecondStartRefused(t *testing.T) {
 	base := freeBase(t, 3)
 	db := "sqlite://" + filepath.Join(t.TempDir(), "weft.db")
 	var first syncBuffer
-	stop := startStudio(t, db, base, 3, loop(base), &first)
+	stop := startServer(t, db, base, 3, loop(base), &first)
 	defer stop()
-	if !strings.HasPrefix(first.String(), "studio: http://"+loop(base)+"/\n") {
+	if !strings.HasPrefix(first.String(), "weftbase: http://"+loop(base)+"/\n") {
 		t.Errorf("first start's banner %q, want it on %s", first.String(), loop(base))
 	}
 
@@ -143,10 +143,10 @@ func TestSecondStartRefused(t *testing.T) {
 	}
 }
 
-// TestForeignListenerMovesStudio: something that is not Studio on the
-// wanted port moves Studio to the next one, with one line saying which
+// TestForeignListenerMovesServer: something that is not server on the
+// wanted port moves server to the next one, with one line saying which
 // and why, and the banner prints the real address.
-func TestForeignListenerMovesStudio(t *testing.T) {
+func TestForeignListenerMovesServer(t *testing.T) {
 	base := freeBase(t, 2)
 	foreign, err := net.Listen("tcp", loop(base))
 	if err != nil {
@@ -157,23 +157,23 @@ func TestForeignListenerMovesStudio(t *testing.T) {
 	defer func() { _ = hs.Close() }()
 
 	var out syncBuffer
-	stop := startStudio(t, "sqlite://"+filepath.Join(t.TempDir(), "weft.db"), base, 2, loop(base+1), &out)
+	stop := startServer(t, "sqlite://"+filepath.Join(t.TempDir(), "weft.db"), base, 2, loop(base+1), &out)
 	defer stop()
 	lines := strings.Split(out.String(), "\n")
-	if want := "studio: " + loop(base) + " is busy (not a weft Studio); listening on " + loop(base+1) + " instead (--addr pins one)"; lines[0] != want {
+	if want := "weftbase: " + loop(base) + " is busy (not a weftbase server); listening on " + loop(base+1) + " instead (--addr pins one)"; lines[0] != want {
 		t.Errorf("first line %q, want %q", lines[0], want)
 	}
-	if len(lines) < 2 || lines[1] != "studio: http://"+loop(base+1)+"/" {
+	if len(lines) < 2 || lines[1] != "weftbase: http://"+loop(base+1)+"/" {
 		t.Errorf("banner %q, want the real address %s", out.String(), loop(base+1))
 	}
 }
 
-// TestStudioOnAnotherDBMovesStudio: a Studio on another database holds
+// TestServerOnAnotherDBMovesServer: a server on another database holds
 // the port — the next one is taken.
-func TestStudioOnAnotherDBMovesStudio(t *testing.T) {
+func TestServerOnAnotherDBMovesServer(t *testing.T) {
 	base := freeBase(t, 2)
 	var other syncBuffer
-	stopOther := startStudio(t, "sqlite://"+filepath.Join(t.TempDir(), "other.db"), base, 1, loop(base), &other)
+	stopOther := startServer(t, "sqlite://"+filepath.Join(t.TempDir(), "other.db"), base, 1, loop(base), &other)
 	defer func() { stopOther() }()
 
 	ln, err := net.Listen("tcp", loop(base+1)) // free it again for the second start
@@ -200,7 +200,7 @@ func TestStudioOnAnotherDBMovesStudio(t *testing.T) {
 			}
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("the second studio never served on the next port")
+			t.Fatal("the second weftbase never served on the next port")
 		}
 	}
 	stopOther()
@@ -208,7 +208,7 @@ func TestStudioOnAnotherDBMovesStudio(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(out.String(), "studio: "+loop(base)+" is busy (a Studio on another database, ") {
+	if !strings.HasPrefix(out.String(), "weftbase: "+loop(base)+" is busy (a server on another database, ") {
 		t.Errorf("stdout %q, want the move explained", out.String())
 	}
 }
@@ -275,7 +275,7 @@ func TestAddrResolution(t *testing.T) {
 }
 
 // TestDBFile pins the path the port policy compares with a running
-// Studio's db.path: the file obsdb/sqlite opens for --db, absolute —
+// Server's db.path: the file obsdb/sqlite opens for --db, absolute —
 // "" (never a match) for a fileless or malformed --db.
 func TestDBFile(t *testing.T) {
 	dir := t.TempDir()
@@ -312,7 +312,7 @@ func TestDBFile(t *testing.T) {
 	}
 }
 
-// TestRelativeDBFormsReuse: a Studio started with a relative
+// TestRelativeDBFormsReuse: a server started with a relative
 // --db sqlite://x.db is found (and the start refused) by a start in the same directory that
 // names the same file through $WEFTBASE_DB — the two forms resolve to one
 // absolute path.
@@ -320,7 +320,7 @@ func TestRelativeDBFormsReuse(t *testing.T) {
 	t.Chdir(t.TempDir())
 	base := freeBase(t, 2)
 	var first syncBuffer
-	stop := startStudio(t, "sqlite://x.db", base, 2, loop(base), &first)
+	stop := startServer(t, "sqlite://x.db", base, 2, loop(base), &first)
 	defer stop()
 
 	t.Setenv("WEFTBASE_DB", "x.db")

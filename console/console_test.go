@@ -24,12 +24,12 @@ func serve(t *testing.T, h http.Handler, method, path string) (int, http.Header,
 // shell — deep links survive reload — with its <base href> the mount
 // base, the security headers and a self-only CSP.
 func TestShellAndFallback(t *testing.T) {
-	h := Handler(Options{Base: "/studio/"})
+	h := Handler(Options{Base: "/weftbase/"})
 	code, hdr, body := serve(t, h, http.MethodGet, "/")
 	if code != http.StatusOK {
 		t.Fatalf("shell: %d", code)
 	}
-	if !strings.Contains(body, `<base href="/studio/">`) {
+	if !strings.Contains(body, `<base href="/weftbase/">`) {
 		t.Errorf("shell missing base rewrite: %s", body)
 	}
 	if ct := hdr.Get("Content-Type"); !strings.Contains(ct, "text/html") {
@@ -47,7 +47,7 @@ func TestShellAndFallback(t *testing.T) {
 		t.Errorf("security headers missing: %v", hdr)
 	}
 	for _, p := range []string{"/runs", "/runs/r_ok", "/agents", "/index.html", "/csp.json"} {
-		if _, _, b := serve(t, h, http.MethodGet, p); !strings.Contains(b, `<base href="/studio/">`) {
+		if _, _, b := serve(t, h, http.MethodGet, p); !strings.Contains(b, `<base href="/weftbase/">`) {
 			t.Errorf("%s is not the shell", p)
 		}
 	}

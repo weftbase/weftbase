@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
+	v1 "github.com/weftbase/weftbase/api/http/v1"
 	"github.com/weftbase/weftbase/obsdb"
 	"github.com/weftbase/weftbase/obsdb/sqlite"
-	"github.com/weftbase/weftbase/studio"
 )
 
 // vacuumRun writes one finished run last seen at at.
@@ -160,7 +160,7 @@ func TestVacuumNoDatabase(t *testing.T) {
 	}
 }
 
-// --retain / WEFT_RETAIN become studio.Retain and the banner's line.
+// --retain / WEFT_RETAIN become v1.Retain and the banner's line.
 func TestRetainOptions(t *testing.T) {
 	t.Setenv("WEFT_RETAIN", "")
 	if opts, note, err := retainOptions(""); err != nil || len(opts) != 0 || note != "" {
@@ -181,9 +181,9 @@ func TestRetainOptions(t *testing.T) {
 	}
 }
 
-// The binary's floor message is studio.Retain's, word for word: the
+// The binary's floor message is v1.Retain's, word for word: the
 // panic New raises under an hour carries it.
-func TestRetainFloorMatchesStudio(t *testing.T) {
+func TestRetainFloorMatchesServer(t *testing.T) {
 	db, err := sqlite.Open(filepath.Join(t.TempDir(), "floor.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -191,14 +191,14 @@ func TestRetainFloorMatchesStudio(t *testing.T) {
 	defer func() { _ = db.Close() }()
 	defer func() {
 		if r := recover(); r != "weftbase: "+retainFloorMsg {
-			t.Errorf("studio.New(Retain(30m)) panicked %v, want %q", r, "weftbase: "+retainFloorMsg)
+			t.Errorf("v1.New(Retain(30m)) panicked %v, want %q", r, "weftbase: "+retainFloorMsg)
 		}
 	}()
-	_ = studio.New(studio.DB(db), studio.Retain(30*time.Minute))
+	_ = v1.New(v1.DB(db), v1.Retain(30*time.Minute))
 }
 
 // weftbase dev --retain reaches api/meta as retention.
-func TestStudioRetainInMeta(t *testing.T) {
+func TestServerRetainInMeta(t *testing.T) {
 	t.Setenv("WEFT_RETAIN", "")
 	opts, _, err := retainOptions("168h")
 	if err != nil {

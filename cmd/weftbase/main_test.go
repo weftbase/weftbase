@@ -25,7 +25,7 @@ import (
 	"github.com/weftbase/weftbase/internal/release"
 )
 
-// TestVersion pins `weftbase version` (and --version, the old studio
+// TestVersion pins `weftbase version` (and --version, the old server
 // binary's flag): weftbase's own version (release.Version) and the weft
 // version it embeds (version.Runtime) on one stdout line, exit 0, and
 // no server.
@@ -98,7 +98,7 @@ func TestNewServerClickhouse(t *testing.T) {
 	if _, err := rand.Read(suffix); err != nil {
 		t.Fatal(err)
 	}
-	name := "studio_cmd_" + hex.EncodeToString(suffix)
+	name := "weftbase_cmd_" + hex.EncodeToString(suffix)
 	adminOpts, err := ch.ParseDSN(base)
 	if err != nil {
 		t.Fatalf("dsn: %v", err)
@@ -158,7 +158,7 @@ func TestNewServerClickhouse(t *testing.T) {
 		t.Errorf("shell: %d %.80s", code, body)
 	}
 
-	// The binary opened this handle, so the binary closes it: studio's
+	// The binary opened this handle, so the binary closes it: server's
 	// own Close leaves a DB(...) handle to its owner, and the shutdown
 	// path used to leave the ClickHouse connections open.
 	if code, body := get("/api/runs", "tok"); code != http.StatusOK {
@@ -274,7 +274,7 @@ func TestBootBannerTokenAuthenticates(t *testing.T) {
 	// The banner's "dev token <tok>" line names the one token.
 	var token string
 	for _, line := range strings.Split(banner.String(), "\n") {
-		if rest, ok := strings.CutPrefix(line, "studio: dev token "); ok {
+		if rest, ok := strings.CutPrefix(line, "weftbase: dev token "); ok {
 			token = strings.TrimSpace(strings.TrimSuffix(rest, "(WEFTBASE_TOKEN fixes it)"))
 		}
 	}
@@ -294,7 +294,7 @@ func TestBootBannerTokenAuthenticates(t *testing.T) {
 
 // TestStableTokenAuthenticatesUnprinted: on a database file the token
 // is the one in <db>.token — it opens the API, and the banner never
-// prints it (it is the panel tokens' signing key), naming the file
+// prints it (it is the scoped tokens' signing key), naming the file
 // instead.
 func TestStableTokenAuthenticatesUnprinted(t *testing.T) {
 	t.Setenv("WEFTBASE_TOKEN", "")
@@ -318,7 +318,7 @@ func TestStableTokenAuthenticatesUnprinted(t *testing.T) {
 	if strings.Contains(banner.String(), token) || strings.Contains(banner.String(), "#token=") {
 		t.Errorf("the banner prints the stable token:\n%s", banner.String())
 	}
-	if want := "studio: token created in " + db + ".token"; !strings.Contains(banner.String(), want) {
+	if want := "weftbase: token created in " + db + ".token"; !strings.Contains(banner.String(), want) {
 		t.Errorf("banner %q, want it to name the file (%q)", banner.String(), want)
 	}
 }
@@ -345,7 +345,7 @@ func TestDBLabelMasksPassword(t *testing.T) {
 
 // TestListenShutsDownGracefully pins the P2-20 half serve()'s old bare
 // ListenAndServe missed: SIGTERM stops the listener and listen returns
-// nil (serve then closes the studio's resources) — the process can
+// nil (serve then closes the server's resources) — the process can
 // exit on a signal at all, and the port actually closes.
 func TestListenShutsDownGracefully(t *testing.T) {
 	skipWithoutSelfSignal(t)
@@ -394,13 +394,13 @@ func TestListenShutsDownGracefully(t *testing.T) {
 }
 
 // TestDoctorSubcommand pins `weftbase doctor`'s wiring (internal/doctor
-// is the checking): --url picks the Studio, an unreachable one is the
+// is the checking): --url picks the server, an unreachable one is the
 // first line and exit 1 without a second message, and WEFTBASE_URL /
 // WEFTBASE_TOKEN are the flags' defaults.
 func TestDoctorSubcommand(t *testing.T) {
 	var out, errb strings.Builder
 	code := run([]string{"doctor", "--url", "http://127.0.0.1:1"}, &out, &errb)
-	if code != 1 || !strings.HasPrefix(out.String(), "studio not reachable at http://127.0.0.1:1: ") || errb.String() != "" {
+	if code != 1 || !strings.HasPrefix(out.String(), "weftbase not reachable at http://127.0.0.1:1: ") || errb.String() != "" {
 		t.Errorf("unreachable: exit %d, stderr %q\n%s", code, errb.String(), out.String())
 	}
 
@@ -427,14 +427,14 @@ func TestDoctorSubcommand(t *testing.T) {
 	}
 	// A doctor error must not be mistaken for ErrUnhealthy's silence.
 	if !errors.Is(doctor.Run(context.Background(), io.Discard, doctor.Target{URL: "http://127.0.0.1:1"}), doctor.ErrUnhealthy) {
-		t.Error("doctor.Run on an unreachable Studio is not ErrUnhealthy")
+		t.Error("doctor.Run on an unreachable server is not ErrUnhealthy")
 	}
 }
 
 // TestManifestFlag pins --manifest (plan B5 review) and the upward
 // search (plan B1): the flag, else WEFT_MANIFEST, else the nearest
 // weft.json from the working directory upward, read once at start into
-// studio.Manifest — the flag wins; an unreadable named file is a start
+// v1.Manifest — the flag wins; an unreadable named file is a start
 // error naming the flag; the note says which file was loaded, or that
 // none was found.
 func TestManifestFlag(t *testing.T) {
@@ -486,17 +486,17 @@ func TestManifestFlag(t *testing.T) {
 		t.Skip("a weft.json above the temp directory: the no-manifest case cannot be pinned here")
 	}
 	if got, note := served("", empty); !strings.HasPrefix(got, "404") ||
-		note != "studio: no weft.json from "+empty+" upward; no manifest (--manifest names one)" {
+		note != "weftbase: no weft.json from "+empty+" upward; no manifest (--manifest names one)" {
 		t.Errorf("no flag, no env, none upward: %s (note %q), want 404 (no manifest) and the note", got, note)
 	}
-	if got, note := served("", deep); !strings.Contains(got, "found-upward") || note != "studio: manifest "+found+" (found upward)" {
+	if got, note := served("", deep); !strings.Contains(got, "found-upward") || note != "weftbase: manifest "+found+" (found upward)" {
 		t.Errorf("upward: %s (note %q), want the grandparent's weft.json", got, note)
 	}
 	t.Setenv("WEFT_MANIFEST", envFile)
-	if got, note := served("", deep); !strings.Contains(got, "from-env") || note != "studio: manifest "+envFile+" (WEFT_MANIFEST)" {
+	if got, note := served("", deep); !strings.Contains(got, "from-env") || note != "weftbase: manifest "+envFile+" (WEFT_MANIFEST)" {
 		t.Errorf("WEFT_MANIFEST over the upward search: %s (note %q)", got, note)
 	}
-	if got, note := served(flagFile, deep); !strings.Contains(got, "from-flag") || note != "studio: manifest "+flagFile+" (--manifest)" {
+	if got, note := served(flagFile, deep); !strings.Contains(got, "from-flag") || note != "weftbase: manifest "+flagFile+" (--manifest)" {
 		t.Errorf("--manifest beside WEFT_MANIFEST: %s (note %q), want the flag's file", got, note)
 	}
 	// A file that does not parse is a start error naming it, named or

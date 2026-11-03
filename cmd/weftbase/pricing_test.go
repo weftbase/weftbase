@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-// --pricing / WEFT_PRICING become studio.Pricing and the banner's line:
+// --pricing / WEFT_PRICING become v1.Pricing and the banner's line:
 // the flag wins over the variable; neither is the shipped table (no
 // option); a file that does not load is an error naming where it came
 // from, the path and the field.
@@ -57,7 +57,7 @@ func TestPricingOptions(t *testing.T) {
 
 // weftbase dev --pricing reaches api/meta as pricing {source file, path
 // (the server token's), dated, models}.
-func TestStudioPricingInMeta(t *testing.T) {
+func TestServerPricingInMeta(t *testing.T) {
 	t.Setenv("WEFT_PRICING", "")
 	file := filepath.Join(t.TempDir(), "prices.json")
 	if err := os.WriteFile(file, []byte(`{"dated":"2026-09-03","models":[]}`), 0o600); err != nil {

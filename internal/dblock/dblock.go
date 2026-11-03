@@ -1,15 +1,15 @@
-// Package dblock is the one-Studio-per-database rule of the weft
+// Package dblock is the one-server-per-database rule of the weft
 // command (B7-fix): `weftbase dev` hold an exclusive lock
 // on <db>.lock, beside a SQLite database file, for as long as they
 // serve it, taken before the port policy runs. A second start on the
 // same file — at the same moment, or from another directory whose
-// discovery file names another Studio — cannot take it and is refused.
+// discovery file names another server — cannot take it and is refused.
 //
 // The lock is the operating system's, on an open file: flock(2) on
 // unix (LOCK_EX|LOCK_NB), LockFileEx on Windows. Either is released by
 // the kernel when the holding process's last descriptor closes — on a
 // clean exit, and equally when the process is killed or crashes — so
-// a stale lock never outlives its Studio and needs no cleanup. The
+// a stale lock never outlives its server and needs no cleanup. The
 // file itself stays (removing it would race the next taker): Acquire
 // empties it the moment it takes the lock, so a crashed holder's words
 // never name the new one, and the holder writes its {url, pid} once it
@@ -39,7 +39,7 @@ import (
 // of this one) holds the lock.
 var ErrHeld = errors.New("dblock: held")
 
-// Holder is what the lock file says about the Studio holding it.
+// Holder is what the lock file says about the server holding it.
 type Holder struct {
 	URL string `json:"url"`
 	PID int    `json:"pid"`

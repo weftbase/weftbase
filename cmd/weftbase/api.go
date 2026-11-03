@@ -15,122 +15,15 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/weftbase/weftbase/client/rest"
+
 	"github.com/weftbase/weftbase/internal/termsafe"
 	"github.com/weftbase/weftbase/obsdb"
 )
 
 // The API clients: runs, open and export are thin clients of the
-// Studio JSON API. Each request is one documented route; nothing here
-// computes what Studio serves.
-
-// client talks to one Studio's API.
-type client struct {
-	base  string // the Studio's root URL, no trailing slash
-	token string
-	http  *http.Client
-}
-
-func newClient(base, token string) *client {
-	return &client{
-		base:  strings.TrimRight(base, "/"),
-		token: token,
-		http: &http.Client{
-			// An export is a whole run: the bound is generous, never absent.
-			Timeout: 2 * time.Minute,
-			// The client talks to --url only: a redirect is an error,
-			// never followed — Go keeps the bearer on a same-host
-			// other-port hop and on https→http (the doctor's rule).
-			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		},
-	}
-}
-
-// redacted is the Studio's URL for a message: a password in its
-// userinfo is never printed.
-func (c *client) redacted() string {
-	u, err := url.Parse(c.base)
-	if err != nil {
-		return "the --url given"
-	}
-	return u.Redacted()
-}
-
-// maxBody bounds what a client reads from one response.
-const maxBody = 512 << 20
-
-// get answers GET path?q with the response body; a non-2xx answer is
-// an error carrying Studio's own error message.
-func (c *client) get(ctx context.Context, path string, q url.Values) ([]byte, error) {
-	u := c.base + path
-	if len(q) > 0 {
-		u += "?" + q.Encode()
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, err
-	}
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("studio not reachable at %s: %w (weftbase dev starts one; --url or WEFTBASE_URL points at another)", c.redacted(), err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
-	if err != nil {
-		return nil, fmt.Errorf("GET %s: %w", path, err)
-	}
-	if len(body) > maxBody {
-		return nil, fmt.Errorf("GET %s: the response exceeds %d MiB", path, maxBody>>20)
-	}
-	if resp.StatusCode/100 == 3 {
-		loc := resp.Header.Get("Location")
-		if loc == "" {
-			loc = "(no Location)"
-		}
-		return nil, fmt.Errorf("GET %s: %d, a redirect to %s, not followed: point --url at the Studio itself", path, resp.StatusCode, loc)
-	}
-	if resp.StatusCode/100 != 2 {
-		return nil, apiError(path, resp.StatusCode, body)
-	}
-	return body, nil
-}
-
-// apiError is a non-2xx answer as one line: Studio's error message
-// when the body is its error shape, the status otherwise.
-func apiError(path string, status int, body []byte) error {
-	var e struct {
-		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	msg := http.StatusText(status)
-	if json.Unmarshal(body, &e) == nil && e.Error.Message != "" {
-		msg = termsafe.Text(e.Error.Message)
-	}
-	var err error = &statusError{Status: status, Body: body, line: fmt.Sprintf("GET %s: %d %s", path, status, msg)}
-	if status == http.StatusUnauthorized {
-		err = fmt.Errorf("%w (--token or WEFTBASE_TOKEN)", err)
-	}
-	return err
-}
-
-// statusError is a non-2xx answer: its one line, plus the status and
-// the body Studio sent (its error, and a badge with a reason when the
-// route gave one) for a caller that passes them on — weftbase mcp does.
-type statusError struct {
-	Status int
-	Body   []byte
-	line   string
-}
-
-func (e *statusError) Error() string { return e.line }
-
-// runPath is /api/runs/<id>: a run id may carry slashes (a subagent's
-// child id), escaped the way the UI escapes them.
-func runPath(id string) string { return "/api/runs/" + url.PathEscape(id) }
+// server's JSON API over client/rest. Each request is one documented
+// route; nothing here computes what the server serves.
 
 // parseArgs parses fs over args with the positional arguments allowed
 // anywhere — `weftbase export <id> --format jsonl` — and returns them. A
@@ -155,7 +48,7 @@ func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
 // ── weftbase runs ──────────────────────────────────────────────────────
 
 // runRow is the part of GET /api/runs' row the table prints; --json
-// prints the row as Studio serves it.
+// prints the row as server serves it.
 type runRow struct {
 	ID          string     `json:"id"`
 	Agent       string     `json:"agent"`
@@ -226,7 +119,7 @@ func (r runRow) duration() string {
 }
 
 // cost is the COST cell: the run's own cost in USD, "$0" for a
-// scripted model's exact zero, "-" when unpriced or unknown (Studio's
+// scripted model's exact zero, "-" when unpriced or unknown (server's
 // cost_badge says why; --json carries it).
 func (r runRow) cost() string {
 	if r.CostUSD == nil {
@@ -248,7 +141,7 @@ const promptCells = 40
 // prompt is the PROMPT cell: the run's prompt_preview — its first line,
 // every control character (tabs, escape sequences, carriage returns) a
 // space, cut to promptCells runes with "…" — or "-" when the row
-// carries none (a content-off run stores no prompt; Studio's run page
+// carries none (a content-off run stores no prompt; server's run page
 // badges why). The preview is untrusted text — an app's prompt, an
 // OTLP sender's record — and never reaches the terminal raw.
 func (r runRow) prompt() string {
@@ -263,7 +156,7 @@ func (r runRow) prompt() string {
 	return line
 }
 
-// stoppedBy is the STOPPED BY cell: what ended the run as Studio names
+// stoppedBy is the STOPPED BY cell: what ended the run as server names
 // it (stopped_by), a canceled run's cause beside it, "-" when nothing
 // recorded one (a model error, a run still going, an older run).
 func (r runRow) stoppedBy() string {
@@ -276,7 +169,7 @@ func (r runRow) stoppedBy() string {
 	return cell(r.StoppedBy)
 }
 
-// cell is a table cell from free text Studio served (an agent name, a
+// cell is a table cell from free text server served (an agent name, a
 // cause, an id an OTLP sender chose): control characters as spaces,
 // "-" for nothing — the one rule every printed cell follows.
 func cell(s string) string {
@@ -301,7 +194,7 @@ func runRuns(args []string, stdout, stderr io.Writer) error {
 	failed := fs.Bool("failed", false, "only failed runs (the API's status=failed)")
 	status := fs.String("status", "", "only runs of this `status`: running, succeeded, failed, interrupted, parked or cancelled (the API's status=)")
 	limit := fs.Int("limit", 50, "print at most this many runs (0: every matching run)")
-	asJSON := fs.Bool("json", false, "print the rows as Studio serves them, a JSON array")
+	asJSON := fs.Bool("json", false, "print the rows as server serves them, a JSON array")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return err
@@ -348,7 +241,7 @@ func runRuns(args []string, stdout, stderr io.Writer) error {
 pages:
 	for {
 		q.Set("limit", strconv.Itoa(runsPageSize))
-		body, err := c.get(ctx, "/api/runs", q)
+		body, err := c.Get(ctx, "/api/runs", q)
 		if err != nil {
 			return err
 		}
@@ -438,7 +331,7 @@ pages:
 		return err
 	}
 	// The next step, on stderr: stdout stays the table.
-	_, _ = fmt.Fprintln(stderr, "weftbase: weftbase open <id> shows one in Studio; weftbase export <id> --format jsonl writes it out")
+	_, _ = fmt.Fprintln(stderr, "weftbase: weftbase open <id> shows one in server; weftbase export <id> --format jsonl writes it out")
 	return nil
 }
 
@@ -461,8 +354,8 @@ func parseSince(v string, now time.Time) (time.Time, error) {
 
 // runOpen is `weftbase open [id]`: the page of a run, a conversation (a
 // public id), a session or a trace — the id is tried as each kind in
-// turn against the API (UX-S5a-06) — or, with no id, the Studio root
-// (UX-S5a-02: on a fresh Studio with no run, the one signed-in link a
+// turn against the API (UX-S5a-06) — or, with no id, the server root
+// (UX-S5a-02: on a fresh server with no run, the one signed-in link a
 // terminal can print). The link is printed and with --open opened.
 func runOpen(args []string, stdout, stderr io.Writer) error {
 	fs := newFlags("open", stderr)
@@ -483,21 +376,21 @@ func runOpen(args []string, stdout, stderr io.Writer) error {
 		if page, err = pageOf(ctx, c, pos[0]); err != nil {
 			return err
 		}
-	} else if _, err := c.get(ctx, "/api/meta", nil); err != nil {
-		// The root: checked the Studio answers and the token opens it.
+	} else if _, err := c.Get(ctx, "/api/meta", nil); err != nil {
+		// The root: checked the server answers and the token opens it.
 		return err
 	}
 	// The printed link is bare unless asked: a fixed token stays out of
 	// logs (serveBoot's banner rule). The browser gets it in the fragment.
-	printed := pageLink(c.base, page, "")
+	printed := rest.PageLink(c.Base(), page, "")
 	if *withToken {
-		printed = pageLink(c.base, page, c.token)
+		printed = rest.PageLink(c.Base(), page, c.Token())
 	}
 	if _, err := fmt.Fprintln(stdout, printed); err != nil {
 		return err
 	}
 	if *open {
-		openBrowser(stdout, pageLink(c.base, page, c.token))
+		openBrowser(stdout, rest.PageLink(c.Base(), page, c.Token()))
 	}
 	return nil
 }
@@ -514,11 +407,11 @@ var idKinds = []struct{ noun, route, page string }{
 // pageOf is the UI page of id: the first kind whose route knows it. A
 // 404 tries the next kind; any other failure is the error. An id no
 // kind knows is an error naming what was tried.
-func pageOf(ctx context.Context, c *client, id string) (string, error) {
+func pageOf(ctx context.Context, c *rest.Client, id string) (string, error) {
 	var tried []string
 	for _, k := range idKinds {
-		_, err := c.get(ctx, k.route+url.PathEscape(id), nil)
-		var se *statusError
+		_, err := c.Get(ctx, k.route+url.PathEscape(id), nil)
+		var se *rest.StatusError
 		switch {
 		case err == nil:
 			return k.page + url.PathEscape(id), nil
@@ -528,23 +421,7 @@ func pageOf(ctx context.Context, c *client, id string) (string, error) {
 		}
 		return "", err
 	}
-	return "", fmt.Errorf("%s is no %s this Studio knows (%s)", termsafe.Text(id), strings.Join(tried, ", "), c.redacted())
-}
-
-// pageLink is a UI page, <base><page>, the token in the fragment when
-// there is one (the UI adopts it; a fragment never reaches a server or
-// a Referer).
-func pageLink(base, page, token string) string {
-	link := base + page
-	if token != "" {
-		link += "#token=" + url.QueryEscape(token)
-	}
-	return link
-}
-
-// runLink is a run's page in the UI, <base>/runs/<id>.
-func runLink(base, id, token string) string {
-	return pageLink(base, "/runs/"+url.PathEscape(id), token)
+	return "", fmt.Errorf("%s is no %s this server knows (%s)", termsafe.Text(id), strings.Join(tried, ", "), c.Redacted())
 }
 
 // ── weftbase export ────────────────────────────────────────────────────
@@ -569,7 +446,7 @@ func runExport(args []string, stdout, stderr io.Writer) error {
 		return usageError("--format must be json, jsonl or otlp")
 	}
 	c, _ := clientFor(*base, *token, stderr)
-	body, err := c.get(context.Background(), runPath(id)+"/export", url.Values{"format": {*format}})
+	body, err := c.Get(context.Background(), rest.RunPath(id)+"/export", url.Values{"format": {*format}})
 	if err != nil {
 		return err
 	}

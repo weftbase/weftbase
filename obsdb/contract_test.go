@@ -43,12 +43,12 @@ import (
 	"github.com/weftbase/weft/otel"
 	"github.com/weftbase/weft/thread"
 	"github.com/weftbase/weft/thread/pool"
-	"github.com/weftbase/weftbase/exporter"
 	"github.com/weftbase/weftbase/internal/weftsrc"
 	"github.com/weftbase/weftbase/obsdb"
 	"github.com/weftbase/weftbase/obsdb/clickhouse"
 	"github.com/weftbase/weftbase/obsdb/obsdbtest"
 	"github.com/weftbase/weftbase/obsdb/sqlite"
+	"github.com/weftbase/weftbase/observe/local"
 )
 
 // The record contract's conformance set (docs/record-contract.md):
@@ -1312,7 +1312,7 @@ func captureCase(t *testing.T, gc genCase, epoch time.Time, dir string) []string
 	}
 	opts := append([]otel.Option{otel.NoGlobal(), otel.NoEnv(), otel.Heartbeat(0),
 		otel.Service("contract-app"), dest}, gc.start...)
-	p, err := exporter.Start(ctx, opts...)
+	p, err := local.Start(ctx, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}

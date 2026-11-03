@@ -37,7 +37,22 @@ it is re-pinned (§9.1).
 | Makefile, CI, workspace action | done | studio/devtools targets and jobs removed |
 | gate: `go test -race ./obsdb/... ./internal/...`; sqlite conformance; ClickHouse suite; `grep -ri studio obsdb` empty | done | full `go test -race ./...` green; ClickHouse 25.8 gated suite green, 0 skips (local Docker) |
 
-## Step 3. Moves: todo
+## Step 3. Moves: done
+
+| Item | Status | Notes |
+|---|---|---|
+| `client` module (`client/go.mod`) and committed root `go.work` (`. ./client ../weft ../weft/core`) | done | go.work replaces the weft and client placeholders |
+| `runtime/id.go` → `client/ulid` | done | `ulid.New()` |
+| `studio/runtime/http.go` → `internal/httpx` | done | shows as delete+add (the duplicate ULID was most of it) |
+| `internal/discovery` → `client/discovery` | done | file `studio.json` → `dev.json` |
+| `studio/internal/reqlog` → `internal/reqlog` | done | ingest class is `/otlp/` |
+| `studio/ingest` → `observe/ingest` (`otlp.go`), `ingesthealth.go` → `observe/ingest/health.go` | done | mounted at `/otlp/v1/{traces,logs}`; writes before publishing |
+| pricing → `observe/cost` (+ `pricingdata`, `internal/pricinggen`, `pricing.json`, testdata) | done | `table.go` is new (the table was a third of pricing.go); the coster stays with the read server |
+| `exporter` split → `client/exporter` (`Remote(url, key)`, `Install`, `WithFallback`, `Named`) + `observe/local` | done | `remote.go`/`install.go` pair weakly (21%/45%) |
+| `cmd/weftbase/mcp*.go` → `api/mcp` (`mcp.Serve`) over `client/rest` (hand-written seed from `cmd/weftbase/api.go`) | done | |
+| studio read server → `api/http/v1` (package `v1`) | done | **deviation**: all of studio moved into one package; routes still `/api/*`. Peeling logic into `observe/query`, `sessions`, `approvals/readmodel`, `observe/export`, `registry/manifests` is step 5b |
+| no `studio` package; vocabulary clean in Go | done | `studio_version` → `server_version`; CLI prefix `weftbase:` |
+| gate: build/vet/test -race in both modules; client deps exclude the server | done | |
 
 ## Step 4. Layering check: todo
 

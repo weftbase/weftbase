@@ -40,7 +40,7 @@ func TestLogFlags(t *testing.T) {
 		t.Fatal(err)
 	}
 	slog.Info("hidden")
-	slog.Warn("studio: ingest batch refused", "request_id", "r1")
+	slog.Warn("weftbase: ingest batch refused", "request_id", "r1")
 	restore()
 	if slog.Default() != prev {
 		t.Error("restore did not put the previous default back")

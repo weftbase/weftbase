@@ -16,15 +16,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftbase/weftbase/internal/discovery"
+	"github.com/weftbase/weftbase/client/discovery"
 )
 
 // `weftbase dev` (plan B1.2). The app is the helper process
-// (dev_helper_test.go); Studio listens on a free port; every test ends
+// (dev_helper_test.go); server listens on a free port; every test ends
 // with no process and nothing listening.
 
-// oneLineRe is the one line: studio <link> · app pid <n>.
-var oneLineRe = regexp.MustCompile(`(?m)^studio (\S+) · app pid (\d+)$`)
+// oneLineRe is the one line: server <link> · app pid <n>.
+var oneLineRe = regexp.MustCompile(`(?m)^weftbase (\S+) · app pid (\d+)$`)
 
 // helperRe is the helper's own line: its pid and what it was handed.
 var helperRe = regexp.MustCompile(`(?m)^helper pid=(\d+) WEFT_ENV=(\S*) WEFTBASE_URL=(\S*) WEFTBASE_TOKEN=(\S*) WEFTBASE_DB=(\S*)$`)
@@ -195,7 +195,7 @@ func TestDevEnvAndOneLine(t *testing.T) {
 					t.Errorf("WEFTBASE_TOKEN = %q, want the stable token in %s.token (%v)", tok, db, err)
 				}
 				if discovery.Find("http://"+addr) == "" {
-					t.Error("weftbase dev wrote no discovery file for its Studio")
+					t.Error("weftbase dev wrote no discovery file for its server")
 				}
 				own := helperRe.ReplaceAllString(d.out.String(), "") // the app prints what it was handed
 				if link != "http://"+addr+"/" || strings.Contains(own, tok) {
@@ -212,13 +212,13 @@ func TestDevEnvAndOneLine(t *testing.T) {
 			// UX-D-25: no browser opened (stdout is no terminal) and a
 			// bare link: one line says where the token is, never the token.
 			wantTok := map[string]string{
-				"stable":    "studio: token: " + db + ".token (weftbase open --with-token)",
-				"fixed":     "studio: token: the one --token / WEFTBASE_TOKEN set",
+				"stable":    "weftbase: token: " + db + ".token (weftbase open --with-token)",
+				"fixed":     "weftbase: token: the one --token / WEFTBASE_TOKEN set",
 				"generated": "",
 			}[c.name]
 			var gotTok string
 			for _, l := range strings.Split(d.out.String(), "\n") {
-				if strings.HasPrefix(l, "studio: token: ") {
+				if strings.HasPrefix(l, "weftbase: token: ") {
 					gotTok = l
 				}
 			}
@@ -230,8 +230,8 @@ func TestDevEnvAndOneLine(t *testing.T) {
 			if !strings.Contains(d.out.String(), "helper pid="+line[2]+" got interrupt") {
 				t.Errorf("the app was not stopped with SIGINT first:\n%s", d.out.String())
 			}
-			if !strings.Contains(d.out.String(), "studio: shutting down") {
-				t.Errorf("studio was not stopped:\n%s", d.out.String())
+			if !strings.Contains(d.out.String(), "weftbase: shutting down") {
+				t.Errorf("server was not stopped:\n%s", d.out.String())
 			}
 			gone(t, "the app", pid)
 			notListening(t, addr)
@@ -321,7 +321,7 @@ func grandchild(t *testing.T, dir string, app int) int {
 }
 
 // TestDevNoWatchExitCode: under --no-watch the app's own exit ends
-// weftbase dev, with the app's exit code, Studio stopped.
+// weftbase dev, with the app's exit code, server stopped.
 func TestDevNoWatchExitCode(t *testing.T) {
 	addr := loop(freeBase(t, 1))
 	d := startDev(t, []string{"--addr", addr, "--db", "sqlite://" + filepath.Join(t.TempDir(), "weft.db"), "--no-watch"},
@@ -358,7 +358,7 @@ func TestDevEnv(t *testing.T) {
 		t.Errorf("a set WEFT_ENV was overridden: %q", v)
 	}
 	if v, _ := get(env, "WEFTBASE_DB"); v != "/mine.db" {
-		t.Errorf("WEFTBASE_DB without a Studio file = %q, want the shell's", v)
+		t.Errorf("WEFTBASE_DB without a server file = %q, want the shell's", v)
 	}
 }
 
@@ -413,7 +413,7 @@ func TestDevNewDirRestarts(t *testing.T) {
 
 // TestDevStopSignals: SIGTERM and SIGHUP (the terminal closed) stop
 // weftbase dev like Ctrl-C — the app first (SIGHUP becomes SIGTERM for
-// it: many servers read SIGHUP as reload), then Studio; exit 0.
+// it: many servers read SIGHUP as reload), then server; exit 0.
 func TestDevStopSignals(t *testing.T) {
 	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGHUP} {
 		t.Run(sig.String(), func(t *testing.T) {
@@ -429,8 +429,8 @@ func TestDevStopSignals(t *testing.T) {
 			if !strings.Contains(d.out.String(), "helper pid="+strconv.Itoa(pid)+" got terminated") {
 				t.Errorf("the app was not stopped with SIGTERM:\n%s", d.out.String())
 			}
-			if !strings.Contains(d.out.String(), "studio: shutting down") {
-				t.Errorf("studio was not stopped:\n%s", d.out.String())
+			if !strings.Contains(d.out.String(), "weftbase: shutting down") {
+				t.Errorf("server was not stopped:\n%s", d.out.String())
 			}
 			gone(t, "the app", pid)
 			notListening(t, addr)
@@ -485,7 +485,7 @@ func TestDevAppExitThenSave(t *testing.T) {
 }
 
 // TestDevPortShift: without --addr the port policy applies — a busy
-// base port moves Studio to the next one, said in one line, and the
+// base port moves server to the next one, said in one line, and the
 // app's WEFTBASE_URL (and the one line) name the port really used.
 func TestDevPortShift(t *testing.T) {
 	base := freeBase(t, 2)
@@ -510,23 +510,23 @@ func TestDevPortShift(t *testing.T) {
 	if !strings.HasPrefix(line[1], "http://"+loop(base+1)+"/") {
 		t.Errorf("the one line's link %q is not on %s", line[1], loop(base+1))
 	}
-	if !strings.Contains(d.out.String(), "studio: "+loop(base)+" is busy") {
+	if !strings.Contains(d.out.String(), "weftbase: "+loop(base)+" is busy") {
 		t.Errorf("the shift is not said:\n%s", d.out.String())
 	}
 	d.interrupt(t)
 	notListening(t, loop(base+1))
 }
 
-// TestDevReusesRunningStudio: a Studio already serving the same
+// TestDevReusesRunningServer: a server already serving the same
 // database, walled by the fixed token weftbase dev was given, is reused —
 // the reuse line, the app pointed at its URL with that token — and
-// weftbase dev stops only the app: the reused Studio is not its to stop.
-func TestDevReusesRunningStudio(t *testing.T) {
+// weftbase dev stops only the app: the reused server is not its to stop.
+func TestDevReusesRunningServer(t *testing.T) {
 	base := freeBase(t, 1)
 	dir := t.TempDir()
 	db := "sqlite://" + filepath.Join(dir, "weft.db")
 	var running syncBuffer
-	stopRunning := startStudio(t, db, base, 1, loop(base), &running)
+	stopRunning := startServer(t, db, base, 1, loop(base), &running)
 	setVar(t, &devDefaultAddr, loop(base))
 	setVar(t, &devSpan, 1)
 	t.Setenv("WEFTBASE_ADDR", "")
@@ -534,29 +534,29 @@ func TestDevReusesRunningStudio(t *testing.T) {
 	d := startDev(t, []string{"--db", db, "--token", "tok", "--watch", dir}, nil)
 	line := d.waitOut(t, oneLineRe, 1)[0]
 	helper := d.waitOut(t, helperRe, 1)[0]
-	if !strings.Contains(d.out.String(), "studio already running at http://"+loop(base)) {
+	if !strings.Contains(d.out.String(), "weftbase already running at http://"+loop(base)) {
 		t.Errorf("no reuse line:\n%s", d.out.String())
 	}
 	if helper[3] != "http://"+loop(base) || helper[4] != "tok" {
-		t.Errorf("the app got %q / %q, want the running Studio's URL and the fixed token", helper[3], helper[4])
+		t.Errorf("the app got %q / %q, want the running server's URL and the fixed token", helper[3], helper[4])
 	}
 	if line[1] != "http://"+loop(base)+"/" {
-		t.Errorf("link %q, want the bare running Studio URL", line[1])
+		t.Errorf("link %q, want the bare running server URL", line[1])
 	}
 	// One SIGTERM stops both: weftbase dev (its app first) and the running
-	// Studio (its own serveOn) — weftbase dev must not print a shutdown of
-	// a Studio it did not start.
+	// Server (its own serveOn) — weftbase dev must not print a shutdown of
+	// a server it did not start.
 	pid := atoi(t, line[2])
 	stopRunning()
 	d.wait(t, 0)
 	gone(t, "the app", pid)
-	if strings.Contains(d.out.String(), "studio: shutting down") {
-		t.Errorf("weftbase dev stopped a Studio it reused:\n%s", d.out.String())
+	if strings.Contains(d.out.String(), "weftbase: shutting down") {
+		t.Errorf("weftbase dev stopped a server it reused:\n%s", d.out.String())
 	}
 	notListening(t, loop(base))
 }
 
-// TestLoopbackAddr: the app dials loopback for a Studio bound to every
+// TestLoopbackAddr: the app dials loopback for a server bound to every
 // interface (otel refuses plaintext to a non-loopback host).
 func TestLoopbackAddr(t *testing.T) {
 	for in, want := range map[string]string{
@@ -573,7 +573,7 @@ func TestLoopbackAddr(t *testing.T) {
 }
 
 // TestDevPendingSignalStartsNoApp: a signal already buffered when the
-// loop begins (a Ctrl-C during Studio's port probes) ends weftbase dev
+// loop begins (a Ctrl-C during server's port probes) ends weftbase dev
 // without starting the app — no start, no "could not start" line —
 // and is the signal the loop reports.
 func TestDevPendingSignalStartsNoApp(t *testing.T) {
@@ -597,7 +597,7 @@ func TestDevPendingSignalStartsNoApp(t *testing.T) {
 
 // TestTokenLine (UX-D-25, U30.1-fix): the line names <db>.token only
 // when it holds the token in use — a reused holder whose token differs
-// from the file is said as the running Studio's; a token in the link,
+// from the file is said as the running server's; a token in the link,
 // or none, prints nothing.
 func TestTokenLine(t *testing.T) {
 	dir := t.TempDir()
@@ -607,19 +607,19 @@ func TestTokenLine(t *testing.T) {
 	}
 	for _, c := range []struct {
 		name  string
-		st    devStudioRun
+		st    devServerRun
 		fixed bool
 		want  string
 	}{
-		{"the file's", devStudioRun{token: "file-token", dbPath: db, link: "http://x/"}, false,
-			"studio: token: " + db + ".token (weftbase open --with-token)"},
-		{"a reused holder's, not the file's", devStudioRun{token: "holder-token", dbPath: db, link: "http://x/"}, false,
-			"studio: token: the running Studio's, not " + db + ".token (weftbase open --with-token)"},
-		{"fixed", devStudioRun{token: "k", dbPath: db, link: "http://x/"}, true,
-			"studio: token: the one --token / WEFTBASE_TOKEN set"},
-		{"in the link", devStudioRun{token: "g", link: "http://x/#token=g"}, false, ""},
-		{"none", devStudioRun{link: "http://x/"}, false, ""},
-		{"no database file", devStudioRun{token: "g", link: "http://x/"}, false, ""},
+		{"the file's", devServerRun{token: "file-token", dbPath: db, link: "http://x/"}, false,
+			"weftbase: token: " + db + ".token (weftbase open --with-token)"},
+		{"a reused holder's, not the file's", devServerRun{token: "holder-token", dbPath: db, link: "http://x/"}, false,
+			"weftbase: token: the running server's, not " + db + ".token (weftbase open --with-token)"},
+		{"fixed", devServerRun{token: "k", dbPath: db, link: "http://x/"}, true,
+			"weftbase: token: the one --token / WEFTBASE_TOKEN set"},
+		{"in the link", devServerRun{token: "g", link: "http://x/#token=g"}, false, ""},
+		{"none", devServerRun{link: "http://x/"}, false, ""},
+		{"no database file", devServerRun{token: "g", link: "http://x/"}, false, ""},
 	} {
 		if got := tokenLine(&c.st, c.fixed); got != c.want {
 			t.Errorf("%s: %q, want %q", c.name, got, c.want)

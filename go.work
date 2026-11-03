@@ -1,0 +1,21 @@
+go 1.26.0
+
+// Development resolution: the server module, the client module and
+// the weft checkout beside this repository. Until weft and the client
+// module are tagged, the go.mod files require them at the placeholder
+// pseudo-version; the replace lines resolve that version to the
+// checkouts (go.mod files never commit a replace). A module the
+// workspace uses still needs its placeholder replaced: the module
+// graph reads the required version's go.mod.
+use (
+	.
+	./client
+	../weft
+	../weft/core
+)
+
+replace (
+	github.com/weftbase/weft v0.0.0-00010101000000-000000000000 => ../weft
+	github.com/weftbase/weft/core v0.0.0-00010101000000-000000000000 => ../weft/core
+	github.com/weftbase/weftbase/client v0.0.0-00010101000000-000000000000 => ./client
+)

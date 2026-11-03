@@ -10,9 +10,9 @@ import (
 	"github.com/weftbase/weft/core"
 	"github.com/weftbase/weft/core/wefttest"
 	"github.com/weftbase/weft/otel"
-	"github.com/weftbase/weftbase/exporter"
 	"github.com/weftbase/weftbase/obsdb"
 	"github.com/weftbase/weftbase/obsdb/sqlite"
+	"github.com/weftbase/weftbase/observe/local"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
@@ -46,7 +46,7 @@ func (c *capture) ForceFlush(context.Context) error { return nil }
 func (c *capture) batch() obsdb.Batch {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return obsdb.Batch{Spans: exporter.FromSDKSpans(c.spans), Records: exporter.FromSDKRecords(c.logs)}
+	return obsdb.Batch{Spans: local.FromSDKSpans(c.spans), Records: local.FromSDKRecords(c.logs)}
 }
 
 // fiftySteps runs a 50-step scripted agent — 49 tool steps and a final
@@ -89,14 +89,14 @@ func TestRequestRecordsThroughThePipeline(t *testing.T) {
 	ctx := context.Background()
 	off := &capture{}
 	path := filepath.Join(t.TempDir(), "weft.db")
-	p, err := exporter.Start(ctx, otel.NoGlobal(), otel.NoEnv(), otel.Heartbeat(0),
-		exporter.Local(path), otel.Exporters(off, off))
+	p, err := local.Start(ctx, otel.NoGlobal(), otel.NoEnv(), otel.Heartbeat(0),
+		local.Local(path), otel.Exporters(off, off))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = p.Shutdown(ctx) }()
 	runID := fiftySteps(t, p)
-	local := exporter.LocalDBOf(p)
+	local := local.DBOf(p)
 
 	run, err := local.Run(ctx, runID)
 	if err != nil {

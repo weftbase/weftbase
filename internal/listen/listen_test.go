@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
+	v1 "github.com/weftbase/weftbase/api/http/v1"
 	"github.com/weftbase/weftbase/internal/listen"
-	"github.com/weftbase/weftbase/studio"
 )
 
 // freeBase returns a loopback address whose port and the n-1 ports
@@ -59,22 +59,22 @@ func occupy(t testing.TB, a string) {
 	t.Cleanup(func() { _ = ln.Close() })
 }
 
-// serveStudio serves a Studio on a over path (token "" = none) and
-// returns once it has answered GET /api/meta: a fresh Studio's first
-// meta does one-time work (the embedded panel's version stamp is read
+// serveServer serves a server on a over path (token "" = none) and
+// returns once it has answered GET /api/meta: a fresh server's first
+// meta does one-time work (the embedded Console's version stamp is read
 // on first use — past 500 ms under -race on a loaded CI runner), and
 // the tests pin the port policy's verdicts, not a cold start's speed.
-func serveStudio(t testing.TB, a, path, token string) {
+func serveServer(t testing.TB, a, path, token string) {
 	t.Helper()
 	ln, err := net.Listen("tcp", a)
 	if err != nil {
 		t.Fatal(err)
 	}
-	opts := []studio.Option{studio.Base("/"), studio.Open(path)}
+	opts := []v1.Option{v1.Base("/"), v1.Open(path)}
 	if token != "" {
-		opts = append(opts, studio.Token(token))
+		opts = append(opts, v1.Token(token))
 	}
-	srv := studio.New(opts...)
+	srv := v1.New(opts...)
 	hs := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: time.Second}
 	go func() { _ = hs.Serve(ln) }()
 	t.Cleanup(func() { _ = hs.Close(); _ = srv.Close() })
@@ -94,13 +94,13 @@ func serveStudio(t testing.TB, a, path, token string) {
 			}
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the Studio on %s never answered /api/meta: %v", a, err)
+			t.Fatalf("the server on %s never answered /api/meta: %v", a, err)
 		}
 	}
 }
 
 // choose runs listen.Choose with r's Timeout, else ProbeTimeout: a
-// probe that must hear a Studio's answer never races a short deadline.
+// probe that must hear a server's answer never races a short deadline.
 // A test that waits a probe out (a listener that never answers) sets
 // its own short Timeout.
 func choose(t testing.TB, r listen.Request) (listen.Choice, error) {
@@ -124,7 +124,7 @@ func TestFreeAddressIsBound(t *testing.T) {
 	}
 }
 
-// TestSameDBIsReused pins the reuse verdict: a Studio on the wanted
+// TestSameDBIsReused pins the reuse verdict: a server on the wanted
 // address serving the same database file — read with the dev token,
 // or on loopback with no token — is reused, nothing is bound, and the
 // verdict names its URL and pid.
@@ -133,7 +133,7 @@ func TestSameDBIsReused(t *testing.T) {
 		t.Run("token="+token, func(t *testing.T) {
 			host, port := freeBase(t, 2)
 			path := filepath.Join(t.TempDir(), "weft.db")
-			serveStudio(t, addr(host, port), path, token)
+			serveServer(t, addr(host, port), path, token)
 			c, err := choose(t, listen.Request{Addr: addr(host, port), Span: 2, DBPath: path, Token: token})
 			if err != nil {
 				t.Fatal(err)
@@ -141,7 +141,7 @@ func TestSameDBIsReused(t *testing.T) {
 			if !c.Reuse || c.Listener != nil || c.Addr != addr(host, port) || c.PID != os.Getpid() {
 				t.Fatalf("same db: %+v, want a reuse of %s with pid %d", c, addr(host, port), os.Getpid())
 			}
-			want := "studio already running at http://" + addr(host, port) + " (pid " + strconv.Itoa(os.Getpid()) + "), reusing"
+			want := "weftbase already running at http://" + addr(host, port) + " (pid " + strconv.Itoa(os.Getpid()) + "), reusing"
 			if c.ReuseLine() != want {
 				t.Errorf("reuse line %q, want %q", c.ReuseLine(), want)
 			}
@@ -149,7 +149,7 @@ func TestSameDBIsReused(t *testing.T) {
 	}
 }
 
-// TestBusyAddressMovesOn pins each "not this Studio" case: the next
+// TestBusyAddressMovesOn pins each "not this server" case: the next
 // port is bound and the note names the skipped address and why.
 func TestBusyAddressMovesOn(t *testing.T) {
 	for _, c := range []struct {
@@ -159,7 +159,7 @@ func TestBusyAddressMovesOn(t *testing.T) {
 		reason string
 	}{
 		{"a foreign listener", func(t *testing.T, a string) { occupy(t, a) },
-			listen.Request{DBPath: "/x/weft.db", Timeout: 200 * time.Millisecond}, "not a weft Studio"},
+			listen.Request{DBPath: "/x/weft.db", Timeout: 200 * time.Millisecond}, "not a weftbase server"},
 		{"a foreign HTTP server", func(t *testing.T, a string) {
 			ln, err := net.Listen("tcp", a)
 			if err != nil {
@@ -168,19 +168,19 @@ func TestBusyAddressMovesOn(t *testing.T) {
 			hs := &http.Server{Handler: http.NotFoundHandler(), ReadHeaderTimeout: time.Second}
 			go func() { _ = hs.Serve(ln) }()
 			t.Cleanup(func() { _ = hs.Close() })
-		}, listen.Request{DBPath: "/x/weft.db"}, "not a weft Studio"},
-		{"a Studio on another database", func(t *testing.T, a string) {
-			serveStudio(t, a, filepath.Join(t.TempDir(), "other.db"), "tok")
-		}, listen.Request{DBPath: "/x/weft.db", Token: "tok"}, "a Studio on another database, "},
-		{"a Studio with another token", func(t *testing.T, a string) {
-			serveStudio(t, a, filepath.Join(t.TempDir(), "weft.db"), "theirs")
-		}, listen.Request{DBPath: "/x/weft.db", Token: "mine"}, "a Studio with another token"},
-		{"a Studio that requires a token", func(t *testing.T, a string) {
-			serveStudio(t, a, filepath.Join(t.TempDir(), "weft.db"), "theirs")
+		}, listen.Request{DBPath: "/x/weft.db"}, "not a weftbase server"},
+		{"a server on another database", func(t *testing.T, a string) {
+			serveServer(t, a, filepath.Join(t.TempDir(), "other.db"), "tok")
+		}, listen.Request{DBPath: "/x/weft.db", Token: "tok"}, "a server on another database, "},
+		{"a server with another token", func(t *testing.T, a string) {
+			serveServer(t, a, filepath.Join(t.TempDir(), "weft.db"), "theirs")
+		}, listen.Request{DBPath: "/x/weft.db", Token: "mine"}, "a server with another token"},
+		{"a server that requires a token", func(t *testing.T, a string) {
+			serveServer(t, a, filepath.Join(t.TempDir(), "weft.db"), "theirs")
 		}, listen.Request{DBPath: "/x/weft.db"}, "set WEFTBASE_TOKEN"},
 		{"a fileless command database never matches", func(t *testing.T, a string) {
-			serveStudio(t, a, filepath.Join(t.TempDir(), "weft.db"), "tok")
-		}, listen.Request{Token: "tok"}, "a Studio on another database"},
+			serveServer(t, a, filepath.Join(t.TempDir(), "weft.db"), "tok")
+		}, listen.Request{Token: "tok"}, "a server on another database"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			host, port := freeBase(t, 2)
@@ -208,8 +208,8 @@ func TestBusyAddressMovesOn(t *testing.T) {
 func TestPinnedBusyIsAnError(t *testing.T) {
 	host, port := freeBase(t, 2)
 	path := filepath.Join(t.TempDir(), "weft.db")
-	// Even the same Studio is not reused: a pin is a pin.
-	serveStudio(t, addr(host, port), path, "tok")
+	// Even the same server is not reused: a pin is a pin.
+	serveServer(t, addr(host, port), path, "tok")
 	c, err := choose(t, listen.Request{Addr: addr(host, port), Pinned: true, Span: 2, DBPath: path, Token: "tok"})
 	if err == nil || !strings.Contains(err.Error(), addr(host, port)) || !strings.Contains(err.Error(), "pinned") || c.Listener != nil || c.Reuse {
 		t.Errorf("pinned busy: %+v, %v; want an error naming %s", c, err, addr(host, port))
@@ -242,7 +242,7 @@ func TestSameFileThroughASymlink(t *testing.T) {
 		t.Skip("no symlinks here:", err)
 	}
 	host, port := freeBase(t, 2)
-	serveStudio(t, addr(host, port), path, "tok")
+	serveServer(t, addr(host, port), path, "tok")
 	c, err := choose(t, listen.Request{Addr: addr(host, port), Span: 2, DBPath: filepath.Join(link, "weft.db"), Token: "tok"})
 	if err != nil || !c.Reuse {
 		t.Errorf("symlinked db path: %+v, %v; want a reuse", c, err)
@@ -281,17 +281,17 @@ func TestFixedTokenBeatsTokenFor(t *testing.T) {
 	}
 }
 
-// TestKnownStudio (B7, UX-S5a-13): a Studio the discovery file names
+// TestKnownServer (B7, UX-S5a-13): a server the discovery file names
 // (Request.Known) is asked first, whatever its port: the same database
 // there is the reuse verdict even with the wanted address free, pinned
-// or not; a Studio there on another database leaves the policy as it
+// or not; a server there on another database leaves the policy as it
 // was — the wanted address is bound.
-func TestKnownStudio(t *testing.T) {
+func TestKnownServer(t *testing.T) {
 	host, port := freeBase(t, 2)
 	known := addr(host, port+1)
 	dir := t.TempDir()
 	db := filepath.Join(dir, "weft.db")
-	serveStudio(t, known, db, "")
+	serveServer(t, known, db, "")
 	for _, pinned := range []bool{false, true} {
 		c, err := listen.Choose(context.Background(), listen.Request{Addr: addr(host, port), Pinned: pinned, DBPath: db, Known: known, Timeout: 5 * time.Second})
 		if err != nil || !c.Reuse || c.Addr != known || c.PID != os.Getpid() || c.Listener != nil {

@@ -8,11 +8,11 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/weftbase/weftbase/client/discovery"
 	"github.com/weftbase/weftbase/internal/dblock"
-	"github.com/weftbase/weftbase/internal/discovery"
 )
 
-// One Studio per database file (B7-fix, UX-S5a-13): `weftbase dev` and
+// One server per database file (B7-fix, UX-S5a-13): `weftbase dev` and
 // `weftbase dev` take <db>.lock (internal/dblock: flock / LockFileEx,
 // released by the kernel when the process ends, however it ends)
 // before the port policy and hold it while they serve. A start that
@@ -55,10 +55,10 @@ func lockDB(dbPath string) (*dblock.Lock, error) {
 	return l, nil
 }
 
-// errHeld is lockDB's verdict when another Studio holds the file.
+// errHeld is lockDB's verdict when another server holds the file.
 var errHeld = errors.New("held")
 
-// dbHolder is the Studio holding dbPath's lock, as far as anything
+// dbHolder is the server holding dbPath's lock, as far as anything
 // trusted says: the lock file's {url, pid} under dblock.ReadHolder's
 // rules (0600 and this user's, a loopback IP url, a live pid — weftbase dev
 // hands it the database's token), else a trusted discovery file naming
@@ -84,22 +84,22 @@ func dbHolder(dbPath string) (addr string, pid int, ok bool) {
 	return "", 0, false
 }
 
-// heldError is the refusal of a start whose database another Studio
+// heldError is the refusal of a start whose database another server
 // holds: its URL and pid when known.
 func heldError(dbPath string) error {
 	if addr, pid, ok := dbHolder(dbPath); ok {
 		return alreadyRunning(addr, pid, dbPath)
 	}
-	return fmt.Errorf("another Studio holds %s (its lock, %s): one Studio per database file — stop it first, or start this one on another --db",
+	return fmt.Errorf("another server holds %s (its lock, %s): one server per database file — stop it first, or start this one on another --db",
 		dbPath, dblock.Path(lockPath(dbPath)))
 }
 
-// alreadyRunning is the refusal naming the running Studio.
+// alreadyRunning is the refusal naming the running server.
 func alreadyRunning(addr string, pid int, dbPath string) error {
 	p := "pid unknown"
 	if pid > 0 {
 		p = fmt.Sprintf("pid %d", pid)
 	}
-	return fmt.Errorf("studio already running at http://%s (%s) on %s: one Studio per database file — sign in to it with `weftbase open --with-token`, or stop it first",
+	return fmt.Errorf("weftbase already running at http://%s (%s) on %s: one server per database file — sign in to it with `weftbase open --with-token`, or stop it first",
 		loopbackAddr(addr), p, dbPath)
 }

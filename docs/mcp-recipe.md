@@ -1,10 +1,10 @@
 # Reading runs from Claude Code and Cursor: the `weftbase mcp` recipe
 
-`weftbase mcp` is a stdio MCP server over a running Studio's read API. A
+`weftbase mcp` is a stdio MCP server over a running server's read API. A
 coding agent (Claude Code, Cursor, VS Code) calls it to answer "why did
-run X fail" while you debug, reading the same JSON routes the Studio UI
+run X fail" while you debug, reading the same JSON routes the server UI
 and `weftbase runs`/`open`/`export` read. It adds no route, computes
-nothing Studio does not serve, and never writes: every tool is a GET.
+nothing server does not serve, and never writes: every tool is a GET.
 
 ## 1. Set it up: three commands
 
@@ -19,14 +19,14 @@ v0.15.0–v0.20), so `@latest` has it, as does `go install ./cmd/weftbase`
 from a checkout; `weftbase version` says which one you run. The tools below are the current release's: `weftbase mcp --help`
 lists the ones your binary has.
 
-`weftbase dev` (or `weftbase dev -- go run ./cmd/app`, which runs Studio and your app together)
-listens on `127.0.0.1:7331` and writes the discovery file `studio.json`
+`weftbase dev` (or `weftbase dev -- go run ./cmd/app`, which runs server and your app together)
+listens on `127.0.0.1:7331` and writes the discovery file `dev.json`
 with its URL and dev token. `weftbase mcp`, started by Claude Code with no
-flags, reads that file and talks to that Studio with that token. Your
-app finds the same Studio the same way (`exporter.Install()`), so its runs
+flags, reads that file and talks to that server with that token. Your
+app finds the same server the same way (`exporter.Install()`), so its runs
 are already there.
 
-To name a Studio yourself:
+To name a server yourself:
 
 ```sh
 claude mcp add weft -- weftbase mcp --url http://127.0.0.1:7331
@@ -52,7 +52,7 @@ is the same shape):
 ```
 
 with `"args": ["mcp", "--url", "http://127.0.0.1:7331"]` to name a
-Studio, and `"env": {"WEFTBASE_TOKEN": "…"}` beside `args` for a
+server, and `"env": {"WEFTBASE_TOKEN": "…"}` beside `args` for a
 token.
 
 **VS Code**, `.vscode/mcp.json`, is *not* the same shape: its top-level
@@ -66,8 +66,8 @@ Every convenience is escapable:
 
 | What | Order (first wins) |
 |---|---|
-| the Studio | `--url`, `WEFTBASE_URL`, the discovery file (skipped under `WEFTBASE_DISCOVERY=off`), `http://127.0.0.1:7331` |
-| the token | `--token`, `WEFTBASE_TOKEN`, the discovery file's — only when that file names the Studio resolved above |
+| the server | `--url`, `WEFTBASE_URL`, the discovery file (skipped under `WEFTBASE_DISCOVERY=off`), `http://127.0.0.1:7331` |
+| the token | `--token`, `WEFTBASE_TOKEN`, the discovery file's — only when that file names the server resolved above |
 
 The token travels in the `Authorization` header only; `weftbase mcp` never
 prints it (its one stderr line says where the token came from: `token
@@ -128,14 +128,14 @@ tool call failing, the prompts ~220 characters — answers 3.2 KB compact,
 | How is agent X doing — failure rate, cost, latency? | `stats {"by": "agent", "since": "7d"}` (or `by` model, tool, error_type, step; `agent`, `tag`, `public_id` narrow it) | a group's `runs_query` is the `search` that lists its runs |
 | Where did the refund tool return an error? | `step {"id": X, "n": N}` (each call's `result.is_error`) or `events {"id": X}` (`tool_finish` with `is_error`) | — search does not filter on tool results |
 | Compare run A and B | `diff {"a": A, "b": B}` | `step` on the first changed step |
-| What can this Studio do? | `meta {}` | a 404 or 403 elsewhere: is the capability off, and why |
+| What can this server do? | `meta {}` | a 404 or 403 elsewhere: is the capability off, and why |
 | Which runs just happened? | `runs {"agent": "…", "status": "failed", "limit": 10}` | `explain_failure` |
-| Is this run parked? | `explain_failure {"id": X}` | "awaiting a decision": approve or deny in Studio (§3); "decided: … denied by alice → resumed as Y": read Y |
+| Is this run parked? | `explain_failure {"id": X}` | "awaiting a decision": approve or deny in server (§3); "decided: … denied by alice → resumed as Y": read Y |
 | What did this turn answer? | `explain_failure {"id": X}` (`last_assistant_text`: this run's own text, never an earlier turn's) | `transcript {"id": X}` (each batch marked input or the run's own) |
 | Where did the time go? | `spans {"id": X}` (`tree: true` with the child runs) | `trace {"trace_id": T}` for a stock OTel app's trace |
 | What did the app log? | `logs {"id": X, "severity": "warn"}` | — a `not_recorded` hole names `otel.Slog()` |
 | What is running now? | `live {}` (a snapshot; call again) | `explain_failure` on one |
-| Which agents, experiments, runtimes? | `agents {}`, `experiments {}`, `runtimes {}` | a 404: the playground or the manifest is off (`meta`) |
+| Which agents, experiments, runtimes? | `agents {}`, `experiments {}`, `runtimes {}` | a 404: the feature or the manifest is off (`meta`) |
 
 ### Worked examples
 
@@ -143,7 +143,7 @@ These are the output of `make mcp-check` (§7): a real `weftbase dev`, the
 record contract's fixtures (`obsdb/testdata/contract/`, real recorded
 pipeline output, renumbered per case so they share one database), and
 the real `weftbase mcp` binary driven over stdio by the MCP Go SDK's client,
-the way Claude Code drives it. The Studio sat on a free port
+the way Claude Code drives it. The server sat on a free port
 (`127.0.0.1:33933`); yours is `127.0.0.1:7331`. Each example is the call,
 the summary line, and the start of the JSON (cut here with `…`).
 
@@ -160,7 +160,7 @@ next: step {id:"a1100000000000000000000000000001", n:0} for the step whole | req
 (`next:` is the explanation's `next` array, joined.) The answer names
 the error, the step it is about and why that step (here: the budget
 stopped the run *between* steps, so the step shown is the last one that
-ran), that step's tool calls with their outcome, and the Studio page.
+ran), that step's tool calls with their outcome, and the server page.
 Then the step whole:
 
 ```text
@@ -297,12 +297,12 @@ diff a1100000000000000000000000000001 → a1100004000000000000000000000001: 1 ch
 {"a":{"run_id":"a1100000000000000000000000000001","steps":1,"status":"failed"},"b":{"run_id":"a1100004000000000000000000000001","steps":2,"status":"succeeded"},"steps":[{"step":0,"changed":false,"a":{"status":"ok","system_hash":"57e8f485cbb…
 ```
 
-**What can this Studio do?**
+**What can this server do?**
 
 ```text
 > meta {}
-Studio at http://127.0.0.1:33933: capabilities requests, steps, export, logs, diff, traces, search, manifests, spans_tree, timeline, pricing, delete, proposals, live, ingest, auth, handoff, panel-config
-{"weft_version":"v0.20.3","studio_version":"v0.20.3","panel_version":"v0.20.3","db":{"kind":"sqlite","path":"/tmp/TestMCPLiveCheck3582215505/001/weft.db","size":922888},"title":"weftbase dev","has_manifest":false,"ingest_open":true,"interrup…
+server at http://127.0.0.1:33933: capabilities requests, steps, export, logs, diff, traces, search, manifests, spans_tree, timeline, pricing, delete, proposals, live, ingest, auth, handoff
+{"weft_version":"v0.20.3","server_version":"v0.20.3","db":{"kind":"sqlite","path":"/tmp/TestMCPLiveCheck3582215505/001/weft.db","size":922888},"title":"weftbase dev","has_manifest":false,"ingest_open":true,"interrup…
 ```
 
 `capabilities_off` in the JSON names each capability that is off and
@@ -320,7 +320,7 @@ replays, edits or starts anything. Two walls hold it:
 
 `--read-only=false` is a usage error. Write verbs stay out until weft
 has an approval story for agents. Until then the agent hands off to
-you: every `explain_failure` answer ends with the run's Studio page
+you: every `explain_failure` answer ends with the run's server page
 (`— http://127.0.0.1:7331/runs/<id>`, the `url` field), where you
 approve or deny a parked call, steer or cancel a running one, replay
 from a step, edit a result or delete the run.
@@ -330,10 +330,10 @@ from a step, edit a result or delete the run.
 | Token | Where it comes from | What `weftbase mcp` reads with it |
 |---|---|---|
 | the dev token | `weftbase dev`/`weftbase dev`: `<db>.token` beside the SQLite file (0600, never printed), in the discovery file; `--token`/`WEFTBASE_TOKEN` override it | everything every tool offers |
-| a read-only panel token | minted for one public id (`/api/panel-tokens`, setup C) | that public id's runs only; system prompts, request records and app logs `hidden`; session reverse lookups refused |
+| a read-only scoped token | minted for one public id (setup C) | that public id's runs only; system prompts, request records and app logs `hidden`; session reverse lookups refused |
 
 A route a token may not read answers 403, and the tool returns it as an
-error (`isError`): Studio's own line, then its body — the error, the
+error (`isError`): server's own line, then its body — the error, the
 badge, the reason and the `fix` when the route gives one — never an
 empty result. `explain_failure` under a read token still answers: the
 step it cannot read is named in `step_note` (`hidden (403)`), and its
@@ -369,40 +369,40 @@ steps.
 
 ## 6. Troubleshooting
 
-**`no Studio answers /api/meta: studio not reachable at
+**`no server answers /api/meta: weftbase not reachable at
 http://127.0.0.1:7331: Get "http://127.0.0.1:7331/api/meta": dial tcp
 127.0.0.1:7331: connect: connection refused (weftbase dev starts one;
 --url or WEFTBASE_URL points at another); the next call looks again
 (WEFTBASE_URL, the discovery file): no restart needed`** as a tool's
-error (and a `level=WARN … no Studio answers /api/meta yet; tools will
-retry per call` line in the client's MCP log at startup) — no Studio is
+error (and a `level=WARN … no server answers /api/meta yet; tools will
+retry per call` line in the client's MCP log at startup) — no server is
 running there. `weftbase mcp` does not exit: it serves, and the next tool
 call after a failure looks again — with no `--url`, it re-reads
-`WEFTBASE_URL` and the discovery file, so a Studio started after the
+`WEFTBASE_URL` and the discovery file, so a server started after the
 coding session (or `weftbase dev` on 7332–7340) is found without
 restarting the client; an explicit `--url` is retried as given. Start
 one (`weftbase dev` or `weftbase dev`), or point at yours: `--url`,
-`WEFTBASE_URL`. If a Studio *is* running elsewhere, the discovery
+`WEFTBASE_URL`. If a server *is* running elsewhere, the discovery
 file was not used: check that `WEFTBASE_DISCOVERY` is not `off` and
 `WEFTBASE_URL` is unset in the environment the client starts `weft
 mcp` in (Claude Code passes its own environment, plus `-e` pairs).
 
-**`weft: mcp: no Studio answers /api/meta: GET /api/meta: 401 the API
+**`weft: mcp: no server answers /api/meta: GET /api/meta: 401 the API
 requires a token: Authorization: Bearer <token> (--token or
-WEFTBASE_TOKEN)`** — that Studio walls its API
+WEFTBASE_TOKEN)`** — that server walls its API
 and no token reached it. Give `-e WEFTBASE_TOKEN=…` or `--token`; with
 `--url`, the discovery file's token is used only when the file names
-the same URL (a token goes only to the Studio it belongs to). A 401
+the same URL (a token goes only to the server it belongs to). A 401
 mid-session, with no `--url`, `--token` or `WEFTBASE_TOKEN`, ends
 "…; the next call looks again (WEFTBASE_URL, the discovery file): no
-restart needed": a Studio restarted with a new token (a fileless
+restart needed": a server restarted with a new token (a fileless
 database's per-process one, `--rotate-token`) is read with the
 discovery file's new token on the next call.
 
-**The discovery file is ignored.** `studio.json` lives in `./.weftbase`
-(only from the directory the Studio was started in), then
+**The discovery file is ignored.** `dev.json` lives in `./.weftbase`
+(only from the directory the server was started in), then
 `$XDG_RUNTIME_DIR/weftbase`, then the user cache directory. It is trusted
-only when its URL is loopback, it is fresh (the Studio's pid alive,
+only when its URL is loopback, it is fresh (the server's pid alive,
 younger than 24 h) and, on unix, it is mode 0600 and yours; anything
 else is skipped. `weftbase dev` removes it on a clean exit. `WEFTBASE_URL`
 or `--url` always wins over it, and `WEFTBASE_DISCOVERY=off` turns the read off.
@@ -416,12 +416,12 @@ subagent child), or the route's capability is off — ask `meta`.
 `make mcp-check` (`cmd/weftbase/mcp_check_test.go`, build tag `livecheck`)
 proves "`weftbase mcp` answers 'why did run X fail'" end to end without a
 model: it builds `weft`, starts `weftbase dev --db sqlite://<tmp>
---addr 127.0.0.1:<free port> --no-playground` in a scratch directory
+--addr 127.0.0.1:<free port>` in a scratch directory
 with `HOME`, `XDG_RUNTIME_DIR` and `XDG_CACHE_HOME` inside it (so its
-`studio.json` lands there; your own discovery files are compared before
+`dev.json` lands there; your own discovery files are compared before
 and after and must not change), POSTs the `failed`, `parked`,
 `interrupted`, `tool_calls`, `session_turns` and `stock_genai` fixtures
-to `/v1/traces` and `/v1/logs` with the dev token read from
+to `/otlp/v1/traces` and `/otlp/v1/logs` with the dev token read from
 `<db>.token`, then — later, through the otel pipeline on wefttest
 scripted models — four shapes built in the check from the arena's
 scenarios: `sub.failed`, `agentic.chaos`, a thread turn denied by alice
@@ -441,7 +441,7 @@ and resumed, and a nine-turn session; then:
   session turn its own text; the nine-turn `session` under 4 KB; and
   `spans` (a tree), `logs`, `transcript`, `live`;
 - spawns `weftbase mcp` with no flag and no token (the `claude mcp add weft
-  -- weftbase mcp` path), which finds the scratch Studio through its
+  -- weftbase mcp` path), which finds the scratch server through its
   discovery file, and asserts `meta` and the stderr line `token from the
   discovery file`.
 
