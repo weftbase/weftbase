@@ -1,0 +1,496 @@
+/* Weftbase theme for shadcn/ui · TanStack Start · Tailwind CSS v4.
+   From the Weftbase design system (project/shadcn/globals.css). The one
+   change: Geist and Geist Mono are self-hosted from the design system's
+   font files in public/fonts (served from dist/fonts), so an offline
+   install never calls a font CDN. Colour literals live in this file only. */
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@font-face {
+  font-family: "Geist Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("/fonts/Geist-Variable.woff2") format("woff2-variations");
+}
+@font-face {
+  font-family: "Geist Mono Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("/fonts/GeistMono-Variable.woff2") format("woff2-variations");
+}
+
+@custom-variant dark (&:is(.dark *, [data-theme="dark"] *));
+
+:root {
+  --background: #FFFFFF;
+  --foreground: #303036;
+  --card: #FFFFFF;
+  --card-foreground: var(--foreground);
+  --popover: #FFFFFF;
+  --popover-foreground: var(--foreground);
+  --primary: #232327;
+  --primary-foreground: #FFFFFF;
+  --secondary: #FAFAFA;
+  --secondary-foreground: #303036;
+  --muted: #F4F4F5;
+  --muted-foreground: #52525B;
+  --accent: #F4F4F5;
+  --accent-foreground: var(--foreground);
+  --destructive: #C2342B;
+  --destructive-foreground: #FFFFFF;
+  --border: #E4E4E7;
+  --input: #D4D4D8;
+  --ring: #303036;
+  --chart-1: #18181B;
+  --chart-2: #52525B;
+  --chart-3: #8B8B93;
+  --chart-4: #B4B4BB;
+  --chart-5: #D97706;
+  --sidebar: #FAFAFA;
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: #F4F4F5;
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: #E4E4E7;
+  --sidebar-ring: var(--ring);
+  --subtle-foreground: #71717A;
+  --surface: #FAFAFA;
+  --frame: var(--muted);
+  --inverse: #18181B;
+  --inverse-border: var(--inverse);
+  --primary-top: #34343A;
+  --primary-ledge: #C4C4CA;
+  --secondary-top: #FFFFFF;
+  --secondary-border: #E4E4E7;
+  --secondary-ledge: #E4E4E7;
+  --destructive-end: #A8261E;
+  --destructive-ledge: #E8B4AF;
+  --tile-top: #34343A;
+  --tile: #232327;
+  --tile-border: rgba(0,0,0,0);
+  --tile-foreground: #FAFAFA;
+  --input-background: #FFFFFF;
+  --ring-halo: rgba(48,48,54,0.12);
+  --success: #16A34A;
+  --success-foreground: #15803D;
+  --success-muted: #F0FDF4;
+  --warning: #D97706;
+  --warning-foreground: #B45309;
+  --warning-muted: #FFFBEB;
+  --danger: #DC2626;
+  --danger-foreground: #B91C1C;
+  --danger-muted: #FEF2F2;
+  --neutral: #71717A;
+  --neutral-foreground: #3F3F46;
+  --neutral-muted: #F4F4F5;
+  --code: #18181B;
+  --code-border: #2A2A2F;
+  --code-foreground: #E4E4E7;
+  --code-muted: #8B8B93;
+  --code-success: #4ADE80;
+  --code-dot: #3F3F46;
+  --kbd: #FFFFFF;
+  --kbd-border: #E4E4E7;
+  --tab-list: var(--muted);
+  --tab-list-border: var(--border);
+  --tab-foreground: var(--muted-foreground);
+  --tab-active: var(--background);
+  --tab-active-foreground: var(--foreground);
+  --table-head-foreground: var(--subtle-foreground);
+  --table-border: var(--border);
+  --table-row-selected: var(--muted);
+  --switch-thumb: #FFFFFF;
+  --brand-ink: #18181B;
+  --brand-graphite: #52525B;
+  --brand-steel: #8B8B93;
+  --brand-mist: #B4B4BB;
+  --brand-paper: #FAFAFA;
+  --pattern-1: #E9E9EC;
+  --pattern-2: #DCDCE0;
+  --pattern-3: #CFCFD4;
+  --pattern-4: #C2C2C8;
+  --pattern-line: #D4D4D8;
+  --pattern-cut: var(--background);
+  --elev-keycap-primary: inset 0 1px 0 rgba(255,255,255,0.14), 0 2px 0 #C4C4CA, 0 5px 12px -5px rgba(0,0,0,0.15);
+  --elev-keycap-secondary: inset 0 1px 0 #FFFFFF, 0 2px 0 #E4E4E7;
+  --elev-keycap-destructive: inset 0 1px 0 rgba(255,255,255,0.16), 0 2px 0 #E8B4AF;
+  --elev-card: 0 1px 0 #E4E4E7, 0 8px 20px -14px rgba(0,0,0,0.12);
+  --elev-tile: inset 0 1px 0 rgba(255,255,255,0.14), 0 3px 0 #C4C4CA, 0 10px 18px -8px rgba(0,0,0,0.18);
+  --elev-code: 0 2px 0 #C4C4CA, 0 16px 32px -18px rgba(0,0,0,0.35);
+  --elev-frame: 0 3px 0 #C4C4CA, 0 40px 80px -40px rgba(0,0,0,0.25);
+  --elev-band: inset 0 1px 0 rgba(255,255,255,0.08), 0 3px 0 #C4C4CA;
+  --elev-input: inset 0 1px 2px rgba(0,0,0,0.05);
+  --elev-focus: 0 0 0 3px rgba(48,48,54,0.12);
+  --elev-kbd: 0 1px 0 #E4E4E7;
+  --elev-command: 0 2px 0 #E4E4E7;
+  --elev-nav-active: inset 0 0 0 1px #E4E4E7;
+  --elev-tab-active: 0 1px 0 #E4E4E7, 0 1px 3px rgba(0,0,0,0.08);
+  --elev-switch: inset 0 1px 2px rgba(0,0,0,0.2);
+  --elev-thumb: 0 1px 2px rgba(0,0,0,0.3);
+  --radius: 0.625rem;
+}
+
+.dark,
+[data-theme="dark"] {
+  --background: #111113;
+  --foreground: #ECECEE;
+  --card: #18181B;
+  --card-foreground: var(--foreground);
+  --popover: #18181B;
+  --popover-foreground: var(--foreground);
+  --primary: #E9E9EC;
+  --primary-foreground: #303036;
+  --secondary: #27272A;
+  --secondary-foreground: #ECECEE;
+  --muted: #1F1F23;
+  --muted-foreground: #A1A1AA;
+  --accent: #1F1F23;
+  --accent-foreground: var(--foreground);
+  --destructive: #E5484D;
+  --destructive-foreground: #FFFFFF;
+  --border: #2A2A2F;
+  --input: #3F3F46;
+  --ring: #ECECEE;
+  --chart-1: #ECECEE;
+  --chart-2: #B4B4BB;
+  --chart-3: #8B8B93;
+  --chart-4: #52525B;
+  --chart-5: #FBBF24;
+  --sidebar: #18181B;
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: #1F1F23;
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: #2A2A2F;
+  --sidebar-ring: var(--ring);
+  --subtle-foreground: #8B8B93;
+  --surface: #18181B;
+  --frame: var(--muted);
+  --inverse: #18181B;
+  --inverse-border: #2A2A2F;
+  --primary-top: #FFFFFF;
+  --primary-ledge: #71717A;
+  --secondary-top: #303035;
+  --secondary-border: #3F3F46;
+  --secondary-ledge: #52525B;
+  --destructive-end: #C9343A;
+  --destructive-ledge: #7F1D1D;
+  --tile-top: #303035;
+  --tile: #232327;
+  --tile-border: #3F3F46;
+  --tile-foreground: #ECECEE;
+  --input-background: #111113;
+  --ring-halo: rgba(236,236,238,0.14);
+  --success: #4ADE80;
+  --success-foreground: #4ADE80;
+  --success-muted: rgba(74,222,128,0.12);
+  --warning: #FBBF24;
+  --warning-foreground: #FBBF24;
+  --warning-muted: rgba(251,191,36,0.12);
+  --danger: #F87171;
+  --danger-foreground: #F87171;
+  --danger-muted: rgba(248,113,113,0.12);
+  --neutral: #A1A1AA;
+  --neutral-foreground: #D4D4D8;
+  --neutral-muted: rgba(255,255,255,0.07);
+  --code: #0B0B0D;
+  --code-border: #26262B;
+  --code-foreground: #E4E4E7;
+  --code-muted: #8B8B93;
+  --code-success: #4ADE80;
+  --code-dot: #3F3F46;
+  --kbd: #1F1F23;
+  --kbd-border: #3F3F46;
+  --tab-list: var(--muted);
+  --tab-list-border: var(--border);
+  --tab-foreground: var(--muted-foreground);
+  --tab-active: var(--background);
+  --tab-active-foreground: var(--foreground);
+  --table-head-foreground: var(--subtle-foreground);
+  --table-border: var(--border);
+  --table-row-selected: var(--muted);
+  --switch-thumb: #18181B;
+  --brand-ink: #18181B;
+  --brand-graphite: #52525B;
+  --brand-steel: #8B8B93;
+  --brand-mist: #B4B4BB;
+  --brand-paper: #FAFAFA;
+  --pattern-1: #2E2E34;
+  --pattern-2: #26262B;
+  --pattern-3: #202024;
+  --pattern-4: #1B1B1F;
+  --pattern-line: #33333A;
+  --pattern-cut: var(--background);
+  --elev-keycap-primary: inset 0 1px 0 #FFFFFF, 0 2px 0 #71717A, 0 5px 12px -5px rgba(0,0,0,0.5);
+  --elev-keycap-secondary: inset 0 1px 0 rgba(255,255,255,0.08), 0 2px 0 #52525B, 0 5px 12px -5px rgba(0,0,0,0.35);
+  --elev-keycap-destructive: inset 0 1px 0 rgba(255,255,255,0.16), 0 2px 0 #7F1D1D;
+  --elev-card: inset 0 1px 0 rgba(255,255,255,0.04), 0 2px 0 #0B0B0D, 0 10px 24px -14px rgba(0,0,0,0.6);
+  --elev-tile: inset 0 1px 0 rgba(255,255,255,0.10), 0 3px 0 #000000, 0 10px 18px -8px rgba(0,0,0,0.5);
+  --elev-code: 0 2px 0 #000000, 0 16px 32px -18px rgba(0,0,0,0.35);
+  --elev-frame: 0 3px 0 #000000, 0 40px 80px -40px rgba(0,0,0,0.7);
+  --elev-band: inset 0 1px 0 rgba(255,255,255,0.08), 0 3px 0 #000000;
+  --elev-input: inset 0 1px 2px rgba(0,0,0,0.4);
+  --elev-focus: 0 0 0 3px rgba(236,236,238,0.14);
+  --elev-kbd: 0 1px 0 #000000;
+  --elev-command: 0 2px 0 #000000;
+  --elev-nav-active: inset 0 0 0 1px #2A2A2F;
+  --elev-tab-active: 0 1px 0 #2A2A2F, 0 1px 3px rgba(0,0,0,0.08);
+  --elev-switch: inset 0 1px 2px rgba(0,0,0,0.2);
+  --elev-thumb: 0 1px 2px rgba(0,0,0,0.3);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: "Geist Variable", "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-heading: var(--font-sans);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-subtle-foreground: var(--subtle-foreground);
+  --color-surface: var(--surface);
+  --color-frame: var(--frame);
+  --color-inverse: var(--inverse);
+  --color-inverse-border: var(--inverse-border);
+  --color-primary-top: var(--primary-top);
+  --color-primary-ledge: var(--primary-ledge);
+  --color-secondary-top: var(--secondary-top);
+  --color-secondary-border: var(--secondary-border);
+  --color-secondary-ledge: var(--secondary-ledge);
+  --color-destructive-end: var(--destructive-end);
+  --color-destructive-ledge: var(--destructive-ledge);
+  --color-tile-top: var(--tile-top);
+  --color-tile: var(--tile);
+  --color-tile-border: var(--tile-border);
+  --color-tile-foreground: var(--tile-foreground);
+  --color-input-background: var(--input-background);
+  --color-ring-halo: var(--ring-halo);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-muted: var(--success-muted);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-muted: var(--warning-muted);
+  --color-danger: var(--danger);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-danger-muted: var(--danger-muted);
+  --color-neutral: var(--neutral);
+  --color-neutral-foreground: var(--neutral-foreground);
+  --color-neutral-muted: var(--neutral-muted);
+  --color-code: var(--code);
+  --color-code-border: var(--code-border);
+  --color-code-foreground: var(--code-foreground);
+  --color-code-muted: var(--code-muted);
+  --color-code-success: var(--code-success);
+  --color-code-dot: var(--code-dot);
+  --color-kbd: var(--kbd);
+  --color-kbd-border: var(--kbd-border);
+  --color-tab-list: var(--tab-list);
+  --color-tab-list-border: var(--tab-list-border);
+  --color-tab-foreground: var(--tab-foreground);
+  --color-tab-active: var(--tab-active);
+  --color-tab-active-foreground: var(--tab-active-foreground);
+  --color-table-head-foreground: var(--table-head-foreground);
+  --color-table-border: var(--table-border);
+  --color-table-row-selected: var(--table-row-selected);
+  --color-switch-thumb: var(--switch-thumb);
+  --color-brand-ink: var(--brand-ink);
+  --color-brand-graphite: var(--brand-graphite);
+  --color-brand-steel: var(--brand-steel);
+  --color-brand-mist: var(--brand-mist);
+  --color-brand-paper: var(--brand-paper);
+  --color-pattern-1: var(--pattern-1);
+  --color-pattern-2: var(--pattern-2);
+  --color-pattern-3: var(--pattern-3);
+  --color-pattern-4: var(--pattern-4);
+  --color-pattern-line: var(--pattern-line);
+  --color-pattern-cut: var(--pattern-cut);
+
+  --radius-sm: calc(var(--radius) * 0.6);   /* 6px  kbd, count badge   */
+  --radius-md: calc(var(--radius) * 0.8);   /* 8px  nav, menu item     */
+  --radius-lg: var(--radius);               /* 10px buttons, tab list  */
+  --radius-xl: calc(var(--radius) * 1.6);   /* 16px cards, toasts      */
+  --radius-2xl: calc(var(--radius) * 1.8);  /* 18px 72px app tile      */
+  --radius-3xl: calc(var(--radius) * 2.4);  /* 24px CTA band           */
+  --radius-4xl: calc(var(--radius) * 2.8);  /* 28px hero tile          */
+
+  --shadow-keycap: var(--elev-keycap-primary);
+  --shadow-keycap-secondary: var(--elev-keycap-secondary);
+  --shadow-keycap-destructive: var(--elev-keycap-destructive);
+  --shadow-card: var(--elev-card);
+  --shadow-tile: var(--elev-tile);
+  --shadow-code: var(--elev-code);
+  --shadow-frame: var(--elev-frame);
+  --shadow-band: var(--elev-band);
+  --shadow-input: var(--elev-input);
+  --shadow-focus: var(--elev-focus);
+  --shadow-kbd: var(--elev-kbd);
+  --shadow-command: var(--elev-command);
+  --shadow-nav-active: var(--elev-nav-active);
+  --shadow-tab-active: var(--elev-tab-active);
+  --shadow-switch: var(--elev-switch);
+  --shadow-thumb: var(--elev-thumb);
+}
+
+/* The exact Weftbase corners as utilities: rounded-input, rounded-alert, rounded-card … */
+@theme {
+  --radius-check: 5px;
+  --radius-kbd-sm: 5px;
+  --radius-tab: 7px;
+  --radius-input: 9px;
+  --radius-icon: 11px;
+  --radius-alert: 12px;
+  --radius-code: 14px;
+  --radius-card: 16px;
+  --radius-tile: 18px;
+  --radius-frame: 20px;
+  --radius-band: 24px;
+  --radius-hero-tile: 28px;
+  --radius-app-icon: 36px;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+/* Keycap · lit surfaces, the icon tile and the brand labels. Usable on any element. */
+@utility keycap {
+  background-image: linear-gradient(180deg, var(--primary-top) 0%, var(--primary) 100%);
+  color: var(--primary-foreground);
+  box-shadow: var(--elev-keycap-primary);
+  margin-bottom: 2px;
+}
+@utility keycap-secondary {
+  background-image: linear-gradient(180deg, var(--secondary-top) 0%, var(--secondary) 100%);
+  color: var(--secondary-foreground);
+  border: 1px solid var(--secondary-border);
+  box-shadow: var(--elev-keycap-secondary);
+  margin-bottom: 2px;
+}
+@utility keycap-destructive {
+  background-image: linear-gradient(180deg, var(--destructive) 0%, var(--destructive-end) 100%);
+  color: var(--destructive-foreground);
+  box-shadow: var(--elev-keycap-destructive);
+  margin-bottom: 2px;
+}
+@utility tile {
+  background-image: linear-gradient(180deg, var(--tile-top) 0%, var(--tile) 100%);
+  color: var(--tile-foreground);
+  border: 1px solid var(--tile-border);
+  box-shadow: var(--elev-tile);
+}
+@utility eyebrow {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--subtle-foreground);
+}
+@utility eyebrow-lg {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--subtle-foreground);
+}
+@utility table-head {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--table-head-foreground);
+}
+
+/* Console additions, all from tokens above. */
+@utility code-block {
+  /* Code and terminal blocks are dark in both themes. */
+  background: var(--code);
+  color: var(--code-foreground);
+  border: 1px solid var(--code-border);
+  border-radius: var(--radius-code);
+  box-shadow: var(--elev-code);
+}
+@utility count-badge {
+  /* The amber "items waiting" count in the sidebar (Kbd README, wb-count). */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--warning-muted);
+  color: var(--warning-foreground);
+}
+@utility stat {
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+@layer base {
+  h1, h2, h3 {
+    font-weight: 600;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
