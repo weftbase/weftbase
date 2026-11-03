@@ -190,6 +190,13 @@ describe("the grant's lifetime", () => {
   })
 
   it("the browser's own retry refused for a spent sig is replaced by a new grant too", async () => {
+    // The page's deadline is the grant's 60 s less a second's margin
+    // and the Date header's truncation to whole seconds (grantDeadline):
+    // 59 to 60 s after the grant, by where the clock sits inside its
+    // second. A clock on a whole second is the earliest (59 s); pin it
+    // there, so the drop at 58 s is inside the grant on every run, not
+    // only on the 999 in 1000 whose wall clock was off the second.
+    vi.setSystemTime(new Date("2026-10-01T09:00:00.000Z"))
     const studio = fakeStudio({})
     const h = openPanelLive(
       { base: EP, token: "" },
@@ -198,11 +205,11 @@ describe("the grant's lifetime", () => {
     await flush()
     const first = FakeEventSource.last("run=r1")!
     first.opened()
-    vi.advanceTimersByTime(59_000)
+    vi.advanceTimersByTime(58_000)
     first.fail(FakeEventSource.CONNECTING) // inside the grant: left to the browser
     expect(studio.posts("live-grant")).toHaveLength(1)
     vi.advanceTimersByTime(3000)
-    first.retry() // 62 s: the fake's /api/live refuses the sig
+    first.retry() // 61 s: the fake's /api/live refuses the sig
     await flush()
     expect(studio.posts("live-grant")).toHaveLength(2)
     FakeEventSource.instances[1].opened()

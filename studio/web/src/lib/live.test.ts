@@ -270,11 +270,16 @@ describe("openLive", () => {
   })
 
   it("the browser's retry refused after the grant's 60 s gets a new grant too, on the backoff", async () => {
+    // The page's deadline is 59 to 60 s after the grant (grantDeadline:
+    // a second's margin, the Date header cut to whole seconds); a clock
+    // on a whole second is the earliest. Pinned there, the drop at 58 s
+    // is inside the grant on every run.
+    vi.setSystemTime(new Date("2026-10-01T09:00:00.000Z"))
     const live = openLive({ selector: { run: "r1" } })
     await flush()
     const first = FakeEventSource.nth(0)
     first.connect()
-    vi.advanceTimersByTime(59_000)
+    vi.advanceTimersByTime(58_000)
     first.dropRetrying() // inside the grant: the browser retries
     expect(first.closedByClient).toBe(false)
     vi.advanceTimersByTime(3000)
