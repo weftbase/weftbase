@@ -1,6 +1,7 @@
 package console
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -127,5 +128,43 @@ func TestCSPHashMatchesParsedText(t *testing.T) {
 	}
 	if got := CSPFor([]byte(`<script src="/assets/a.js"></script><script> </script>`)); strings.Contains(got, "sha256") {
 		t.Errorf("an external or empty script hashed: %s", got)
+	}
+}
+
+// The committed build's csp.json is what the server sends: every
+// inline script hash the build computed is in script-src.
+func TestCSPFromTheBuild(t *testing.T) {
+	b, err := dist.ReadFile("dist/csp.json")
+	if err != nil {
+		t.Skip("no csp.json in this build")
+	}
+	var doc map[string][]string
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	shell, err := dist.ReadFile("dist/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := cspOf(shell)
+	for _, src := range doc["script-src"] {
+		if !strings.Contains(got, "script-src") || !strings.Contains(got, src) {
+			t.Errorf("CSP %q misses %s", got, src)
+		}
+	}
+	// The shell's own inline scripts hash to what the build wrote.
+	for _, h := range strings.Fields(CSPFor(shell)) {
+		if strings.HasPrefix(h, "'sha256-") && !strings.Contains(got, h) {
+			t.Errorf("inline script %s is not allowed by %q", h, got)
+		}
+	}
+}
+
+func TestCSPFromBuildRefusesUnsafeInline(t *testing.T) {
+	if _, ok := cspFromBuild([]byte(`{"script-src":["'self'","'unsafe-inline'"]}`)); ok {
+		t.Fatal("a build map allowing inline scripts was accepted")
+	}
+	if _, ok := cspFromBuild([]byte(`{"script_hashes":["sha256-x"]}`)); ok {
+		t.Fatal("a map with no script-src was accepted")
 	}
 }

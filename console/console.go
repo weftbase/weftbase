@@ -18,6 +18,8 @@ import (
 	"net/http"
 	"path"
 	"regexp"
+	"slices"
+	"sort"
 	"strings"
 )
 
@@ -93,24 +95,48 @@ func normBase(p string) string {
 }
 
 // cspOf is the Content-Security-Policy for the shell: the one the build
-// computed (dist/csp.json, {"script_hashes": ["sha256-…"]}) when
-// present, else hashes of the shell's inline scripts. Self-only
-// everywhere, data: images, inline styles, and scripts from self plus
-// a sha256 per inline block, never 'unsafe-inline' for scripts.
+// wrote (dist/csp.json, a map of directive to sources, its script-src
+// carrying a sha256 per inline script) when present, else hashes of
+// the shell's inline scripts. Either way scripts come from self plus
+// those hashes, never 'unsafe-inline'.
 func cspOf(shell []byte) string {
-	csp := "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'"
 	if b, err := dist.ReadFile("dist/csp.json"); err == nil {
-		var doc struct {
-			ScriptHashes []string `json:"script_hashes"`
-		}
-		if json.Unmarshal(b, &doc) == nil {
-			for _, h := range doc.ScriptHashes {
-				csp += " '" + h + "'"
-			}
+		if csp, ok := cspFromBuild(b); ok {
 			return csp
 		}
 	}
 	return CSPFor(shell)
+}
+
+// cspFromBuild renders the build's directive map in a stable order.
+// A map with no script-src, or one allowing 'unsafe-inline' scripts,
+// is refused and the caller hashes the shell itself.
+func cspFromBuild(b []byte) (string, bool) {
+	var doc map[string][]string
+	if json.Unmarshal(b, &doc) != nil {
+		return "", false
+	}
+	scripts, ok := doc["script-src"]
+	if !ok || slices.Contains(scripts, "'unsafe-inline'") {
+		return "", false
+	}
+	// default-src first, script-src last, the rest sorted between.
+	names := make([]string, 0, len(doc))
+	for name := range doc {
+		if name != "default-src" && name != "script-src" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	if _, ok := doc["default-src"]; ok {
+		names = append([]string{"default-src"}, names...)
+	}
+	names = append(names, "script-src")
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		parts = append(parts, strings.TrimSpace(name+" "+strings.Join(doc[name], " ")))
+	}
+	return strings.Join(parts, "; "), true
 }
 
 // CSPFor computes the policy from the shell's inline scripts. The HTML
