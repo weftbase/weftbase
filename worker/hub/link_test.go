@@ -112,7 +112,11 @@ func TestSilentWorkerLosesTheRun(t *testing.T) {
 	stalled, sc := running(t, e)
 	e.f.send(wire.Ack{CommandID: sc.CommandID, State: "bogus", RunID: stalled})
 	r := e.wait(t, stalled, status(sessions.StatusFailed))
-	if !strings.Contains(r.Error, "no ack from the worker") {
+	// The silence bound loses it ("no ack from the worker"); on a slow
+	// machine the item's 40 ms lease can lapse first, and the reclaim
+	// loses it instead ("the worker stopped answering"). Both end it
+	// worker_lost and neither sends it again (at-most-once).
+	if !strings.Contains(r.Error, "no ack from the worker") && !strings.Contains(r.Error, "the worker stopped answering") {
 		t.Errorf("stalled = %+v", r)
 	}
 	if r, _ := e.l.Get(context.Background(), e.s, beating); r.Status != sessions.StatusRunning {
