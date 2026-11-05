@@ -25,13 +25,15 @@ unsigned: true
 == the UI asks for a challenge and signs a decision
 challenge: call call_1 key k1
 resumed: Deployed. The change is live.
-== a replayed signature fails closed
+== a redelivered signature is a no-op; a replayed nonce fails closed
+redelivered: ok
 replay: thread: decision signature replayed: nonce already decided call "call_1"
 == the audit trail
 request call_1 on deploy
 audit park parked
 decision call_1 approve via signed
 audit resume started (1 call(s) to resolve)
+audit dispatch (never)
 audit resume completed
 audit signed refused (replayed)
 `

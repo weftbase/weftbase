@@ -67,7 +67,7 @@ func TestDecidedUndecidedCallFromARealResume(t *testing.T) {
 	if res, err := t1.Wait(); err != nil || len(res.Pending) != 2 {
 		t.Fatalf("parked turn: %v, %v", res, err)
 	}
-	d := thread.Deny("r1", "out of policy")
+	d := thread.Deny("r1", "out of policy").Bind(pendingFor(t, s, "r1"))
 	d.Who = "agent-7"
 	if next, err := s.Decide(ctx, d); err != nil || next != nil {
 		t.Fatalf("Decide one of two: turn %v, err %v (want no resume yet)", next, err)
@@ -128,4 +128,17 @@ func TestDecidedUndecidedCallFromARealResume(t *testing.T) {
 	if got["r1"] != "denied" || got["e1"] != "no_decision" {
 		t.Errorf("decided outcomes = %v (source %s), want r1 denied, e1 no_decision", got, doc.Decided.Source)
 	}
+}
+
+// pendingFor is the pending request for callID: a decision is bound to
+// the request it answers (Decision.Bind).
+func pendingFor(t *testing.T, s *thread.Session, callID string) thread.Request {
+	t.Helper()
+	for _, r := range s.Pending() {
+		if r.CallID == callID {
+			return r
+		}
+	}
+	t.Fatalf("no pending request for %s: %+v", callID, s.Pending())
+	return thread.Request{}
 }

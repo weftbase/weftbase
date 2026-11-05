@@ -90,6 +90,7 @@ func TestSessionTimelineFromARealRun(t *testing.T) {
 	}
 	decide := func(d thread.Decision) {
 		t.Helper()
+		d = d.Bind(pendingFor(t, s, d.CallID))
 		d.Who = "agent-7"
 		if _, err := s.Decide(ctx, d); err != nil {
 			t.Fatal(err)

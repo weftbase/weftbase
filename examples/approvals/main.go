@@ -107,7 +107,7 @@ func run(w io.Writer, dir string) error {
 	if err := p(w, "pending after reopen:", len(pending)); err != nil {
 		return err
 	}
-	if _, err := reopened.Decide(ctx, thread.Approve(pending[0].CallID)); err != nil {
+	if _, err := reopened.Decide(ctx, thread.Approve(pending[0].CallID).Bind(pending[0])); err != nil {
 		if err := p(w, "unsigned:", errors.Is(err, thread.ErrSignatureRequired)); err != nil {
 			return err
 		}
@@ -142,10 +142,20 @@ func run(w io.Writer, dir string) error {
 		return err
 	}
 
-	if err := p(w, "== a replayed signature fails closed"); err != nil {
+	if err := p(w, "== a redelivered signature is a no-op; a replayed nonce fails closed"); err != nil {
 		return err
 	}
-	if _, err := reopened.DecideSigned(ctx, decision); err != nil {
+	// The same signed bytes again (a retried webhook, say) change
+	// nothing.
+	if err := p(w, "redelivered:", fmtErr(reopened.DecideSigned(ctx, decision))); err != nil {
+		return err
+	}
+	// A different decision signed under the spent nonce is refused.
+	other, err := ring.Sign(challenge, thread.Deny(pending[0].CallID, "changed my mind"))
+	if err != nil {
+		return err
+	}
+	if _, err := reopened.DecideSigned(ctx, other); err != nil {
 		if err := p(w, "replay:", err); err != nil {
 			return err
 		}
@@ -165,7 +175,10 @@ func run(w io.Writer, dir string) error {
 				return err
 			}
 		case thread.ApprovalAuditEntry:
-			line := []any{"audit", e.Step, e.Outcome}
+			line := []any{"audit", e.Step}
+			if e.Outcome != "" {
+				line = append(line, e.Outcome)
+			}
 			if e.Detail != "" {
 				line = append(line, "("+e.Detail+")")
 			}
@@ -175,4 +188,12 @@ func run(w io.Writer, dir string) error {
 		}
 	}
 	return nil
+}
+
+// fmtErr is the error of a two-value call, or "ok".
+func fmtErr(_ any, err error) any {
+	if err != nil {
+		return err
+	}
+	return "ok"
 }

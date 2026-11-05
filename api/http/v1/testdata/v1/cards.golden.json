@@ -10153,7 +10153,7 @@
             "seq": 10,
             "call_id": "m5",
             "name": "svc_archive_statement",
-            "content": "mcp: connection closed: calling \"tools/call\": client is closing",
+            "content": "OUTCOME_UNKNOWN: tool \"svc_archive_statement\" lost its answer (mcp: connection closed: calling \"tools/call\": client is closing); it may have run; outcome unknown",
             "is_error": true
           }
         },
@@ -10326,7 +10326,7 @@
                   "type": "tool_result",
                   "call_id": "m5",
                   "name": "svc_archive_statement",
-                  "content": "mcp: connection closed: calling \"tools/call\": client is closing",
+                  "content": "OUTCOME_UNKNOWN: tool \"svc_archive_statement\" lost its answer (mcp: connection closed: calling \"tools/call\": client is closing); it may have run; outcome unknown",
                   "is_error": true
                 }
               ]
@@ -11386,7 +11386,7 @@
               "seq": 10,
               "call_id": "m5",
               "name": "svc_archive_statement",
-              "content": "mcp: connection closed: calling \"tools/call\": client is closing",
+              "content": "OUTCOME_UNKNOWN: tool \"svc_archive_statement\" lost its answer (mcp: connection closed: calling \"tools/call\": client is closing); it may have run; outcome unknown",
               "is_error": true
             }
           },
@@ -11491,9 +11491,9 @@
               "id": "42"
             },
             "result": {
-              "content": "mcp: connection closed: calling \"tools/call\": client is closing",
+              "content": "OUTCOME_UNKNOWN: tool \"svc_archive_statement\" lost its answer (mcp: connection closed: calling \"tools/call\": client is closing); it may have run; outcome unknown",
               "is_error": true,
-              "bytes": 63
+              "bytes": 161
             },
             "span": {
               "id": "5ba000000000004c",
@@ -12824,7 +12824,7 @@
             "seq": 2,
             "call_id": "s1",
             "name": "slow",
-            "content": "tool \"slow\" timed out after 50ms",
+            "content": "OUTCOME_UNKNOWN: tool \"slow\" did not answer within 50ms; it may still complete; outcome unknown",
             "is_error": true
           }
         },
@@ -12935,7 +12935,7 @@
                   "type": "tool_result",
                   "call_id": "s1",
                   "name": "slow",
-                  "content": "tool \"slow\" timed out after 50ms",
+                  "content": "OUTCOME_UNKNOWN: tool \"slow\" did not answer within 50ms; it may still complete; outcome unknown",
                   "is_error": true
                 }
               ]
@@ -13334,7 +13334,7 @@
               "seq": 2,
               "call_id": "s1",
               "name": "slow",
-              "content": "tool \"slow\" timed out after 50ms",
+              "content": "OUTCOME_UNKNOWN: tool \"slow\" did not answer within 50ms; it may still complete; outcome unknown",
               "is_error": true
             }
           },
@@ -13361,9 +13361,9 @@
             "seq": 1,
             "args": {},
             "result": {
-              "content": "tool \"slow\" timed out after 50ms",
+              "content": "OUTCOME_UNKNOWN: tool \"slow\" did not answer within 50ms; it may still complete; outcome unknown",
               "is_error": true,
-              "bytes": 32
+              "bytes": 95
             },
             "span": {
               "id": "5ba0000000000056",
