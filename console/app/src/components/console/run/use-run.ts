@@ -16,7 +16,7 @@ import type { ChainView } from "@/lib/api/chain"
 import { actorText, useMe } from "@/lib/actor"
 import type { ActorLike } from "@/lib/actor"
 import { isNotFound } from "@/lib/api/errors"
-import { useRunLive } from "@/lib/api/live"
+import { useOutboxState, useRunLive } from "@/lib/api/live"
 import { q } from "@/lib/api/queries"
 import { displayStatus } from "@/lib/api/status"
 import type { DisplayStatus } from "@/lib/api/status"
@@ -157,20 +157,29 @@ const isQueued = (c: ChainView) =>
   c.last.ledger_only === true &&
   (c.status === "queued" || c.status === "running")
 
+/** chainRefetch: how often the run page reads its chain again by
+ * itself. A queued run is in the ledger only: every second until its
+ * trace arrives. A waiting run is told of its decision by the outbox
+ * stream (the resume is a ledger event of this chain, which useRunLive
+ * hears); only while that stream is not connected does it look every
+ * 30 s. */
+export function chainRefetch(
+  d: ChainView | undefined,
+  events: StreamState
+): number | false {
+  if (!d) return false
+  if (isQueued(d) || d.last.settling) return 1000
+  return d.status === "waiting" && events !== "live" ? 30_000 : false
+}
+
 export function useRun(id: string): RunData {
   const qc = useQueryClient()
   const me = useMe()
+  const outbox = useOutboxState()
   const chainQ = useQuery({
     ...chainQuery(id),
     retry: (n, e) => !isNotFound(e) && n < 2,
-    // A queued run is in the ledger only: look again until its trace
-    // arrives. A waiting run needs no timer: the decision's resume is a
-    // ledger event of this chain (run.queued, resume_of), which
-    // useRunLive hears on the outbox stream.
-    refetchInterval: (query) => {
-      const d = query.state.data
-      return d && (isQueued(d) || d.last.settling) ? 1000 : false
-    },
+    refetchInterval: (query) => chainRefetch(query.state.data, outbox),
   })
   const chain = chainQ.data
   const lastId = chain?.last.id ?? id

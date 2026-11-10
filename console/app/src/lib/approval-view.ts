@@ -26,10 +26,31 @@ export function argsSummary(args: unknown): string {
 
 export type ApprovalTone = "waiting" | "good" | "bad" | "neutral"
 
-/** The word and tone of an approval's status. */
-export function approvalState(a: Pick<Approval, "status">): {
+/** Why an approval was cancelled (its `reason`), in a sentence. */
+export const CANCEL_REASON: Record<string, string> = {
+  user: "The run was cancelled while this call waited for a decision.",
+  version_retired:
+    "The agent version was retired while this call waited for a decision.",
+}
+
+/** approvalReason: an approval's reason for a line of text. A
+ * cancellation's reason is a code the server picks from two. */
+export function approvalReason(
+  a: Pick<Approval, "status" | "reason">
+): string | undefined {
+  if (!a.reason) return undefined
+  if (a.status !== "cancelled") return a.reason
+  if (a.reason === "user") return "the run was cancelled"
+  if (a.reason === "version_retired") return "its version was retired"
+  return a.reason.replace(/_/g, " ")
+}
+
+/** The word and tone of an approval's status; `title` says more where
+ * the word alone does not (a cancelled approval's reason). */
+export function approvalState(a: Pick<Approval, "status" | "reason">): {
   label: string
   tone: ApprovalTone
+  title?: string
 } {
   switch (a.status) {
     case "pending":
@@ -43,7 +64,14 @@ export function approvalState(a: Pick<Approval, "status">): {
     case "expired":
       return { label: "Expired", tone: "neutral" }
     case "cancelled":
-      return { label: "Cancelled", tone: "neutral" }
+      return {
+        label:
+          a.reason === "version_retired"
+            ? "Cancelled · version retired"
+            : "Cancelled",
+        tone: "neutral",
+        title: a.reason ? (CANCEL_REASON[a.reason] ?? a.reason) : undefined,
+      }
     default:
       return { label: a.status, tone: "neutral" }
   }

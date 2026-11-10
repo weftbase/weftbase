@@ -23,6 +23,7 @@ import type { ActorLike } from "@/lib/actor"
 import { q } from "@/lib/api/queries"
 import type { Approval } from "@/lib/api/types"
 import {
+  CANCEL_REASON,
   approvalState,
   approvalVersion,
   argsSummary,
@@ -56,7 +57,7 @@ const DOT: Record<ApprovalTone, string> = {
 function State({ approval }: { approval: Approval }) {
   const s = approvalState(approval)
   return (
-    <span className="inline-flex min-w-0 items-center gap-1.5">
+    <span className="inline-flex min-w-0 items-center gap-1.5" title={s.title}>
       <span
         aria-hidden
         className={cn("size-2 flex-none rounded-full", DOT[s.tone])}
@@ -448,9 +449,14 @@ function Detail({
           </p>
         )}
         <dl className="grid grid-cols-[96px_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-xs">
-          {/* An expiry's reason only says that it expired. */}
+          {/* An expiry's reason only says that it expired; a
+              cancellation's is a word the server picks from two. */}
           {a.reason && a.status !== "expired" && (
-            <Row label="Reason">{a.reason}</Row>
+            <Row label="Reason">
+              {a.status === "cancelled"
+                ? (CANCEL_REASON[a.reason] ?? a.reason)
+                : a.reason}
+            </Row>
           )}
           {a.content && (
             <Row label="Answer given">

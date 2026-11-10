@@ -27,7 +27,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { ApiError } from "@/lib/api/errors"
+import { ApiError, actionError } from "@/lib/api/errors"
 import { api } from "@/lib/api/http"
 import { forget } from "@/lib/api/queries"
 import { count } from "@/lib/format"
@@ -37,7 +37,7 @@ import { count } from "@/lib/format"
 export function deleteError(e: unknown): string {
   if (e instanceof ApiError && e.status === 409 && e.code === "run_active")
     return "A run of this session is still going. Cancel it first, then delete."
-  return e instanceof Error ? e.message : String(e)
+  return actionError(e)
 }
 
 /** SessionMenu: the session's "…" menu. Export (JSON lines: every turn's

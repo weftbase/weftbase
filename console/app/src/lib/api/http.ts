@@ -179,11 +179,11 @@ export const api = {
   /** One page of runs, newest first. The server pages a plain list by a
    * time cursor and a search by offset; both come back as a RunsList. */
   async runs(q: RunsQuery = {}, cursor?: RunsCursor): Promise<RunsList> {
-    // chains: a park and its resumes are one row. A page may hold fewer
-    // rows than `limit`, and a search's `total` counts rows before the
-    // fold.
+    // A park and its resumes are one row (the server's default: logical
+    // runs). `total` is exact only with `total_exact`; `partial` says
+    // the server stopped reading before the end.
     const { tag, ...rest } = q
-    const query: Query = { ...rest, chains: 1, ...cursor }
+    const query: Query = { ...rest, ...cursor }
     const eq = tag?.indexOf("=") ?? -1
     if (tag && eq > 0) query[`tag.${tag.slice(0, eq)}`] = tag.slice(eq + 1)
     if (isSearch(q)) {
@@ -191,6 +191,7 @@ export const api = {
       return {
         total: p.total,
         total_exact: p.total_exact,
+        partial: p.partial,
         runs: p.runs,
         next: p.next_offset === null ? null : { offset: p.next_offset },
         facets: p.facets,
@@ -200,6 +201,7 @@ export const api = {
     return {
       total: p.total,
       total_exact: p.total_exact,
+      partial: p.partial,
       runs: p.runs,
       next:
         p.next_before === null
@@ -218,7 +220,8 @@ export const api = {
         limit,
       })
     ).runs,
-  /** Start a run; answers its ledger row (queued). */
+  /** Start a run; answers its ledger row (queued). 409 session_busy /
+   * session_settling: the session's previous turn has not ended. */
   admit: (body: AdmitRequest) => post<LedgerRun>("/v1/runs", body),
   run: (id: string) => get<RunDetail>(run(id)),
   /** The timeline of a logical run: the spans of every run of its chain

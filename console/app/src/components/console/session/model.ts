@@ -10,6 +10,7 @@ import { actorText } from "@/lib/actor"
 import type { ActorLike } from "@/lib/actor"
 import type { ConversationView } from "@/lib/api/sessions"
 import { outcomeStatus } from "@/lib/api/status"
+import { approvalReason } from "@/lib/approval-view"
 import type { DisplayStatus } from "@/lib/api/status"
 import type {
   Approval,
@@ -297,7 +298,8 @@ export function waitMarker(
         .map((a) => actorText(a, ctx.me))
         .filter((x): x is string => x !== undefined)
     )
-    const reason = approvals.length === 1 ? approvals[0].reason : undefined
+    const reason =
+      approvals.length === 1 ? approvalReason(approvals[0]) : undefined
     told =
       (approvals.length === 1
         ? `${approvals[0].tool} ${outcomes[0]}`
@@ -355,7 +357,8 @@ function approvalFacts(
   out.push({ label: `${p}Decision`, value: verb(a.outcome ?? a.status) })
   const who = actorText(a.actor, ctx.me)
   if (who) out.push({ label: `${p}Decided by`, value: who })
-  if (a.reason) out.push({ label: `${p}Reason`, value: a.reason })
+  const reason = approvalReason(a)
+  if (reason) out.push({ label: `${p}Reason`, value: reason })
   if (a.content)
     out.push({ label: `${p}Answer given to the agent`, value: a.content })
   if (a.decided_at)

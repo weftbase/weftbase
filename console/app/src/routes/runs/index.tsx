@@ -136,6 +136,12 @@ function RunsFilters() {
         total && (
           <span className="font-mono tabular-nums" title={total.title}>
             {total.text}
+            {total.more && (
+              <span className="font-sans text-muted-foreground">
+                {" "}
+                · {total.more}
+              </span>
+            )}
           </span>
         )
       }

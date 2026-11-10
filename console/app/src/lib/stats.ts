@@ -31,6 +31,7 @@ export function figuresOf(t: OutcomeBucket): {
   const open = [
     t.waiting > 0 && `${count(t.waiting)} waiting`,
     t.running > 0 && `${count(t.running)} running`,
+    t.queued > 0 && `${count(t.queued)} queued`,
   ].filter(Boolean)
   const used = t.input_tokens + t.output_tokens
   return {

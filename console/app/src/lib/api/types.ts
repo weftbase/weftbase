@@ -84,9 +84,10 @@ export interface RunRow extends CostFields {
   started: string
   finished: string | null
   last_seen: string
-  status: RunRowStatus
-  /** The status to show, when the server sends it (newer servers).
-   * Read it through displayStatus (status.ts), never directly. */
+  /** The trace store's word; absent on a ledger_only row (the trace
+   * store does not hold the run). Draw display_status instead. */
+  status?: RunRowStatus
+  /** The status to show. Read it through displayStatus (status.ts). */
   display_status?:
     | "queued"
     | "running"
@@ -265,6 +266,9 @@ export interface RunsPage {
    * total_exact says so. */
   total: number
   total_exact: boolean
+  /** The server stopped reading before the end (its time or row
+   * budget): more runs may match than the pages show. */
+  partial?: boolean
   runs: RunRow[]
   next_before: string | null
   next_before_id: string | null
@@ -277,6 +281,9 @@ export interface SearchPage {
   /** As on RunsPage: exact only where total_exact says so. */
   total: number
   total_exact: boolean
+  /** As on RunsPage; also set past the deepest offset the server pages
+   * to (next_offset is then null). */
+  partial?: boolean
   runs: RunRow[]
   sort: "started" | "duration" | "tokens" | "cost"
   next_offset: number | null
@@ -321,6 +328,7 @@ export interface RunsList {
   /** An upper bound unless total_exact. */
   total: number
   total_exact: boolean
+  partial?: boolean
   runs: RunRow[]
   next: RunsCursor | null
   facets?: SearchPage["facets"]
@@ -394,6 +402,9 @@ export interface LedgerRun {
   tenant_id: string
   agent: string
   agent_version: VersionRef
+  /** The first run of the park-and-resume chain (the run itself when
+   * it resumes nothing). */
+  chain_id: string
   resolved_via: string
   status: "queued" | "running" | "parked" | "succeeded" | "failed" | "cancelled"
   metadata?: Record<string, string>
@@ -679,7 +690,7 @@ export interface SessionRow extends CostFields {
   /** The one word a list draws (a run's display_status words): the
    * ledger's where it holds the newest turn. Read it through
    * sessionStatus (status.ts). */
-  display_status?: NonNullable<RunRow["display_status"]>
+  display_status: NonNullable<RunRow["display_status"]>
   usage: Usage
   /** What the thread's summarizer model calls cost the session: apart
    * from usage, never folded into it nor priced. Absent when it
@@ -1291,6 +1302,8 @@ export interface ToolsDoc {
 export interface OutcomeBucket {
   t: string
   runs: number
+  /** Runs the ledger holds that have not started (by=total). */
+  queued: number
   succeeded: number
   failed: number
   cancelled: number

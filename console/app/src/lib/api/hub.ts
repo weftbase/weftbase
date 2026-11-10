@@ -40,14 +40,15 @@ export const OUTBOX_EVENTS = [
   "approval.requested",
   "approval.decided",
   "approval.expired",
+  "approval.cancelled",
   "run.queued",
   "run.started",
   "run.parked",
   "run.finished",
   "run.failed",
-  "run.canceled",
   "run.cancelled",
   "run.deleted",
+  "session.deleted",
 ] as const
 
 type Topic = "runs" | "events"
@@ -283,24 +284,27 @@ function subscribe<T>(topic: Topic, h: HubHandlers<T>): () => void {
  * end). Child runs too: their ids start with the parent's. */
 export const subscribeRuns = (h: HubHandlers<RunFrame>) => subscribe("runs", h)
 
-/** The outbox events of one kind ("approval." or "run."): the topic
- * carries both, each subscriber sees its own. */
+/** The outbox events of some kinds ("approval.", "run.", "session."):
+ * the topic carries them all, each subscriber sees its own. */
 const ofKind = (
-  prefix: string,
+  prefixes: readonly string[],
   h: HubHandlers<OutboxEvent>
 ): HubHandlers<OutboxEvent> => ({
   ...h,
   onData: (e) => {
-    if (e.type.startsWith(prefix)) h.onData(e)
+    if (prefixes.some((p) => e.type.startsWith(p))) h.onData(e)
   },
 })
 
 /** Approvals asked for and decided, as they happen. */
 export const subscribeApprovals = (h: HubHandlers<OutboxEvent>) =>
-  subscribe("events", ofKind("approval.", h))
+  subscribe("events", ofKind(["approval."], h))
 
-/** The ledger's run transitions (run.queued, run.started, …, run.deleted)
- * as they happen: `data.run_id`, `data.chain_run_id` (the chain's first
- * run) and `data.status` name the run and where it is now. */
+/** The ledger's run transitions (run.queued, run.started, …) and the
+ * deletes (run.deleted, session.deleted) as they happen. A transition's
+ * `data.run_id`, `data.chain_run_id` (the chain's first run),
+ * `data.session_id` (when the run has one) and `data.status` name the
+ * run and where it is now; a delete's `data.run_ids` and
+ * `data.session_id` what went. */
 export const subscribeRunEvents = (h: HubHandlers<OutboxEvent>) =>
-  subscribe("events", ofKind("run.", h))
+  subscribe("events", ofKind(["run.", "session.deleted"], h))

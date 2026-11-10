@@ -649,19 +649,26 @@ describe("the list", () => {
       (x) => x.failed_turns === 1 && x.status === "succeeded"
     )!
     expect(outcomeStrip(s).dots).toEqual(["succeeded", "failed", "succeeded"])
-    expect(sessionStatus(s)).toBe("succeeded")
     expect(outcomeStrip(s).title).toBe("3 turns: 2 succeeded, 1 failed")
   })
 
   it("reads waiting and cancelled from the server's words", () => {
     const parked = demo.sessions.find((x) => x.status === "parked")!
-    expect(sessionStatus(parked)).toBe("waiting")
     expect(outcomeStrip(parked).dots.at(-1)).toBe("waiting")
     const cancelled = demo.sessions.find((x) => x.status === "cancelled")!
     expect(outcomeStrip(cancelled).dots).toEqual(["succeeded", "cancelled"])
     expect(outcomeStatus("ended")).toBe("cancelled")
     expect(outcomeStatus("resumed")).toBe("running")
     expect(outcomeStatus("a new word")).toBe("interrupted")
+  })
+
+  it("draws the server's display_status as the session's status", () => {
+    for (const s of golden.sessions)
+      expect(sessionStatus(s)).toBe(s.display_status)
+    // The ledger's word wins over the outcome of the newest trace.
+    expect(
+      sessionStatus({ ...golden.sessions[0], display_status: "queued" })
+    ).toBe("queued")
   })
 
   it("keeps the newest dots of a long session and counts the rest", () => {

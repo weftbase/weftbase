@@ -20,6 +20,7 @@ import {
   movesTracker,
   useRunLive,
   useRunsLive,
+  useSessionLive,
 } from "@/lib/api/live"
 import type { HubHandlers } from "@/lib/api/hub"
 import type { OutboxEvent, RunFrame, RunRow, RunsList } from "@/lib/api/types"
@@ -237,5 +238,56 @@ describe("approvalMoves", () => {
     expect(approvalMoves(denied, "approval.requested")).toBe(false)
     expect(approvalMoves(denied, "approval.decided")).toBe(true)
     expect(approvalMoves(plain, "approval.decided")).toBe(false)
+  })
+})
+
+describe("useSessionLive", () => {
+  function Session() {
+    useSessionLive("ses_1")
+    return null
+  }
+  it("hears a queued turn of the session being cancelled (no trace, no frame)", async () => {
+    track(["session", "ses_1"])
+    await vi.runAllTimersAsync()
+    fetched[JSON.stringify(["session", "ses_1"])] = 0
+    render(
+      <QueryClientProvider client={qc}>
+        <Session />
+      </QueryClientProvider>
+    )
+    event("run.cancelled", {
+      run_id: "run_q",
+      session_id: "ses_1",
+      status: "cancelled",
+    })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(count(["session", "ses_1"])).toBe(1)
+    event("run.cancelled", {
+      run_id: "run_x",
+      session_id: "ses_2",
+      status: "cancelled",
+    })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(count(["session", "ses_1"])).toBe(1)
+  })
+})
+
+describe("a delete heard on the outbox", () => {
+  it("drops the deleted runs' caches", async () => {
+    mount()
+    qc.setQueryData(["run", "run_gone"], { id: "run_gone" })
+    qc.setQueryData(["run", "run_kept"], { id: "run_kept" })
+    for (const h of hub.runEvents)
+      h.onData({
+        seq: 2,
+        id: "evt2",
+        type: "run.deleted",
+        resource_kind: "run",
+        resource_id: "run_gone",
+        data: { run_ids: ["run_gone"], ledger_runs: 1, approvals: 0 },
+        created_at: "",
+      })
+    expect(qc.getQueryData(["run", "run_gone"])).toBeUndefined()
+    expect(qc.getQueryData(["run", "run_kept"])).toBeDefined()
   })
 })

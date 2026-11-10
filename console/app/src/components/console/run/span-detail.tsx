@@ -43,6 +43,7 @@ import {
   offset,
   tokens,
 } from "@/lib/format"
+import { approvalReason } from "@/lib/approval-view"
 import { cn } from "@/lib/utils"
 
 import { Facts, Fold, Inline, Muted, Text } from "./fold"
@@ -606,7 +607,7 @@ function approvalFacts(
       : (decided?.status ?? "required")
   return [
     ["Approval", who ? `${outcome} by ${who}` : outcome],
-    ["Reason given", decided?.reason],
+    ["Reason given", decided ? approvalReason(decided) : undefined],
   ]
 }
 
@@ -792,7 +793,7 @@ function Waiting({ node, chain }: { node: TraceNode; chain: ChainView }) {
                 "Decided",
                 decided?.decided_at ? dateTime(decided.decided_at) : undefined,
               ],
-              ["Reason given", decided?.reason],
+              ["Reason given", decided ? approvalReason(decided) : undefined],
               [
                 "Answer given",
                 decided?.content ? (

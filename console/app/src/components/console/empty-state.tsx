@@ -4,7 +4,12 @@ import type { LucideIcon } from "lucide-react"
 import * as React from "react"
 
 import { Button } from "@/components/ui/button"
-import { ApiError, isNotFound, isUnsupported } from "@/lib/api/errors"
+import {
+  ApiError,
+  isNotFound,
+  isUnavailable,
+  isUnsupported,
+} from "@/lib/api/errors"
 import { cn } from "@/lib/utils"
 
 /** EmptyState: nothing to show, said plainly, with what to do next. */
@@ -58,7 +63,9 @@ export function ErrorState({
     ? `${what} was not found`
     : isUnsupported(error)
       ? `${what} is not available on this server`
-      : `${what} could not load`
+      : isUnavailable(error)
+        ? `${what} could not load: the store is unavailable, retry`
+        : `${what} could not load`
   const message = error instanceof Error ? error.message : String(error)
   return (
     <EmptyState

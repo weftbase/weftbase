@@ -219,9 +219,10 @@ export function runsRows(pages: readonly Pick<RunsList, "runs">[]): RunRow[] {
  * "at least" the rows it has. */
 export function runsCount(
   pages:
-    readonly Pick<RunsList, "total" | "total_exact" | "runs">[] | undefined,
+    | readonly Pick<RunsList, "total" | "total_exact" | "runs" | "partial">[]
+    | undefined,
   more: boolean
-): { n: number; text: string; title?: string } | undefined {
+): { n: number; text: string; title?: string; more?: string } | undefined {
   const first = pages?.[0]
   if (!pages || !first) return undefined
   const word = (n: number) => (n === 1 ? "run" : "runs")
@@ -231,6 +232,16 @@ export function runsCount(
       text: `${count(first.total)} ${word(first.total)}`,
     }
   const loaded = runsRows(pages).length
+  // The server stopped reading (its budget, or the deepest offset it
+  // pages to): what is loaded is all there is to show.
+  if (!more && pages.some((p) => p.partial))
+    return {
+      n: loaded,
+      text: `${count(loaded)} ${word(loaded)}`,
+      more: "more results not shown",
+      title:
+        "The server stopped reading before the end: more runs may match. Narrow the filters to see them.",
+    }
   if (!more) return { n: loaded, text: `${count(loaded)} ${word(loaded)}` }
   return {
     n: loaded,

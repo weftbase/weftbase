@@ -155,9 +155,7 @@ function Session({ sessionId }: { sessionId: string }) {
               <span className="min-w-0 truncate">{title}</span>
             </span>
           }
-          status={
-            (s ?? view) && <StatusBadge state={sessionStatus((s ?? view)!)} />
-          }
+          status={s && <StatusBadge state={sessionStatus(s)} />}
           id={<CopyId id={sessionId} label="session id" />}
           meta={
             // The pill appears once the stream is open: a quiet session's

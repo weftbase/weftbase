@@ -4,7 +4,7 @@
 // the Console never computes one). A run continues when every one of
 // its approvals has a decision.
 
-import { ApiError } from "./errors"
+import { ApiError, actionError } from "./errors"
 import { api } from "./http"
 import type { Approval } from "./types"
 
@@ -36,9 +36,8 @@ export function decisionError(e: unknown): string {
       return "The arguments of this call are no longer the ones shown, so the decision was not applied. Reload to see the current arguments, then decide again."
     if (e.code === "not_pending")
       return "This call already has a decision: someone else decided it, or the run ended."
-    return e.message
   }
-  return e instanceof Error ? e.message : String(e)
+  return actionError(e)
 }
 
 /** The keys a decision makes stale. */

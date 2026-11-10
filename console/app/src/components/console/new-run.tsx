@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { actionError } from "@/lib/api/errors"
 import { api } from "@/lib/api/http"
 import { q } from "@/lib/api/queries"
 
@@ -215,9 +216,7 @@ function Form({ preset, onDone }: { preset?: string; onDone: () => void }) {
       )}
       {start.error && (
         <p role="alert" className="text-xs text-danger-foreground">
-          {start.error instanceof Error
-            ? start.error.message
-            : String(start.error)}
+          {actionError(start.error)}
         </p>
       )}
       <DialogFooter>

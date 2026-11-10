@@ -83,6 +83,11 @@ partly priced sum).
   `query.error`, `LoadingRows` while `!query.data`, `EmptyState` for an
   empty list, then the content. A 401 anywhere returns the app to the
   signed-out screen (`router.tsx`, `auth-gate.tsx`).
+- Errors: `ErrorState` reads a 503 (`isUnavailable`) as a store that is
+  down, with a retry. A refused action reads through `actionError(e)`
+  (`errors.ts`): the 409 codes (`already_finished`, `already_resumed`,
+  `not_parked`, `not_running`, `session_busy`, `session_settling`) in
+  words, else the server's message.
 - `status.ts`: `displayStatus(run)` is the only mapping from server
   fields to a status (queued, running, waiting, succeeded, failed,
   cancelled, interrupted). It prefers the server's `display_status`.
@@ -114,6 +119,8 @@ partly priced sum).
   by another client), in ONE tab (a Web Lock) that hands the frames to the
   others (a BroadcastChannel); closes them on `pagehide` and reopens on
   `pageshow`; and lets a hidden tab refetch once when it is shown.
+  `useOutboxState()` says whether the outbox stream is connected: a
+  waiting run page looks again every 30 s only while it is not.
   A run row arrives each time a run moves (a step, a tool call, a child
   run), which is what keeps a run or session page current: need
   something live? Listen to the hub and invalidate. `onStale` means
@@ -141,13 +148,15 @@ already on screen (the inbox, or that run's page; `approvalOnScreen` in
 after it went. Toasts sit at the bottom left of the content area
 (`ui/sonner.tsx`): beside the sidebar, above a page's bottom bar.
 
-Runs lists always ask for `chains=1` (`api.runs` adds it) and filter on
-the status as shown (`display_status`), in a search too: build the query
+Runs lists are logical runs (a park and its resumes are one row: the
+server's default; `chains=0` would list every run, and `api.runs` never
+sends it) and filter on the status as shown (`display_status`), in a search too: build the query
 with `toRunsQuery(search, since)` (`lib/runs.ts`). A search (any of `q`,
 `tool`, `model`, `since`, `sort`, `min_cost`, `min_tokens`) is
 offset-paged. A list's `total` is exact only with `total_exact`;
 otherwise it is an upper bound: say the size with `runsCount(pages,
-hasNextPage)` ("50+ runs" until every page is loaded) and read rows
+hasNextPage)` ("50+ runs" until every page is loaded; "· more results
+not shown" when the server marked a page `partial`) and read rows
 with `runsRows(pages)` (each run once: offset pages can overlap).
 
 Actions: a dialog opened from a "…" menu gives the focus back to the

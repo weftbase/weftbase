@@ -35,7 +35,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Textarea } from "@/components/ui/textarea"
-import { ApiError } from "@/lib/api/errors"
+import { ApiError, actionError } from "@/lib/api/errors"
 import { api } from "@/lib/api/http"
 import type { ExportFormat } from "@/lib/api/http"
 import { afterRunWrite, forget } from "@/lib/api/queries"
@@ -51,7 +51,7 @@ const FORMATS: [ExportFormat, string][] = [
   ["otlp", "OTLP"],
 ]
 
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
+const message = actionError
 
 /** appUrl: the app page a run names, only when it is a web address
  * (http or https). Anything else (javascript:, data:, a relative path)

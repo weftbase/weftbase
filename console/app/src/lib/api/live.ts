@@ -26,6 +26,7 @@ import type { InfiniteData, QueryClient } from "@tanstack/react-query"
 import * as React from "react"
 
 import { subscribeApprovals, subscribeRunEvents, subscribeRuns } from "./hub"
+import { forget } from "./queries"
 import { displayStatus } from "./status"
 import type { StreamState } from "./stream"
 import type { OutboxEvent, RunDetail, RunRow, RunsList } from "./types"
@@ -149,7 +150,6 @@ const EVENT_STATUS: Record<string, string> = {
   "run.parked": "waiting",
   "run.finished": "succeeded",
   "run.failed": "failed",
-  "run.canceled": "cancelled",
   "run.cancelled": "cancelled",
 }
 
@@ -235,6 +235,10 @@ export function useRunsLive(): StreamState {
       // ledger knows earlier (queued) and of runs that never start.
       const closeEvents = subscribeRunEvents({
         onData(e) {
+          if (e.type === "run.deleted" || e.type === "session.deleted") {
+            forgetDeleted(qc, e)
+            return
+          }
           const id = typeof e.data?.run_id === "string" ? e.data.run_id : ""
           const status = EVENT_STATUS[e.type]
           // A row a list shows whose trace may never come (queued, then
@@ -244,11 +248,7 @@ export function useRunsLive(): StreamState {
             all()
             return
           }
-          if (!status) {
-            // run.deleted of a run no list shows: the counts.
-            stats.invalidate(["stats"])
-            return
-          }
+          if (!status) return
           if (status === "queued") {
             lists.invalidateWhere((k) => takesNew(k, status))
             lists.invalidate(["sessions"])
@@ -327,9 +327,28 @@ export function useRunLive(
   )
 }
 
+/** useOutboxState: the state of the outbox stream (GET /v1/events),
+ * for a page that falls back to a slow timer while it is down. */
+export function useOutboxState(): StreamState {
+  return useHub((onState) => subscribeRunEvents({ onState, onData() {} }), [])
+}
+
+/** forgetDeleted: a run or session deleted (here or elsewhere) leaves
+ * no cache behind (run.deleted / session.deleted, which name what went). */
+function forgetDeleted(qc: QueryClient, e: OutboxEvent) {
+  const d = e.data ?? {}
+  const ids = Array.isArray(d.run_ids)
+    ? d.run_ids.filter((x): x is string => typeof x === "string")
+    : []
+  const session = typeof d.session_id === "string" ? d.session_id : undefined
+  if (e.type === "session.deleted" && session) forget(qc, { session })
+  else forget(qc, { runs: ids, session })
+}
+
 /** useSessionLive keeps one session current: `["session", id, …]`
  * refetches (at most once a second) whenever one of its runs, or a
- * child of one, moves. */
+ * child of one, moves, and on a ledger event of one of its runs (a
+ * queued turn cancelled, or failed by its TTL, never has a trace). */
 export function useSessionLive(id: string): StreamState {
   const qc = useQueryClient()
   return useHub(
@@ -347,9 +366,17 @@ export function useSessionLive(id: string): StreamState {
         },
         onStale: () => t.invalidate(["session", id]),
       })
+      const closeEvents = subscribeRunEvents({
+        onData(e) {
+          if (e.type === "session.deleted") return // forgetDeleted
+          if (e.data?.session_id === id) t.invalidate(["session", id])
+        },
+        onStale: () => t.invalidate(["session", id]),
+      })
       return () => {
         t.stop()
         close()
+        closeEvents()
       }
     },
     [qc, id]

@@ -38,17 +38,16 @@ export function displayStatus(
   return isDisplay(r.status) ? r.status : "interrupted"
 }
 
-/** sessionStatus: a session's status is its newest turn's: the
- * server's display_status, else its outcome word (outcomeStatus). */
+/** sessionStatus: a session's status is the server's display_status
+ * (its newest turn's, the ledger's where it holds that turn). */
 export function sessionStatus(
-  s: Pick<SessionRow, "status"> & Partial<Pick<SessionRow, "display_status">>
+  s: Pick<SessionRow, "display_status">
 ): DisplayStatus {
-  if (isDisplay(s.display_status)) return s.display_status
-  return outcomeStatus(s.status)
+  return isDisplay(s.display_status) ? s.display_status : "interrupted"
 }
 
-/** outcomeStatus maps one turn outcome of a session row (`status`,
- * `outcomes[]`) onto a display status: parked is waiting on a person, a
+/** outcomeStatus maps one word of a session row's `outcomes[]` (the
+ * server sends no display word per run there) onto a display status: parked is waiting on a person, a
  * park already decided is running again, and a turn a newer message
  * ended reads cancelled. An unknown word reads interrupted. */
 export function outcomeStatus(outcome: string): DisplayStatus {
