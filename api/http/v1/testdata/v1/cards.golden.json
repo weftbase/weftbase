@@ -12,6 +12,10 @@
           }
         ],
         "display_status": "waiting",
+        "approvals_expired": 0,
+        "approvals_denied": 0,
+        "approvals_approved": 0,
+        "approvals_pending": 0,
         "stopped_by": "parked",
         "started": "2026-10-01T09:00:00Z",
         "finished": null,
@@ -81,6 +85,7 @@
       "request_count": 1,
       "prompt_preview": "status?",
       "children": [],
+      "children_total": 0,
       "holes": [],
       "compactions": []
     },
@@ -538,6 +543,10 @@
           }
         ],
         "display_status": "waiting",
+        "approvals_expired": 0,
+        "approvals_denied": 0,
+        "approvals_approved": 0,
+        "approvals_pending": 0,
         "stopped_by": "parked",
         "started": "2026-10-01T09:00:00Z",
         "finished": null,
@@ -610,6 +619,7 @@
       "request_count": 1,
       "prompt_preview": "status?",
       "children": [],
+      "children_total": 0,
       "holes": [],
       "compactions": []
     },
@@ -1075,6 +1085,10 @@
           }
         ],
         "display_status": "waiting",
+        "approvals_expired": 0,
+        "approvals_denied": 0,
+        "approvals_approved": 0,
+        "approvals_pending": 0,
         "stopped_by": "parked",
         "started": "2026-10-01T09:00:00Z",
         "finished": null,
@@ -1144,6 +1158,7 @@
       "request_count": 1,
       "prompt_preview": "deploy it",
       "children": [],
+      "children_total": 0,
       "holes": [],
       "compactions": []
     },
@@ -1638,6 +1653,7 @@
       "request_count": 2,
       "prompt_preview": "fan out",
       "children": [],
+      "children_total": 0,
       "holes": [],
       "compactions": []
     },
@@ -2938,6 +2954,7 @@
       "request_count": 3,
       "prompt_preview": "echo something",
       "children": [],
+      "children_total": 0,
       "holes": [],
       "compactions": []
     },
@@ -4072,6 +4089,7 @@
       "request_count": 1,
       "prompt_preview": "What is in this image? ",
       "children": [],
+      "children_total": 0,
       "holes": [],
       "compactions": []
     },
@@ -4443,6 +4461,7 @@
       "request_count": 2,
       "prompt_preview": "/var is full, free some space.",
       "children": [],
+      "children_total": 0,
       "holes": [],
       "compactions": []
     },
@@ -5497,6 +5516,7 @@
       "request_count": 2,
       "prompt_preview": "x",
       "children": [],
+      "children_total": 0,
       "holes": [],
       "compactions": []
     },
@@ -6342,6 +6362,7 @@
       "request_count": 3,
       "prompt_preview": "hi",
       "children": [],
+      "children_total": 0,
       "holes": [],
       "compactions": []
     },
@@ -6875,6 +6896,7 @@
       "request_count": 2,
       "prompt_preview": "hi",
       "children": [],
+      "children_total": 0,
       "holes": [],
       "compactions": []
     },
@@ -7281,6 +7303,7 @@
       "request_count": 2,
       "prompt_preview": "x",
       "children": [],
+      "children_total": 0,
       "holes": [],
       "compactions": []
     },
@@ -8108,6 +8131,7 @@
       "request_count": 2,
       "prompt_preview": "review",
       "children": [],
+      "children_total": 0,
       "holes": [],
       "compactions": []
     },
@@ -9092,6 +9116,7 @@
       "request_count": 1,
       "prompt_preview": "review",
       "children": [],
+      "children_total": 0,
       "holes": [],
       "compactions": []
     },
@@ -9560,6 +9585,7 @@
       "request_count": 1,
       "prompt_preview": "where is 42?",
       "children": [],
+      "children_total": 0,
       "holes": [],
       "compactions": []
     },
@@ -10105,6 +10131,7 @@
       "request_count": 2,
       "prompt_preview": "Customer 42 asks about invoice INV-9.",
       "children": [],
+      "children_total": 0,
       "holes": [],
       "compactions": []
     },
@@ -11977,6 +12004,7 @@
           "prompt_preview": "do the work"
         }
       ],
+      "children_total": 1,
       "holes": [],
       "compactions": []
     },
@@ -12834,6 +12862,7 @@
         "request_count": 1,
         "prompt_preview": "do the work",
         "children": [],
+        "children_total": 0,
         "holes": [],
         "compactions": []
       }
@@ -12890,6 +12919,7 @@
       "request_count": 2,
       "prompt_preview": "go slow",
       "children": [],
+      "children_total": 0,
       "holes": [],
       "compactions": []
     },

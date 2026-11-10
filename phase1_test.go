@@ -611,3 +611,57 @@ func TestChainWithTwoWaits(t *testing.T) {
 		t.Errorf("chains list: %d %v", code, page)
 	}
 }
+
+// POST /v1/runs with session_id makes the run the session's next turn,
+// and a session's runs the trace store never saw (queued) are still
+// its runs: deleting the session refuses while they wait and removes
+// them once they have ended.
+func TestSessionTurnsAndDeleteOfQueuedRuns(t *testing.T) {
+	dir := t.TempDir()
+	app, _, stop := startApp(t, dir, BuildDigest(digestA))
+	if err := app.Agent(core.New(wefttest.Script(), core.Name("support"))); err != nil {
+		t.Fatal(err)
+	}
+	stop()
+	_, ts, _ := startApp(t, dir, Roles(RoleAPI)) // no scheduler: what is admitted waits
+	var ids []string
+	for turn := 1; turn <= 2; turn++ {
+		code, run := postJSON(t, ts.URL+"/v1/runs", map[string]any{"agent": "support", "session_id": "ses_a%b_c", "input": map[string]any{"prompt": "hi"},
+			"metadata": map[string]string{"plan": "pro"}})
+		md, _ := run["metadata"].(map[string]any)
+		if code != 202 || md["weft.session.id"] != "ses_a%b_c" || md["weft.turn"] != fmt.Sprint(turn) || md["plan"] != "pro" {
+			t.Fatalf("turn %d: %d %v", turn, code, run)
+		}
+		ids = append(ids, run["id"].(string))
+	}
+	// Another session whose id the first one's is a LIKE pattern of.
+	if code, run := postJSON(t, ts.URL+"/v1/runs", map[string]any{"agent": "support", "session_id": "ses_aXb_c", "input": map[string]any{"prompt": "hi"}}); code != 202 ||
+		run["metadata"].(map[string]any)["weft.turn"] != "1" {
+		t.Fatalf("the other session's first turn: %d %v", code, run)
+	}
+	if code, body := call(t, "DELETE", ts.URL+"/v1/sessions/ses_a%25b_c", bootstrap, "", nil); code != 409 || !strings.Contains(body, `"run_active"`) {
+		t.Errorf("deleting a session with queued runs: %d %s", code, body)
+	}
+	for _, id := range ids {
+		if code, _ := postJSON(t, ts.URL+"/v1/runs/"+id+"/cancel", map[string]any{}); code != 202 {
+			t.Fatalf("cancel %s: %d", id, code)
+		}
+	}
+	code, body := call(t, "DELETE", ts.URL+"/v1/sessions/ses_a%25b_c", bootstrap, "", nil)
+	var del struct {
+		RunIDs     []string `json:"run_ids"`
+		LedgerRuns int      `json:"ledger_runs"`
+	}
+	if err := json.Unmarshal([]byte(body), &del); code != 200 || err != nil || del.LedgerRuns != 2 || len(del.RunIDs) != 2 {
+		t.Fatalf("delete: %d %s", code, body)
+	}
+	if code, _ := getJSON(t, ts.URL+"/v1/runs/"+ids[0]+"/status"); code != 404 {
+		t.Errorf("a deleted run's status: %d", code)
+	}
+	if code, page := getJSON(t, ts.URL+"/v1/runs?display_status=queued"); code != 200 || len(page["runs"].([]any)) != 1 {
+		t.Errorf("the other session's run should still wait: %d %v", code, page)
+	}
+	if code, _ := call(t, "DELETE", ts.URL+"/v1/sessions/ses_nope", bootstrap, "", nil); code != 404 {
+		t.Errorf("an unknown session: %d", code)
+	}
+}

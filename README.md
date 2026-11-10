@@ -1,79 +1,77 @@
 # weftbase
 
-The agent-native backend for agents built with
+The backend for agents built with
 [weft](https://github.com/weftbase/weft). Agents are versioned,
-deployable units; runs are placed on workers (embedded in your app, local
-child processes, remote workers) through a durable queue; tenancy and
-approvals are built to be embedded in your own product. One binary,
-`weftbase`, serves the public `/v1` API, OTLP ingest and the Console.
+deployable units; their runs are placed on workers through a durable
+queue; a call that needs a person waits for one; and every run is
+recorded and shown. One binary, `weftbase`, serves the `/v1` API, OTLP
+ingest and the Console.
 
 **weft runs agents; weftbase stores, places and governs them.** weftbase
 imports weft; weft never imports weftbase.
 
-> **Status: rebuild in progress** on branch `rebuild` (a new structure,
-> a fresh data directory; nothing reads a database of the old server).
-> Progress and what works today: [`REBUILD-TODO.md`](REBUILD-TODO.md).
-> Design: [`docs/architecture.md`](docs/architecture.md). The previous
-> code is on the `legacy` branch (and its archive tag).
+> **Status: v0.1.0, not tagged yet.** What is in it and what is not:
+> [`CHANGELOG.md`](CHANGELOG.md). What remains before the tag:
+> [`REBUILD-TODO.md`](REBUILD-TODO.md). Design:
+> [`docs/architecture.md`](docs/architecture.md).
 
-## Modules
+## Quick start: the demo
 
-| Module | What |
-|---|---|
-| `github.com/weftbase/weftbase` | the server: kernel, domains, stores, `/v1`, Console, CLI |
-| `github.com/weftbase/weftbase/client` | what your app imports: `exporter` (send traces), `rest` (call `/v1`), `worker` (serve agents as a build), `wire` (the worker protocol), `discovery`, `ulid` |
-
-The client module imports weft, the standard library and OpenTelemetry
-only, so an agent build never compiles the server.
-
-## Quick start
+From a checkout (with the weft checkout beside it, see Development):
 
 ```sh
-weftbase dev                          # the server on http://127.0.0.1:7331, SQLite under ./.weftbase
-weftbase dev -- go run ./cmd/app      # the server and your app, restarted on every .go save
+go run ./examples/demo
 ```
 
-To see it with data and no model provider, run the demo: a node on
-`:7331`, two scripted agents (one embedded, one as a local build), two
-versions each, and a new run every few seconds.
+It starts a node on `http://127.0.0.1:7331` over a throwaway data
+directory, registers five agents of a make-believe kitchenware store in
+both placements, plays a first batch of runs and then starts a new one
+every few seconds. It prints an API key and a sign-in link for the
+Console: open the link.
+
+Every model in the demo is scripted (weft's `wefttest`): **no model
+provider is called and no key is needed.** What you see is real
+otherwise: the runs go through the public API, the queue, the workers
+and OTLP ingest.
 
 ```sh
-go run ./examples/demo                # or: make demo; prints the API key and a Console sign-in link
-go run ./examples/demo -every 0       # the first batch only; -speed 0 removes the scripted latency
-                                      # Enter prints a fresh sign-in link; -pending-every 3 leaves refunds for you to decide
-cd console/app && bun run dev         # beside it: the Console dev server on :3000, proxying /v1 to :7331
+go run ./examples/demo -every 0          # the first batch only
+go run ./examples/demo -speed 0          # no scripted latency
+go run ./examples/demo -pending-every 3  # leave every third refund for you to approve
 ```
 
-A sign-in link works once and for 15 minutes; a Console session lasts
-12 hours from its last use. For a fresh link from a running server:
+Press Enter in its terminal for a fresh sign-in link.
+
+## Your own agent
 
 ```sh
-weftbase signin                       # beside `weftbase dev`: no flag needed
-weftbase signin --url http://127.0.0.1:7331 --token wb_sk_…   # any server, with a secret key
+go install github.com/weftbase/weftbase/cmd/weftbase@latest   # once v0.1.0 is tagged; until then: go build ./cmd/weftbase
+weftbase dev                          # a node on http://127.0.0.1:7331, SQLite under ./.weftbase
 ```
 
-Any OpenTelemetry app can send to it:
-`OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:7331/otlp` (the SDK
-appends `/v1/traces` and `/v1/logs`).
+`weftbase dev` prints a Console sign-in link and keeps a secret API key
+in `.weftbase/bootstrap.key`.
 
-In a Go app:
+**Send it traces.** Any weft app reports to the node with one line, and
+any other OpenTelemetry app with one variable:
 
 ```go
 import "github.com/weftbase/weftbase/client/exporter"
 
-defer exporter.Install()() // WEFTBASE_URL + WEFTBASE_TOKEN, else the discovery file `weftbase dev` writes
+defer exporter.Install()() // WEFTBASE_URL + WEFTBASE_TOKEN, else the running `weftbase dev` on this machine
 ```
 
-Recording into an in-process SQLite file instead (no server):
-`observe/local.Install()`.
+```sh
+OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:7331/otlp   # plus an Authorization header with the key
+weftbase dev -- go run ./cmd/app      # the node and your app together, restarted on every .go save
+```
 
-## Running agents
-
-An agent build is a Go binary that serves weft agents with
-`client/worker`:
+**Let it run the agent.** An agent build is a Go binary that serves weft
+agents with `client/worker`:
 
 ```go
 func main() {
+	defer exporter.Install()() // the node hands the build its URL and an ingest key
 	support := weft.New(model, weft.Name("support"), lookup, refund)
 	if err := worker.Serve(worker.FromEnv(), worker.Agent(support)); err != nil {
 		log.Fatal(err)
@@ -82,43 +80,65 @@ func main() {
 ```
 
 ```sh
-weftbase serve --build ./bin/support   # the local placement: a supervised child per build
+go build -o bin/support ./cmd/support
+weftbase serve --build ./bin/support  # the local placement: a supervised child process per build
 ```
 
-The supervisor copies the build into `<data>/builds/<sha256>`, starts
-it with `WEFTBASE_SOCKET`, `WEFTBASE_WORKER_TOKEN` (the link's secret),
-`WEFTBASE_BUILD_DIGEST` and `WEFTBASE_PLACEMENT=local`, and records the
-build and an AgentVersion per agent. It also hands the child
-`WEFTBASE_URL` and `WEFTBASE_TOKEN` (the node's URL and an ingest key it
-mints), so a build that calls `exporter.Install()` sends its traces and
-logs to the node with no wiring. A newer build of the same agents retires the older one;
-runs parked on it still resume there (it is started again on demand).
-`./bin/support --manifest` prints the build's manifests. In-process
-agents use the embedded placement instead: `app.Agent(support)`.
+The node copies the build into its data directory, starts it, and
+records an AgentVersion per agent. A newer build of the same agents
+takes over; runs parked on the older one still resume there. Agents
+that live in your own process use the embedded placement instead
+(`weftbase.New(…)`, `app.Agent(support)`; see `examples/demo`).
 
-Then `POST /v1/runs {"agent": "support", "input": {"prompt": "…"}}`
-(the `prod` label, else the newest version), `POST
-/v1/agents/support/labels/prod {"version": "agv_…"}` to promote,
-`POST /v1/runs/{id}/cancel`, `/steer` and `/resume`.
+Then, with the API key as a bearer:
+
+```sh
+curl -X POST :7331/v1/runs -d '{"agent":"support","input":{"prompt":"Where is order 1042?"}}'
+curl -X POST :7331/v1/agents/support/labels/prod -d '{"version":"agv_…"}'   # promote
+curl :7331/v1/approvals?status=pending                                       # calls waiting for a person
+curl -X POST :7331/v1/approvals/appr_…/decision -d '{"decision":"approve","args_sha256":"…"}'
+```
+
+`api/openapi/v1.yaml` is the whole contract.
+
+## The Console
+
+Served by the node at `/`. A sign-in link works once and for 15
+minutes; a session lasts 12 hours from its last use. For a fresh link
+from a running node:
+
+```sh
+weftbase signin                                               # beside `weftbase dev`: no flag needed
+weftbase signin --url http://127.0.0.1:7331 --token wb_sk_…   # any node, with a secret key
+```
+
+## Modules
+
+| Module | What |
+|---|---|
+| `github.com/weftbase/weftbase` | the server: kernel, domains, stores, `/v1`, the Console, the CLI |
+| `github.com/weftbase/weftbase/client` | what your app imports: `exporter` (send traces), `worker` (serve agents as a build), `rest` (call `/v1`), `wire` (the worker protocol), `discovery`, `ulid` |
+
+The client module imports weft, the standard library and OpenTelemetry
+only, so an agent build never compiles the server.
 
 ## Layout
 
 See [`docs/architecture.md`](docs/architecture.md) for the layers and
-rules; `make layering` enforces them.
+the rules; `make layering` enforces them.
 
 ```
-api/http/v1   the /v1 API: reads, agents, runs (admit, cancel, steer, resume)
+api/http/v1   the /v1 API: runs, sessions, approvals, agents, stats, streams, OTLP ingest
 api/mcp       the MCP tool set behind `weftbase mcp`
 console       the embedded Console build (console/app is the Bun project)
-observe/      ingest (OTLP), cost (pricing), local (in-process sink)
-obsdb/        the trace store: sqlite, clickhouse, conformance suite
+observe/      ingest (OTLP), cost (pricing), local (an in-process sink)
+obsdb/        the trace store: sqlite, clickhouse, the conformance suite
 store, tenant the control store contract and the tenant Scope
-registry, queue, sessions   agents and versions, the durable queue and timers, the run ledger
+registry, queue, sessions   agents and versions, the durable queue and timers, the run ledger and approvals
 worker/       the worker hub, the router, the executors (embedded, local)
-internal/     dblock, listen, doctor, reqlog, httpx, release, termsafe, weftsrc
-cmd/weftbase  the CLI
+cmd/weftbase  the CLI (docs/cli.md)
 client/       the client module
-scripts/layering  the layering, client-dependency and vocabulary checks
+examples/     demo (the tour), approvals (weft's thread approvals, standalone)
 ```
 
 ## Development
@@ -131,15 +151,18 @@ server does not yet: it requires the client module at a placeholder
 version until `client/v0.1.0` is tagged.
 
 ```sh
-make build vet test    # both modules
-make layering          # imports, client deps, retired words
-make check             # all of the above
+make build vet test    # both modules, race tests
+make check             # those plus the layering and vocabulary checks
+make api-check         # the OpenAPI contract against the route table
+make mcp-check         # `weftbase mcp` end to end against a real node
+make demo              # go run ./examples/demo
 make tidy              # never commit a replace
 ```
 
-ClickHouse tests are gated on `WEFT_CLICKHOUSE_DSN` (see
-`obsdb/clickhouse/README.md`). Tests never call a model:
-`make offline` runs them under `WEFT_MODEL_REQUESTS=deny`.
+Tests never call a model: `make offline` runs them under
+`WEFT_MODEL_REQUESTS=deny`. ClickHouse tests are gated on
+`WEFT_CLICKHOUSE_DSN` (see `obsdb/clickhouse/README.md`). The Console
+has its own checks (`console/app/README.md`).
 
 ## License
 

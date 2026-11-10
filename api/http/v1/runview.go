@@ -48,6 +48,14 @@ const (
 	displayInterrupted = "interrupted"
 )
 
+// The approvals outcomes of a logical run.
+const (
+	approvalsPending  = "pending"
+	approvalsExpired  = "expired"
+	approvalsDenied   = "denied"
+	approvalsApproved = "approved"
+)
+
 var displayStatuses = []string{displayQueued, displayRunning, displayWaiting, displaySucceeded, displayFailed,
 	displayCancelled, displayInterrupted}
 
@@ -78,6 +86,13 @@ type controlFields struct {
 	// Chain is set where the run is one of several a park and its
 	// resume link (on a list only with chains=1).
 	Chain *chainDoc `json:"chain,omitempty"`
+	// ApprovalsOutcome sums up the approvals the logical run waited on
+	// (set with its chain): pending while one is open, else expired
+	// when one lapsed with nobody deciding (the node denied the call
+	// and resumed the run), else denied when a person refused one, else
+	// approved. A run can end succeeded with its call never made: this
+	// is where that reads.
+	ApprovalsOutcome string `json:"approvals_outcome,omitempty"`
 
 	// parkedAt is when the ledger parked the run. The ledger learns of
 	// a park from the worker's ack, before the run's last records reach
@@ -91,6 +106,13 @@ type controlFields struct {
 type chainDoc struct {
 	Runs          []chainRun `json:"runs"`
 	DisplayStatus string     `json:"display_status"`
+	// ApprovalsOutcome and the counts sum up the chain's approvals (see
+	// the row's approvals_outcome).
+	ApprovalsOutcome  string `json:"approvals_outcome,omitempty"`
+	ApprovalsExpired  int    `json:"approvals_expired"`
+	ApprovalsDenied   int    `json:"approvals_denied"`
+	ApprovalsApproved int    `json:"approvals_approved"`
+	ApprovalsPending  int    `json:"approvals_pending"`
 	// StoppedBy, ErrorType, CancelCause and Err are the last run's: the
 	// cause of the chain's state.
 	StoppedBy   string     `json:"stopped_by,omitempty"`
@@ -362,6 +384,16 @@ func (c *control) chain(cost *coster, of runRow) *chainDoc {
 			if a.Actor != nil && !slices.Contains(w.DecidedBy, *a.Actor) {
 				w.DecidedBy = append(w.DecidedBy, *a.Actor)
 			}
+			switch a.Status {
+			case sessions.ApprovalPending:
+				doc.ApprovalsPending++
+			case sessions.ApprovalExpired:
+				doc.ApprovalsExpired++
+			case sessions.ApprovalDenied:
+				doc.ApprovalsDenied++
+			case sessions.ApprovalApproved, sessions.ApprovalResolved:
+				doc.ApprovalsApproved++
+			}
 		}
 		until := now
 		if i+1 < len(runs) && !runs[i+1].LedgerOnly {
@@ -370,6 +402,16 @@ func (c *control) chain(cost *coster, of runRow) *chainDoc {
 		}
 		doc.WaitingMS += max(until.Sub(w.From).Milliseconds(), 0)
 		doc.Waits = append(doc.Waits, w)
+	}
+	switch {
+	case doc.ApprovalsPending > 0:
+		doc.ApprovalsOutcome = approvalsPending
+	case doc.ApprovalsExpired > 0:
+		doc.ApprovalsOutcome = approvalsExpired
+	case doc.ApprovalsDenied > 0:
+		doc.ApprovalsOutcome = approvalsDenied
+	case doc.ApprovalsApproved > 0:
+		doc.ApprovalsOutcome = approvalsApproved
 	}
 	doc.DurationMS = max(end.Sub(doc.Started).Milliseconds(), 0)
 	doc.CostUSD = round6(doc.CostUSD)
@@ -416,117 +458,144 @@ func inputPreview(in wire.Input) string {
 	return ""
 }
 
-// controlRows finishes a /v1/runs page: the control fields of every
-// row; with chains, one row per chain (a resume is folded into the run
-// it continues, which carries chain); display_status held to its word;
-// and, on a first page that no other filter narrows, the queued runs
-// the trace store does not know, first.
+// view is how a read of runs is shown, for the list and the search
+// alike (display_status, chains and approvals mean the same in both):
 //
-// The trace store pages before this runs, so with chains or
-// display_status a page can hold fewer rows than limit, and total
-// counts the trace store's match (plus the queued rows added).
-// foldRows finishes the rows a trace-store read returned, for the list
-// and the search alike: the control fields of every row; with chains,
-// one row per chain; display held to its word. mapped says the read
-// was filtered or sorted (a status, a search): a resume it matched
-// then stands for its chain (the chain's first run is fetched in its
-// place, once), where an unfiltered list drops the resume because the
-// first run is a row of its own.
-func (s *Server) foldRows(r *http.Request, ctl *control, cost *coster, rows []runRow, display string, chains, mapped bool) []runRow {
-	ctl.decorate(rows)
-	if chains {
-		seen := map[string]bool{}
-		kept := rows[:0:0]
-		for _, row := range rows {
-			if row.ResumedFrom != "" && !mapped {
-				continue // its chain's first run is a row of its own
-			}
-			ch := ctl.chain(cost, row)
-			if ch != nil && ch.Runs[0].ID != row.ID {
+//   - the control fields on every row (control.decorate);
+//   - chains: one row per logical run. Where the read is unfiltered and
+//     newest first, a resume is dropped (the run it continues is a row
+//     of its own, at its start). Where the read is filtered or sorted
+//     (mapped: a status, a search), a chain is shown where its last run
+//     is read, as its first run's row; a run that was resumed is
+//     skipped. Either way a chain is one row, on one page only;
+//   - display: the rows held to a display status (a chain's is its
+//     last run's);
+//   - approvals: the chains held to the outcome of their approvals.
+//
+// The trace store pages before any of this, so a reader that asks for
+// limit rows keeps reading the store until it has them (fill).
+type view struct {
+	display   string
+	chains    bool
+	approvals string // "" | pending | expired | denied | approved
+	mapped    bool
+}
+
+// folds reports whether the view drops or replaces rows: a page then
+// has to be filled, and the store's total is an upper bound.
+func (v view) folds() bool { return v.chains || v.display != "" || v.approvals != "" }
+
+// keep is one decorated row through the view: the row to show, or
+// false.
+func (v view) keep(ctl *control, cost *coster, row runRow) (runRow, bool) {
+	if v.chains {
+		if v.mapped && row.ResumedBy != "" {
+			return row, false // its chain is shown where its last run is
+		}
+		if !v.mapped && row.ResumedFrom != "" {
+			return row, false // its chain's first run is a row of its own
+		}
+		if ch := ctl.chain(cost, row); ch != nil {
+			if ch.Runs[0].ID != row.ID {
 				head, ok := ctl.read(cost, ch.Runs[0].ID)
 				if !ok {
-					continue
+					return row, false
 				}
 				row = head
 			}
-			if seen[row.ID] {
-				continue
-			}
-			seen[row.ID] = true
-			if ch != nil {
-				row.Chain, row.DisplayStatus = ch, ch.DisplayStatus
-			}
-			kept = append(kept, row)
+			row.Chain, row.DisplayStatus, row.ApprovalsOutcome = ch, ch.DisplayStatus, ch.ApprovalsOutcome
 		}
-		rows = kept
 	}
-	if display != "" {
-		kept := rows[:0:0]
-		for _, row := range rows {
-			if row.DisplayStatus == display {
-				kept = append(kept, row)
-			}
-		}
-		rows = kept
+	if v.display != "" && row.DisplayStatus != v.display {
+		return row, false
 	}
-	return rows
+	if v.approvals != "" && row.ApprovalsOutcome != v.approvals {
+		return row, false
+	}
+	return row, true
 }
 
-// viewParams reads display_status and chains, which the list and the
-// search share; display_status sets the trace-store status that finds
-// its candidates (status is the caller's own, "" when none was given).
-func viewParams(w http.ResponseWriter, r *http.Request, q map[string][]string, status *obsdb.Status) (display string, chains, ok bool) {
+// viewParams reads display_status, chains and approvals, which the list
+// and the search share; display_status sets the trace-store status that
+// finds its candidates (status is the caller's own, "" when none was
+// given).
+func viewParams(w http.ResponseWriter, r *http.Request, q map[string][]string, status *obsdb.Status) (v view, ok bool) {
 	display, dst, ok := displayParam(w, r, q)
 	if !ok {
-		return "", false, false
+		return v, false
 	}
 	if display != "" {
 		if *status != "" {
 			badRequest(w, r, "give status or display_status, not both")
-			return "", false, false
+			return v, false
 		}
-		*status = dst
+		// The store is not asked for the trace status the word maps to:
+		// where a run has a ledger row the ledger's word wins, and the
+		// two can differ (a run the ledger ended whose last records are
+		// still on their way, a run lost with its worker). Every row is
+		// read and held to its display status, so the answer is exact
+		// and agrees with the statistics.
+		_ = dst
+		v.mapped = true
 	}
+	v.display = display
 	if vs := q["chains"]; len(vs) > 0 && vs[0] != "" {
 		b, err := strconv.ParseBool(vs[0])
 		if err != nil {
 			badRequest(w, r, "chains must be true or false (1 or 0)")
-			return "", false, false
+			return v, false
 		}
-		chains = b
+		v.chains = b
 	}
-	return display, chains, true
+	if vs := q["approvals"]; len(vs) > 0 && vs[0] != "" {
+		switch vs[0] {
+		case approvalsPending, approvalsExpired, approvalsDenied, approvalsApproved:
+		default:
+			badRequest(w, r, "approvals is pending, expired, denied or approved")
+			return v, false
+		}
+		if !v.chains {
+			badRequest(w, r, "approvals needs chains=1: an approval's outcome is its logical run's")
+			return v, false
+		}
+		v.approvals = vs[0]
+	}
+	return v, true
 }
 
-func (s *Server) controlRows(r *http.Request, cost *coster, query obsdb.RunQuery, rows []runRow, total int, display string, chains bool) ([]runRow, int) {
-	ctl := s.control(r)
-	rows = s.foldRows(r, ctl, cost, rows, display, chains, query.Status != "")
+// fillScanPages bounds how many store pages one filled answer reads: a
+// filter that keeps almost nothing ends there with a cursor, the page
+// short, rather than reading the whole store.
+const fillScanPages = 40
+
+// fillStorePage is the store page a folded read asks for.
+const fillStorePage = 200
+
+// queuedRows are the queued runs the trace store does not know, for the
+// first page of a list no other filter narrows.
+func (s *Server) queuedRows(r *http.Request, ctl *control, query obsdb.RunQuery, v view, have []runRow) []runRow {
 	narrowed := query.SessionID != "" || query.PublicID != "" || query.StoppedBy != "" || query.ErrorType != "" ||
 		query.IDPrefix != "" || len(query.Errs) > 0 || len(query.Meta) > 0 || query.TurnBelow > 0 || query.TurnAbove > 0 ||
-		(query.ParentRunID != "" && query.ParentRunID != "*") || !query.Before.IsZero()
-	if s.ledger == nil || ctl.sc.IsZero() || narrowed || (display != displayQueued && query.Status != "") {
-		return rows, total
+		(query.ParentRunID != "" && query.ParentRunID != "*") || !query.Before.IsZero() || v.approvals != ""
+	if s.ledger == nil || ctl.sc.IsZero() || narrowed || query.Status != "" || (v.display != "" && v.display != displayQueued) {
+		return nil
 	}
 	queued, err := s.ledger.Queued(r.Context(), ctl.sc, query.Agent, 100)
 	if err != nil {
-		return rows, total
+		return nil
 	}
-	have := map[string]bool{}
-	for _, row := range rows {
-		have[row.ID] = true
+	seen := map[string]bool{}
+	for _, row := range have {
+		seen[row.ID] = true
 	}
 	var extra []runRow
 	for _, lr := range queued {
-		if have[lr.ID] || (chains && lr.ResumeOf != "") {
+		if seen[lr.ID] || (v.chains && lr.ResumeOf != "") {
 			continue
 		}
 		extra = append(extra, ctl.ledgerRow(lr))
 	}
-	total += len(extra)
-	if !query.Oldest {
-		rows, extra = extra, rows
-	}
-	return append(append(make([]runRow, 0, len(rows)+len(extra)), rows...), extra...), total
+	return extra
 }
 
 // serveLedgerRun answers GET /v1/runs/{id} for a run only the ledger
@@ -538,7 +607,9 @@ func (s *Server) serveLedgerRun(w http.ResponseWriter, r *http.Request, id strin
 		return false
 	}
 	row := ctl.ledgerRow(lr)
-	row.Chain = ctl.chain(s.coster(r.Context()), row)
+	if row.Chain = ctl.chain(s.coster(r.Context()), row); row.Chain != nil {
+		row.ApprovalsOutcome = row.Chain.ApprovalsOutcome
+	}
 	page := runPage{runDoc: runDoc{runRow: row, Children: []runRow{}, Holes: []stepHole{}}, Compactions: []runCompaction{}}
 	ctl.approvals(&page)
 	writeJSON(w, r, http.StatusOK, page)

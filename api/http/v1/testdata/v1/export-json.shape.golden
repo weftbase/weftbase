@@ -188,6 +188,7 @@
 .run.children[].weft_version=string
 .run.children[]{}
 .run.children_count=float64
+.run.children_total=float64
 .run.cost_badge=string
 .run.cost_known=bool
 .run.cost_reason=string

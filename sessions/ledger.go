@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -225,6 +226,11 @@ type AdmitRequest struct {
 	Version  string            `json:"version,omitempty"`
 	Input    wire.Input        `json:"input"`
 	Metadata map[string]string `json:"metadata,omitempty"`
+	// SessionID makes the run the next turn of that session: the
+	// ledger stamps weft.session.id and the turn number (one more than
+	// the session's turns it holds) on the run's metadata. The input is
+	// the caller's: the ledger keeps no transcript.
+	SessionID string `json:"session_id,omitempty"`
 	// Priority orders the start among queued runs.
 	Priority int `json:"priority,omitempty"`
 }
@@ -253,6 +259,18 @@ func (l *Ledger) Admit(ctx context.Context, s tenant.Scope, actor events.Actor, 
 			return err
 		}
 		in := req.Input
+		if req.SessionID != "" {
+			turns, err := l.sessionTurns(tx, s, req.SessionID)
+			if err != nil {
+				return err
+			}
+			md := map[string]string{}
+			for k, val := range req.Metadata {
+				md[k] = val
+			}
+			md[MetaSessionID], md[MetaTurn] = req.SessionID, strconv.Itoa(turns+1)
+			req.Metadata = md
+		}
 		run = Run{ID: "run_" + ulid.New(), TenantID: s.Tenant(), Agent: v.Agent, AgentVersion: v.ID, ResolvedVia: via,
 			Status: StatusQueued, Input: &in, Metadata: req.Metadata}
 		return l.insert(tx, s, actor, &run, queue.KindRun, req.Priority)
@@ -290,8 +308,8 @@ func (l *Ledger) insert(tx store.Tx, s tenant.Scope, actor events.Actor, run *Ru
 }
 
 func (l *Ledger) emit(tx store.Tx, s tenant.Scope, actor events.Actor, typ string, run Run, extra map[string]any) error {
-	data := map[string]any{"run_id": run.ID, "agent": run.Agent, "agent_version": run.AgentVersion,
-		"resolved_via": run.ResolvedVia, "status": run.Status}
+	data := map[string]any{"run_id": run.ID, "chain_run_id": l.chainHead(tx, s, run.ID, run.ResumeOf), "agent": run.Agent,
+		"agent_version": run.AgentVersion, "resolved_via": run.ResolvedVia, "status": run.Status}
 	if run.ResumeOf != "" {
 		data["resume_of"] = run.ResumeOf
 	}
@@ -300,6 +318,20 @@ func (l *Ledger) emit(tx store.Tx, s tenant.Scope, actor events.Actor, typ strin
 	}
 	_, err := l.log.Emit(tx, s, events.Event{Type: typ, ResourceKind: "run", ResourceID: run.ID, Actor: actor}, data)
 	return err
+}
+
+// chainHead is the first run of the chain a run belongs to: the run a
+// park-and-resume chain started with (the run itself when it resumes
+// nothing). A page that shows the logical run matches events by it.
+func (l *Ledger) chainHead(tx store.Tx, s tenant.Scope, id, resumeOf string) string {
+	for n := 0; resumeOf != "" && n < 64; n++ {
+		id = resumeOf
+		if err := store.QueryRow(tx, `SELECT resume_of FROM runs WHERE id = ? AND project_id = ? AND env = ? AND tenant_id = ?`,
+			id, s.Project(), s.Env(), s.Tenant()).Scan(&resumeOf); err != nil {
+			break
+		}
+	}
+	return id
 }
 
 // ItemRunID reads the run id of a queue item's payload.
@@ -794,4 +826,54 @@ func (l *Ledger) Delete(ctx context.Context, s tenant.Scope, actor events.Actor,
 		return err
 	})
 	return runs, approvals, err
+}
+
+// The run metadata keys that make a run a session's turn (weft's own).
+const (
+	MetaSessionID = "weft.session.id"
+	MetaTurn      = "weft.turn"
+)
+
+// sessionLike matches the runs whose metadata names the session: the
+// metadata column is the JSON encoding/json writes ("key":"value", no
+// space), so the pair is matched as text.
+func sessionLike(sessionID string) string {
+	pair, _ := json.Marshal(map[string]string{MetaSessionID: sessionID})
+	esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(string(pair[1 : len(pair)-1]))
+	return "%" + esc + "%"
+}
+
+// sessionTurns counts the session's turns the ledger holds: its runs
+// that resume nothing.
+func (l *Ledger) sessionTurns(tx store.Tx, s tenant.Scope, sessionID string) (int, error) {
+	var n int
+	err := store.QueryRow(tx, `SELECT COUNT(*) FROM runs WHERE project_id = ? AND env = ? AND tenant_id = ? AND resume_of = ''
+		AND metadata LIKE ? ESCAPE '\'`, s.Project(), s.Env(), s.Tenant(), sessionLike(sessionID)).Scan(&n)
+	return n, err
+}
+
+// SessionRuns are the ids of the session's runs the ledger holds,
+// oldest first: every one, a queued run no trace names yet included.
+func (l *Ledger) SessionRuns(ctx context.Context, s tenant.Scope, sessionID string) ([]string, error) {
+	if s.IsZero() {
+		return nil, tenant.ErrZeroScope
+	}
+	var out []string
+	err := l.db.Read(ctx, func(tx store.Tx) error {
+		rows, err := store.Query(tx, `SELECT id FROM runs WHERE project_id = ? AND env = ? AND tenant_id = ?
+			AND metadata LIKE ? ESCAPE '\' ORDER BY created_at, id`, s.Project(), s.Env(), s.Tenant(), sessionLike(sessionID))
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			out = append(out, id)
+		}
+		return rows.Err()
+	})
+	return out, err
 }

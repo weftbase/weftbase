@@ -44,6 +44,7 @@
   "requests_badge": "derived",
   "derived": true,
   "children": [],
+  "children_total": 0,
   "holes": [
     {
       "hole": "derived",

@@ -163,6 +163,9 @@ type runRow struct {
 	// what went wrong inside a run that may still have succeeded.
 	problemFields
 	Usage core.Usage `json:"usage"`
+	// UsagePartial: the run is still running, and usage (and the cost
+	// figures from it) are what its finished steps reported so far.
+	UsagePartial bool `json:"usage_partial,omitempty"`
 	// The run's cost (plan A5, pricing.go): its own model calls
 	// (cost_usd: its usage minus its subagent children's, at its own
 	// model's rates) and its descendants' (delegated_cost_usd), two
@@ -322,7 +325,12 @@ func problemsOf(p obsdb.Problems) problemFields {
 }
 
 type runsPage struct {
+	// Total counts the trace store's match. With display_status, chains
+	// or approvals the answer is a fold of that match: total is then an
+	// upper bound, and exact only where total_exact says so (the first
+	// page held every row).
 	Total      int        `json:"total"`
+	TotalExact bool       `json:"total_exact"`
 	Runs       []runRow   `json:"runs"`
 	NextBefore *time.Time `json:"next_before"`
 	// NextBeforeID is the cursor's second half: with next_before, the
@@ -347,8 +355,16 @@ type runsPage struct {
 // header badges; [] when the run has none.
 type runDoc struct {
 	runRow
-	Children []runRow   `json:"children"`
-	Holes    []stepHole `json:"holes"`
+	// Children are the run's subagent children, one level deep: a
+	// child's own children are on its document (and in
+	// spans?tree=1). ChildrenTotal counts every run under this one, at
+	// any depth, from the children the cost read already holds;
+	// ChildrenTotalTruncated says that read stopped at its bound, so
+	// the count is a floor.
+	Children               []runRow   `json:"children"`
+	ChildrenTotal          int        `json:"children_total"`
+	ChildrenTotalTruncated bool       `json:"children_total_truncated,omitempty"`
+	Holes                  []stepHole `json:"holes"`
 }
 
 // runPage is what GET /v1/runs/{id} serves: the run document and the
@@ -891,10 +907,11 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	query.Status = st
-	display, chains, ok := viewParams(w, r, q, &query.Status)
+	v, ok := viewParams(w, r, q, &query.Status)
 	if !ok {
 		return
 	}
+	v.mapped = v.mapped || query.Status != ""
 	if v := q.Get("all"); v != "" {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
@@ -947,37 +964,91 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 		query.Errs = sq.Errs
 	}
 
-	var page obsdb.RunPage
-	if display != displayQueued {
-		var err error
-		if page, err = s.db.Runs(r.Context(), query); err != nil {
+	// With a view that folds, the store is read until limit rows are
+	// kept (or it ends): the cursor then names the last store row read,
+	// whether or not it was kept.
+	want := obsdb.LimitOf(query.Limit)
+	if v.folds() {
+		query.Limit = max(want, fillStorePage) // fewer, larger reads behind a fold
+	}
+	out := runsPage{Runs: make([]runRow, 0, want), TotalExact: true}
+	c := s.coster(r.Context())
+	ctl := s.control(r)
+	first := query.Before.IsZero()
+	exhausted := v.display == displayQueued
+	for scans := 0; v.display != displayQueued; scans++ {
+		page, err := s.db.Runs(r.Context(), query)
+		if err != nil {
 			dbError(w, r, "runs", "", err)
 			return
 		}
+		if scans == 0 {
+			out.Total = page.Total
+		}
+		c.primeTrees(page.Runs)
+		rows := make([]runRow, 0, len(page.Runs))
+		for _, rec := range page.Runs {
+			rows = append(rows, c.row(rec))
+		}
+		ctl.decorate(rows)
+		cut := -1
+		for i, row := range rows {
+			if kept, ok := v.keep(ctl, c, row); ok {
+				out.Runs = append(out.Runs, kept)
+			}
+			if v.folds() && len(out.Runs) >= want && i < len(rows)-1 {
+				cut = i
+				break
+			}
+		}
+		switch {
+		case cut >= 0:
+			// The page was cut inside a store page: resume after the
+			// last row read.
+			at, id := page.Runs[cut].Started, page.Runs[cut].ID
+			out.NextBefore, out.NextBeforeID = &at, &id
+		case page.NextBefore != nil:
+			// The cursor is the database's own: it knows whether the
+			// page was cut at its limit (a page may exceed the limit by
+			// the runs tied on the cursor time).
+			next := *page.NextBefore
+			out.NextBefore = &next
+			if page.NextBeforeID != "" {
+				id := page.NextBeforeID
+				out.NextBeforeID = &id
+			}
+		default:
+			out.NextBefore, out.NextBeforeID = nil, nil
+			exhausted = true
+		}
+		if !v.folds() || cut >= 0 || exhausted || len(out.Runs) >= want || scans+1 >= fillScanPages {
+			break
+		}
+		query.Before, query.BeforeID = *out.NextBefore, ""
+		if out.NextBeforeID != nil {
+			query.BeforeID = *out.NextBeforeID
+		}
 	}
-	out := runsPage{Total: page.Total, Runs: make([]runRow, 0, len(page.Runs))}
-	c := s.coster(r.Context())
-	c.primeTrees(page.Runs)
-	for _, rec := range page.Runs {
-		out.Runs = append(out.Runs, c.row(rec))
+	if v.folds() {
+		// The store counted its own match, before the fold: an upper
+		// bound, exact only when this answer holds every row there is.
+		out.TotalExact = first && exhausted
+		if out.TotalExact {
+			out.Total = len(out.Runs)
+		}
 	}
-	out.Runs, out.Total = s.controlRows(r, c, query, out.Runs, out.Total, display, chains)
+	if first {
+		extra := s.queuedRows(r, ctl, query, v, out.Runs)
+		out.Total += len(extra)
+		if query.Oldest {
+			out.Runs = append(out.Runs, extra...)
+		} else if len(extra) > 0 {
+			out.Runs = append(extra, out.Runs...)
+		}
+	}
 	// The marks only on a page the request narrowed to a conversation.
 	if q.Get("public_id") != "" || q.Get("session") != "" {
 		out.TurnMarksCapped = s.turnMarks(r.Context(), out.Runs)
-	}
-	// The cursor is the database's own: it knows whether the page was
-	// cut at its limit. Counting rows here cannot — a page may exceed
-	// the limit by the runs tied on the cursor time (they ride along so
-	// the time cursor does not skip them), and a count that expects
-	// exactly limit rows would read such a page as the last one.
-	if page.NextBefore != nil {
-		next := *page.NextBefore
-		out.NextBefore = &next
-		if page.NextBeforeID != "" {
-			id := page.NextBeforeID
-			out.NextBeforeID = &id
-		}
 	}
 	writeJSON(w, r, http.StatusOK, out)
 }
@@ -1220,12 +1291,15 @@ func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 	c.prime(det.ID, det.Children)
 	c.primeTrees(c.kids[det.ID])
 	doc := runDoc{runRow: c.row(det.RunRow), Children: s.childRows(r.Context(), c, c.kids[det.ID])}
+	doc.ChildrenTotal, doc.ChildrenTotalTruncated = c.under(det.ID, 0)
 	ctl := s.control(r)
 	ctl.decorate(doc.Children)
 	one := []runRow{doc.runRow}
 	ctl.decorate(one)
 	doc.runRow = one[0]
-	doc.Chain = ctl.chain(c, doc.runRow)
+	if doc.Chain = ctl.chain(c, doc.runRow); doc.Chain != nil {
+		doc.ApprovalsOutcome = doc.Chain.ApprovalsOutcome
+	}
 	doc.LogWarn, doc.LogError, doc.LogsCapped = s.logCounts(r.Context(), id)
 	holes, err := s.runHoles(r.Context(), det.RunRow)
 	if err != nil {

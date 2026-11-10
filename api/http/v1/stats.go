@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/weftbase/weft/core"
+	"github.com/weftbase/weftbase/authz"
 	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/sessions"
 )
 
 // GET /v1/stats (UX plan A4, D7; UX-E-25, UX-A-14): numbers across
@@ -265,7 +267,7 @@ func (s *Server) serveStats(w http.ResponseWriter, r *http.Request) {
 	// each bucket, read from the run rows.
 	var pass outcomePass
 	if page.By == obsdb.StatsByAgent && query.Status == "" {
-		if pass, err = s.outcomes(r.Context(), query.RunQuery, page.Since, page.Until, page.Buckets, true); err != nil {
+		if pass, err = s.outcomes(r.Context(), s.control(r), query.RunQuery, page.Since, page.Until, page.Buckets, true); err != nil {
 			dbError(w, r, "stats", "", err)
 			return
 		}
@@ -483,6 +485,11 @@ type statsTotalBucket struct {
 	FailureRate  *float64 `json:"failure_rate"`
 	InputTokens  int64    `json:"input_tokens"`
 	OutputTokens int64    `json:"output_tokens"`
+	// ApprovalsExpired and ApprovalsDenied count the approvals that
+	// lapsed with nobody deciding, and that a person refused, by when
+	// that happened (by=total only; 0 elsewhere).
+	ApprovalsExpired int64 `json:"approvals_expired"`
+	ApprovalsDenied  int64 `json:"approvals_denied"`
 	// CostUSD sums the runs' known costs; CostKnown is false when some
 	// run's cost is not known (an unpriced model).
 	CostUSD   float64 `json:"cost_usd"`
@@ -571,13 +578,33 @@ func (s *Server) serveStatsTotal(w http.ResponseWriter, r *http.Request, buckets
 	if _, set := q["parent"]; set {
 		query.ParentRunID = parentParam(q)
 	}
-	pass, err := s.outcomes(r.Context(), query, since, until, buckets, false)
+	pass, err := s.outcomes(r.Context(), s.control(r), query, since, until, buckets, false)
 	if err != nil {
 		dbError(w, r, "stats", "", err)
 		return
 	}
 	out := statsTotal{By: "total", Since: since, Until: until, Buckets: buckets, BucketMS: width.Milliseconds(),
 		BucketStarts: bucketStarts(since, width, buckets), Total: pass.total.total, Series: pass.total.series, Capped: pass.capped}
+	// The approvals that lapsed or were refused in the window (by when
+	// they were decided), from the ledger: a run whose call was never
+	// made can still end succeeded, and this is where that shows.
+	if s.ledger != nil {
+		if _, sc, _ := authz.From(r.Context()); !sc.IsZero() {
+			if ds, err := s.ledger.ApprovalDecisions(r.Context(), sc, since, until, q.Get("agent")); err == nil {
+				for _, d := range ds {
+					i := min(int(d.At.Sub(since)/width), buckets-1)
+					for _, b := range []*statsTotalBucket{&out.Total, &out.Series[i]} {
+						switch d.Status {
+						case sessions.ApprovalExpired:
+							b.ApprovalsExpired++
+						case sessions.ApprovalDenied:
+							b.ApprovalsDenied++
+						}
+					}
+				}
+			}
+		}
+	}
 	writeJSON(w, r, http.StatusOK, out)
 }
 
@@ -597,7 +624,7 @@ type outcomePass struct {
 // outcomes reads the window's run rows that query keeps (newest first,
 // at most statsTotalRows) and counts them by display status: the whole,
 // and per agent when byAgent.
-func (s *Server) outcomes(ctx context.Context, query obsdb.RunQuery, since, until time.Time, buckets int, byAgent bool) (outcomePass, error) {
+func (s *Server) outcomes(ctx context.Context, ctl *control, query obsdb.RunQuery, since, until time.Time, buckets int, byAgent bool) (outcomePass, error) {
 	width := until.Sub(since) / time.Duration(buckets)
 	starts := bucketStarts(since, width, buckets)
 	fresh := func() *outcomeSeries {
@@ -618,14 +645,23 @@ pages:
 			return pass, err
 		}
 		c.primeTrees(page.Runs)
+		// The rows as the list shows them: the ledger's word where the
+		// run has a ledger row, so the counts and the list agree.
+		rows := make([]runRow, 0, len(page.Runs))
 		for _, rec := range page.Runs {
+			rows = append(rows, c.row(rec))
+		}
+		if ctl != nil {
+			ctl.decorate(rows)
+		}
+		for k, rec := range page.Runs {
 			if rec.Started.Before(since) {
 				break pages
 			}
 			if !rec.Started.Before(until) {
 				continue
 			}
-			row := c.row(rec)
+			row := rows[k]
 			i := min(int(rec.Started.Sub(since)/width), buckets-1)
 			pass.total.series[i].add(row)
 			pass.total.total.add(row)

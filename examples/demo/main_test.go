@@ -1,15 +1,48 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"io"
+	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/weftbase/weftbase/examples/demo/shop"
 )
+
+// outbox reads the events GET path replays (an SSE stream) until ctx
+// ends.
+func outbox(t *testing.T, ctx context.Context, c client, path string) []any {
+	t.Helper()
+	req, err := http.NewRequestWithContext(ctx, "GET", c.base+path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.key)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var out []any
+	sc := bufio.NewScanner(resp.Body)
+	sc.Buffer(make([]byte, 0, 1<<20), 1<<20)
+	for sc.Scan() {
+		if data, ok := strings.CutPrefix(sc.Text(), "data: "); ok {
+			var e any
+			if json.Unmarshal([]byte(data), &e) == nil {
+				out = append(out, e)
+			}
+		}
+	}
+	return out
+}
 
 // getAny reads path into a generic JSON value.
 func getAny(t *testing.T, c client, path string) map[string]any {
@@ -106,7 +139,7 @@ func TestDemo(t *testing.T) {
 		unsettled := 0
 		for _, r := range all {
 			switch {
-			case at(r, "display_status") == "running", at(r, "display_status") == "queued", at(r, "settling") == true:
+			case at(r, "display_status") == "running", at(r, "display_status") == "queued", at(r, "settling") == true, at(r, "status") == "running":
 				unsettled++
 			case len(list(getAny(t, c, "/v1/runs/"+url.PathEscape(str(r, "id"))+"/spans"), "spans")) == 0:
 				unsettled++
@@ -203,6 +236,95 @@ func TestDemo(t *testing.T) {
 			if at(r, "display_status") != "succeeded" {
 				t.Errorf("a %v run under display_status=succeeded", at(r, "display_status"))
 			}
+		}
+	})
+
+	t.Run("pages and totals", func(t *testing.T) {
+		// A folded list fills its pages: walking it four rows at a time
+		// gives the same rows in the same order, each once.
+		full := getAny(t, c, "/v1/runs?chains=1&limit=300")
+		if at(full, "total_exact") != true || at(full, "total") != float64(len(chains)) {
+			t.Errorf("the whole list: total %v, exact %v, %d rows", at(full, "total"), at(full, "total_exact"), len(chains))
+		}
+		var walked []any
+		for path := "/v1/runs?chains=1&limit=4"; ; {
+			page := getAny(t, c, path)
+			rows := list(page, "runs")
+			for _, r := range rows {
+				walked = append(walked, at(r, "id"))
+			}
+			if at(page, "next_before") == nil {
+				break
+			}
+			if len(rows) != 4 || at(page, "total_exact") != false {
+				t.Fatalf("a page of %d rows (total_exact %v), want 4 and an upper-bound total", len(rows), at(page, "total_exact"))
+			}
+			path = "/v1/runs?chains=1&limit=4&before=" + url.QueryEscape(str(page, "next_before")) + "&before_id=" + url.QueryEscape(str(page, "next_before_id"))
+		}
+		want := make([]any, len(chains))
+		for i, r := range chains {
+			want[i] = at(r, "id")
+		}
+		if !slices.Equal(walked, want) {
+			t.Errorf("walking the list by 4: %d rows, want the %d of one read, in order", len(walked), len(want))
+		}
+		// "Failed in the last hour" has one answer: the search by
+		// display_status and the stats agree, for every status.
+		total := at(getAny(t, c, "/v1/stats?by=total&since=1h"), "total")
+		since := url.QueryEscape(time.Now().Add(-time.Hour).UTC().Format(time.RFC3339))
+		for _, status := range []string{"succeeded", "failed", "cancelled", "waiting"} {
+			n := 0
+			for offset := 0.0; ; {
+				page := getAny(t, c, "/v1/runs?chains=1&limit=5&display_status="+status+"&since="+since+"&offset="+strconv.Itoa(int(offset)))
+				n += len(list(page, "runs"))
+				if at(page, "next_offset") == nil {
+					break
+				}
+				offset = num(page, "next_offset")
+			}
+			if float64(n) != num(total, status) {
+				t.Errorf("%s in the last hour: the search lists %d, the stats count %v", status, n, at(total, status))
+			}
+		}
+	})
+
+	t.Run("an expired approval", func(t *testing.T) {
+		// Nobody decided the payout: the node denied the call and
+		// resumed the run, which went on to its answer. The run did
+		// end succeeded; what happened to its approval is said beside.
+		paid := find(chains, func(r any) bool { return at(r, "agent") == "payouts" })
+		if at(paid, "display_status") != "succeeded" || at(paid, "approvals_outcome") != "expired" || at(paid, "chain", "approvals_expired") != 1.0 {
+			t.Errorf("the payout run: %v, approvals %v", at(paid, "display_status"), at(paid, "approvals_outcome"))
+		}
+		if rows := list(getAny(t, c, "/v1/runs?chains=1&approvals=expired"), "runs"); len(rows) != 1 || at(rows[0], "id") != at(paid, "id") {
+			t.Errorf("approvals=expired lists %d runs", len(rows))
+		}
+		if rows := list(getAny(t, c, "/v1/runs?chains=1&approvals=denied"), "runs"); len(rows) != 1 || at(rows[0], "agent") != "refunds" {
+			t.Errorf("approvals=denied lists %d runs", len(rows))
+		}
+		if rows := list(getAny(t, c, "/v1/runs?chains=1&approvals=pending"), "runs"); len(rows) != 1 || at(rows[0], "display_status") != "waiting" {
+			t.Errorf("approvals=pending lists %d runs", len(rows))
+		}
+		total := at(getAny(t, c, "/v1/stats?by=total&since=1h"), "total")
+		if at(total, "approvals_expired") != 1.0 || at(total, "approvals_denied") != 1.0 {
+			t.Errorf("stats: %v expired, %v denied", at(total, "approvals_expired"), at(total, "approvals_denied"))
+		}
+		if doc := getAny(t, c, "/v1/runs/"+str(paid, "id")); at(doc, "approvals_outcome") != "expired" {
+			t.Errorf("the payout's document: approvals_outcome %v", at(doc, "approvals_outcome"))
+		}
+		// The events name the logical run: the account closure's second
+		// approval was asked by the resume, and carries the first run.
+		twice := find(chains, func(r any) bool { return len(list(r, "chain", "runs")) == 3 })
+		var matched bool
+		stream, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		for _, e := range outbox(t, stream, c, "/v1/events?type=approval.requested,approval.decided") {
+			if at(e, "data", "chain_run_id") == at(twice, "id") && at(e, "data", "run_id") != at(twice, "id") {
+				matched = true
+			}
+		}
+		if !matched {
+			t.Error("no approval event of the chain's later run names the chain's first run")
 		}
 	})
 
@@ -544,6 +666,24 @@ func TestDemo(t *testing.T) {
 		if x := byInput(deskStock); at(x, "ended_kind") != "interrupt" || at(x, "off_path") != nil || at(x, "reply") != nil || at(x, "display_status") != "cancelled" {
 			t.Errorf("the interrupted turn = %v", x)
 		}
+		// The numbers weft gave to a resume or a steered message are
+		// explained, and the turns are numbered without gaps.
+		conv = getAny(t, c, "/v1/sessions/"+str(desk, "id")+"/conversation?limit=50")
+		reasons := map[any]int{}
+		for _, sk := range list(conv, "skipped_turns") {
+			reasons[at(sk, "reason")]++
+			if at(sk, "into") == nil || str(sk, "note") == "" {
+				t.Errorf("skipped turn = %v", sk)
+			}
+		}
+		if reasons["resumed"] != 2 || reasons["steered"]+reasons["deferred"] != 1 || reasons["not_recorded"] != 0 {
+			t.Errorf("skipped turns = %v", at(conv, "skipped_turns"))
+		}
+		for i, turn := range turns {
+			if at(turn, "index") != float64(i+1) {
+				t.Errorf("turn %v has index %v, want %d", at(turn, "turn"), at(turn, "index"), i+1)
+			}
+		}
 		if x := byInput(deskShip); at(x, "ended_kind") != "rollback" || at(x, "off_path") != true || num(x, "ended_by_turn") == 0 {
 			t.Errorf("the rolled-back turn = %v", x)
 		}
@@ -558,6 +698,73 @@ func TestDemo(t *testing.T) {
 		logs := getAny(t, c, "/v1/runs/"+str(failed, "id")+"/logs?severity=error")
 		if num(failed, "tool_errors") != 4 || at(logs, "logs", 0, "body") != "address service unavailable" {
 			t.Errorf("the failed run: %v tool errors, logs %v", at(failed, "tool_errors"), at(logs, "logs"))
+		}
+	})
+
+	t.Run("logs of a logical run", func(t *testing.T) {
+		twice := find(chains, func(r any) bool { return len(list(r, "chain", "runs")) == 3 })
+		id := str(twice, "id")
+		// One paged read over the chain's three runs, each line with
+		// its run.
+		seen := map[any]bool{}
+		lines := 0
+		for path := "/v1/runs/" + id + "/logs?chain=1&limit=4"; ; {
+			page := getAny(t, c, path)
+			for _, l := range list(page, "logs") {
+				seen[at(l, "run_id")] = true
+				lines++
+			}
+			if len(list(page, "runs")) != 3 {
+				t.Fatalf("chain logs read %v runs", at(page, "runs"))
+			}
+			if at(page, "next_cursor") == nil {
+				break
+			}
+			path = "/v1/runs/" + id + "/logs?chain=1&limit=4&cursor=" + url.QueryEscape(str(page, "next_cursor"))
+		}
+		if len(seen) != 3 || lines < 12 {
+			t.Errorf("chain logs: %d lines of %d runs", lines, len(seen))
+		}
+		found := list(getAny(t, c, "/v1/runs/"+id+"/logs?chain=1&q=CUS_8841"), "logs")
+		if len(found) != 1 || at(found[0], "body") != "account closed" || at(found[0], "run_id") == id {
+			t.Errorf("q=CUS_8841 (an attribute value, another case) = %v", found)
+		}
+		// tree=1: a subagent's lines under its parent's run.
+		parent := find(chains, func(r any) bool { return num(r, "children_count") == 1 && at(r, "children_failed") == nil })
+		tree := list(getAny(t, c, "/v1/runs/"+str(parent, "id")+"/logs?tree=1&q=charges+listed"), "logs")
+		if len(tree) != 1 || !strings.HasPrefix(str(tree[0], "run_id"), str(parent, "id")+"/") {
+			t.Errorf("tree logs q=charges listed = %v", tree)
+		}
+		if doc := getAny(t, c, "/v1/runs/"+str(parent, "id")); at(doc, "children_total") != 1.0 || len(list(doc, "children")) != 1 {
+			t.Errorf("children_total = %v", at(doc, "children_total"))
+		}
+	})
+
+	t.Run("a new turn of a session", func(t *testing.T) {
+		// POST /v1/runs with session_id continues the session: the
+		// ledger numbers the turn, and the conversation so far is put
+		// before the new message.
+		ses := find(list(getAny(t, c, "/v1/sessions?agent=support"), "sessions"), func(s any) bool { return num(s, "turns") == 2 })
+		var run map[string]any
+		if err := c.post(ctx, "/v1/runs", map[string]any{"agent": "support", "session_id": str(ses, "id"), "input": map[string]any{"prompt": shop.AskReturn}}, &run); err != nil {
+			t.Fatal(err)
+		}
+		if at(run, "metadata", "weft.turn") != "3" || len(list(run, "input", "messages")) != 5 {
+			t.Fatalf("the admitted turn: metadata %v, %d input messages", at(run, "metadata"), len(list(run, "input", "messages")))
+		}
+		if _, err := c.wait(ctx, str(run, "id"), "succeeded", "failed"); err != nil {
+			t.Fatal(err)
+		}
+		deadline := time.Now().Add(20 * time.Second)
+		for {
+			conv := getAny(t, c, "/v1/sessions/"+str(ses, "id")+"/conversation")
+			if third := at(conv, "turns", 2); at(third, "input") == shop.AskReturn && strings.HasPrefix(str(third, "reply"), "Yes. Order #1042") && at(third, "index") == 3.0 {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("the continued conversation = %v", at(conv, "turns"))
+			}
+			time.Sleep(50 * time.Millisecond)
 		}
 	})
 

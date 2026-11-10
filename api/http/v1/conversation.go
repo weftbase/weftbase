@@ -3,6 +3,7 @@ package v1
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
@@ -29,6 +30,12 @@ type conversationDoc struct {
 	Session   sessionRow         `json:"session"`
 	Delegated []sessionRow       `json:"delegated"`
 	Turns     []conversationTurn `json:"turns"`
+	// SkippedTurns explains every turn number between 1 and the newest
+	// that no entry of turns carries: a run that continued another turn
+	// (a resume), a message steered into a running turn (weft numbers
+	// it, and it has no run of its own), or a turn this server holds no
+	// record of.
+	SkippedTurns []skippedTurn `json:"skipped_turns"`
 	// TotalTurns counts the session's turns (chains folded).
 	TotalTurns int  `json:"total_turns"`
 	Offset     int  `json:"offset"`
@@ -41,8 +48,23 @@ type conversationDoc struct {
 	MarksCapped bool `json:"marks_capped,omitempty"`
 }
 
+// skippedTurn is one turn number with no entry of its own. Reason is
+// resumed (the run continued turn Into after a wait), steered (the
+// message was delivered into turn Into's run), deferred or dropped (a
+// steer that was not delivered), or not_recorded.
+type skippedTurn struct {
+	Turn   int    `json:"turn"`
+	Reason string `json:"reason"`
+	Into   int    `json:"into,omitempty"`
+	RunID  string `json:"run_id,omitempty"`
+	Note   string `json:"note"`
+}
+
 type conversationTurn struct {
-	Turn int `json:"turn"`
+	// Index is the turn's place in the conversation, from 1, with no
+	// gaps; Turn is weft's own number, which can skip (skipped_turns).
+	Index int `json:"index"`
+	Turn  int `json:"turn"`
 	// RunID is the turn's first run; Runs every run of it in order (more
 	// than one when it parked and was resumed).
 	RunID string   `json:"run_id"`
@@ -57,10 +79,13 @@ type conversationTurn struct {
 	Reply *string `json:"reply"`
 	// DisplayStatus and its cause (as on a run row).
 	DisplayStatus string `json:"display_status"`
-	StoppedBy     string `json:"stopped_by,omitempty"`
-	ErrorType     string `json:"error_type,omitempty"`
-	CancelCause   string `json:"cancel_cause,omitempty"`
-	Err           string `json:"err,omitempty"`
+	// ApprovalsOutcome: as on a run row (pending, expired, denied,
+	// approved), when the turn waited on a person.
+	ApprovalsOutcome string `json:"approvals_outcome,omitempty"`
+	StoppedBy        string `json:"stopped_by,omitempty"`
+	ErrorType        string `json:"error_type,omitempty"`
+	CancelCause      string `json:"cancel_cause,omitempty"`
+	Err              string `json:"err,omitempty"`
 	// EndedBy says what ended a turn a newer message felled: the run
 	// and turn that did, and how (interrupt | rollback).
 	EndedBy     string `json:"ended_by,omitempty"`
@@ -193,8 +218,11 @@ func (s *Server) serveSessionConversation(w http.ResponseWriter, r *http.Request
 	}
 
 	for i := offset; i < len(turns) && i < offset+limit; i++ {
-		doc.Turns = append(doc.Turns, s.conversationTurn(r, ctl, cost, turns[i], marks))
+		t := s.conversationTurn(r, ctl, cost, turns[i], marks)
+		t.Index = i + 1
+		doc.Turns = append(doc.Turns, t)
 	}
+	doc.SkippedTurns = skippedTurns(turns, marks)
 	if next := offset + len(doc.Turns); next < len(turns) {
 		doc.NextOffset = &next
 	}
@@ -219,13 +247,6 @@ func (s *Server) conversationTurn(r *http.Request, ctl *control, cost *coster, r
 			t.EndedBy, t.EndedByTurn, t.EndedKind = run.EndedBy, run.EndedByTurn, run.EndedKind
 			t.OffPath = run.EndedKind == "rollback"
 		}
-		if run.Status == string(obsdb.StatusRunning) && run.Usage == (core.Usage{}) {
-			// A running run's row has no usage yet: what its finished
-			// steps reported so far.
-			calls, used := s.progress(r, run.ID)
-			t.ModelCalls += max(calls-run.Steps, 0)
-			t.Usage = t.Usage.Add(used)
-		}
 		for _, c := range []*float64{run.CostUSD, run.DelegatedCostUSD} {
 			if c != nil {
 				usd += *c
@@ -245,7 +266,7 @@ func (s *Server) conversationTurn(r *http.Request, ctl *control, cost *coster, r
 	}
 	t.DurationMS = max(end.Sub(t.Started).Milliseconds(), 0)
 	if ch := ctl.chain(cost, head); ch != nil {
-		t.Waits, t.WaitingMS, t.DisplayStatus = ch.Waits, ch.WaitingMS, ch.DisplayStatus
+		t.Waits, t.WaitingMS, t.DisplayStatus, t.ApprovalsOutcome = ch.Waits, ch.WaitingMS, ch.DisplayStatus, ch.ApprovalsOutcome
 	}
 
 	// The words: the user's message from the first run's input, the
@@ -283,22 +304,69 @@ func (s *Server) conversationTurn(r *http.Request, ctl *control, cost *coster, r
 	return t
 }
 
-// progress is what a running run has done so far, from its step_finish
-// events: the steps that ended, and their usage.
-func (s *Server) progress(r *http.Request, id string) (steps int, used core.Usage) {
-	page, err := s.db.Events(r.Context(), id, -1, 5000)
-	if err != nil {
-		return 0, core.Usage{}
-	}
-	for _, e := range page.Events {
-		var ev struct {
-			Type  string     `json:"type"`
-			Usage core.Usage `json:"usage"`
+// skippedTurns explains the turn numbers no conversation entry carries.
+func skippedTurns(turns [][]runRow, marks map[string][]sessionEntry) []skippedTurn {
+	out := []skippedTurn{}
+	have := map[int]bool{}
+	newest := 0
+	for _, runs := range turns {
+		have[runs[0].Turn] = true
+		newest = max(newest, runs[0].Turn)
+		for _, run := range runs[1:] { // the runs that resumed the turn
+			if run.Turn > 0 && run.Turn != runs[0].Turn {
+				have[run.Turn] = true
+				newest = max(newest, run.Turn)
+				out = append(out, skippedTurn{Turn: run.Turn, Reason: "resumed", Into: runs[0].Turn, RunID: run.ID,
+					Note: "this run continued turn " + strconv.Itoa(runs[0].Turn) + " after it waited on a person"})
+			}
 		}
-		if json.Unmarshal(e.Event, &ev) == nil && ev.Type == "step_finish" {
-			steps++
-			used = used.Add(ev.Usage)
+	}
+	// A steer is numbered when it is accepted, then delivered into the
+	// running turn (or deferred, or dropped): its receipts say which.
+	type steer struct {
+		turn, into int
+		state      string
+	}
+	steers := map[string]*steer{} // by receipt id
+	for _, runs := range turns {
+		for _, run := range runs {
+			for _, m := range marks[run.ID] {
+				if m.Kind != "receipt" || m.Fields["input"] != "steer" {
+					continue
+				}
+				id, _ := m.Fields["receipt_id"].(string)
+				st := steers[id]
+				if st == nil {
+					st = &steer{into: runs[0].Turn}
+					steers[id] = st
+				}
+				if n, ok := m.Fields["turn"].(float64); ok && n > 0 {
+					st.turn = int(n)
+				}
+				if state, _ := m.Fields["state"].(string); state != "" && state != "queued" && state != "accepted" {
+					st.state = state
+				}
+			}
 		}
 	}
-	return steps, used
+	for _, st := range steers {
+		if st.turn == 0 || have[st.turn] {
+			continue
+		}
+		have[st.turn] = true
+		newest = max(newest, st.turn)
+		sk := skippedTurn{Turn: st.turn, Reason: "steered", Into: st.into,
+			Note: "a message steered into turn " + strconv.Itoa(st.into) + " while it ran: it has no run of its own"}
+		if st.state != "" && st.state != "delivered" {
+			sk.Reason, sk.Note = st.state, "a message steered at turn "+strconv.Itoa(st.into)+" that was "+st.state+", not delivered into its run"
+		}
+		out = append(out, sk)
+	}
+	for n := 1; n <= newest; n++ {
+		if !have[n] {
+			out = append(out, skippedTurn{Turn: n, Reason: "not_recorded", Note: "this server holds no run and no receipt for this turn number"})
+		}
+	}
+	slices.SortFunc(out, func(a, b skippedTurn) int { return a.Turn - b.Turn })
+	return out
 }

@@ -3,6 +3,7 @@ package v1
 import (
 	"errors"
 	"net/http"
+	"slices"
 
 	"github.com/weftbase/weftbase/authz"
 	"github.com/weftbase/weftbase/obsdb"
@@ -128,29 +129,49 @@ func (s *Server) deleteLedger(w http.ResponseWriter, r *http.Request, ids []stri
 }
 
 func (s *Server) serveDeleteSession(w http.ResponseWriter, r *http.Request, id string) {
-	// The session's runs go from the ledger too, with their approvals;
-	// refused while one of them is still in hand.
+	// The session's runs go from the ledger too, with their approvals —
+	// the queued ones no trace names yet included; refused while one of
+	// them is still in hand.
+	ctl := s.control(r)
 	det, err := s.db.Session(r.Context(), id)
-	if err != nil {
+	traced := err == nil
+	if err != nil && !errors.Is(err, obsdb.ErrNotFound) {
 		deleteError(w, r, "session", id, err)
 		return
 	}
-	rows := make([]runRow, 0, len(det.Runs))
-	ids := make([]string, 0, len(det.Runs))
+	var ids []string
 	for _, rr := range det.Runs {
-		rows = append(rows, row(rr))
 		ids = append(ids, rr.ID)
 	}
-	s.control(r).decorate(rows)
-	if !s.deletable(w, r, "session", rows) {
+	if s.ledger != nil && !ctl.sc.IsZero() {
+		more, err := s.ledger.SessionRuns(r.Context(), ctl.sc, id)
+		if err != nil {
+			controlError(w, r, err)
+			return
+		}
+		for _, run := range more {
+			if !slices.Contains(ids, run) {
+				ids = append(ids, run)
+			}
+		}
+	}
+	if len(ids) == 0 {
+		notFound(w, r, "no session "+id)
 		return
 	}
-	if err := s.db.DeleteSession(r.Context(), id); err != nil {
-		deleteError(w, r, "session", id, err)
-		return
+	for _, lr := range ctl.ledgerRuns(ids) {
+		if row := ctl.ledgerRow(lr); !s.deletable(w, r, "session", []runRow{row}) {
+			return
+		}
+	}
+	if traced {
+		if err := s.db.DeleteSession(r.Context(), id); err != nil {
+			deleteError(w, r, "session", id, err)
+			return
+		}
 	}
 	doc := deleteDoc{Deleted: "session", SessionID: id, RunIDs: ids, Note: deleteSessionNote}
-	if !s.deleteLedger(w, r, ids, &doc, true) {
+	if !s.deleteLedger(w, r, ids, &doc, traced) {
 		return
 	}
 	writeJSON(w, r, http.StatusOK, doc)

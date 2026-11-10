@@ -10,6 +10,10 @@
       }
     ],
     "display_status": "waiting",
+    "approvals_expired": 0,
+    "approvals_denied": 0,
+    "approvals_approved": 0,
+    "approvals_pending": 0,
     "stopped_by": "parked",
     "started": "(time)",
     "finished": null,
@@ -144,6 +148,7 @@
       ]
     }
   ],
+  "children_total": 1,
   "holes": [
     {
       "hole": "stripped",

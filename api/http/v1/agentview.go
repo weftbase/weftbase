@@ -320,7 +320,7 @@ func (s *Server) agentStats(w http.ResponseWriter, r *http.Request, names []stri
 	// The runs by display status, as GET /v1/stats?by=agent's outcomes
 	// count them: top-level runs, a parked run and its resume one run,
 	// a cancelled run not a failure.
-	if pass, err := s.outcomes(r.Context(), obsdb.RunQuery{}, since, until, 1, true); err == nil {
+	if pass, err := s.outcomes(r.Context(), s.control(r), obsdb.RunQuery{}, since, until, 1, true); err == nil {
 		for name, o := range pass.byAgent {
 			if ws := out[name]; ws != nil {
 				t := o.total

@@ -314,8 +314,11 @@ paths:
           description: >-
             The one word a row reads (its display_status), from the
             trace store and the run ledger: queued rows come from the
-            ledger alone. Not with status. The trace store pages first,
-            so a page can hold fewer rows than limit.
+            ledger alone. Not with status. Means the same in the list
+            and in the search (q, since, until, sort, …). A page is
+            filled: the store is read until limit rows are kept. total
+            counts the store's match before the fold (an upper bound);
+            total_exact says when it is the exact count.
           schema: { type: string, enum: [queued, running, waiting, succeeded, failed, cancelled, interrupted] }
         - name: chains
           in: query
@@ -327,6 +330,14 @@ paths:
             cost_known, waits[{run, resumed_by?, from, to, approvals[],
             decided_by[]}]} and the chain's display_status.
           schema: { type: string, enum: ["1"] }
+        - name: approvals
+          in: query
+          description: >-
+            With chains=1: only logical runs whose approvals read
+            pending, expired (one lapsed with nobody deciding: the node
+            denied the call and resumed the run), denied or approved
+            (a row's approvals_outcome).
+          schema: { type: string, enum: [pending, expired, denied, approved] }
         - { name: session, in: query, schema: { type: string } }
         - { name: public_id, in: query, schema: { type: string } }
         - name: parent
@@ -376,7 +387,12 @@ paths:
         label, else the newest version), writes the run to the ledger
         with its agent_version and resolved_via, enqueues it and emits
         run.queued, in one transaction. The run then goes to a worker
-        serving that version.
+        serving that version. With session_id the run is that session's
+        next turn: the ledger stamps weft.session.id and weft.turn on
+        its metadata, and a caller that sends only input.prompt gets
+        the conversation so far put before it (what the session's
+        newest run saw and said). 409 session_busy while that run has
+        not ended.
       x-weftbase-action: runs.create
       parameters:
         - $ref: "#/components/parameters/CSRF"
@@ -393,6 +409,7 @@ paths:
               schema: { $ref: "#/components/schemas/LedgerRun" }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
         "501": { $ref: "#/components/responses/Error" }
   /v1/runs/stream:
     get:
@@ -649,10 +666,23 @@ paths:
     get:
       operationId: listRunLogs
       summary: The app logs attributed to the run
+      description: >-
+        logs[{index, time, severity, severity_number, event_name?, body,
+        attrs, span_id?, run_id}]. The plain form pages one run by
+        from / next_from. With q, chain or tree the read is wide: the
+        lines of several runs, run by run (the chain in order, each run
+        before the runs under it), paged by cursor / next_cursor, with
+        runs[] naming the runs read.
       x-weftbase-action: runs.content
       parameters:
         - $ref: "#/components/parameters/RunID"
         - $ref: "#/components/parameters/Limit"
+        - { name: from, in: query, description: The plain form's cursor (a log index)., schema: { type: integer, minimum: 0 } }
+        - { name: severity, in: query, description: "A minimum: trace, debug, info, warn, error, fatal or 1-24.", schema: { type: string } }
+        - { name: q, in: query, description: "Only lines whose body or an attribute value contains the text (case folded).", schema: { type: string } }
+        - { name: chain, in: query, description: "1: every run of the run's chain (a parked run and its resumes).", schema: { type: string, enum: ["1"] } }
+        - { name: tree, in: query, description: "1: with each run, the runs under it (subagent children, at most 500).", schema: { type: string, enum: ["1"] } }
+        - { name: cursor, in: query, description: The wide form's cursor (a previous next_cursor)., schema: { type: string } }
       responses:
         "200": { $ref: "#/components/responses/Loose" }
         "404": { $ref: "#/components/responses/Error" }
@@ -1240,6 +1270,7 @@ components:
             prompt: { type: string }
             messages: { type: array, items: { type: object, additionalProperties: true } }
         metadata: { type: object, additionalProperties: { type: string } }
+        session_id: { type: string, description: "Makes the run the next turn of this session." }
         priority: { type: integer }
     Approval:
       type: object

@@ -3,8 +3,11 @@ package v1
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/weftbase/weft/core"
 
 	"github.com/weftbase/weftbase/authz"
 	"github.com/weftbase/weftbase/client/wire"
@@ -179,6 +182,21 @@ func (s *Server) serveAdmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, sc, _ := authz.From(r.Context())
+	// session_id makes the run the session's next turn. A caller that
+	// sends only the new message (input.prompt) gets the conversation
+	// so far put before it: what the session's newest run saw and said,
+	// read from the trace store.
+	if req.SessionID != "" && req.Input.Prompt != "" && len(req.Input.Messages) == 0 {
+		history, err := s.sessionHistory(r, req.SessionID)
+		if err != nil {
+			writeError(w, r, http.StatusConflict, "session_busy", err.Error())
+			return
+		}
+		if len(history) > 0 {
+			next, _ := json.Marshal(core.User(req.Input.Prompt))
+			req.Input = wire.Input{Messages: append(history, next)}
+		}
+	}
 	run, err := s.ledger.Admit(r.Context(), sc, actor(r), req)
 	if err != nil {
 		controlError(w, r, err)
@@ -263,4 +281,39 @@ func (s *Server) serveResume(w http.ResponseWriter, r *http.Request, id string) 
 		return
 	}
 	writeJSON(w, r, http.StatusAccepted, run)
+}
+
+// sessionHistory is the conversation of a session so far, as messages:
+// everything its newest run was given and answered. Empty for a
+// session the trace store does not know (its first turn). A session
+// whose newest run has not ended (it runs, or waits on a person) is an
+// error: its next turn would start from half a conversation.
+func (s *Server) sessionHistory(r *http.Request, sessionID string) ([]json.RawMessage, error) {
+	det, err := s.db.Session(r.Context(), sessionID)
+	if err != nil || len(det.Runs) == 0 {
+		return nil, nil
+	}
+	last := det.Runs[0]
+	for _, rr := range det.Runs {
+		if rr.Started.After(last.Started) {
+			last = rr
+		}
+	}
+	one := []runRow{row(last)}
+	s.control(r).decorate(one)
+	if st := one[0].DisplayStatus; st == displayRunning || st == displayQueued || st == displayWaiting {
+		return nil, fmt.Errorf("session %s: its newest run %s is %s; a new turn starts when it has ended", sessionID, last.ID, st)
+	}
+	batches, err := s.db.TranscriptBatches(r.Context(), last.ID)
+	if err != nil {
+		return nil, nil
+	}
+	var out []json.RawMessage
+	for _, b := range batches {
+		var msgs []json.RawMessage
+		if json.Unmarshal(b.Messages, &msgs) == nil {
+			out = append(out, msgs...)
+		}
+	}
+	return out, nil
 }

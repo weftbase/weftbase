@@ -198,6 +198,19 @@ run the ledger still has in hand (queued, running, waiting) is refused
 with 409 `run_active`. `GET /v1/events` replays the outbox from its
 start by default; `after=now` starts at the tail.
 
+An approval that expires is denied by the node and the run resumes;
+it usually goes on to an answer and ends succeeded. The status stays
+what the run did. What happened to its approvals is beside it:
+`approvals_outcome` (pending, expired, denied, approved) on the row,
+the chain and the conversation turn, `?approvals=expired` on the list,
+and `approvals_expired` / `approvals_denied` in `stats?by=total`.
+
+With `chains=1` or `display_status` a page is filled: the handler keeps
+reading the trace store until it has `limit` rows. In an unfiltered
+list a chain is the row of its first run, at its start; in a filtered
+or sorted read it is shown where its last run is read. `total` is the
+store's count before the fold, exact where `total_exact` says so.
+
 ## Console sign-in
 
 A one-time link (`<origin>/#signin=<token>`, 15 minutes) is exchanged

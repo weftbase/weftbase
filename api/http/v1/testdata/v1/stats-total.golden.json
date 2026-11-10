@@ -42,6 +42,8 @@
     "failure_rate": 0.5,
     "input_tokens": 0,
     "output_tokens": 0,
+    "approvals_expired": 0,
+    "approvals_denied": 0,
     "cost_usd": 0,
     "cost_known": false,
     "duration_ms": {
@@ -63,6 +65,8 @@
       "failure_rate": null,
       "input_tokens": 0,
       "output_tokens": 0,
+      "approvals_expired": 0,
+      "approvals_denied": 0,
       "cost_usd": 0,
       "cost_known": true,
       "duration_ms": null
@@ -79,6 +83,8 @@
       "failure_rate": null,
       "input_tokens": 0,
       "output_tokens": 0,
+      "approvals_expired": 0,
+      "approvals_denied": 0,
       "cost_usd": 0,
       "cost_known": true,
       "duration_ms": null
@@ -95,6 +101,8 @@
       "failure_rate": null,
       "input_tokens": 0,
       "output_tokens": 0,
+      "approvals_expired": 0,
+      "approvals_denied": 0,
       "cost_usd": 0,
       "cost_known": true,
       "duration_ms": null
@@ -111,6 +119,8 @@
       "failure_rate": null,
       "input_tokens": 0,
       "output_tokens": 0,
+      "approvals_expired": 0,
+      "approvals_denied": 0,
       "cost_usd": 0,
       "cost_known": true,
       "duration_ms": null
@@ -127,6 +137,8 @@
       "failure_rate": null,
       "input_tokens": 0,
       "output_tokens": 0,
+      "approvals_expired": 0,
+      "approvals_denied": 0,
       "cost_usd": 0,
       "cost_known": true,
       "duration_ms": null
@@ -143,6 +155,8 @@
       "failure_rate": null,
       "input_tokens": 0,
       "output_tokens": 0,
+      "approvals_expired": 0,
+      "approvals_denied": 0,
       "cost_usd": 0,
       "cost_known": true,
       "duration_ms": null
@@ -159,6 +173,8 @@
       "failure_rate": null,
       "input_tokens": 0,
       "output_tokens": 0,
+      "approvals_expired": 0,
+      "approvals_denied": 0,
       "cost_usd": 0,
       "cost_known": true,
       "duration_ms": null
@@ -175,6 +191,8 @@
       "failure_rate": null,
       "input_tokens": 0,
       "output_tokens": 0,
+      "approvals_expired": 0,
+      "approvals_denied": 0,
       "cost_usd": 0,
       "cost_known": true,
       "duration_ms": null
@@ -191,6 +209,8 @@
       "failure_rate": null,
       "input_tokens": 0,
       "output_tokens": 0,
+      "approvals_expired": 0,
+      "approvals_denied": 0,
       "cost_usd": 0,
       "cost_known": true,
       "duration_ms": null
@@ -207,6 +227,8 @@
       "failure_rate": 0,
       "input_tokens": 0,
       "output_tokens": 0,
+      "approvals_expired": 0,
+      "approvals_denied": 0,
       "cost_usd": 0,
       "cost_known": false,
       "duration_ms": {
@@ -227,6 +249,8 @@
       "failure_rate": 1,
       "input_tokens": 0,
       "output_tokens": 0,
+      "approvals_expired": 0,
+      "approvals_denied": 0,
       "cost_usd": 0,
       "cost_known": false,
       "duration_ms": {
@@ -247,6 +271,8 @@
       "failure_rate": 1,
       "input_tokens": 0,
       "output_tokens": 0,
+      "approvals_expired": 0,
+      "approvals_denied": 0,
       "cost_usd": 0,
       "cost_known": false,
       "duration_ms": {
@@ -267,6 +293,8 @@
       "failure_rate": 1,
       "input_tokens": 0,
       "output_tokens": 0,
+      "approvals_expired": 0,
+      "approvals_denied": 0,
       "cost_usd": 0,
       "cost_known": false,
       "duration_ms": {
@@ -287,6 +315,8 @@
       "failure_rate": 1,
       "input_tokens": 0,
       "output_tokens": 0,
+      "approvals_expired": 0,
+      "approvals_denied": 0,
       "cost_usd": 0,
       "cost_known": true,
       "duration_ms": {
@@ -307,6 +337,8 @@
       "failure_rate": 1,
       "input_tokens": 0,
       "output_tokens": 0,
+      "approvals_expired": 0,
+      "approvals_denied": 0,
       "cost_usd": 0,
       "cost_known": true,
       "duration_ms": {
@@ -327,6 +359,8 @@
       "failure_rate": 0,
       "input_tokens": 0,
       "output_tokens": 0,
+      "approvals_expired": 0,
+      "approvals_denied": 0,
       "cost_usd": 0,
       "cost_known": true,
       "duration_ms": {
@@ -347,6 +381,8 @@
       "failure_rate": 0,
       "input_tokens": 0,
       "output_tokens": 0,
+      "approvals_expired": 0,
+      "approvals_denied": 0,
       "cost_usd": 0,
       "cost_known": true,
       "duration_ms": {
@@ -367,6 +403,8 @@
       "failure_rate": null,
       "input_tokens": 0,
       "output_tokens": 0,
+      "approvals_expired": 0,
+      "approvals_denied": 0,
       "cost_usd": 0,
       "cost_known": true,
       "duration_ms": null
@@ -383,6 +421,8 @@
       "failure_rate": null,
       "input_tokens": 0,
       "output_tokens": 0,
+      "approvals_expired": 0,
+      "approvals_denied": 0,
       "cost_usd": 0,
       "cost_known": true,
       "duration_ms": null
@@ -399,6 +439,8 @@
       "failure_rate": null,
       "input_tokens": 0,
       "output_tokens": 0,
+      "approvals_expired": 0,
+      "approvals_denied": 0,
       "cost_usd": 0,
       "cost_known": true,
       "duration_ms": null
@@ -415,6 +457,8 @@
       "failure_rate": null,
       "input_tokens": 0,
       "output_tokens": 0,
+      "approvals_expired": 0,
+      "approvals_denied": 0,
       "cost_usd": 0,
       "cost_known": true,
       "duration_ms": null
@@ -431,6 +475,8 @@
       "failure_rate": null,
       "input_tokens": 0,
       "output_tokens": 0,
+      "approvals_expired": 0,
+      "approvals_denied": 0,
       "cost_usd": 0,
       "cost_known": true,
       "duration_ms": null
@@ -447,6 +493,8 @@
       "failure_rate": null,
       "input_tokens": 0,
       "output_tokens": 0,
+      "approvals_expired": 0,
+      "approvals_denied": 0,
       "cost_usd": 0,
       "cost_known": true,
       "duration_ms": null
@@ -463,6 +511,8 @@
       "failure_rate": null,
       "input_tokens": 0,
       "output_tokens": 0,
+      "approvals_expired": 0,
+      "approvals_denied": 0,
       "cost_usd": 0,
       "cost_known": true,
       "duration_ms": null

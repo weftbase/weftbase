@@ -3,6 +3,7 @@ package v1
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -38,6 +39,8 @@ type logRow struct {
 	Body           string         `json:"body"`
 	Attrs          map[string]any `json:"attrs"`
 	SpanID         string         `json:"span_id,omitempty"`
+	// RunID is the run the line belongs to.
+	RunID string `json:"run_id"`
 }
 
 // logsPage is GET /v1/runs/{id}/logs. NextFrom is the next page's
@@ -71,8 +74,12 @@ type logRow struct {
 // PartialReason says so; with no hole, reason carries it too, so a
 // page can be partial with a reason and no badge.
 type logsPage struct {
-	Logs          []logRow   `json:"logs"`
-	NextFrom      *int64     `json:"next_from,omitempty"`
+	Logs     []logRow `json:"logs"`
+	NextFrom *int64   `json:"next_from,omitempty"`
+	// Runs and NextCursor are set by the wide form (q, chain or tree):
+	// the runs read, in order, and where the next page starts.
+	Runs          []string   `json:"runs,omitempty"`
+	NextCursor    string     `json:"next_cursor,omitempty"`
 	Partial       bool       `json:"partial,omitempty"`
 	PartialReason string     `json:"partial_reason,omitempty"`
 	Holes         []stepHole `json:"holes"`
@@ -120,6 +127,10 @@ const (
 // renumbering them.
 func (s *Server) serveRunLogs(w http.ResponseWriter, r *http.Request, id string) {
 	q := r.URL.Query()
+	if q.Has("q") || q.Has("chain") || q.Has("tree") || q.Has("cursor") {
+		s.serveRunLogsWide(w, r, id)
+		return
+	}
 	var query obsdb.LogQuery
 	if v := q.Get("from"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)
@@ -171,7 +182,7 @@ func (s *Server) serveRunLogs(w http.ResponseWriter, r *http.Request, id string)
 		}
 		out.Logs = append(out.Logs, logRow{
 			Index: l.Index, Time: l.Time, Severity: obsdb.SeverityText(l.Severity), SeverityNumber: l.Severity,
-			EventName: l.EventName, Body: l.Body, Attrs: attrs, SpanID: l.SpanID,
+			EventName: l.EventName, Body: l.Body, Attrs: attrs, SpanID: l.SpanID, RunID: id,
 		})
 	}
 	if n := len(logs); n > 0 && n >= query.PageLimit() {
@@ -231,4 +242,169 @@ func (s *Server) logCounts(ctx context.Context, runID string) (warn, errs int64,
 		return 0, 0, false
 	}
 	return c.Warn, c.Error, c.Capped
+}
+
+// descendantsCap bounds the runs a tree read follows.
+const descendantsCap = 500
+
+// descendants are the runs under id (its subagent children, theirs, and
+// so on), breadth first, at most descendantsCap; truncated says there
+// are more.
+func (s *Server) descendants(ctx context.Context, id string) (ids []string, truncated bool) {
+	level := []string{id}
+	for depth := 0; len(level) > 0 && depth < 16; depth++ {
+		var next []string
+		for _, parent := range level {
+			page, err := s.db.Runs(ctx, obsdb.RunQuery{ParentRunID: parent, Limit: 500, Oldest: true})
+			if err != nil {
+				continue
+			}
+			for _, kid := range page.Runs {
+				if len(ids) >= descendantsCap {
+					return ids, true
+				}
+				ids = append(ids, kid.ID)
+				next = append(next, kid.ID)
+			}
+			if page.NextBefore != nil {
+				truncated = true
+			}
+		}
+		level = next
+	}
+	return ids, truncated
+}
+
+// serveRunLogsWide is GET /v1/runs/{id}/logs with q, chain or tree: the
+// lines of several runs in one paged read, each with its run_id.
+//
+//	chain=1   every run of the run's chain (a parked run, its resumes)
+//	tree=1    with each of those, the runs under it (subagent children)
+//	q=        only lines whose body or an attribute value contains the
+//	          text (case folded)
+//	cursor=   the previous page's next_cursor
+//
+// Lines come run by run (the chain in order, each run before its
+// descendants), in time order inside a run. severity and limit as the
+// plain form; from is the plain form's cursor and is not read here.
+func (s *Server) serveRunLogsWide(w http.ResponseWriter, r *http.Request, id string) {
+	q := r.URL.Query()
+	flag := func(name string) (bool, bool) {
+		v := q.Get(name)
+		if v == "" {
+			return false, true
+		}
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			badRequest(w, r, name+" must be true or false (1 or 0)")
+		}
+		return b, err == nil
+	}
+	chain, ok := flag("chain")
+	if !ok {
+		return
+	}
+	tree, ok := flag("tree")
+	if !ok {
+		return
+	}
+	limit, ok := limitParam(w, r, q)
+	if !ok {
+		return
+	}
+	limit = min(obsdb.LimitOf(limit), maxLogsLimit)
+	var minSeverity int
+	if v := q.Get("severity"); v != "" {
+		n, ok := obsdb.ParseSeverity(v)
+		if !ok {
+			badRequest(w, r, "severity must be trace, debug, info, warn, error, fatal or a number 1-24")
+			return
+		}
+		minSeverity = n
+	}
+	ctl := s.control(r)
+	of, found := ctl.read(s.coster(r.Context()), id)
+	if !found {
+		notFound(w, r, "no run "+id)
+		return
+	}
+	heads := []string{id}
+	if chain {
+		if ch := ctl.chain(s.coster(r.Context()), of); ch != nil {
+			heads = heads[:0]
+			for _, m := range ch.Runs {
+				heads = append(heads, m.ID)
+			}
+		}
+	}
+	out := logsPage{Logs: []logRow{}}
+	holes := holeSet{}
+	for _, h := range heads {
+		out.Runs = append(out.Runs, h)
+		if tree {
+			kids, cut := s.descendants(r.Context(), h)
+			out.Runs = append(out.Runs, kids...)
+			if cut {
+				holes.add(obsdb.HoleTruncated, "the run tree holds more runs than this read follows ("+strconv.Itoa(descendantsCap)+"): the logs of the runs past them are not here", "")
+			}
+		}
+	}
+	// The cursor: the index of the run in Runs, and the line to read
+	// from in it.
+	k, from := 0, int64(0)
+	if c := q.Get("cursor"); c != "" {
+		a, b, cut := strings.Cut(c, ":")
+		ki, err1 := strconv.Atoi(a)
+		fi, err2 := strconv.ParseInt(b, 10, 64)
+		if !cut || err1 != nil || err2 != nil || ki < 0 || fi < 0 {
+			badRequest(w, r, "cursor is a previous page's next_cursor")
+			return
+		}
+		k, from = ki, fi
+	}
+	needle := strings.ToLower(q.Get("q"))
+	matches := func(l obsdb.OtherLog) bool {
+		if needle == "" || strings.Contains(strings.ToLower(l.Body), needle) {
+			return true
+		}
+		for _, v := range l.Attrs {
+			if strings.Contains(strings.ToLower(fmt.Sprint(v)), needle) {
+				return true
+			}
+		}
+		return false
+	}
+	for ; k < len(out.Runs) && out.NextCursor == ""; k, from = k+1, 0 {
+		run := out.Runs[k]
+		for {
+			page, err := s.db.OtherLogs(r.Context(), run, obsdb.LogQuery{From: from, Limit: 500, MinSeverity: minSeverity})
+			if err != nil {
+				break // a run with no span has no lines to attribute
+			}
+			if page.Truncated {
+				holes.add(obsdb.HoleTruncated, "a run's traces hold more than "+logsCap+" log lines in its window: later lines of it may be missing", logsTruncatedFix)
+			}
+			for _, l := range page.Logs {
+				from = l.Index + 1
+				if !matches(l) {
+					continue
+				}
+				attrs := l.Attrs
+				if attrs == nil {
+					attrs = map[string]any{}
+				}
+				out.Logs = append(out.Logs, logRow{Index: l.Index, Time: l.Time, Severity: obsdb.SeverityText(l.Severity), SeverityNumber: l.Severity,
+					EventName: l.EventName, Body: l.Body, Attrs: attrs, SpanID: l.SpanID, RunID: run})
+				if len(out.Logs) >= limit {
+					out.NextCursor = strconv.Itoa(k) + ":" + strconv.FormatInt(from, 10)
+					break
+				}
+			}
+			if out.NextCursor != "" || len(page.Logs) < 500 {
+				break
+			}
+		}
+	}
+	out.setHoles(holes.list())
+	writeJSON(w, r, http.StatusOK, out)
 }

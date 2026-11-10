@@ -150,7 +150,10 @@ func (l *Ledger) request(tx store.Tx, s tenant.Scope, run Run, pending []wire.Pe
 }
 
 func (l *Ledger) emitApproval(tx store.Tx, s tenant.Scope, actor events.Actor, typ string, a Approval, extra map[string]any) error {
-	data := map[string]any{"approval_id": a.ID, "run_id": a.RunID, "call_id": a.CallID, "agent": a.Agent, "tool": a.Tool,
+	var resumeOf string
+	_ = store.QueryRow(tx, `SELECT resume_of FROM runs WHERE id = ?`, a.RunID).Scan(&resumeOf)
+	data := map[string]any{"approval_id": a.ID, "run_id": a.RunID, "chain_run_id": l.chainHead(tx, s, a.RunID, resumeOf),
+		"call_id": a.CallID, "agent": a.Agent, "tool": a.Tool,
 		"args_sha256": a.ArgsSHA256, "status": a.Status}
 	for k, v := range extra {
 		data[k] = v
@@ -425,6 +428,42 @@ func (l *Ledger) RunApprovals(ctx context.Context, s tenant.Scope, runIDs ...str
 			}
 		}
 		return nil
+	})
+	return out, err
+}
+
+// ApprovalDecision is when an approval left pending, and how.
+type ApprovalDecision struct {
+	Status string
+	At     time.Time
+}
+
+// ApprovalDecisions are the approvals decided in [since, until) (agent
+// "" is every agent): what a window's statistics count as expired and
+// denied.
+func (l *Ledger) ApprovalDecisions(ctx context.Context, s tenant.Scope, since, until time.Time, agent string) ([]ApprovalDecision, error) {
+	if s.IsZero() {
+		return nil, tenant.ErrZeroScope
+	}
+	var out []ApprovalDecision
+	err := l.db.Read(ctx, func(tx store.Tx) error {
+		rows, err := store.Query(tx, `SELECT status, decided_at FROM approvals WHERE project_id = ? AND env = ? AND tenant_id = ?
+			AND decided_at >= ? AND decided_at < ? AND (? = '' OR agent = ?)`,
+			s.Project(), s.Env(), s.Tenant(), since.UTC().Format(tsFormat), until.UTC().Format(tsFormat), agent, agent)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var d ApprovalDecision
+			var at string
+			if err := rows.Scan(&d.Status, &at); err != nil {
+				return err
+			}
+			d.At = parseTS(at)
+			out = append(out, d)
+		}
+		return rows.Err()
 	})
 	return out, err
 }
