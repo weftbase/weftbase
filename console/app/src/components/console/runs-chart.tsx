@@ -1,14 +1,41 @@
 import * as React from "react"
 
-import type { StatsBucket } from "@/lib/api/types"
+import type { OutcomeBucket } from "@/lib/api/types"
 import { count } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
-// Runs over time, split by outcome: one stacked bar per bucket, failed on
-// top of the rest. Two series only (the server's buckets carry runs and
-// failed), neutral and danger, so the split holds for colour-blind
-// readers by lightness as well as hue; the legend, the hover readout and
-// a table for screen readers carry the same numbers.
+// Runs over time, split by outcome: one stacked bar per bucket. The
+// colours are the status colours (tokens in styles.css, stepped so
+// neighbours in the stack stay apart for colour-blind readers); the
+// stack order is fixed, segments are split by a 2px gap, and the legend,
+// the hover readout and a table for screen readers carry the same
+// numbers, so colour is never the only cue.
+
+type Key = "succeeded" | "cancelled" | "waiting" | "failed" | "open"
+
+/** Bottom of the stack first. */
+const SERIES: { key: Key; label: string; fill: string }[] = [
+  { key: "succeeded", label: "Succeeded", fill: "bg-chart-succeeded" },
+  { key: "cancelled", label: "Cancelled", fill: "bg-chart-cancelled" },
+  { key: "waiting", label: "Waiting", fill: "bg-chart-waiting" },
+  { key: "failed", label: "Failed", fill: "bg-chart-failed" },
+  { key: "open", label: "In progress", fill: "bg-chart-open" },
+]
+
+/** A bucket's runs per series. "open" is what has no outcome yet:
+ * running, interrupted, queued. */
+export function outcomeCounts(b: OutcomeBucket): Record<Key, number> {
+  return {
+    succeeded: b.succeeded,
+    cancelled: b.cancelled,
+    waiting: b.waiting,
+    failed: b.failed,
+    open: Math.max(
+      0,
+      b.runs - b.succeeded - b.cancelled - b.waiting - b.failed
+    ),
+  }
+}
 
 const timeFmt = (bucketMs: number) =>
   new Intl.DateTimeFormat(
@@ -21,7 +48,7 @@ const timeFmt = (bucketMs: number) =>
   )
 
 /** niceMax rounds a maximum up to 1, 2 or 5 × 10^n, at least 4. */
-function niceMax(n: number): number {
+export function niceMax(n: number): number {
   if (n <= 4) return 4
   const p = 10 ** Math.floor(Math.log10(n))
   const f = n / p
@@ -30,45 +57,53 @@ function niceMax(n: number): number {
 
 export function RunsChart({
   series,
-  since,
   bucketMs,
   className,
 }: {
-  series: StatsBucket[]
-  /** RFC 3339 start of the first bucket. */
-  since: string
+  /** One bucket per interval, oldest first; `t` is its start. */
+  series: OutcomeBucket[]
   bucketMs: number
   className?: string
 }) {
   const [hover, setHover] = React.useState<number | null>(null)
-  const start = Date.parse(since)
   const fmt = timeFmt(bucketMs)
+  const counts = series.map(outcomeCounts)
   const max = niceMax(Math.max(0, ...series.map((b) => b.runs)))
-  const at = (i: number) => fmt.format(new Date(start + i * bucketMs))
+  const at = (i: number) => {
+    const b = series.at(i)
+    return b ? fmt.format(new Date(b.t)) : ""
+  }
   const total = series.reduce((a, b) => a + b.runs, 0)
-  const h = hover === null ? undefined : series.at(hover)
+  // "In progress" is in the legend only when the window has any.
+  const shown = SERIES.filter(
+    (s) => s.key !== "open" || counts.some((c) => c.open > 0)
+  )
+  const h = hover === null ? undefined : counts.at(hover)
 
   return (
     <figure className={cn("flex flex-col gap-2", className)}>
-      <div className="flex h-4 items-center gap-3 text-xs text-muted-foreground">
-        <span className="inline-flex items-center gap-1.5">
-          <span aria-hidden className="size-2 rounded-[2px] bg-chart-ok" />
-          Not failed
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span aria-hidden className="size-2 rounded-[2px] bg-chart-failed" />
-          Failed
-        </span>
+      <div className="flex min-h-4 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        {shown.map((s) => (
+          <span key={s.key} className="inline-flex items-center gap-1.5">
+            <span aria-hidden className={cn("size-2 rounded-[2px]", s.fill)} />
+            {s.label}
+            {h && (
+              <span className="font-mono text-foreground tabular-nums">
+                {count(h[s.key])}
+              </span>
+            )}
+          </span>
+        ))}
         <span className="ml-auto font-mono tabular-nums" aria-live="off">
           {h && hover !== null
-            ? `${at(hover)} · ${count(h.runs)} runs · ${count(h.failed)} failed`
-            : `${count(total)} runs`}
+            ? `from ${at(hover)}`
+            : `${count(total)} ${total === 1 ? "run" : "runs"}`}
         </span>
       </div>
       <div className="flex gap-2">
         <div
           aria-hidden
-          className="flex w-6 flex-none flex-col justify-between text-right font-mono text-[11px] leading-none text-subtle-foreground"
+          className="flex w-8 flex-none flex-col justify-between text-right font-mono text-[11px] leading-none text-subtle-foreground"
         >
           <span>{count(max)}</span>
           <span>{count(max / 2)}</span>
@@ -87,34 +122,28 @@ export function RunsChart({
             className="absolute inset-0 flex items-end gap-0.5"
             onMouseLeave={() => setHover(null)}
           >
-            {series.map((b, i) => {
-              const ok = b.runs - b.failed
+            {counts.map((c, i) => {
+              const parts = SERIES.filter((s) => c[s.key] > 0)
               return (
                 <div
                   key={i}
                   onMouseEnter={() => setHover(i)}
                   className={cn(
-                    "flex h-full min-w-0 flex-1 flex-col justify-end gap-0.5",
+                    "flex h-full min-w-0 flex-1 flex-col-reverse justify-start gap-0.5",
                     hover === i && "bg-muted"
                   )}
                 >
-                  {b.failed > 0 && (
+                  {parts.map((s, j) => (
                     <span
-                      className="w-full rounded-t-[3px] bg-chart-failed"
-                      style={{
-                        height: `max(2px, ${(b.failed / max) * 100}%)`,
-                      }}
-                    />
-                  )}
-                  {ok > 0 && (
-                    <span
+                      key={s.key}
                       className={cn(
-                        "w-full bg-chart-ok",
-                        b.failed === 0 && "rounded-t-[3px]"
+                        "w-full flex-none",
+                        s.fill,
+                        j === parts.length - 1 && "rounded-t-[3px]"
                       )}
-                      style={{ height: `max(2px, ${(ok / max) * 100}%)` }}
+                      style={{ height: `max(2px, ${(c[s.key] / max) * 100}%)` }}
                     />
-                  )}
+                  ))}
                 </div>
               )
             })}
@@ -123,27 +152,29 @@ export function RunsChart({
       </div>
       <div
         aria-hidden
-        className="flex justify-between pl-8 font-mono text-[11px] leading-none text-subtle-foreground"
+        className="flex justify-between pl-10 font-mono text-[11px] leading-none text-subtle-foreground"
       >
         <span>{at(0)}</span>
         <span>{at(Math.floor(series.length / 2))}</span>
         <span>now</span>
       </div>
       <table className="sr-only">
-        <caption>Runs per interval</caption>
+        <caption>Runs per interval, by outcome</caption>
         <thead>
           <tr>
             <th>From</th>
-            <th>Runs</th>
-            <th>Failed</th>
+            {SERIES.map((s) => (
+              <th key={s.key}>{s.label}</th>
+            ))}
           </tr>
         </thead>
         <tbody>
-          {series.map((b, i) => (
+          {counts.map((c, i) => (
             <tr key={i}>
               <td>{at(i)}</td>
-              <td>{b.runs}</td>
-              <td>{b.failed}</td>
+              {SERIES.map((s) => (
+                <td key={s.key}>{c[s.key]}</td>
+              ))}
             </tr>
           ))}
         </tbody>

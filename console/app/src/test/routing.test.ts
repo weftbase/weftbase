@@ -6,10 +6,10 @@ import { QueryClient } from "@tanstack/react-query"
 import { createMemoryHistory, createRouter } from "@tanstack/react-router"
 import { describe, expect, it } from "vitest"
 
+import { toRunsQuery } from "@/lib/runs"
 import { validateRuns } from "@/lib/search"
 import { mountRewrite } from "@/router"
 import { routeTree } from "@/routeTree.gen"
-import { toQuery } from "@/routes/runs/index"
 
 function routerAt(path: string) {
   return createRouter({
@@ -82,7 +82,22 @@ describe("routes", () => {
       Object.keys(
         validateRuns({ status: "waiting", bogus: "1", range: "2y" })
       ).sort()
-    ).toEqual(["agent", "q", "range", "status", "tab"])
+    ).toEqual([
+      "agent",
+      "error",
+      "min_cost",
+      "min_tokens",
+      "model",
+      "q",
+      "range",
+      "session",
+      "sort",
+      "status",
+      "sub",
+      "tab",
+      "tag",
+      "tool",
+    ])
     expect(validateRuns({ range: "2y" }).range).toBeUndefined()
   })
 
@@ -99,13 +114,20 @@ describe("routes", () => {
     const s = validateRuns({ status: "bogus", agent: "", q: "refund" })
     expect(s.status).toBeUndefined()
     expect(s.agent).toBeUndefined()
-    expect(toQuery(s)).toMatchObject({ q: "refund", limit: 50 })
-    // "waiting" is the Console's word; the server's filter word is parked.
-    expect(toQuery(validateRuns({ status: "waiting" })).status).toBe("parked")
+    expect(toRunsQuery(s)).toMatchObject({ q: "refund", limit: 50 })
+    // A plain list filters on the status as shown.
     expect(
-      toQuery(validateRuns({ status: "failed" }), "2020-01-01T00:00:00.000Z")
+      toRunsQuery(validateRuns({ status: "waiting" })).display_status
+    ).toBe("waiting")
+    // A search (here: a time range) only takes the trace store's word.
+    expect(
+      toRunsQuery(
+        validateRuns({ status: "waiting", range: "24h" }),
+        "2020-01-01T00:00:00.000Z"
+      )
     ).toMatchObject({
-      status: "failed",
+      status: "parked",
+      display_status: undefined,
       since: "2020-01-01T00:00:00.000Z",
     })
   })

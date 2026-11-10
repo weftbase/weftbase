@@ -45,7 +45,7 @@ export function StatStrip({
           <dd className="flex min-w-0 items-baseline gap-2">
             <span
               className={cn(
-                "truncate stat",
+                "flex-none stat",
                 s.tone === "danger" && "text-danger-foreground",
                 s.tone === "warning" && "text-warning-foreground"
               )}

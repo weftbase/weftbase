@@ -49,7 +49,10 @@ const Toaster = ({ ...props }: ToasterProps) => {
         } as React.CSSProperties
       }
       toastOptions={{
-        classNames: { toast: "shadow-card! text-sm!" },
+        classNames: {
+          toast: "font-sans! shadow-card! text-sm!",
+          description: "text-xs! text-muted-foreground!",
+        },
       }}
       {...props}
     />

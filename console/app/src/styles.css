@@ -136,9 +136,9 @@
   --elev-switch: inset 0 1px 2px rgba(0,0,0,0.2);
   --elev-thumb: 0 1px 2px rgba(0,0,0,0.3);
   /* Trace waterfall: colour is the AGENT (lane), never the span kind.
-     lane-0 is the root agent (neutral); lanes 1-6 go to subagents in the
-     order they first appear and never cycle (a 7th agent reuses lane-0
-     and its name carries it). Each lane has a solid step (model calls)
+     Lanes 1-6 go to the agents in the order they first appear (the root
+     run is lane 1) and never cycle; lane-0 is neutral: a 7th agent, and
+     what is no agent's work (stock spans). Each lane has a solid step (model calls)
      and a dim step (tool calls, summary bars). The order blue, orange,
      aqua, violet, green, magenta passes the dataviz validator's adjacent
      checks on both surfaces (CVD dE >= 9.2, normal dE >= 24); the first
@@ -162,6 +162,13 @@
   --chart-ok: #8B8B93;
   --chart-failed: #DC2626;
   --chart-grid: #EDEDF0;
+  /* Runs by outcome, in stack order (bottom up): succeeded, cancelled,
+     waiting, failed, then runs still going. Status hues, stepped so
+     neighbours in the stack stay apart for colour-blind readers. */
+  --chart-succeeded: #16A34A;
+  --chart-cancelled: #8B8B93;
+  --chart-waiting: #EDA100;
+  --chart-open: #2A78D6;
   --radius: 0.5rem;
 }
 
@@ -287,8 +294,12 @@
   --span-slowest: var(--warning-foreground);
   --span-slowest-muted: var(--warning-muted);
   --chart-ok: #71717A;
-  --chart-failed: #F87171;
+  --chart-failed: #E5484D;
   --chart-grid: #232327;
+  --chart-succeeded: #1F9E52;
+  --chart-cancelled: #8B8B93;
+  --chart-waiting: #C98F00;
+  --chart-open: #3987E5;
   color-scheme: dark;
 }
 
@@ -409,6 +420,10 @@
   --color-chart-ok: var(--chart-ok);
   --color-chart-failed: var(--chart-failed);
   --color-chart-grid: var(--chart-grid);
+  --color-chart-succeeded: var(--chart-succeeded);
+  --color-chart-cancelled: var(--chart-cancelled);
+  --color-chart-waiting: var(--chart-waiting);
+  --color-chart-open: var(--chart-open);
 
   --radius-sm: calc(var(--radius) * 0.6);   /* 6px  kbd, count badge   */
   --radius-md: calc(var(--radius) * 0.8);   /* 8px  nav, menu item     */

@@ -18,13 +18,15 @@ import {
 } from "@/components/console/filter-bar"
 import { LinkTabs, Page, PageHeader } from "@/components/console/page-header"
 import { RelativeTime } from "@/components/console/relative-time"
-import { RUN_COLUMNS } from "@/components/console/run-columns"
+import { runColumns } from "@/components/console/run-columns"
+import { RunsFilterMenu } from "@/components/console/runs-filter"
 import { LivePill } from "@/components/console/status"
 import { Button } from "@/components/ui/button"
 import { q } from "@/lib/api/queries"
-import type { RunsQuery, TraceRow } from "@/lib/api/types"
+import { FILTERABLE, STATUS_LABEL } from "@/lib/api/status"
+import type { TraceRow } from "@/lib/api/types"
 import { count, duration, shortId } from "@/lib/format"
-import { FILTERABLE, STATUS_LABEL, statusFilter } from "@/lib/api/status"
+import { isSearching, keepShown, toRunsQuery, unpricedLine } from "@/lib/runs"
 import {
   RANGES,
   RANGE_LABEL,
@@ -34,26 +36,16 @@ import {
 } from "@/lib/search"
 import type { RunsSearch } from "@/lib/search"
 
-// Runs: the dense list of top-level runs, newest first, live. One filter
-// bar (search, status, agent, time range), all of it in the URL. Traces
-// that belong to no weft run are a second tab, shown only when the
-// server has any.
+// Runs: the dense list of runs, newest first, live. A park and its
+// resume are one row. One filter bar (search, status, agent, time range,
+// then "+ Filter"), all of it in the URL; the headers of the columns the
+// server can order by sort. Traces that belong to no weft run are a
+// second tab, shown only when the server has any.
 export const Route = createFileRoute("/runs/")({
   validateSearch: validateRuns,
   head: () => ({ meta: [{ title: "Runs · weftbase" }] }),
   component: RunsPage,
 })
-
-/** toQuery maps the URL's filters onto GET /v1/runs parameters. */
-export function toQuery(s: RunsSearch, since?: string): RunsQuery {
-  return {
-    q: s.q,
-    status: s.status ? statusFilter(s.status) : undefined,
-    agent: s.agent,
-    since,
-    limit: 50,
-  }
-}
 
 function RunsPage() {
   const search = Route.useSearch()
@@ -101,18 +93,51 @@ function useRunsQuery() {
     () => (search.range ? sinceOf(search.range) : undefined),
     [search.range]
   )
-  return useInfiniteQuery(q.runs(toQuery(search, since)))
+  return useInfiniteQuery(q.runs(toRunsQuery(search, since)))
+}
+
+/** Every filter the URL can hold, cleared. */
+const CLEARED: Record<Exclude<keyof RunsSearch, "tab">, undefined> = {
+  q: undefined,
+  status: undefined,
+  agent: undefined,
+  range: undefined,
+  tool: undefined,
+  model: undefined,
+  error: undefined,
+  min_cost: undefined,
+  min_tokens: undefined,
+  tag: undefined,
+  session: undefined,
+  sub: undefined,
+  sort: undefined,
+}
+
+const keys = (groups: { key: string }[] | undefined, also?: string) => {
+  const out = (groups?.map((g) => g.key) ?? []).filter(Boolean)
+  if (also && !out.includes(also)) out.push(also)
+  return out.sort()
 }
 
 function RunsFilters() {
   const search = Route.useSearch()
   const set = useSetSearch<RunsSearch>(Route.fullPath)
   const runs = useRunsQuery()
-  // Agent names: every agent that ran in the last 30 days.
+  // What the selects offer: what ran in the last 30 days.
   const agents = useQuery(q.stats("agent", "30d"))
-  const names = (agents.data?.groups.map((g) => g.key) ?? []).filter(Boolean)
-  if (search.agent && !names.includes(search.agent)) names.push(search.agent)
-  const total = runs.data?.pages[0]?.total
+  const models = useQuery(q.statsAll("model", "30d"))
+  const tools = useQuery(q.statsAll("tool", "30d"))
+  const errors = useQuery(q.stats("error_type", "30d"))
+  // A search is filtered again here (keepShown), so the server's total
+  // would overstate it: count the rows once they are all loaded.
+  const total = !isSearching(search)
+    ? runs.data?.pages[0]?.total
+    : runs.data && !runs.hasNextPage
+      ? keepShown(
+          runs.data.pages.flatMap((p) => p.runs),
+          search
+        ).length
+      : undefined
 
   return (
     <FilterBar
@@ -138,7 +163,10 @@ function RunsFilters() {
       <FilterSelect
         label="Agent"
         value={search.agent}
-        options={names.sort().map((n) => ({ value: n, label: n }))}
+        options={keys(agents.data?.groups, search.agent).map((n) => ({
+          value: n,
+          label: n,
+        }))}
         onChange={(agent) => set({ agent })}
       />
       <FilterSelect
@@ -148,6 +176,13 @@ function RunsFilters() {
         options={RANGES.map((r) => ({ value: r, label: RANGE_LABEL[r] }))}
         onChange={(range) => set({ range })}
       />
+      <RunsFilterMenu
+        search={search}
+        set={set}
+        tools={keys(tools.data?.groups)}
+        models={keys(models.data?.groups)}
+        errors={keys(errors.data?.groups).filter((k) => k !== "cancelled")}
+      />
     </FilterBar>
   )
 }
@@ -156,8 +191,13 @@ function RunsTable() {
   const search = Route.useSearch()
   const set = useSetSearch<RunsSearch>(Route.fullPath)
   const runs = useRunsQuery()
-  const filtered = Boolean(
-    search.q || search.status || search.agent || search.range
+  const filtered = Object.keys(CLEARED).some(
+    (k) => search[k as keyof RunsSearch] !== undefined
+  )
+  const columns = React.useMemo(
+    () => runColumns({ sort: search.sort, onSort: (sort) => set({ sort }) }),
+    // set is a new function each render; the sort is what matters.
+    [search.sort]
   )
 
   if (runs.error)
@@ -169,24 +209,16 @@ function RunsTable() {
       />
     )
   if (!runs.data) return <LoadingRows rows={12} />
-  const rows = runs.data.pages.flatMap((p) => p.runs)
-  if (rows.length === 0)
+  const rows = keepShown(
+    runs.data.pages.flatMap((p) => p.runs),
+    search
+  )
+  if (rows.length === 0 && !runs.hasNextPage)
     return filtered ? (
       <EmptyState
         title="No runs match these filters"
         action={
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() =>
-              set({
-                q: undefined,
-                status: undefined,
-                agent: undefined,
-                range: undefined,
-              })
-            }
-          >
+          <Button size="sm" variant="secondary" onClick={() => set(CLEARED)}>
             Clear filters
           </Button>
         }
@@ -197,30 +229,39 @@ function RunsTable() {
       </EmptyState>
     )
 
+  const unpriced = unpricedLine(rows)
   return (
-    <DataTable
-      label="Runs"
-      columns={RUN_COLUMNS}
-      rows={rows}
-      rowKey={(r) => r.id}
-      rowLink={(r) => ({ to: "/runs/$runId", params: { runId: r.id } })}
-      footer={
-        runs.hasNextPage ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={runs.isFetchingNextPage}
-            onClick={() => void runs.fetchNextPage()}
-          >
-            {runs.isFetchingNextPage ? "Loading…" : "Load more"}
-          </Button>
-        ) : (
-          <span>
-            {count(rows.length)} {rows.length === 1 ? "run" : "runs"}, all shown
-          </span>
-        )
-      }
-    />
+    <>
+      <DataTable
+        label="Runs"
+        columns={columns}
+        rows={rows}
+        rowKey={(r) => r.id}
+        rowLink={(r) => ({ to: "/runs/$runId", params: { runId: r.id } })}
+        footer={
+          runs.hasNextPage ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={runs.isFetchingNextPage}
+              onClick={() => void runs.fetchNextPage()}
+            >
+              {runs.isFetchingNextPage ? "Loading…" : "Load more"}
+            </Button>
+          ) : (
+            <span>
+              {count(rows.length)} {rows.length === 1 ? "run" : "runs"}, all
+              shown
+            </span>
+          )
+        }
+      />
+      {unpriced && (
+        <p className="px-4 pb-3 text-center text-xs text-muted-foreground">
+          {unpriced}
+        </p>
+      )}
+    </>
   )
 }
 

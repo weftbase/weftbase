@@ -14,9 +14,15 @@ import { useQueryClient } from "@tanstack/react-query"
 import type { InfiniteData, QueryClient } from "@tanstack/react-query"
 import * as React from "react"
 
-import { streamRun, streamRuns, streamSession } from "./stream"
+import { streamEvents, streamRun, streamRuns, streamSession } from "./stream"
 import type { StreamState } from "./stream"
-import type { RunDetail, RunRow, RunsList, StreamFrame } from "./types"
+import type {
+  OutboxEvent,
+  RunDetail,
+  RunRow,
+  RunsList,
+  StreamFrame,
+} from "./types"
 
 type Key = readonly unknown[]
 
@@ -197,5 +203,43 @@ export function useSessionLive(
       }
     },
     [qc, id, enabled]
+  )
+}
+
+const APPROVAL_EVENTS = ["approval.requested", "approval.decided"] as const
+
+/** useApprovalsLive keeps the approvals inbox and its count current from
+ * the outbox stream. onRequested is called for an approval asked for
+ * while this page is open (the stream first replays the stored events;
+ * those are not news). Mounted once by the shell. */
+export function useApprovalsLive(
+  onRequested?: (event: OutboxEvent) => void
+): StreamState {
+  const qc = useQueryClient()
+  const cb = React.useRef(onRequested)
+  cb.current = onRequested
+  return useStream(
+    (onState) => {
+      const t = throttled(qc)
+      const opened = Date.now()
+      const close = streamEvents(APPROVAL_EVENTS, {
+        onState,
+        onEvent(e) {
+          const at = Date.parse(e.created_at)
+          // The replay of what is already stored changes nothing on screen.
+          if (!(at >= opened - 5000)) return
+          t.invalidate(["approvals"], ["runs"])
+          if (e.type === "approval.requested") cb.current?.(e)
+        },
+        onReopen(resumed) {
+          if (!resumed) t.invalidate(["approvals"])
+        },
+      })
+      return () => {
+        t.stop()
+        close()
+      }
+    },
+    [qc]
   )
 }

@@ -61,6 +61,17 @@ pasted.
 
 ## Screens
 
-Overview and Runs (with the Traces tab) are complete and live. The run
-page, sessions, approvals, agents and a raw trace are plain real-data
-stubs on the same primitives, to be replaced.
+Overview (tiles, runs by outcome, Needs attention, the Breakdown table,
+one window switch), Runs (chains folded, "+ Filter", sortable headers,
+the Traces tab), Agents (the inventory, the Tools tab, an agent's
+capabilities, versions and Move label), Approvals (the inbox and the
+decision) and Settings are complete and live, as are the command menu
+(⌘K) and the shortcuts sheet (`?`). The run
+page (`src/routes/runs/$runId.tsx`, parts in
+`src/components/console/run/`) is the trace waterfall
+(`src/components/console/trace-waterfall/`) with playback, the detail of
+a step, Transcript, Logs and Details; a run that parked and was resumed
+is one page (`src/lib/api/chain.ts`). A raw trace
+(`src/routes/traces/$traceId.tsx`) is the same waterfall. "New run" is
+`src/components/console/new-run.tsx`. Not built: comparing two runs
+(`/v1/diff`).

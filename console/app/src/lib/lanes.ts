@@ -1,9 +1,11 @@
 // Waterfall lanes: one colour per agent run, so a subtree reads as one
-// block. The root run is neutral (lane 0); each other run takes the next
-// of six hues in the order it first appears. The hues never cycle: the
-// order is what keeps neighbours apart for colour-blind readers
-// (styles.css, --lane-*). A 7th subagent falls back to neutral; its name
-// and its place in the tree still tell it apart.
+// block. The root run takes the first hue (lane 1); each other run takes
+// the next of the six in the order it first appears. The hues never
+// cycle: the order is what keeps neighbours apart for colour-blind
+// readers (styles.css, --lane-*). A run past the sixth is neutral (lane
+// 0); its name and its place in the tree still tell it apart. Lane 0 is
+// also what is not an agent's work at all: stock OpenTelemetry spans and
+// the hatched wait on a person.
 
 import type { Span } from "./api/types"
 
@@ -74,9 +76,9 @@ export const LANES: readonly Lane[] = [
 ]
 
 /** assignLanes maps each run id of a span tree to its lane. `rootRunId`
- * gets lane 0; the others take lanes 1..6 in order of their first span's
- * start. Stable for a given set of spans: a lane follows the agent, not
- * its position after filtering. */
+ * gets lane 1; the others take lanes 2..6 in order of their first span's
+ * start, and neutral after that. Stable for a given set of spans: a lane
+ * follows the agent, not its position after filtering. */
 export function assignLanes(
   spans: readonly Span[],
   rootRunId: string
@@ -88,8 +90,8 @@ export function assignLanes(
     const seen = first.get(run)
     if (seen === undefined || t < seen) first.set(run, t)
   }
-  const lanes = new Map<string, Lane>([[rootRunId, LANES[0]]])
-  let next = 1
+  const lanes = new Map<string, Lane>([[rootRunId, LANES[1]]])
+  let next = 2
   for (const [run] of [...first].sort(
     (a, b) => a[1] - b[1] || (a[0] < b[0] ? -1 : 1)
   )) {

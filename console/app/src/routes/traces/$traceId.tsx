@@ -1,119 +1,138 @@
 import { useQuery } from "@tanstack/react-query"
 import { Link, createFileRoute } from "@tanstack/react-router"
+import { InfoIcon } from "lucide-react"
+import * as React from "react"
 
 import { CopyId } from "@/components/console/copy-id"
-import { DataTable } from "@/components/console/data-table"
-import type { Column } from "@/components/console/data-table"
-import { ErrorState, Rebuilding } from "@/components/console/empty-state"
+import { ErrorState } from "@/components/console/empty-state"
 import { Page, PageHeader } from "@/components/console/page-header"
+import { SpanDetail } from "@/components/console/run/span-detail"
+import { SplitPane } from "@/components/console/split-pane"
+import {
+  TraceWaterfall,
+  useTraceView,
+} from "@/components/console/trace-waterfall"
+import type { TraceInput } from "@/components/console/trace-waterfall"
 import { q } from "@/lib/api/queries"
-import type { Span } from "@/lib/api/types"
-import { between, count, duration } from "@/lib/format"
-import { validateTrace } from "@/lib/search"
-import { SPAN_KINDS, spanKind, spanLabel } from "@/lib/span-kind"
+import { count } from "@/lib/format"
+import { useSetSearch, validateTrace } from "@/lib/search"
+import type { TraceSearch } from "@/lib/search"
 
-// A raw trace (one that belongs to no weft run), reached from the Traces
-// tab of Runs. A stub on the new foundation: its spans in start order.
-// The trace waterfall replaces the table.
+// A raw trace: every span of one trace id, whether or not a weft run is
+// in it. The same waterfall as a run's timeline, with neutral rows for
+// stock spans; a span's detail is its timing and attributes. Reached
+// from the Traces tab of Runs and from a run's Details ("Open whole
+// trace").
 export const Route = createFileRoute("/traces/$traceId")({
   validateSearch: validateTrace,
   head: () => ({ meta: [{ title: "Trace · weftbase" }] }),
   component: TracePage,
 })
 
-const COLUMNS: Column<Span>[] = [
-  {
-    key: "kind",
-    header: <span className="sr-only">Kind</span>,
-    width: "28px",
-    cell: (s) => {
-      const k = SPAN_KINDS[spanKind(s)]
-      return (
-        <k.icon
-          aria-label={k.label}
-          className="size-3.5 text-muted-foreground"
-        />
-      )
-    },
-  },
-  {
-    key: "name",
-    header: "Span",
-    width: "minmax(200px, 1fr)",
-    cell: (s) => <span className="font-medium">{spanLabel(s)}</span>,
-  },
-  {
-    key: "service",
-    header: "Service",
-    width: "minmax(100px, 200px)",
-    muted: true,
-    cell: (s) => s.service || "—",
-  },
-  {
-    key: "status",
-    header: "Status",
-    width: "80px",
-    muted: true,
-    cell: (s) => s.status,
-  },
-  {
-    key: "duration",
-    header: "Duration",
-    width: "88px",
-    align: "right",
-    mono: true,
-    cell: (s) => duration(between(s.start, s.end)),
-  },
-]
+const NONE: TraceInput = { spans: [] }
 
 function TracePage() {
   const { traceId } = Route.useParams()
+  const search = Route.useSearch()
+  const set = useSetSearch<TraceSearch>(Route.fullPath)
   const trace = useQuery(q.trace(traceId))
-  const spans = [...(trace.data?.spans ?? [])].sort((a, b) =>
-    a.start < b.start ? -1 : 1
+  const input = React.useMemo<TraceInput>(
+    () => (trace.data ? { spans: trace.data.spans } : NONE),
+    [trace.data]
   )
+  const view = useTraceView(input)
+  const node = search.span ? view.model.byId.get(search.span) : undefined
+  const select = (id: string | undefined) => set({ span: id })
+  const runs = trace.data?.run_ids ?? []
+
   return (
     <Page
       header={
         <PageHeader
           title="Trace"
           id={<CopyId id={traceId} label="trace id" />}
-          meta={trace.data && <span>{count(spans.length)} spans</span>}
+          meta={
+            trace.data && (
+              <span>
+                {count(trace.data.spans.length)}{" "}
+                {trace.data.spans.length === 1 ? "span" : "spans"}
+              </span>
+            )
+          }
         />
       }
-      className="flex flex-col gap-4"
+      className="flex flex-col gap-3 overflow-hidden"
     >
       {trace.error ? (
         <ErrorState error={trace.error} what="The trace" />
       ) : trace.data ? (
         <>
-          {trace.data.run_ids.length > 0 && (
-            <p className="text-xs text-muted-foreground">
-              This trace belongs to{" "}
-              {trace.data.run_ids.map((id, i) => (
-                <span key={id}>
-                  {i > 0 && ", "}
-                  <Link
-                    to="/runs/$runId"
-                    params={{ runId: id }}
-                    className="font-mono text-foreground hover:underline"
-                  >
-                    {id}
-                  </Link>
-                </span>
-              ))}
-              .
-            </p>
-          )}
-          <Rebuilding what="The trace view" />
-          <DataTable
-            label="Spans"
-            bordered
-            stickyHeader={false}
-            columns={COLUMNS}
-            rows={spans}
-            rowKey={(s) => s.span_id}
-          />
+          <p className="flex flex-none items-start gap-1.5 text-xs text-muted-foreground">
+            <InfoIcon className="mt-px size-3.5 flex-none text-subtle-foreground" />
+            {runs.length > 0 ? (
+              <span>
+                Every span of this trace, as recorded.{" "}
+                {runs.length === 1 ? "The run in it: " : "The runs in it: "}
+                {runs.slice(0, 6).map((id, i) => (
+                  <React.Fragment key={id}>
+                    {i > 0 && ", "}
+                    <Link
+                      to="/runs/$runId"
+                      params={{ runId: id }}
+                      className="font-mono text-foreground hover:underline"
+                    >
+                      {id}
+                    </Link>
+                  </React.Fragment>
+                ))}
+                {runs.length > 6 && ` and ${runs.length - 6} more`}. A run's own
+                page shows its messages and tool arguments.
+              </span>
+            ) : (
+              <span>
+                No weft run is in this trace
+                {trace.data.not_run?.reason
+                  ? `: ${trace.data.not_run.reason}`
+                  : ""}
+                . Its spans are shown as recorded; there are no messages or tool
+                arguments to show.
+                {trace.data.not_run?.fix &&
+                  ` To get them: ${trace.data.not_run.fix}.`}
+              </span>
+            )}
+          </p>
+          <div
+            className="min-h-0 flex-1"
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && search.span) select(undefined)
+            }}
+          >
+            <SplitPane
+              id="trace"
+              gutter
+              defaultWidth={440}
+              detail={
+                node && (
+                  <SpanDetail
+                    key={node.id}
+                    node={node}
+                    model={view.model}
+                    onSelect={select}
+                    onClose={() => select(undefined)}
+                  />
+                )
+              }
+            >
+              <TraceWaterfall
+                id="trace"
+                view={view}
+                strip
+                selected={search.span}
+                onSelect={select}
+                autoFocus
+              />
+            </SplitPane>
+          </div>
         </>
       ) : null}
     </Page>

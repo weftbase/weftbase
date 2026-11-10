@@ -15,14 +15,18 @@ import { ApiError } from "./errors"
 import type {
   AdmitRequest,
   Agent,
+  AgentDetail,
   AgentVersion,
+  AgentsSummary,
+  Approval,
+  ApprovalsPage,
+  Conversation,
   EventsPage,
   LedgerRun,
   LogsPage,
   Meta,
   PricingTable,
   RequestsPage,
-  ResumeDecision,
   RunDetail,
   RunsCursor,
   RunsList,
@@ -38,8 +42,10 @@ import type {
   SpansDoc,
   Stats,
   StatsBy,
+  StatsTotal,
   StepDoc,
   StoredManifest,
+  ToolsDoc,
   TraceDetail,
   TracesPage,
   Transcript,
@@ -114,7 +120,16 @@ const run = (id: string) => `/v1/runs/${seg(id)}`
 const session = (id: string) => `/v1/sessions/${seg(id)}`
 
 /** The parameters that make GET /v1/runs a search (offset-paged). */
-const SEARCH_KEYS = ["q", "model", "tool", "since", "until", "sort"] as const
+const SEARCH_KEYS = [
+  "q",
+  "model",
+  "tool",
+  "since",
+  "until",
+  "sort",
+  "min_cost",
+  "min_tokens",
+] as const
 
 export function isSearch(q: RunsQuery): boolean {
   return SEARCH_KEYS.some((k) => q[k] !== undefined && q[k] !== "")
@@ -137,7 +152,11 @@ export const api = {
   /** One page of runs, newest first. The server pages a plain list by a
    * time cursor and a search by offset; both come back as a RunsList. */
   async runs(q: RunsQuery = {}, cursor?: RunsCursor): Promise<RunsList> {
-    const query: Query = { ...q, ...cursor }
+    // chains: a park and its resumes are one row (a search ignores it).
+    const { tag, ...rest } = q
+    const query: Query = { ...rest, chains: 1, ...cursor }
+    const eq = tag?.indexOf("=") ?? -1
+    if (tag && eq > 0) query[`tag.${tag.slice(0, eq)}`] = tag.slice(eq + 1)
     if (isSearch(q)) {
       const p = await get<SearchPage>("/v1/runs", query)
       return {
@@ -157,6 +176,17 @@ export const api = {
           : { before: p.next_before, before_id: p.next_before_id ?? undefined },
     }
   },
+  /** The runs whose id is, or starts with, the text: child runs and the
+   * resumes of a parked run included, so any id a person pastes is
+   * found (the command menu's lookup). */
+  findRuns: async (idPrefix: string, limit = 5) =>
+    (
+      await get<RunsPage>("/v1/runs", {
+        id_prefix: idPrefix,
+        parent: "*",
+        limit,
+      })
+    ).runs,
   /** Start a run; answers its ledger row (queued). */
   admit: (body: AdmitRequest) => post<LedgerRun>("/v1/runs", body),
   run: (id: string) => get<RunDetail>(run(id)),
@@ -164,6 +194,10 @@ export const api = {
   /** tree: every descendant run's spans too, each tagged with its run_id. */
   spans: (id: string, tree = true) =>
     get<SpansDoc>(`${run(id)}/spans`, { tree: tree ? 1 : undefined }),
+  /** The timeline of a logical run: the spans of every run of its chain
+   * (a park and its resumes) and their descendants, with the waits. */
+  runTimeline: (id: string) =>
+    get<SpansDoc>(`${run(id)}/spans`, { tree: 1, chain: 1 }),
   events: (id: string, after?: number, limit?: number) =>
     get<EventsPage>(`${run(id)}/events`, { after, limit }),
   /** step: the conversation as the model saw it at that step. */
@@ -175,27 +209,60 @@ export const api = {
   logs: (id: string, from?: number, limit?: number) =>
     get<LogsPage>(`${run(id)}/logs`, { from, limit }),
   /** The export is a download: give this URL to an <a download>. */
-  exportUrl: (id: string, format: ExportFormat = "json") =>
-    buildUrl(`${run(id)}/export`, { format }),
+  exportUrl: (id: string, format: ExportFormat = "json", tree = false) =>
+    buildUrl(`${run(id)}/export`, { format, tree: tree ? 1 : undefined }),
+  /** Delete a run and what it recorded. Cannot be undone. */
+  deleteRun: (id: string) => request<void>("DELETE", run(id)),
   cancel: (id: string, reason?: string) =>
     post<LedgerRun>(`${run(id)}/cancel`, { reason }),
   steer: (id: string, text: string) =>
     post<{ run_id: string; steered: number }>(`${run(id)}/steer`, {
       messages: [{ role: "user", content: [{ type: "text", text }] }],
     }),
-  /** Decide a parked run's pending calls; answers the new run. */
-  resume: (id: string, decisions: ResumeDecision[]) =>
-    post<LedgerRun>(`${run(id)}/resume`, { decisions }),
+
+  // Approvals: tool calls waiting on, or decided by, a person
+  approvals: (
+    q: {
+      run?: string
+      status?: string
+      agent?: string
+      tool?: string
+      limit?: number
+      offset?: number
+    } = {}
+  ) => get<ApprovalsPage>("/v1/approvals", { ...q }),
+  approval: (id: string) => get<Approval>(`/v1/approvals/${seg(id)}`),
+  /** Decide one approval. args_sha256 is the approval's own value, sent
+   * back: 409 args_changed when the arguments are no longer those. */
+  decideApproval: (
+    id: string,
+    body: {
+      decision: "approve" | "deny" | "resolve"
+      reason?: string
+      content?: string
+      args_sha256: string
+    }
+  ) => post<Approval>(`/v1/approvals/${seg(id)}/decision`, body),
 
   // Sessions
   sessions: (q: SessionsQuery = {}) =>
     get<SessionsPage>("/v1/sessions", { ...q }),
   session: (id: string) => get<SessionDetail>(session(id)),
+  /** The session a public id (the browser-safe handle an app shows)
+   * stands for. */
+  publicSession: (publicId: string) =>
+    get<{ session_id: string }>(`/v1/public/${seg(publicId)}`),
   timeline: (id: string) => get<SessionTimeline>(`${session(id)}/timeline`),
   entries: (id: string, offset?: number, limit?: number) =>
     get<SessionEntries>(`${session(id)}/entries`, { offset, limit }),
+  /** The session as a person reads it, one entry per turn, oldest
+   * first; paged by turn (limit at most 100). */
+  conversation: (id: string, page: { offset?: number; limit?: number } = {}) =>
+    get<Conversation>(`${session(id)}/conversation`, { ...page }),
   sessionExportUrl: (id: string) =>
     buildUrl(`${session(id)}/export`, { format: "jsonl" }),
+  /** Delete a session, its turns and what they recorded. Cannot be undone. */
+  deleteSession: (id: string) => request<unknown>("DELETE", session(id)),
 
   // Traces
   /** notRun: only traces that belong to no weft run. */
@@ -211,10 +278,20 @@ export const api = {
   /** since: a duration back from now ("1h", "24h", "7d") or RFC 3339.
    * Counts top-level runs only, like the Runs list, unless all is set. */
   stats: (by: StatsBy, since: string, opts: { all?: boolean } = {}) =>
-    get<Stats>("/v1/stats", { by, since, parent: opts.all ? undefined : null }),
+    get<Stats>("/v1/stats", { by, since, parent: opts.all ? "*" : null }),
+  /** Top-level runs by display status: the window's total and 24 buckets. */
+  statsTotal: (since: string) =>
+    get<StatsTotal>("/v1/stats", { by: "total", since }),
 
   // Agents
   agents: async () => (await get<{ agents: Agent[] }>("/v1/agents")).agents,
+  /** Every agent with its newest version's shape and its runs over the
+   * window (since: "1h", "24h", "7d"), and the inventory's totals. */
+  agentsSummary: (since?: string) =>
+    get<AgentsSummary>("/v1/agents", { include: "summary", since }),
+  agent: (name: string) => get<AgentDetail>(`/v1/agents/${seg(name)}`),
+  /** Every tool once, with the agent versions that have it. */
+  tools: (since?: string) => get<ToolsDoc>("/v1/tools", { since }),
   agentVersions: async (name: string) =>
     (
       await get<{ agent: string; versions: AgentVersion[] | null }>(

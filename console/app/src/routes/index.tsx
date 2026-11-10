@@ -5,36 +5,44 @@ import * as React from "react"
 
 import { useLiveState } from "@/components/console/app-shell"
 import { DataTable } from "@/components/console/data-table"
+import type { Column } from "@/components/console/data-table"
 import {
   EmptyState,
   ErrorState,
   LoadingRows,
 } from "@/components/console/empty-state"
-import { FilterSelect } from "@/components/console/filter-bar"
 import { Page, PageHeader, Section } from "@/components/console/page-header"
-import {
-  RUN_COLUMNS,
-  RUN_COLUMNS_SHORT,
-} from "@/components/console/run-columns"
+import { RelativeTime } from "@/components/console/relative-time"
+import { RUN_COLUMNS } from "@/components/console/run-columns"
 import { RunsChart } from "@/components/console/runs-chart"
+import { Segmented } from "@/components/console/segmented"
+import { Sparkline } from "@/components/console/sparkline"
 import { StatStrip } from "@/components/console/stat-strip"
-import { LivePill } from "@/components/console/status"
+import { LivePill, Status } from "@/components/console/status"
 import { q } from "@/lib/api/queries"
-import { displayStatus } from "@/lib/api/status"
-import type { RunRow } from "@/lib/api/types"
-import { cost, count, percent, tokens } from "@/lib/format"
+import type { Approval, RunRow } from "@/lib/api/types"
+import { argsSummary } from "@/lib/approval-view"
+import { count, duration, percent, tokens } from "@/lib/format"
+import { rowCause, rowTimes } from "@/lib/runs"
 import {
-  RANGES,
+  BREAKDOWNS,
   RANGE_LABEL,
+  WINDOWS,
   sinceOf,
-  useSetSearch,
   validateOverview,
 } from "@/lib/search"
-import type { OverviewSearch, Range } from "@/lib/search"
-import { totalOf } from "@/lib/stats"
+import type { Breakdown, RunsSearch, Window } from "@/lib/search"
+import {
+  BREAKDOWN_LABEL,
+  BREAKDOWN_NOTE,
+  breakdownRows,
+  figuresOf,
+} from "@/lib/stats"
+import type { BreakdownRow } from "@/lib/stats"
 
-// Overview: is anything wrong right now? Four figures over the window,
-// runs over time by outcome, what needs attention, and the latest runs.
+// Overview: is anything wrong right now? Over one window (1h, 24h, 7d):
+// four figures, runs over time by outcome, what needs attention, one
+// breakdown table, and the latest runs. Nothing else.
 export const Route = createFileRoute("/")({
   validateSearch: validateOverview,
   head: () => ({ meta: [{ title: "Overview · weftbase" }] }),
@@ -44,28 +52,20 @@ export const Route = createFileRoute("/")({
 const runLink = (r: RunRow) =>
   ({ to: "/runs/$runId", params: { runId: r.id } }) as const
 
+const BUCKET: Record<Window, string> = {
+  "1h": "2.5 minutes",
+  "24h": "hour",
+  "7d": "7 hours",
+}
+
 function Overview() {
   const search = Route.useSearch()
-  const set = useSetSearch<OverviewSearch>(Route.fullPath)
-  const range: Range = search.range ?? "24h"
+  const range: Window = search.range ?? "24h"
+  const by: Breakdown = search.by ?? "agent"
   const live = useLiveState()
-  const since = React.useMemo(() => sinceOf(range), [range])
 
-  const stats = useQuery(q.stats("agent", range))
-  const failed = useQuery(q.runsPage({ status: "failed", since, limit: 6 }))
-  const waiting = useQuery(q.runsPage({ status: "parked", limit: 6 }))
-  const latest = useQuery(q.runsPage({ limit: 10 }))
-
-  const total = stats.data ? totalOf(stats.data) : undefined
-  // The server's "failed" includes cancelled runs; someone chose those.
-  const attention = [
-    ...(waiting.data?.runs ?? []),
-    ...(failed.data?.runs ?? []),
-  ]
-    .filter((r) => displayStatus(r) !== "cancelled")
-    .sort((a, b) => (a.started < b.started ? 1 : -1))
-    .slice(0, 8)
-  const attentionTotal = (waiting.data?.total ?? 0) + (failed.data?.total ?? 0)
+  const total = useQuery(q.statsTotal(range))
+  const fig = total.data ? figuresOf(total.data.total) : undefined
 
   return (
     <Page
@@ -74,153 +74,476 @@ function Overview() {
           title="Overview"
           meta={<LivePill state={live} />}
           actions={
-            <FilterSelect
+            <Segmented
               label="Window"
-              value={range}
-              options={RANGES.map((r) => ({ value: r, label: RANGE_LABEL[r] }))}
-              onChange={(r) => set({ range: r === "24h" ? undefined : r })}
-              any={false}
+              options={WINDOWS.map((w) => ({
+                label: w,
+                title: RANGE_LABEL[w],
+                active: w === range,
+                link: {
+                  to: "/",
+                  search: { ...search, range: w === "24h" ? undefined : w },
+                },
+              }))}
             />
           }
         />
       }
       className="flex flex-col gap-4"
     >
-      {stats.error ? (
+      {total.error ? (
         <div className="rounded-alert border">
-          <ErrorState error={stats.error} what="The figures" />
+          <ErrorState error={total.error} what="The figures" />
         </div>
       ) : (
         <StatStrip
           stats={[
-            { label: "Runs", value: total ? count(total.runs) : "—" },
+            { label: "Runs", value: fig?.runs.value ?? "—", ...fig?.runs },
             {
               label: "Failure rate",
-              value: total ? percent(total.failureRate) : "—",
-              hint:
-                total && total.failed > 0
-                  ? `${count(total.failed)} failed`
-                  : undefined,
-              tone: total && total.failed > 0 ? "danger" : "default",
+              value: fig?.failureRate.value ?? "—",
+              ...fig?.failureRate,
             },
-            {
-              label: "Cost",
-              value: total ? cost(total.cost) : "—",
-              title:
-                total && !total.cost.cost_known
-                  ? "Some runs used a model with no price in the pricing table."
-                  : undefined,
-            },
+            { label: "Cost", value: fig?.cost.value ?? "—", ...fig?.cost },
             {
               label: "Tokens",
-              value: total
-                ? tokens(total.inputTokens + total.outputTokens)
-                : "—",
-              hint: total
-                ? `${tokens(total.inputTokens)} in · ${tokens(total.outputTokens)} out`
-                : undefined,
+              value: fig?.tokens.value ?? "—",
+              ...fig?.tokens,
             },
           ]}
         />
       )}
 
-      <div className="grid grid-cols-2 gap-4 max-[1100px]:grid-cols-1">
+      <div className="grid grid-cols-2 gap-4 max-[1240px]:grid-cols-1">
         <Section title="Runs over time">
           <div className="rounded-alert border bg-card p-3">
-            {stats.data && total ? (
+            {total.data ? (
               <RunsChart
-                series={total.series}
-                since={stats.data.since}
-                bucketMs={stats.data.bucket_ms}
+                series={total.data.series}
+                bucketMs={total.data.bucket_ms}
               />
             ) : (
               <div className="h-[172px]" />
             )}
           </div>
         </Section>
+        <Attention range={range} />
+      </div>
 
-        <Section
-          title="Needs attention"
-          action={
-            attentionTotal > attention.length && (
+      <Section
+        title="Breakdown"
+        action={
+          <Segmented
+            label="Break down by"
+            options={BREAKDOWNS.map((b) => ({
+              label: BREAKDOWN_LABEL[b],
+              active: b === by,
+              link: {
+                to: "/",
+                search: { ...search, by: b === "agent" ? undefined : b },
+              },
+            }))}
+          />
+        }
+        className="[&>div:first-child]:h-7"
+      >
+        <BreakdownTable by={by} range={range} />
+      </Section>
+
+      <Latest />
+    </Page>
+  )
+}
+
+// ── Needs attention ─────────────────────────────────────────────────
+
+type Item =
+  | { kind: "approval"; at: string; approval: Approval }
+  | { kind: "run"; at: string; run: RunRow }
+
+const ATTENTION_ROWS = 6
+
+/** What a person should look at: calls waiting on a decision (oldest
+ * first: they block a run), then the runs that failed in the window. */
+function Attention({ range }: { range: Window }) {
+  const since = React.useMemo(() => sinceOf(range), [range])
+  const pending = useQuery(q.approvals({ status: "pending", limit: 20 }))
+  // A plain list (not a search), so cancelled runs are not in it; the
+  // window is applied here.
+  const failed = useQuery(q.runsPage({ display_status: "failed", limit: 50 }))
+  const error = pending.error ?? failed.error
+  const waiting: Item[] = (pending.data?.approvals ?? []).map((a) => ({
+    kind: "approval",
+    at: a.requested_at,
+    approval: a,
+  }))
+  const failures: Item[] = (failed.data?.runs ?? [])
+    .filter((r) => (rowTimes(r).started ?? "") >= since)
+    .map((r) => ({ kind: "run", at: rowTimes(r).started ?? "", run: r }))
+  const items = [...waiting, ...failures]
+  const shown = items.slice(0, ATTENTION_ROWS)
+  const more = items.length - shown.length
+
+  return (
+    <Section
+      title="Needs attention"
+      action={
+        items.length > 0 && (
+          <span className="flex gap-3">
+            {waiting.length > 0 && (
+              <Link
+                to="/approvals"
+                className="hover:text-foreground hover:underline"
+              >
+                {count(pending.data?.pending ?? waiting.length)} waiting
+              </Link>
+            )}
+            {failures.length > 0 && (
               <Link
                 to="/runs"
                 search={{ status: "failed", range }}
                 className="hover:text-foreground hover:underline"
               >
-                All failed runs
+                {count(failures.length)} failed
               </Link>
-            )
-          }
-        >
-          {failed.error || waiting.error ? (
-            <div className="rounded-alert border">
-              <ErrorState
-                error={failed.error ?? waiting.error}
-                what="This list"
-              />
-            </div>
-          ) : !failed.data || !waiting.data ? (
-            <div className="rounded-alert border">
-              <LoadingRows rows={5} />
-            </div>
-          ) : attention.length === 0 ? (
-            <div className="rounded-alert border bg-card">
-              <EmptyState
-                icon={CircleCheckIcon}
-                title="Nothing needs attention"
+            )}
+          </span>
+        )
+      }
+    >
+      {error ? (
+        <div className="rounded-alert border">
+          <ErrorState error={error} what="This list" />
+        </div>
+      ) : !pending.data || !failed.data ? (
+        <div className="rounded-alert border">
+          <LoadingRows rows={5} />
+        </div>
+      ) : items.length === 0 ? (
+        <div className="rounded-alert border bg-card">
+          <EmptyState icon={CircleCheckIcon} title="Nothing needs attention">
+            No run failed in this window and none is waiting on a person.
+          </EmptyState>
+        </div>
+      ) : (
+        <ul className="overflow-hidden rounded-alert border bg-card text-sm">
+          {shown.map((it) => (
+            <li
+              key={it.kind === "approval" ? it.approval.id : it.run.id}
+              className="border-b border-table-border last:border-b-0"
+            >
+              <Link
+                {...(it.kind === "approval"
+                  ? { to: "/approvals", search: { id: it.approval.id } }
+                  : runLink(it.run))}
+                className="grid h-8 grid-cols-[84px_minmax(72px,120px)_minmax(0,1fr)_64px] items-center outline-none hover:bg-muted/60 focus-visible:bg-muted"
               >
-                No run failed in this window and none is waiting on a person.
-              </EmptyState>
-            </div>
-          ) : (
-            <DataTable
-              label="Runs that need attention"
-              bordered
-              stickyHeader={false}
-              columns={RUN_COLUMNS_SHORT}
-              rows={attention}
-              rowKey={(r) => r.id}
-              rowLink={runLink}
-            />
+                <span className="px-2">
+                  {it.kind === "approval" ? (
+                    <Status
+                      state="waiting"
+                      cause={`${it.approval.tool} needs a decision`}
+                    />
+                  ) : (
+                    <Status state="failed" cause={rowCause(it.run)} />
+                  )}
+                </span>
+                <span className="truncate px-2 font-medium">
+                  {it.kind === "approval" ? it.approval.agent : it.run.agent}
+                </span>
+                <span className="truncate px-2 text-muted-foreground">
+                  {it.kind === "approval" ? (
+                    <>
+                      <span className="font-mono text-xs text-foreground">
+                        {it.approval.tool}
+                      </span>{" "}
+                      {argsSummary(it.approval.args)}
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-danger-foreground">
+                        {it.run.error_type || "error"}
+                      </span>{" "}
+                      {it.run.prompt_preview}
+                    </>
+                  )}
+                </span>
+                <span className="px-2 text-right text-xs text-muted-foreground">
+                  <RelativeTime time={it.at} />
+                </span>
+              </Link>
+            </li>
+          ))}
+          {more > 0 && (
+            <li className="flex h-7 items-center justify-center text-xs text-muted-foreground">
+              and {count(more)} more
+            </li>
           )}
-        </Section>
-      </div>
+        </ul>
+      )}
+    </Section>
+  )
+}
 
-      <Section
-        title="Latest runs"
-        action={
-          <Link to="/runs" className="hover:text-foreground hover:underline">
-            All runs
-          </Link>
-        }
-      >
-        {latest.error ? (
-          <div className="rounded-alert border">
-            <ErrorState error={latest.error} what="The latest runs" />
-          </div>
-        ) : !latest.data ? (
-          <div className="rounded-alert border">
-            <LoadingRows />
-          </div>
-        ) : latest.data.runs.length === 0 ? (
-          <div className="rounded-alert border bg-card">
-            <EmptyState title="No runs yet">
-              Runs appear here as soon as an agent reports to this server.
-            </EmptyState>
-          </div>
+// ── Breakdown ───────────────────────────────────────────────────────
+
+function BreakdownTable({ by, range }: { by: Breakdown; range: Window }) {
+  const stats = useQuery(
+    by === "agent"
+      ? q.stats("agent", range)
+      : by === "error"
+        ? q.stats("error_type", range)
+        : q.statsAll(by, range)
+  )
+  const rows = React.useMemo(
+    () => (stats.data ? breakdownRows(by, stats.data) : undefined),
+    [by, stats.data]
+  )
+  const columns = React.useMemo(() => breakdownColumns(by, range), [by, range])
+
+  if (stats.error)
+    return (
+      <div className="rounded-alert border">
+        <ErrorState error={stats.error} what="The breakdown" />
+      </div>
+    )
+  if (!rows)
+    return (
+      <div className="rounded-alert border">
+        <LoadingRows rows={3} />
+      </div>
+    )
+  if (rows.length === 0)
+    return (
+      <div className="rounded-alert border bg-card">
+        <EmptyState
+          title={
+            by === "error"
+              ? "No run failed in this window"
+              : "No runs in this window"
+          }
+        />
+      </div>
+    )
+  return (
+    <DataTable
+      label={`Breakdown by ${BREAKDOWN_LABEL[by].toLowerCase()}`}
+      bordered
+      stickyHeader={false}
+      columns={columns}
+      rows={rows}
+      rowKey={(r) => r.key}
+      footer={<span>{BREAKDOWN_NOTE[by]}</span>}
+    />
+  )
+}
+
+function Num({
+  to,
+  children,
+  title,
+  tone,
+}: {
+  /** The Runs list filters the number links to. */
+  to: Partial<RunsSearch>
+  children: React.ReactNode
+  title?: string
+  tone?: "danger"
+}) {
+  return (
+    <Link
+      to="/runs"
+      search={to}
+      title={title}
+      className={
+        "rounded-sm outline-none hover:underline focus-visible:outline-2 focus-visible:outline-ring" +
+        (tone === "danger" ? " text-danger-foreground" : "")
+      }
+    >
+      {children}
+    </Link>
+  )
+}
+
+function breakdownColumns(
+  by: Breakdown,
+  range: Window
+): Column<BreakdownRow>[] {
+  const link = (r: BreakdownRow, extra: Partial<RunsSearch> = {}) => ({
+    ...r.link,
+    range,
+    ...extra,
+  })
+  const all: Column<BreakdownRow>[] = [
+    {
+      key: "key",
+      header: BREAKDOWN_LABEL[by],
+      width: "minmax(140px, 1fr)",
+      cell: (r) => (
+        <Num to={link(r)}>
+          <span
+            className={
+              by === "agent" ? "font-medium" : "font-mono text-xs font-medium"
+            }
+          >
+            {r.key}
+          </span>
+        </Num>
+      ),
+    },
+    {
+      key: "runs",
+      header: "Runs",
+      width: "64px",
+      align: "right",
+      mono: true,
+      cell: (r) => <Num to={link(r)}>{count(r.runs)}</Num>,
+    },
+    {
+      key: "calls",
+      header: "Calls",
+      width: "64px",
+      align: "right",
+      mono: true,
+      cell: (r) => (r.calls === undefined ? "—" : count(r.calls)),
+    },
+    {
+      key: "failure",
+      header: "Failure rate",
+      width: "96px",
+      align: "right",
+      mono: true,
+      cell: (r) =>
+        r.failureRate === null ? (
+          "—"
         ) : (
-          <DataTable
-            label="Latest runs"
-            bordered
-            stickyHeader={false}
-            columns={RUN_COLUMNS}
-            rows={latest.data.runs}
-            rowKey={(r) => r.id}
-            rowLink={runLink}
-          />
-        )}
-      </Section>
-    </Page>
+          <Num
+            to={{ ...r.failedLink, range }}
+            title={r.failureNote}
+            tone={r.failureRate > 0 ? "danger" : undefined}
+          >
+            {percent(r.failureRate)}
+          </Num>
+        ),
+    },
+    {
+      key: "p50",
+      header: "p50",
+      width: "72px",
+      align: "right",
+      mono: true,
+      cell: (r) =>
+        r.p50 === undefined ? (
+          "—"
+        ) : (
+          <Num to={link(r, { sort: "duration" })} title="Median duration">
+            {duration(r.p50)}
+          </Num>
+        ),
+    },
+    {
+      key: "p95",
+      header: "p95",
+      width: "72px",
+      align: "right",
+      mono: true,
+      cell: (r) =>
+        r.p95 === undefined ? (
+          "—"
+        ) : (
+          <Num
+            to={link(r, { sort: "duration" })}
+            title="95th percentile duration"
+          >
+            {duration(r.p95)}
+          </Num>
+        ),
+    },
+    {
+      key: "tokens",
+      header: "Tokens",
+      width: "72px",
+      align: "right",
+      mono: true,
+      cell: (r) =>
+        r.tokens === undefined ? (
+          "—"
+        ) : (
+          <Num to={link(r, { sort: "tokens" })}>{tokens(r.tokens)}</Num>
+        ),
+    },
+    {
+      key: "cost",
+      header: "Cost",
+      width: "84px",
+      align: "right",
+      mono: true,
+      cell: (r) =>
+        r.cost === "—" ? (
+          "—"
+        ) : (
+          <Num to={link(r, { sort: "cost" })} title={r.costTitle}>
+            {r.cost}
+          </Num>
+        ),
+    },
+    {
+      key: "spark",
+      header: RANGE_LABEL[range],
+      width: "110px",
+      align: "right",
+      cell: (r) => (
+        <Sparkline
+          points={r.spark}
+          label={`${by === "tool" || by === "model" ? "Calls" : "Runs"} per ${BUCKET[range]}, ${RANGE_LABEL[range].toLowerCase()}`}
+        />
+      ),
+    },
+  ]
+  // A tool call has no tokens and no cost: its row shows calls instead.
+  const hidden =
+    by === "tool" ? ["tokens", "cost"] : by === "model" ? [] : ["calls"]
+  return all.filter((c) => !hidden.includes(c.key))
+}
+
+// ── Latest runs ─────────────────────────────────────────────────────
+
+function Latest() {
+  const latest = useQuery(q.runsPage({ limit: 8 }))
+  return (
+    <Section
+      title="Latest runs"
+      action={
+        <Link to="/runs" className="hover:text-foreground hover:underline">
+          All runs
+        </Link>
+      }
+    >
+      {latest.error ? (
+        <div className="rounded-alert border">
+          <ErrorState error={latest.error} what="The latest runs" />
+        </div>
+      ) : !latest.data ? (
+        <div className="rounded-alert border">
+          <LoadingRows />
+        </div>
+      ) : latest.data.runs.length === 0 ? (
+        <div className="rounded-alert border bg-card">
+          <EmptyState title="No runs yet">
+            Runs appear here as soon as an agent reports to this server.
+          </EmptyState>
+        </div>
+      ) : (
+        <DataTable
+          label="Latest runs"
+          bordered
+          stickyHeader={false}
+          columns={RUN_COLUMNS}
+          rows={latest.data.runs.slice(0, 8)}
+          rowKey={(r) => r.id}
+          rowLink={runLink}
+        />
+      )}
+    </Section>
   )
 }

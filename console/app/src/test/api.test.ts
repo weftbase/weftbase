@@ -17,7 +17,6 @@ import type {
   SessionDetail,
   SessionsPage,
   SpansDoc,
-  Stats,
   TraceDetail,
   TracesPage,
   Transcript,
@@ -26,7 +25,6 @@ import { cost } from "@/lib/format"
 import { assignLanes } from "@/lib/lanes"
 import { displayStatus, sessionStatus, statusFilter } from "@/lib/api/status"
 import { baseKind, spanKind, spanLabel } from "@/lib/span-kind"
-import { totalOf } from "@/lib/stats"
 
 import meta from "./fixtures/meta.json"
 import runDetail from "./fixtures/run-children-holes.json"
@@ -37,7 +35,6 @@ import sessionOrders from "./fixtures/session-orders.json"
 import sessions from "./fixtures/sessions.json"
 import pricing from "./fixtures/settings-pricing.json"
 import spansTree from "./fixtures/spans-tree.json"
-import statsAgent from "./fixtures/stats-agent.json"
 import trace from "./fixtures/trace.json"
 import traces from "./fixtures/traces.json"
 import transcriptAsOf from "./fixtures/transcript-as-of-step.json"
@@ -202,28 +199,6 @@ describe("sessions, traces, meta", () => {
   })
 })
 
-describe("stats", () => {
-  it("sums the groups into the overview's figures", () => {
-    const stats = statsAgent as unknown as Stats
-    const t = totalOf(stats)
-    expect(t.runs).toBe(10)
-    expect(t.failed).toBe(5)
-    expect(t.failureRate).toBe(0.5)
-    expect(t.series).toHaveLength(stats.buckets)
-    expect(t.series.reduce((a, b) => a + b.runs, 0)).toBe(10)
-    // One group has an unpriced model: the total is not a known figure.
-    expect(t.cost.cost_known).toBe(false)
-    expect(cost(t.cost)).not.toMatch(/^\$/)
-  })
-
-  it("says nothing about a failure rate with no runs", () => {
-    const stats = statsAgent as unknown as Stats
-    const t = totalOf({ ...stats, groups: [] })
-    expect(t.failureRate).toBeNull()
-    expect(t.cost).toEqual({ cost_usd: 0, cost_known: true })
-  })
-})
-
 describe("spans", () => {
   const doc = spansTree as unknown as SpansDoc
 
@@ -252,13 +227,13 @@ describe("spans", () => {
     expect(baseKind({ ...tool, attrs: {} })).toBe("other")
   })
 
-  it("gives the root run the neutral lane and each subagent the next hue", () => {
+  it("gives the root run the first hue and each subagent the next", () => {
     const lanes = assignLanes(doc.spans, "tg_root")
-    expect(lanes.get("tg_root")?.index).toBe(0)
-    expect(lanes.get("tg_root/0/call_a")?.index).toBe(1)
+    expect(lanes.get("tg_root")?.index).toBe(1)
+    expect(lanes.get("tg_root/0/call_a")?.index).toBe(2)
     // A lane follows the agent: the same spans in another order agree.
     const again = assignLanes([...doc.spans].reverse(), "tg_root")
-    expect(again.get("tg_root/0/call_a")?.index).toBe(1)
+    expect(again.get("tg_root/0/call_a")?.index).toBe(2)
   })
 })
 

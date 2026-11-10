@@ -18,6 +18,7 @@ export function SplitPane({
   defaultWidth = 440,
   min = 320,
   max = 800,
+  gutter = false,
   className,
 }: {
   /** Names the remembered width. */
@@ -28,6 +29,9 @@ export function SplitPane({
   defaultWidth?: number
   min?: number
   max?: number
+  /** The divider is a 12px gap, not a hairline: for two bordered
+   * containers side by side (the run page's waterfall and detail). */
+  gutter?: boolean
   className?: string
 }) {
   const [stored, setStored] = usePref(`wb.split.${id}`, String(defaultWidth))
@@ -76,13 +80,16 @@ export function SplitPane({
             onPointerCancel={() => setDragging(false)}
             onKeyDown={onKeyDown}
             className={cn(
-              "relative w-px flex-none cursor-col-resize bg-border outline-none after:absolute after:inset-y-0 after:-left-1 after:w-2 hover:bg-ring focus-visible:bg-ring",
-              dragging && "bg-ring"
+              "relative flex-none cursor-col-resize outline-none",
+              gutter
+                ? "w-3 after:absolute after:inset-y-2 after:left-1/2 after:w-0.5 after:-translate-x-1/2 after:rounded-full hover:after:bg-ring focus-visible:after:bg-ring"
+                : "w-px bg-border after:absolute after:inset-y-0 after:-left-1 after:w-2 hover:bg-ring focus-visible:bg-ring",
+              dragging && (gutter ? "after:bg-ring" : "bg-ring")
             )}
           />
           <aside
             className="min-h-0 flex-none overflow-auto"
-            style={{ width, maxWidth: "70%" }}
+            style={{ width, maxWidth: gutter ? "56%" : "70%" }}
           >
             {detail}
           </aside>

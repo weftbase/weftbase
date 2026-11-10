@@ -102,9 +102,17 @@ export interface RunRow extends CostFields {
    * resolved (label:<name> | latest | pin | migrate) and where it ran
    * (embedded | local). Present on newer servers, and only for runs the
    * server admitted. */
-  agent_version?: string
+  agent_version?: VersionRef
   resolved_via?: string
   placement?: string
+  /** The manifest the run reported is not the one its version registered. */
+  manifest_drift?: boolean
+  /** A queued run the trace store does not hold yet: only the ledger's
+   * fields are real, everything a trace would say is empty. */
+  ledger_only?: boolean
+  /** Set when a park and its resume link this run to others (one
+   * logical run). Read it through loadChain (chain.ts). */
+  chain?: ChainDoc
   settling?: boolean
   err: string
   steps: number
@@ -154,6 +162,86 @@ export interface RunRow extends CostFields {
   delegated_sessions?: number
 }
 
+/** versionRef (runview.go): a run's AgentVersion, labels as they are now. */
+export interface VersionRef {
+  id: string
+  number: number
+  labels: string[] | null
+}
+
+/** events.Actor: who did something (an operator of the Console, or an
+ * API key). */
+export interface Actor {
+  kind: "operator" | "key" | (string & {})
+  id: string
+  /** A display name, when the server has one. */
+  name?: string
+}
+
+/** sessions.Approval: one tool call waiting on, or decided by, a person. */
+export interface Approval {
+  id: string
+  run_id: string
+  call_id: string
+  agent: string
+  agent_version?: string
+  tool: string
+  args: unknown
+  args_sha256: string
+  /** pending | approved | denied | resolved | expired | cancelled */
+  status: string
+  requested_at: string
+  outcome?: string
+  reason?: string
+  decided_at?: string
+  actor?: Actor
+  resumed_by?: string
+  content?: string
+}
+
+/** approvalsPage: GET /v1/approvals. */
+export interface ApprovalsPage {
+  approvals: Approval[]
+  total: number
+  pending: number
+  next_offset: number | null
+}
+
+/** waitDoc (runview.go): one wait on a person, from the park until the
+ * resume started (`to` null while it lasts). */
+export interface WaitDoc {
+  run: string
+  resumed_by?: string
+  from: string
+  to: string | null
+  approvals?: Approval[] | null
+  decided_by?: Actor[] | null
+}
+
+/** chainDoc (runview.go): one logical run across parks. */
+export interface ChainDoc {
+  runs: {
+    id: string
+    display_status: string
+    started: string
+    finished: string | null
+  }[]
+  display_status: string
+  stopped_by?: string
+  error_type?: string
+  cancel_cause?: string
+  err?: string
+  started: string
+  finished: string | null
+  duration_ms: number
+  waiting_ms: number
+  steps: number
+  usage: Usage
+  cost_usd: number
+  cost_known: boolean
+  waits: WaitDoc[] | null
+}
+
 /** runsPage: GET /v1/runs without a search parameter (cursor-paged). */
 export interface RunsPage {
   total: number
@@ -179,7 +267,10 @@ export interface SearchPage {
 
 /** What the Console asks GET /v1/runs for. */
 export interface RunsQuery {
+  /** The trace store's word. A search (below) takes only this one. */
   status?: RunStatusFilter
+  /** The status as shown; a plain list only (a search ignores it). */
+  display_status?: NonNullable<RunRow["display_status"]>
   agent?: string
   session?: string
   /** A run id: its children. "*": every run. Absent: top-level runs. */
@@ -193,6 +284,10 @@ export interface RunsQuery {
   since?: string
   until?: string
   sort?: SearchPage["sort"]
+  min_cost?: number
+  min_tokens?: number
+  /** One metadata match, "key=value" (sent as tag.<key>=<value>). */
+  tag?: string
   limit?: number
 }
 
@@ -212,8 +307,10 @@ export interface DecisionDoc {
   run: string
   at: string
   actor?: string
+  actor_kind?: string
   source: string
   calls: {
+    approval_id?: string
     call_id: string
     name?: string
     outcome: string
@@ -251,8 +348,10 @@ export interface RunDetail extends RunRow {
   compactions: RunCompaction[]
   manifest_available?: boolean
   caller_linked?: RunRow[]
-  decided?: DecisionDoc
-  resumes?: DecisionDoc
+  decided?: DecisionDoc | null
+  resumes?: DecisionDoc | null
+  /** The run's tool calls that wait on, or were decided by, a person. */
+  approvals?: Approval[] | null
   summarizer?: { usage: Usage } & CostFields
 }
 
@@ -267,6 +366,7 @@ export interface LedgerRun {
   resolved_via: string
   status: "queued" | "running" | "parked" | "succeeded" | "failed" | "canceled"
   metadata?: Record<string, string>
+  input?: { prompt?: string; messages?: Message[] }
   resume_of?: string
   resumed_by?: string
   pending?: { call_id: string; tool: string; args?: unknown }[]
@@ -287,14 +387,6 @@ export interface AdmitRequest {
   version?: string
   input: { prompt?: string; messages?: Message[] }
   metadata?: Record<string, string>
-}
-
-/** One decision of POST /v1/runs/{id}/resume. */
-export interface ResumeDecision {
-  call_id: string
-  decision: "approve" | "deny" | "resolve"
-  reason?: string
-  content?: string
 }
 
 // ── Run content ─────────────────────────────────────────────────────
@@ -391,6 +483,10 @@ export interface Span {
 export interface SpansDoc {
   spans: Span[]
   holes?: Hole[]
+  /** With chain=1: the run ids of the chain, oldest first, and the
+   * waits on a person between them. */
+  chain?: string[]
+  waits?: WaitDoc[] | null
 }
 
 export interface ToolEntry {
@@ -398,7 +494,10 @@ export interface ToolEntry {
   description: string
   schema: unknown
   approval: boolean
+  /** local | subagent | an MCP server's name. */
   source: string
+  timeout_ms?: number
+  max_result_bytes?: number
   [k: string]: unknown
 }
 
@@ -498,6 +597,9 @@ export interface StepDoc {
     usage: Usage
   }[]
   usage: Usage
+  cost_usd?: number | null
+  cost_known?: boolean
+  cost_reason?: string
   holes: Hole[]
 }
 
@@ -523,8 +625,11 @@ export interface LogsPage extends Badge {
 
 // ── Sessions ────────────────────────────────────────────────────────
 
-/** A session's status is its newest turn's: a run status, or "parked". */
-export type SessionStatus = RunRowStatus | "parked" | "cancelled"
+/** A session's status is its newest turn's outcome: a run status, or
+ * "parked" (waiting on a person), "resumed" (a park whose resume has not
+ * reported yet), "cancelled", "ended" (a newer message ended the turn). */
+export type SessionStatus =
+  RunRowStatus | "parked" | "resumed" | "cancelled" | "ended"
 
 /** sessionRow. */
 export interface SessionRow extends CostFields {
@@ -566,6 +671,8 @@ export interface SessionsQuery {
   status?: RunRowStatus
   /** true: sessions with a turn waiting on a person. */
   awaiting?: boolean
+  /** Exact match on the app's own id for the conversation. */
+  public_id?: string
   failed?: boolean
   since?: string
   id_prefix?: string
@@ -599,6 +706,8 @@ export interface SessionEntry {
   fields: Record<string, unknown>
   content?: Record<string, unknown>
   actor?: string
+  /** "resume": `actor` lists the resume's several deciders. */
+  actor_of?: string
 }
 
 export interface TimelineTurn {
@@ -638,6 +747,62 @@ export interface SessionTimeline {
     turns: number
     status?: string
   }[]
+}
+
+/** conversationTurn (conversation.go): one turn as a person reads it. A
+ * park and its resumes are one turn (`runs` has every run). */
+export interface ConversationTurn {
+  turn: number
+  /** The turn's first run; `runs` every run of it, oldest first. */
+  run_id: string
+  runs: string[]
+  /** The user's message; with input_known false it is the prompt
+   * preview or "" (the run's messages were not recorded). */
+  input: string
+  input_known: boolean
+  /** null while there is none (the turn failed, waits or still runs). */
+  reply: string | null
+  display_status: NonNullable<RunRow["display_status"]>
+  stopped_by?: string
+  error_type?: string
+  cancel_cause?: string
+  err?: string
+  /** What ended a turn a newer message felled: the run and turn that
+   * did, and how (interrupt | rollback). */
+  ended_by?: string
+  ended_by_turn?: number
+  ended_kind?: string
+  started: string
+  finished: string | null
+  duration_ms: number
+  waiting_ms: number
+  model_calls: number
+  tool_calls: number
+  usage: Usage
+  cost_usd: number | null
+  cost_known: boolean
+  agent_version?: VersionRef
+  waits: WaitDoc[] | null
+  marks: SessionEntry[] | null
+  compactions?: number
+  delegated_sessions?: number
+}
+
+/** conversationDoc: GET /v1/sessions/{id}/conversation, paged by turn. */
+export interface Conversation {
+  session_id: string
+  public_id?: string
+  agent: string
+  title?: string
+  status: SessionStatus
+  turns: ConversationTurn[]
+  /** The session's turns, chains folded. */
+  total_turns: number
+  offset: number
+  next_offset: number | null
+  /** Marks filed under no turn. */
+  session_marks: SessionEntry[] | null
+  marks_capped?: boolean
 }
 
 /** entriesDoc: GET /v1/sessions/{id}/entries. */
@@ -716,6 +881,11 @@ export interface StatsGroup extends CostFields {
   /** One bucket per `bucket_ms` from `since`, oldest first. */
   series: StatsBucket[]
   runs_query?: string
+  /** by=agent: the group's runs by display status, whole window and
+   * per bucket. Prefer these to runs / failed (whose failed counts
+   * cancelled runs too). */
+  outcomes?: OutcomeBucket
+  outcome_series?: OutcomeBucket[]
 }
 
 /** statsBody: GET /v1/stats. `by` is required by the server; there is no
@@ -726,6 +896,7 @@ export interface Stats {
   until: string
   buckets: number
   bucket_ms: number
+  bucket_starts?: string[]
   groups: StatsGroup[]
   groups_cut?: number
 }
@@ -783,7 +954,8 @@ export interface Meta {
   capabilities: string[]
   principal: Principal
   ingest?: {
-    dropped: unknown[]
+    /** Services that reported records lost on the way here. */
+    dropped: { service: string; records: number; last_heard?: string }[]
     accepted: number
     refused: number
     last_error?: string
@@ -799,7 +971,7 @@ export interface Meta {
   interrupted_after_ms: number
   content: {
     ingest: string
-    latest: { run_id: string; mark: string; note: string } | null
+    latest: { run_id: string; mark: string; note: string; fix?: string } | null
     error?: string
   }
   /** A Go duration ("720h"), or null: everything is kept. */
@@ -877,3 +1049,188 @@ export type StreamFrame =
   | { type: "record"; id: string; data: RecordFrame }
   | { type: "attempt"; id: string; data: AttemptFrame }
   | { type: "backfill_error"; id: string; data: Record<string, unknown> }
+
+// ── Inventory: agents and tools (agentview.go) ──────────────────────
+
+/** agentStats: an agent's top-level runs over a window, by display
+ * status. failure_rate = failed / (succeeded + failed). */
+export interface AgentStats {
+  since: string
+  until: string
+  runs: number
+  succeeded: number
+  failed: number
+  cancelled: number
+  waiting: number
+  failure_rate: number | null
+  last_run_id?: string
+  last_run_at?: string
+}
+
+/** One row of GET /v1/agents?include=summary. `registered` false: the
+ * agent was only seen in runs (a subagent, a trace); its registry
+ * fields are then empty. */
+export interface AgentSummary extends Agent {
+  registered: boolean
+  summary: {
+    /** The newest version (agv_…) and its number; "" and 0 when none. */
+    version: string
+    number: number
+    model: ModelInfo
+    placement: string
+    tools: number
+    subagents: number
+    needs_approval: number
+    stats: AgentStats
+  }
+}
+
+/** GET /v1/agents?include=summary. */
+export interface AgentsSummary {
+  agents: AgentSummary[]
+  totals: { agents: number; tools: number; placements: string[] | null }
+}
+
+export interface ManifestTool {
+  name: string
+  description: string
+  needs_approval: boolean
+  /** The agent this tool hands off to. */
+  subagent?: string
+  timeout?: string
+}
+
+/** The limits a version's manifest sets; absent keys are not set. */
+export interface ManifestLimits {
+  max_steps?: number
+  parallelism?: number
+  timeout?: string
+  max_result_bytes?: number
+  max_model_retries?: number
+  detect_loops?: number
+  strict_input?: boolean
+  stop_when?: string[]
+  max_input_tokens?: number
+  max_output_tokens?: number
+}
+
+/** What changed against the previous version (also the body of
+ * GET /v1/agents/{name}/versions/{a}/diff/{b}). */
+export interface VersionChanges {
+  from: string
+  to: string
+  same_manifest: boolean
+  build_changed: boolean
+  model_changed: { from: ModelInfo; to: ModelInfo } | null
+  instructions_changed: boolean
+  tools_added: string[] | null
+  tools_removed: string[] | null
+  /** A tool both versions have, and the fields that differ. */
+  tools_changed: { name: string; fields: string[] }[] | null
+  limits_changed: { field: string; from: unknown; to: unknown }[] | null
+}
+
+/** A version as GET /v1/agents/{name} returns it. */
+export interface VersionDetail extends AgentVersion {
+  placement: string
+  /** null when the registered manifest could not be read. */
+  manifest: {
+    model: ModelInfo
+    instructions: { present: boolean; length: number }
+    tools: ManifestTool[] | null
+    subagents: string[] | null
+    limits: ManifestLimits
+  } | null
+  /** null for the first version. */
+  changes: VersionChanges | null
+}
+
+/** GET /v1/agents/{name}. */
+export interface AgentDetail extends Agent {
+  placement: string
+  model: ModelInfo
+  newest: VersionDetail | null
+  by_label: Record<string, VersionDetail>
+  /** Newest first. */
+  version_list: VersionDetail[]
+  stats: AgentStats
+}
+
+/** One tool of GET /v1/tools: every agent version that has it. */
+export interface ToolRow {
+  name: string
+  description: string
+  needs_approval: boolean
+  subagent?: string
+  agents: {
+    agent: string
+    versions: {
+      id: string
+      number: number
+      labels: string[] | null
+      needs_approval: boolean
+    }[]
+  }[]
+  /** null: no call in the window. */
+  stats: {
+    calls: number
+    failed_calls: number
+    failure_rate: number | null
+    duration_ms: { p50: number; p95: number; n: number } | null
+  } | null
+}
+
+export interface ToolsDoc {
+  tools: ToolRow[]
+  since: string
+  until: string
+}
+
+// ── Stats by=total (stats.go) ───────────────────────────────────────
+
+/** Runs by display status over one bucket, or over the whole window.
+ * failure_rate = failed / (succeeded + failed): cancelled runs are not
+ * failures. cost_known false: cost_usd is the priced part only. */
+export interface OutcomeBucket {
+  t: string
+  runs: number
+  succeeded: number
+  failed: number
+  cancelled: number
+  waiting: number
+  running: number
+  interrupted: number
+  failure_rate: number | null
+  input_tokens: number
+  output_tokens: number
+  cost_usd: number
+  cost_known: boolean
+  duration_ms: { p50: number; p95: number; n: number } | null
+}
+
+/** GET /v1/stats?by=total. */
+export interface StatsTotal {
+  by: "total"
+  since: string
+  until: string
+  buckets: number
+  bucket_ms: number
+  bucket_starts: string[]
+  total: OutcomeBucket
+  series: OutcomeBucket[]
+  capped?: boolean
+}
+
+// ── The outbox stream (GET /v1/events) ──────────────────────────────
+
+/** One outbox event. `data` depends on `type`. */
+export interface OutboxEvent {
+  seq: number
+  id: string
+  type: string
+  resource_kind: string
+  resource_id: string
+  actor?: Actor
+  data?: Record<string, unknown>
+  created_at: string
+}

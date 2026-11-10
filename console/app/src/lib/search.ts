@@ -74,11 +74,19 @@ export function useSetSearch<T extends object>(from: string) {
 }
 
 // ── Overview ────────────────────────────────────────────────────────
+/** The Overview's windows (its stats are bucketed per window). */
+export const WINDOWS = ["1h", "24h", "7d"] as const
+export type Window = (typeof WINDOWS)[number]
+/** What the Overview's Breakdown table groups by. */
+export const BREAKDOWNS = ["agent", "model", "tool", "error"] as const
+export type Breakdown = (typeof BREAKDOWNS)[number]
 export interface OverviewSearch {
-  range?: Range
+  range?: Window
+  by?: Breakdown
 }
 export const validateOverview = (s: Raw): OverviewSearch => ({
-  range: oneOf(s.range, RANGES),
+  range: oneOf(s.range, WINDOWS),
+  by: oneOf(s.by, BREAKDOWNS),
 })
 
 // ── Runs ────────────────────────────────────────────────────────────
@@ -89,6 +97,31 @@ export interface RunsSearch {
   status?: RunFilterStatus
   agent?: string
   range?: Range
+  // The "+ Filter" menu:
+  tool?: string
+  model?: string
+  /** An error kind (the server's error_type): max_steps, model_error, … */
+  error?: string
+  /** USD at least. */
+  min_cost?: number
+  min_tokens?: number
+  /** One metadata match, "key=value". */
+  tag?: string
+  session?: string
+  /** Subagent runs too, not only top-level ones. */
+  sub?: true
+  sort?: RunsSort
+}
+/** The columns the server can order by; "started" is the default. */
+export const RUNS_SORTS = ["duration", "tokens", "cost"] as const
+export type RunsSort = (typeof RUNS_SORTS)[number]
+const amount = (v: unknown): number | undefined => {
+  const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN
+  return Number.isFinite(n) && n > 0 ? n : undefined
+}
+const tag = (v: unknown): string | undefined => {
+  const t = str(v)
+  return t && t.indexOf("=") > 0 && !t.endsWith("=") ? t : undefined
 }
 export const validateRuns = (s: Raw): RunsSearch => ({
   tab: oneOf(s.tab, ["traces"] as const),
@@ -96,9 +129,18 @@ export const validateRuns = (s: Raw): RunsSearch => ({
   status: oneOf(s.status, FILTERABLE),
   agent: str(s.agent),
   range: oneOf(s.range, RANGES),
+  tool: str(s.tool),
+  model: str(s.model),
+  error: str(s.error),
+  min_cost: amount(s.min_cost),
+  min_tokens: num(s.min_tokens) || undefined,
+  tag: tag(s.tag),
+  session: str(s.session),
+  sub: s.sub === true || s.sub === "true" || s.sub === 1 ? true : undefined,
+  sort: oneOf(s.sort, RUNS_SORTS),
 })
 
-export const RUN_TABS = ["timeline", "transcript", "logs", "raw"] as const
+export const RUN_TABS = ["timeline", "transcript", "logs", "details"] as const
 export interface RunSearch {
   tab?: (typeof RUN_TABS)[number]
   /** The span selected in the waterfall. */
@@ -113,14 +155,23 @@ export const validateRun = (s: Raw): RunSearch => ({
 })
 
 // ── Sessions ────────────────────────────────────────────────────────
+/** What GET /v1/sessions can filter on: the newest turn's status, a
+ * turn waiting on a person, or any failed turn. */
+export const SESSION_STATES = [
+  "running",
+  "waiting",
+  "failed",
+  "succeeded",
+  "interrupted",
+] as const
 export interface SessionsSearch {
   q?: string
-  state?: RunFilterStatus
+  state?: (typeof SESSION_STATES)[number]
   agent?: string
 }
 export const validateSessions = (s: Raw): SessionsSearch => ({
   q: str(s.q),
-  state: oneOf(s.state, FILTERABLE),
+  state: oneOf(s.state, SESSION_STATES),
   agent: str(s.agent),
 })
 
@@ -140,18 +191,44 @@ export interface TraceSearch {
 }
 export const validateTrace = (s: Raw): TraceSearch => ({ span: str(s.span) })
 
-export const AGENT_TABS = ["versions", "manifest"] as const
-export interface AgentSearch {
-  tab?: (typeof AGENT_TABS)[number]
+export interface AgentsSearch {
+  tab?: "tools"
+  range?: Window
 }
-export const validateAgent = (s: Raw): AgentSearch => ({
-  tab: oneOf(s.tab, AGENT_TABS),
+export const validateAgents = (s: Raw): AgentsSearch => ({
+  tab: oneOf(s.tab, ["tools"] as const),
+  range: oneOf(s.range, WINDOWS),
 })
 
+export interface AgentSearch {
+  /** The version number whose capabilities are shown (default: newest). */
+  v?: number
+}
+export const validateAgent = (s: Raw): AgentSearch => ({ v: num(s.v) })
+
+/** pending, decided (any outcome), or one outcome. */
+export const APPROVAL_STATUSES = [
+  "pending",
+  "decided",
+  "approved",
+  "denied",
+  "resolved",
+  "expired",
+  "cancelled",
+] as const
 export interface ApprovalsSearch {
-  /** The parked run open in the detail. */
+  /** The approval open in the detail. */
+  id?: string
+  status?: (typeof APPROVAL_STATUSES)[number]
+  agent?: string
+  tool?: string
+  /** Only one run's approvals. */
   run?: string
 }
 export const validateApprovals = (s: Raw): ApprovalsSearch => ({
+  id: str(s.id),
+  status: oneOf(s.status, APPROVAL_STATUSES),
+  agent: str(s.agent),
+  tool: str(s.tool),
   run: str(s.run),
 })

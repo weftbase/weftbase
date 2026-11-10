@@ -7,8 +7,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { setTheme, useTheme } from "@/lib/theme"
 import type { ThemePref } from "@/lib/theme"
 
-// Settings, Appearance: the theme (kept in this browser) and the keys.
-// Density is compact; there is no other setting.
+// Settings, Appearance: the theme, kept in this browser.
 export const Route = createFileRoute("/settings/appearance")({
   component: Appearance,
 })
@@ -17,14 +16,6 @@ const OPTIONS: { value: ThemePref; label: string }[] = [
   { value: "system", label: "System" },
   { value: "light", label: "Light" },
   { value: "dark", label: "Dark" },
-]
-
-const KEYS: [string, string][] = [
-  ["⌘K", "Open the command menu (Ctrl K on Linux and Windows)"],
-  ["⌘B", "Collapse or expand the sidebar"],
-  ["/", "Focus the search box of a list"],
-  ["↑ ↓", "Move between rows; Enter opens the row"],
-  ["Esc", "Clear the search, or close a menu or detail"],
 ]
 
 function Appearance() {
@@ -47,21 +38,10 @@ function Appearance() {
           ))}
         </RadioGroup>
       </Section>
-      <Section title="Keyboard">
-        <dl className="overflow-hidden rounded-alert border bg-card">
-          {KEYS.map(([key, what]) => (
-            <div
-              key={key}
-              className="flex h-8 items-center gap-4 border-b px-3 last:border-b-0"
-            >
-              <dt className="w-16 flex-none">
-                <Kbd size="sm">{key}</Kbd>
-              </dt>
-              <dd className="text-sm text-muted-foreground">{what}</dd>
-            </div>
-          ))}
-        </dl>
-      </Section>
+      <p className="text-xs text-muted-foreground">
+        Kept in this browser. Density is compact; there is no other setting.
+        Press <Kbd size="sm">?</Kbd> anywhere for the keyboard shortcuts.
+      </p>
     </>
   )
 }

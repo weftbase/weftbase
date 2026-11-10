@@ -19,7 +19,7 @@
 
 import { buildUrl, seg } from "./http"
 import type { Query } from "./http"
-import type { StreamFrame } from "./types"
+import type { OutboxEvent, StreamFrame } from "./types"
 
 export type StreamState = "connecting" | "live" | "reconnecting"
 
@@ -67,7 +67,9 @@ function dedup() {
 export function openStream(
   path: string,
   query: Query,
-  handlers: StreamHandlers
+  handlers: StreamHandlers,
+  /** The SSE event names to listen for (the run streams' by default). */
+  frames: readonly string[] = FRAMES
 ): () => void {
   if (typeof EventSource === "undefined") return () => {}
   let source: EventSource | undefined
@@ -105,7 +107,7 @@ export function openStream(
         handlers.onState?.("reconnecting")
       }
     }
-    for (const type of FRAMES) {
+    for (const type of frames) {
       es.addEventListener(type, (e) => {
         const msg = e as MessageEvent<string>
         let frame: StreamFrame
@@ -114,7 +116,7 @@ export function openStream(
             type,
             id: msg.lastEventId,
             data: JSON.parse(msg.data),
-          }
+          } as StreamFrame
         } catch {
           return // a frame that is not JSON is skipped, never fatal
         }
@@ -176,5 +178,27 @@ export function streamSession(
     `/v1/sessions/${seg(id)}/stream`,
     { kinds: kinds(opts.kinds) },
     handlers
+  )
+}
+
+/** The control store's outbox (GET /v1/events), narrowed to `types`
+ * ("approval.requested", …). Each frame is one event; its SSE event
+ * name is the event's type. A stream opened without a last id starts
+ * with every stored event, oldest first, then goes live: read
+ * `created_at` to tell an old event from a new one. */
+export function streamEvents(
+  types: readonly string[],
+  handlers: Omit<StreamHandlers, "onFrame"> & {
+    onEvent: (event: OutboxEvent) => void
+  }
+): () => void {
+  return openStream(
+    "/v1/events",
+    { type: types.join(",") },
+    {
+      ...handlers,
+      onFrame: (f) => handlers.onEvent(f.data as unknown as OutboxEvent),
+    },
+    types
   )
 }

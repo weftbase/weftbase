@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link, Outlet } from "@tanstack/react-router"
+import { Link, Outlet, useNavigate } from "@tanstack/react-router"
 import {
   CheckIcon,
   LogOutIcon,
@@ -11,11 +11,13 @@ import {
   UserIcon,
 } from "lucide-react"
 import * as React from "react"
+import { toast } from "sonner"
 
 import { CommandMenu } from "@/components/console/command-menu"
 import { NAV, SETTINGS_NAV } from "@/components/console/nav"
 import { NewRun } from "@/components/console/new-run"
 import type { NavItem } from "@/components/console/nav"
+import { ShortcutsSheet } from "@/components/console/shortcuts"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -33,7 +35,7 @@ import {
 } from "@/components/ui/tooltip"
 import { WeftbaseBrand } from "@/components/ui/weftbase-logo"
 import { api } from "@/lib/api/http"
-import { useRunsLive } from "@/lib/api/live"
+import { useApprovalsLive, useRunsLive } from "@/lib/api/live"
 import { q } from "@/lib/api/queries"
 import type { StreamState } from "@/lib/api/stream"
 import type { Meta } from "@/lib/api/types"
@@ -100,8 +102,9 @@ function NavLink({
 }
 
 function Sidebar({ rail }: { rail: boolean }) {
-  // Runs waiting on a person: the Approvals count.
-  const waiting = useQuery(q.runsPage({ status: "parked", limit: 1 }))
+  // Tool calls waiting on a person: the Approvals count, kept current by
+  // the outbox stream (useApprovalsLive in the shell).
+  const waiting = useQuery(q.approvals({ status: "pending", limit: 1 }))
   return (
     <nav
       aria-label="Main"
@@ -138,7 +141,7 @@ function Sidebar({ rail }: { rail: boolean }) {
             key={item.to}
             item={item}
             rail={rail}
-            count={item.to === "/approvals" ? waiting.data?.total : undefined}
+            count={item.to === "/approvals" ? waiting.data?.pending : undefined}
           />
         ))}
         <div className="mt-auto flex flex-col gap-0.5">
@@ -310,7 +313,10 @@ function TopBar({
         <Kbd size="sm">⌘K</Kbd>
       </button>
       <div className="ml-auto flex items-center gap-1">
-        <NewRun />
+        {/* The command menu's "New run" presses this button. */}
+        <span data-new-run className="contents">
+          <NewRun />
+        </span>
         <ThemeToggle />
         <AccountMenu meta={meta} />
       </div>
@@ -324,9 +330,42 @@ export function AppShell({ meta }: { meta: Meta }) {
   const rail = sidebar === "rail"
   const toggle = React.useEffectEvent(() => setSidebar(rail ? null : "rail"))
   const live = useRunsLive()
+  const [keysOpen, setKeysOpen] = React.useState(false)
+  const navigate = useNavigate()
+  // The one toast: a tool call began to wait on a person.
+  useApprovalsLive((e) => {
+    toast("A run is waiting for your approval", {
+      id: "approval-waiting",
+      description:
+        typeof e.data?.agent === "string" && typeof e.data.tool === "string"
+          ? `${e.data.agent} wants to call ${e.data.tool}`
+          : undefined,
+      action: {
+        label: "Review",
+        onClick: () =>
+          void navigate({ to: "/approvals", search: { id: e.resource_id } }),
+      },
+    })
+  })
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null
+      if (
+        e.key === "?" &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !(
+          el &&
+          (["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName) ||
+            el.isContentEditable)
+        )
+      ) {
+        e.preventDefault()
+        setKeysOpen(true)
+        return
+      }
       if (!(e.metaKey || e.ctrlKey)) return
       const key = e.key.toLowerCase()
       if (key === "k") {
@@ -361,7 +400,22 @@ export function AppShell({ meta }: { meta: Meta }) {
             <Outlet />
           </main>
         </div>
-        <CommandMenu open={searchOpen} onOpenChange={setSearchOpen} />
+        <CommandMenu
+          open={searchOpen}
+          onOpenChange={setSearchOpen}
+          onNewRun={() =>
+            // After the menu has closed and given the focus back.
+            setTimeout(
+              () =>
+                document
+                  .querySelector<HTMLButtonElement>("[data-new-run] button")
+                  ?.click(),
+              50
+            )
+          }
+          onShortcuts={() => setKeysOpen(true)}
+        />
+        <ShortcutsSheet open={keysOpen} onOpenChange={setKeysOpen} />
       </div>
     </LiveContext>
   )

@@ -63,10 +63,21 @@ export function ledgerStatus(r: Pick<LedgerRun, "status">): DisplayStatus {
   return r.status
 }
 
-/** sessionStatus: a session's status is its newest turn's; the server
- * already says "parked" there. */
+/** sessionStatus: a session's status is its newest turn's outcome, in
+ * the server's words for a turn (outcomeStatus). */
 export function sessionStatus(s: Pick<SessionRow, "status">): DisplayStatus {
-  return s.status === "parked" ? "waiting" : s.status
+  return outcomeStatus(s.status)
+}
+
+/** outcomeStatus maps one turn outcome of a session row (`status`,
+ * `outcomes[]`) onto a display status: parked is waiting on a person, a
+ * park already decided is running again, and a turn a newer message
+ * ended reads cancelled. An unknown word reads interrupted. */
+export function outcomeStatus(outcome: string): DisplayStatus {
+  if (outcome === "parked") return "waiting"
+  if (outcome === "resumed") return "running"
+  if (outcome === "ended") return "cancelled"
+  return isDisplay(outcome) ? outcome : "interrupted"
 }
 
 export const STATUS_LABEL: Record<DisplayStatus, string> = {

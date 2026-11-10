@@ -1,31 +1,170 @@
 import { useQuery } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
-import { CircleCheckIcon } from "lucide-react"
+import { Link, createFileRoute } from "@tanstack/react-router"
+import { CircleCheckIcon, XIcon } from "lucide-react"
+import * as React from "react"
 
+import { DecideForm } from "@/components/console/approval/decide"
+import { CopyId } from "@/components/console/copy-id"
 import { DataTable } from "@/components/console/data-table"
+import type { Column } from "@/components/console/data-table"
 import {
   EmptyState,
   ErrorState,
   LoadingRows,
 } from "@/components/console/empty-state"
+import { FilterBar, FilterSelect } from "@/components/console/filter-bar"
+import { JsonView } from "@/components/console/json-view"
 import { Page, PageHeader } from "@/components/console/page-header"
-import { RUN_COLUMNS } from "@/components/console/run-columns"
+import { RelativeTime } from "@/components/console/relative-time"
+import { SplitPane } from "@/components/console/split-pane"
+import { Button } from "@/components/ui/button"
 import { q } from "@/lib/api/queries"
-import { count } from "@/lib/format"
-import { validateApprovals } from "@/lib/search"
+import type { Approval } from "@/lib/api/types"
+import { approvalState, argsSummary, decidedBy } from "@/lib/approval-view"
+import type { ApprovalTone } from "@/lib/approval-view"
+import { count, dateTime } from "@/lib/format"
+import {
+  APPROVAL_STATUSES,
+  useSetSearch,
+  validateApprovals,
+} from "@/lib/search"
+import type { ApprovalsSearch } from "@/lib/search"
+import { cn } from "@/lib/utils"
 
-// Approvals. The server has no approvals resource: an approval is a run
-// waiting on a person (GET /v1/runs?status=parked), decided with
-// POST /v1/runs/{id}/resume. A stub on the new foundation: the waiting
-// runs. The inbox with Approve and Deny is built on top of this.
+// Approvals: the inbox of tool calls that wait on, or were decided by, a
+// person. Pending first (oldest first: they block a run), decided below.
+// Selecting one shows the request, the exact arguments and the decision.
 export const Route = createFileRoute("/approvals/")({
   validateSearch: validateApprovals,
   head: () => ({ meta: [{ title: "Approvals · weftbase" }] }),
   component: ApprovalsPage,
 })
 
+const DOT: Record<ApprovalTone, string> = {
+  waiting: "bg-warning",
+  good: "bg-success",
+  bad: "bg-danger",
+  neutral: "bg-neutral",
+}
+
+function State({ approval }: { approval: Approval }) {
+  const s = approvalState(approval)
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1.5">
+      <span
+        aria-hidden
+        className={cn("size-2 flex-none rounded-full", DOT[s.tone])}
+      />
+      <span className="truncate">{s.label}</span>
+    </span>
+  )
+}
+
+const STATUS_LABEL: Record<(typeof APPROVAL_STATUSES)[number], string> = {
+  pending: "Pending",
+  decided: "Decided",
+  approved: "Approved",
+  denied: "Denied",
+  resolved: "Answered",
+  expired: "Expired",
+  cancelled: "Cancelled",
+}
+
+const COLUMNS: Column<Approval>[] = [
+  {
+    key: "status",
+    header: "Status",
+    width: "100px",
+    cell: (a) => <State approval={a} />,
+  },
+  {
+    key: "agent",
+    header: "Agent",
+    width: "minmax(88px, 140px)",
+    cell: (a) => <span className="font-medium">{a.agent}</span>,
+  },
+  {
+    key: "tool",
+    header: "Wants to call",
+    width: "minmax(110px, 160px)",
+    mono: true,
+    cell: (a) => a.tool,
+  },
+  {
+    key: "args",
+    header: "With",
+    width: "minmax(160px, 1fr)",
+    muted: true,
+    cell: (a) => argsSummary(a.args) || "no arguments",
+  },
+  {
+    key: "who",
+    header: "Decided by",
+    width: "minmax(96px, 150px)",
+    muted: true,
+    cell: (a) =>
+      a.status === "pending" ? (
+        <span className="text-subtle-foreground">waiting</span>
+      ) : (
+        <span title={decidedBy(a)}>{decidedBy(a, true) ?? "—"}</span>
+      ),
+  },
+  {
+    key: "when",
+    header: "When",
+    width: "84px",
+    align: "right",
+    muted: true,
+    cell: (a) => <RelativeTime time={a.decided_at ?? a.requested_at} />,
+  },
+]
+
 function ApprovalsPage() {
-  const waiting = useQuery(q.runsPage({ status: "parked", limit: 100 }))
+  const search = Route.useSearch()
+  const set = useSetSearch<ApprovalsSearch>(Route.fullPath)
+  const list = useQuery(
+    q.approvals({
+      status: search.status,
+      agent: search.agent,
+      tool: search.tool,
+      run: search.run,
+      limit: 200,
+    })
+  )
+  const agents = useQuery(q.agentsSummary())
+  const tools = useQuery(q.tools())
+  const agentNames = (agents.data?.agents ?? []).map((a) => a.name)
+  const toolNames = (tools.data?.tools ?? [])
+    .filter(
+      (t) =>
+        t.needs_approval ||
+        t.agents.some((a) => a.versions.some((v) => v.needs_approval))
+    )
+    .map((t) => t.name)
+  for (const [xs, v] of [
+    [agentNames, search.agent],
+    [toolNames, search.tool],
+  ] as const)
+    if (v && !xs.includes(v)) xs.push(v)
+  const filtered = Boolean(
+    search.status || search.agent || search.tool || search.run
+  )
+  const rows = list.data?.approvals ?? []
+
+  // Esc closes the detail.
+  const close = React.useEffectEvent(() => set({ id: undefined }))
+  React.useEffect(() => {
+    if (!search.id) return
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null
+      if (e.key !== "Escape" || el?.closest("[role=dialog],[role=menu]")) return
+      if (el && ["INPUT", "TEXTAREA"].includes(el.tagName)) return
+      close()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [search.id])
+
   return (
     <Page
       flush
@@ -33,29 +172,270 @@ function ApprovalsPage() {
         <PageHeader
           title="Approvals"
           meta={
-            waiting.data && <span>{count(waiting.data.total)} waiting</span>
+            list.data && (
+              <span>
+                {list.data.pending === 0
+                  ? "nothing waiting"
+                  : `${count(list.data.pending)} waiting`}
+              </span>
+            )
           }
         />
       }
+      bar={
+        <FilterBar
+          right={
+            list.data && (
+              <span className="font-mono tabular-nums">
+                {count(list.data.total)}{" "}
+                {list.data.total === 1 ? "approval" : "approvals"}
+              </span>
+            )
+          }
+        >
+          <FilterSelect
+            label="Status"
+            value={search.status}
+            options={APPROVAL_STATUSES.map((s) => ({
+              value: s,
+              label: STATUS_LABEL[s],
+            }))}
+            onChange={(status) => set({ status })}
+          />
+          <FilterSelect
+            label="Agent"
+            value={search.agent}
+            options={agentNames.sort().map((n) => ({ value: n, label: n }))}
+            onChange={(agent) => set({ agent })}
+          />
+          <FilterSelect
+            label="Tool"
+            value={search.tool}
+            options={toolNames.sort().map((n) => ({ value: n, label: n }))}
+            onChange={(tool) => set({ tool })}
+          />
+          {search.run && (
+            <span className="inline-flex h-6 flex-none items-center gap-1 rounded-sm bg-muted pr-0.5 pl-2 text-xs">
+              one run&apos;s approvals
+              <button
+                type="button"
+                aria-label="Show every run's approvals"
+                onClick={() => set({ run: undefined })}
+                className="flex size-5 items-center justify-center rounded-sm text-subtle-foreground hover:bg-background hover:text-foreground"
+              >
+                <XIcon className="size-3" />
+              </button>
+            </span>
+          )}
+        </FilterBar>
+      }
     >
-      {waiting.error ? (
-        <ErrorState error={waiting.error} what="Approvals" />
-      ) : !waiting.data ? (
-        <LoadingRows />
-      ) : waiting.data.runs.length === 0 ? (
-        <EmptyState icon={CircleCheckIcon} title="Nothing is waiting on you">
-          A run appears here when one of its tool calls needs a person&apos;s
-          decision.
-        </EmptyState>
-      ) : (
-        <DataTable
-          label="Runs waiting on a person"
-          columns={RUN_COLUMNS}
-          rows={waiting.data.runs}
-          rowKey={(r) => r.id}
-          rowLink={(r) => ({ to: "/runs/$runId", params: { runId: r.id } })}
-        />
-      )}
+      <SplitPane
+        id="approvals"
+        defaultWidth={460}
+        detail={
+          search.id ? (
+            <Detail
+              key={search.id}
+              id={search.id}
+              listed={rows.find((a) => a.id === search.id)}
+              onClose={() => set({ id: undefined })}
+            />
+          ) : null
+        }
+      >
+        {list.error ? (
+          <ErrorState error={list.error} what="Approvals" />
+        ) : !list.data ? (
+          <LoadingRows />
+        ) : rows.length === 0 ? (
+          filtered ? (
+            <EmptyState
+              title="No approvals match these filters"
+              action={
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() =>
+                    set({
+                      status: undefined,
+                      agent: undefined,
+                      tool: undefined,
+                      run: undefined,
+                    })
+                  }
+                >
+                  Clear filters
+                </Button>
+              }
+            />
+          ) : (
+            <EmptyState
+              icon={CircleCheckIcon}
+              title="Nothing is waiting on you"
+            >
+              A tool call appears here when an agent needs a person&apos;s
+              decision before running it.
+            </EmptyState>
+          )
+        ) : (
+          <DataTable
+            label="Approvals"
+            columns={COLUMNS}
+            rows={rows}
+            rowKey={(a) => a.id}
+            selectedKey={search.id}
+            rowLink={(a) => ({
+              to: "/approvals",
+              search: { ...search, id: a.id },
+              replace: true,
+            })}
+            footer={
+              list.data.next_offset !== null ? (
+                <span>
+                  The first {count(rows.length)} of {count(list.data.total)};
+                  narrow the filters to see the rest.
+                </span>
+              ) : undefined
+            }
+          />
+        )}
+      </SplitPane>
     </Page>
+  )
+}
+
+function Row({
+  label,
+  children,
+}: {
+  label: string
+  children: React.ReactNode
+}) {
+  return (
+    <>
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 break-words">{children}</dd>
+    </>
+  )
+}
+
+function Detail({
+  id,
+  listed,
+  onClose,
+}: {
+  id: string
+  /** The approval as the list holds it, when it does. */
+  listed: Approval | undefined
+  onClose: () => void
+}) {
+  const one = useQuery({ ...q.approval(id), enabled: !listed })
+  const a = listed ?? one.data
+  if (!a)
+    return one.error ? (
+      <ErrorState error={one.error} what="This approval" />
+    ) : (
+      <LoadingRows rows={4} />
+    )
+  const pending = a.status === "pending"
+  const who = decidedBy(a)
+  return (
+    <section aria-label="Approval" className="flex flex-col text-sm">
+      <header className="flex h-10 flex-none items-center gap-2 border-b px-3">
+        <h2 className="min-w-0 truncate font-mono text-xs font-semibold">
+          {a.tool}
+        </h2>
+        <State approval={a} />
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          aria-label="Close"
+          title="Close (Esc)"
+          onClick={onClose}
+          className="ml-auto"
+        >
+          <XIcon />
+        </Button>
+      </header>
+      <div className="flex flex-col gap-3 p-3">
+        <p>
+          <Link
+            to="/agents/$name"
+            params={{ name: a.agent }}
+            className="font-medium underline-offset-4 hover:underline"
+          >
+            {a.agent}
+          </Link>{" "}
+          {pending ? "wants to call" : "asked to call"}{" "}
+          <span className="font-mono text-xs font-medium">{a.tool}</span> with
+          exactly these arguments
+          {pending ? ". Its run waits for the decision." : "."}
+        </p>
+        <JsonView value={a.args} depth={4} />
+        {pending ? (
+          <DecideForm approval={a} showArgs={false} />
+        ) : (
+          <p
+            className={cn(
+              "rounded-input border px-2 py-1.5 text-sm",
+              a.status === "denied" && "border-danger/30 bg-danger-muted",
+              a.status === "approved" && "border-success/30 bg-success-muted"
+            )}
+          >
+            <span className="font-medium">{approvalState(a).label}</span>
+            {who && <> by {who}</>}
+            {a.decided_at && (
+              <>
+                {" "}
+                <RelativeTime time={a.decided_at} />
+              </>
+            )}
+            .
+          </p>
+        )}
+        <dl className="grid grid-cols-[96px_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-xs">
+          {a.reason && <Row label="Reason">{a.reason}</Row>}
+          {a.content && (
+            <Row label="Answer given">
+              <span className="font-mono whitespace-pre-wrap">{a.content}</span>
+            </Row>
+          )}
+          <Row label="Run">
+            <Link
+              to="/runs/$runId"
+              params={{ runId: a.run_id }}
+              className="font-medium underline-offset-4 hover:underline"
+            >
+              Open the run
+            </Link>
+            <CopyId id={a.run_id} label="run id" className="ml-1" />
+          </Row>
+          {a.resumed_by && (
+            <Row label="Continued as">
+              <CopyId id={a.resumed_by} label="run id" className="-ml-1" />
+            </Row>
+          )}
+          {a.agent_version && (
+            <Row label="Version">
+              <CopyId
+                id={a.agent_version}
+                label="version id"
+                className="-ml-1"
+              />
+            </Row>
+          )}
+          <Row label="Asked">
+            <span title={dateTime(a.requested_at)}>
+              <RelativeTime time={a.requested_at} />
+            </span>
+          </Row>
+          {a.decided_at && <Row label="Decided">{dateTime(a.decided_at)}</Row>}
+          <Row label="Call">
+            <span className="font-mono">{a.call_id}</span>
+          </Row>
+        </dl>
+      </div>
+    </section>
   )
 }

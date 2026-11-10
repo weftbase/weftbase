@@ -88,15 +88,6 @@ export function ErrorState({
   )
 }
 
-/** Rebuilding: the plain state of a screen that is being rebuilt. */
-export function Rebuilding({ what }: { what: string }) {
-  return (
-    <p className="rounded-input border border-dashed px-3 py-2 text-xs text-muted-foreground">
-      {what} is being rebuilt. What is below is the server&apos;s data, plain.
-    </p>
-  )
-}
-
 /** Skeleton rows for a loading list: `rows` lines at the row height. */
 export function LoadingRows({ rows = 6 }: { rows?: number }) {
   return (

@@ -70,12 +70,16 @@ const STYLE: Record<
   },
 }
 
-/** StatusDot: the 8px state mark of a table row. */
+/** StatusDot: the 8px state mark alone, where there is no room for the
+ * word (a command menu row, a strip of turns). In a table use Status. */
 export function StatusDot({
   state,
+  cause,
   className,
 }: {
   state: DisplayStatus
+  /** Why, when there is a cause: "max_steps", "by user". */
+  cause?: string
   className?: string
 }) {
   return (
@@ -92,7 +96,45 @@ export function StatusDot({
         />
       </TooltipTrigger>
       <TooltipContent side="right">
-        {STATUS_LABEL[state]}: {STATUS_HINT[state]}
+        {STATUS_LABEL[state]}: {cause ?? STATUS_HINT[state]}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
+/** Status: dot and word, the status of a table row. The tooltip adds
+ * the cause when there is one (an error kind, who cancelled, what the
+ * run waits on), else what the status means. */
+export function Status({
+  state,
+  cause,
+  className,
+}: {
+  state: DisplayStatus
+  cause?: string
+  className?: string
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className={cn(
+            "inline-flex max-w-full min-w-0 items-center gap-1.5 text-sm",
+            className
+          )}
+        >
+          <span
+            aria-hidden
+            className={cn(
+              "inline-block size-2 flex-none rounded-full",
+              STYLE[state].dot
+            )}
+          />
+          <span className="truncate">{STATUS_LABEL[state]}</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="right" className="max-w-80">
+        {cause ? `${STATUS_LABEL[state]}: ${cause}` : STATUS_HINT[state]}
       </TooltipContent>
     </Tooltip>
   )
