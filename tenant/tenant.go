@@ -73,6 +73,27 @@ func (s Scope) IsZero() bool { return s == Scope{} }
 // ProjectLevel reports whether s is the project-level tenant.
 func (s Scope) ProjectLevel() bool { return s.tenant == ProjectTenant }
 
+// ErrOutsideScope: Within was asked for a tenant the scope cannot act
+// for.
+var ErrOutsideScope = errors.New("tenant: the scope cannot act for that tenant")
+
+// Within is s narrowed to tenantID, in s's project and env: what a
+// project-level principal acts under on one tenant's row (the row's own
+// tenant, so its events reach that tenant's subscribers). Only a
+// project-level s may narrow to another tenant; any s may name its own.
+// Anything else is ErrOutsideScope.
+func (s Scope) Within(tenantID string) (Scope, error) {
+	switch {
+	case s.IsZero() || tenantID == "":
+		return Scope{}, ErrOutsideScope
+	case tenantID == s.tenant:
+		return s, nil
+	case s.ProjectLevel():
+		return Scope{s.project, s.env, tenantID}, nil
+	}
+	return Scope{}, ErrOutsideScope
+}
+
 // String is "project/env/tenant", for logs.
 func (s Scope) String() string {
 	return strings.Join([]string{s.project, s.env, s.tenant}, "/")

@@ -883,3 +883,136 @@ func TestTenantCannotDeleteAnotherTenantsRun(t *testing.T) {
 		t.Errorf("the project's run after acme's delete: %d", code)
 	}
 }
+
+// eventsOf is every event of a tenant's scope, oldest first.
+func eventsOf(t *testing.T, app *App, tenantID string) []events.Event {
+	t.Helper()
+	sc, err := tenant.NewScope(tenant.DefaultProject, tenant.DefaultEnv, tenantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evs, err := app.Events().List(context.Background(), events.ForScope(sc, false), 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return evs
+}
+
+// B1: a project-level key acts on a tenant's run it can see — cancels a
+// queued one, decides a parked one's approval — and every change is
+// the tenant's (its events under the run's tenant, the actor the
+// project's key); a tenant's key gets 404 on another tenant's run and
+// approval, reading or writing.
+func TestProjectKeyActsOnTenantRuns(t *testing.T) {
+	app, ts, _ := startApp(t, t.TempDir(), BuildDigest(digestA))
+	var refunded atomic.Int32
+	// Two runs one after the other: the first parks and its resume
+	// answers, the second parks.
+	park := wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order":42}`})
+	model := wefttest.Script(park, wefttest.Say("refunded"), park)
+	if err := app.Agent(refunds(model, &refunded)); err != nil {
+		t.Fatal(err)
+	}
+	acme, other := tenantKey(t, app, "ten_acme"), tenantKey(t, app, "ten_other")
+	admit := func(key string) map[string]any {
+		t.Helper()
+		b, _ := json.Marshal(map[string]any{"agent": "refunds", "input": map[string]any{"prompt": "refund 42"}})
+		code, body := call(t, "POST", ts.URL+"/v1/runs", key, "application/json", b)
+		var run map[string]any
+		if json.Unmarshal([]byte(body), &run) != nil || code != 202 {
+			t.Fatalf("admit: %d %s", code, body)
+		}
+		return run
+	}
+	acmeScope, _ := tenant.NewScope(tenant.DefaultProject, tenant.DefaultEnv, "ten_acme")
+	parked := func(id string) {
+		t.Helper()
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			r, err := app.Ledger().Get(context.Background(), acmeScope, id)
+			if err == nil && r.Status == sessions.StatusParked {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("acme's run did not park: %+v %v", r, err)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	run := admit(acme)
+	id := run["id"].(string)
+	parked(id)
+	// Another tenant: 404 on acme's run and approval, read or write.
+	code, inbox := getJSON(t, ts.URL+"/v1/approvals?status=pending&run="+id)
+	apps, _ := inbox["approvals"].([]any)
+	if code != 200 || len(apps) != 1 {
+		t.Fatalf("the project key's inbox: %d %v", code, inbox)
+	}
+	a := apps[0].(map[string]any)
+	decision, _ := json.Marshal(map[string]any{"decision": "approve", "args_sha256": a["args_sha256"]})
+	for _, c := range []struct{ method, path string }{
+		{"GET", "/v1/runs/" + id + "/status"},
+		{"POST", "/v1/runs/" + id + "/cancel"},
+		{"GET", "/v1/approvals/" + a["id"].(string)},
+		{"POST", "/v1/approvals/" + a["id"].(string) + "/decision"},
+		{"DELETE", "/v1/runs/" + id},
+	} {
+		var body []byte
+		if c.method == "POST" {
+			body = decision
+		}
+		if code, resp := call(t, c.method, ts.URL+c.path, other, "application/json", body); code != 404 {
+			t.Errorf("another tenant: %s %s = %d %s, want 404", c.method, c.path, code, resp)
+		}
+	}
+	// The project key decides acme's approval: the run resumes under acme.
+	code, body := call(t, "POST", ts.URL+"/v1/approvals/"+a["id"].(string)+"/decision", bootstrap, "application/json", decision)
+	var decided map[string]any
+	if json.Unmarshal([]byte(body), &decided) != nil || code != 200 || decided["resumed_by"] == nil {
+		t.Fatalf("the project key decides acme's approval: %d %s", code, body)
+	}
+	resumed, err := app.Ledger().Get(context.Background(), acmeScope, decided["resumed_by"].(string))
+	if err != nil || resumed.TenantID != "ten_acme" {
+		t.Fatalf("the resume = %+v, %v; want acme's", resumed, err)
+	}
+	if done := waitRun(t, app, resumed.ID, sessions.StatusSucceeded, sessions.StatusFailed); done.Status != sessions.StatusSucceeded {
+		t.Fatalf("acme's resume = %+v", done)
+	}
+	// And cancels another acme run waiting on a person.
+	queued := admit(acme)
+	parked(queued["id"].(string))
+	if code, body := call(t, "POST", ts.URL+"/v1/runs/"+queued["id"].(string)+"/cancel", bootstrap, "application/json", nil); code != 202 {
+		t.Fatalf("the project key cancels acme's run: %d %s", code, body)
+	}
+	// And deletes it, audited.
+	if code, body := call(t, "DELETE", ts.URL+"/v1/runs/"+queued["id"].(string), bootstrap, "", nil); code != 200 {
+		t.Fatalf("the project key deletes acme's run: %d %s", code, body)
+	}
+	// Every change is acme's, by the project's key.
+	var decidedEv, cancelledEv, deletedEv *events.Event
+	evs := eventsOf(t, app, "ten_acme")
+	for i, e := range evs {
+		switch {
+		case e.Type == events.ApprovalDecided && e.ResourceID == a["id"]:
+			decidedEv = &evs[i]
+		case e.Type == events.RunCancelled && e.ResourceID == queued["id"]:
+			cancelledEv = &evs[i]
+		case e.Type == events.RunDeleted && e.ResourceID == queued["id"]:
+			deletedEv = &evs[i]
+		}
+	}
+	if deletedEv == nil || !deletedEv.Audited || deletedEv.Actor.Kind != "key" {
+		t.Errorf("run.deleted = %+v, want acme's, audited, by the project key", deletedEv)
+	}
+	if decidedEv == nil || decidedEv.Actor.Kind != "key" || decidedEv.TenantID != "ten_acme" {
+		t.Errorf("approval.decided = %+v, want acme's, by the project key", decidedEv)
+	}
+	if cancelledEv == nil || cancelledEv.Actor.Kind != "key" || cancelledEv.TenantID != "ten_acme" {
+		t.Errorf("run.cancelled = %+v, want acme's, by the project key", cancelledEv)
+	}
+	for _, e := range eventsOf(t, app, tenant.ProjectTenant) {
+		if e.ResourceID == id || e.ResourceID == a["id"] || e.ResourceID == queued["id"] {
+			t.Errorf("an event of acme's run under the project tenant: %+v", e)
+		}
+	}
+}

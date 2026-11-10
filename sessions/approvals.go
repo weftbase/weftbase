@@ -301,7 +301,7 @@ func (l *Ledger) Decide(ctx context.Context, s tenant.Scope, actor events.Actor,
 	var a Approval
 	err := l.db.InTx(ctx, func(tx store.Tx) error {
 		var err error
-		if a, err = l.approval(tx, s, id); err != nil {
+		if a, s, err = l.approvalFor(tx, s, id); err != nil {
 			return err
 		}
 		if !strings.EqualFold(argsSHA256, a.ArgsSHA256) {
@@ -334,15 +334,21 @@ func (l *Ledger) Decide(ctx context.Context, s tenant.Scope, actor events.Actor,
 	return a, err
 }
 
-// approval reads one record of s's own tenant (what a decision acts
-// on).
-func (l *Ledger) approval(tx store.Tx, s tenant.Scope, id string) (Approval, error) {
-	where, args := exact(s)
+// approvalFor reads one record s can decide — its own tenant's, or
+// under a project-level scope any tenant's — with the scope the
+// decision runs under: the record's own tenant (as locate does for a
+// run).
+func (l *Ledger) approvalFor(tx store.Tx, s tenant.Scope, id string) (Approval, tenant.Scope, error) {
+	where, args := within(s, "")
 	a, err := scanApproval(store.QueryRow(tx, selectApproval+` WHERE id = ? AND `+where, append([]any{id}, args...)...))
 	if err != nil {
-		return Approval{}, fmt.Errorf("approval %s: %w", id, err)
+		return Approval{}, tenant.Scope{}, fmt.Errorf("approval %s: %w", id, err)
 	}
-	return a, nil
+	as, err := s.Within(a.TenantID)
+	if err != nil {
+		return Approval{}, tenant.Scope{}, fmt.Errorf("approval %s: %w", id, store.ErrNotFound)
+	}
+	return a, as, nil
 }
 
 // Approval reads one approval s can read (every tenant's under a

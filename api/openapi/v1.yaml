@@ -543,7 +543,8 @@ paths:
         A queued or parked run ends cancelled at once (a parked run's
         pending approvals with it, each writing approval.cancelled); a
         running run is marked and the cancel goes to its worker, which
-        reports the end. 409 already_finished for a run that has ended;
+        reports the end. A project-level credential cancels any tenant's
+        run, under that tenant. 409 already_finished for a run that has ended;
         409 already_resumed for a parked run that was resumed (cancel
         the run that resumed it).
       x-weftbase-action: runs.cancel
@@ -1136,7 +1137,10 @@ paths:
         The one way a parked run resumes (besides the node's own
         approval expiry): the run resumes (as a new run on its pinned
         version, resumed_by) once every approval of it is decided; until
-        then it stays parked. Writes approval.decided. 409 args_changed when args_sha256 is not the approval's;
+        then it stays parked. Writes approval.decided. A project-level
+        credential decides any tenant's approval (under that tenant: its
+        events are the tenant's, the actor the caller); a tenant's key
+        gets 404 on another tenant's. 409 args_changed when args_sha256 is not the approval's;
         409 not_pending when it was decided otherwise, expired or was
         cancelled. The same decision again is a no-op (200). The decider
         (the Console operator, or the API key's id) is recorded as actor.

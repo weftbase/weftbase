@@ -93,7 +93,10 @@ starts on a fresh data directory.
   draw; sessions carry a `display_status` too. A read cut by its budget
   says `partial`. A control store that cannot be read answers 503
   `unavailable` instead of guessing a run's state. A project-level
-  credential reads every tenant's ledger runs and approvals.
+  credential reads every tenant's ledger runs and approvals, and
+  cancels, steers, decides and deletes them under the run's own tenant
+  (the events are that tenant's, the actor the caller); a tenant's key
+  gets 404 on another tenant's run.
 - **Run control**: admit (`POST /v1/runs`, a session's next turn
   refused with `session_busy` in the admitting transaction while the
   previous one is queued, running or waiting, numbered past every turn
@@ -190,8 +193,7 @@ model provider is called and no key is needed.
   **The trace store is not tenant-scoped**: a tenant's key reads every
   tenant's traces, spans, logs and sessions (the ledger's fields, queued
   runs and approvals are scoped; a delete of a run another tenant holds
-  in the ledger is refused). A project-level operator reads a tenant's
-  ledger runs but cancels or decides only its own tenant's.
+  in the ledger is refused).
 - **Run content behind `runs.content`**: the run lists' prompt preview
   and session title, and the spans' content attributes, are redacted
   for a caller without `runs.content`; until restricted keys land every

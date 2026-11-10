@@ -476,6 +476,24 @@ func (l *Ledger) get(tx store.Tx, s tenant.Scope, id string) (Run, error) {
 	return run, nil
 }
 
+// locate reads one run s can act on — its own tenant's, or under a
+// project-level scope any tenant's — with the scope a write of it runs
+// under: the run's own tenant (s.Within), so its events, queue item and
+// timers stay that tenant's while the actor names the caller. Another
+// tenant's run is store.ErrNotFound for a tenant's scope.
+func (l *Ledger) locate(tx store.Tx, s tenant.Scope, id string) (Run, tenant.Scope, error) {
+	where, args := within(s, "")
+	run, err := scanRun(store.QueryRow(tx, selectRun+` WHERE id = ? AND `+where, append([]any{id}, args...)...))
+	if err != nil {
+		return Run{}, tenant.Scope{}, fmt.Errorf("run %s: %w", id, err)
+	}
+	rs, err := s.Within(run.TenantID)
+	if err != nil {
+		return Run{}, tenant.Scope{}, fmt.Errorf("run %s: %w", id, store.ErrNotFound)
+	}
+	return run, rs, nil
+}
+
 // Get reads one run s can read (every tenant's under a project-level
 // scope); another tenant's run is store.ErrNotFound.
 func (l *Ledger) Get(ctx context.Context, s tenant.Scope, id string) (Run, error) {
@@ -559,16 +577,18 @@ func (l *Ledger) resume(tx store.Tx, s tenant.Scope, actor events.Actor, parked 
 // cancelled at once (run.cancelled); a running run is marked
 // cancel_requested and the cancel goes to its worker after the commit,
 // which reports the end. A finished run is ErrFinished; a parked run
-// that was resumed is ErrAlreadyResumed (cancel its resume).
+// that was resumed is ErrAlreadyResumed (cancel its resume). A
+// project-level scope cancels any tenant's run, under that tenant.
 func (l *Ledger) Cancel(ctx context.Context, s tenant.Scope, actor events.Actor, runID, reason string) (Run, error) {
 	if s.IsZero() {
 		return Run{}, tenant.ErrZeroScope
 	}
 	var run Run
 	var deliver bool
+	caller := s
 	err := l.db.InTx(ctx, func(tx store.Tx) error {
 		var err error
-		if run, err = l.get(tx, s, runID); err != nil {
+		if run, s, err = l.locate(tx, caller, runID); err != nil {
 			return err
 		}
 		switch {
@@ -618,6 +638,9 @@ func (l *Ledger) Steer(ctx context.Context, s tenant.Scope, actor events.Actor, 
 	run, err := l.Get(ctx, s, runID)
 	if err != nil {
 		return err
+	}
+	if s, err = s.Within(run.TenantID); err != nil {
+		return fmt.Errorf("run %s: %w", runID, store.ErrNotFound)
 	}
 	if run.Status != StatusRunning || run.CancelRequested {
 		return fmt.Errorf("%w: run %s is %s", ErrNotRunning, runID, run.Status)
@@ -1007,11 +1030,12 @@ func (l *Ledger) Delete(ctx context.Context, s tenant.Scope, actor events.Actor,
 		runs, approvals = 0, 0
 		var held []Run
 		for _, id := range ids {
-			run, ok, err := l.getOpt(tx, s, id)
-			if err != nil {
+			run, _, err := l.locate(tx, s, id)
+			switch {
+			case errors.Is(err, store.ErrNotFound):
+			case err != nil:
 				return err
-			}
-			if ok {
+			default:
 				held = append(held, run)
 			}
 		}
@@ -1019,28 +1043,40 @@ func (l *Ledger) Delete(ctx context.Context, s tenant.Scope, actor events.Actor,
 		if runs, approvals, err = l.deleteRuns(tx, s, held); err != nil {
 			return err
 		}
+		// The audit goes under the runs' own tenant (a chain is one
+		// tenant's); a run only the trace store knows, under the caller's.
+		es := s
+		if len(held) > 0 {
+			if es, err = s.Within(held[0].TenantID); err != nil {
+				return err
+			}
+		}
 		data := map[string]any{"run_ids": ids, "ledger_runs": runs, "approvals": approvals}
 		for _, h := range held {
 			if h.sessionID != "" {
 				data["session_id"] = h.sessionID
 			}
 		}
-		_, err = l.log.Emit(tx, s, events.Event{Type: events.RunDeleted, ResourceKind: "run", ResourceID: ids[0], Actor: actor, Audited: true}, data)
+		_, err = l.log.Emit(tx, es, events.Event{Type: events.RunDeleted, ResourceKind: "run", ResourceID: ids[0], Actor: actor, Audited: true}, data)
 		return err
 	})
 	return runs, approvals, err
 }
 
 // deleteRuns refuses when one of runs is active, else deletes them with
-// their approvals.
+// their approvals, each under its own tenant (s may act for it).
 func (l *Ledger) deleteRuns(tx store.Tx, s tenant.Scope, runs []Run) (n, approvals int, err error) {
 	for _, run := range runs {
 		if active(run) {
 			return 0, 0, fmt.Errorf("%w: run %s is %s", ErrActive, run.ID, run.Status)
 		}
 	}
-	where, args := exact(s)
 	for _, run := range runs {
+		rs, err := s.Within(run.TenantID)
+		if err != nil {
+			return 0, 0, err
+		}
+		where, args := exact(rs)
 		res, err := store.Exec(tx, `DELETE FROM approvals WHERE run_id = ? AND `+where, append([]any{run.ID}, args...)...)
 		if err != nil {
 			return 0, 0, err
@@ -1071,7 +1107,7 @@ func (l *Ledger) DeleteSession(ctx context.Context, s tenant.Scope, actor events
 		for _, id := range ids {
 			seen[id] = true
 		}
-		where, args := exact(s)
+		where, args := within(s, "")
 		rows, err := store.Query(tx, selectRun+` WHERE `+where+` AND session_id = ? ORDER BY created_at, id`, append(args, sessionID)...)
 		if err != nil {
 			return err
@@ -1091,7 +1127,15 @@ func (l *Ledger) DeleteSession(ctx context.Context, s tenant.Scope, actor events
 		if runs, approvals, err = l.deleteRuns(tx, s, held); err != nil {
 			return err
 		}
-		_, err = l.log.Emit(tx, s, events.Event{Type: events.SessionDeleted, ResourceKind: "session", ResourceID: sessionID, Actor: actor, Audited: true},
+		// The audit under the session's own tenant (its runs'); a
+		// session only the trace store knows, under the caller's.
+		es := s
+		if len(held) > 0 {
+			if es, err = s.Within(held[0].TenantID); err != nil {
+				return err
+			}
+		}
+		_, err = l.log.Emit(tx, es, events.Event{Type: events.SessionDeleted, ResourceKind: "session", ResourceID: sessionID, Actor: actor, Audited: true},
 			map[string]any{"session_id": sessionID, "run_ids": ids, "ledger_runs": runs, "approvals": approvals})
 		return err
 	})

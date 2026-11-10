@@ -117,8 +117,13 @@ generation from it lands later.
   fencing token, and the timer table. The store is authoritative.
 - `sessions`: the run ledger. `Admit` resolves the version, writes the
   run (`agent_version`, `resolved_via`, `tenant_id`), enqueues it and
-  emits `run.queued` in one transaction; `Cancel` (409 once finished),
-  `Resume` (a new run pinned to the parked run's version).
+  emits `run.queued` in one transaction; `Cancel` (409
+  `already_finished` once finished), `Steer`, and `Decide` on a parked
+  run's approvals, which resumes it — a new run pinned to the parked
+  run's version — once the last is decided. A project-level scope reads
+  every tenant's runs and acts on them under the run's own tenant
+  (`tenant.Scope.Within`): the events are that tenant's, the actor the
+  caller; a tenant's scope sees its own runs only.
 - `client/wire`: the worker protocol's types (registration, commands,
   acks split into accepted, rejected, busy, run_started, heartbeat,
   finished; cancel and steer with their own ids; the socket handshake;
