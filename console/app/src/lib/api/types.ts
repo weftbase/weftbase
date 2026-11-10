@@ -821,9 +821,16 @@ export interface Conversation {
   skipped_turns?: SkippedTurn[] | null
 }
 
+/** A turn number with no turn of its own (GET …/conversation,
+ * `skipped_turns`). */
 export interface SkippedTurn {
   turn: number
-  reason?: string
+  reason?: "resumed" | "steered" | "deferred" | "dropped" | "not_recorded"
+  /** The turn number it went into (resumed, steered). */
+  into?: number
+  run_id?: string
+  /** The server's sentence for it. */
+  note?: string
 }
 
 /** sessionRow as GET /v1/sessions and the conversation send it: the

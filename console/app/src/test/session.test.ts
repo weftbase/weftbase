@@ -473,27 +473,34 @@ describe("the desk conversation (a capture from the demo)", () => {
     expect(paged.map((t) => t.position)).toEqual([6, 7, 8, 9])
   })
 
-  it("says a skipped number only with the server's reason", () => {
-    const withReasons = buildItems(
+  it("says a skipped number only when it is not shown elsewhere", () => {
+    const items = buildItems(
       view(desk, {
         skipped: [
-          { turn: 3 },
-          { turn: 7, reason: "Turn 7 was a message steered into turn 6." },
+          { turn: 3, reason: "resumed", into: 2 },
+          { turn: 5 },
+          { turn: 7, reason: "dropped", note: "The message was dropped." },
         ],
       }),
       NOW
     )
-    const at = withReasons.findIndex((i) => i.type === "gap")
-    expect(withReasons.filter((i) => i.type === "gap")).toEqual([
-      {
-        type: "gap",
-        key: "skipped:7",
-        text: "Turn 7 was a message steered into turn 6.",
-      },
+    // resumed and steered numbers are the wait / steered marker on the
+    // turn they went into; a number with no reason is not mentioned.
+    const at = items.findIndex((i) => i.type === "gap")
+    expect(items.filter((i) => i.type === "gap")).toEqual([
+      { type: "gap", key: "skipped:7", text: "The message was dropped." },
     ])
     // Just before the turn that follows the skipped number.
-    const next = withReasons[at + 1]
+    const next = items[at + 1]
     expect(next.type === "turn" && next.turn.turn).toBe(8)
+  })
+
+  it("says nothing for a steered number", () => {
+    const items = buildItems(
+      view(desk, { skipped: [{ turn: 7, reason: "steered", into: 6 }] }),
+      NOW
+    )
+    expect(items.filter((i) => i.type === "gap")).toEqual([])
   })
 
   it("a wait and the decision that ended it are one line", () => {

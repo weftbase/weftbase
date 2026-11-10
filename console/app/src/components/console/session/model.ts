@@ -16,6 +16,7 @@ import type {
   ConversationTurn,
   SessionEntry,
   SessionRow,
+  SkippedTurn,
   WaitDoc,
 } from "@/lib/api/types"
 import { cost, dateTime, duration, tokens } from "@/lib/format"
@@ -837,6 +838,20 @@ export function forkOrigin(v: string): { session: string; entry?: string } {
     : { session: v.slice(0, i), entry: v.slice(i + 1) }
 }
 
+/** skippedText is the one muted line for a turn number the server
+ * says never became a turn of its own. */
+export function skippedText(s: SkippedTurn): string {
+  if (s.note) return s.note
+  switch (s.reason) {
+    case "deferred":
+      return "A message was deferred to a later turn."
+    case "dropped":
+      return "A message was dropped before it ran."
+    default:
+      return "A turn is missing from this server's records."
+  }
+}
+
 /** buildItems lays the conversation out top to bottom: a "load older"
  * row when earlier turns are not loaded, where a fork came from, each
  * turn with its markers, the session's own marks (filed under no turn)
@@ -882,7 +897,11 @@ export function buildItems(
   c.turns.forEach((t, i) => {
     if (t.turn > 0) positions.set(t.turn, position(i))
   })
-  const reasons = c.skipped.filter((s) => s.reason)
+  // A number that was resumed or steered into another turn is already
+  // shown there (the wait, the steered message): say nothing for it.
+  const reasons = c.skipped.filter(
+    (s) => s.reason && s.reason !== "resumed" && s.reason !== "steered"
+  )
 
   c.turns.forEach((turn, i) => {
     const started = Date.parse(turn.started)
@@ -897,7 +916,11 @@ export function buildItems(
     const after = i === 0 ? (c.offset > 0 ? Infinity : 0) : c.turns[i - 1].turn
     for (const s of reasons)
       if (turn.turn > 0 && s.turn > after && s.turn < turn.turn)
-        items.push({ type: "gap", key: `skipped:${s.turn}`, text: s.reason! })
+        items.push({
+          type: "gap",
+          key: `skipped:${s.turn}`,
+          text: skippedText(s),
+        })
     const endedBy =
       turn.ended_by_turn === undefined
         ? undefined
