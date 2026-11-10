@@ -195,8 +195,18 @@ func TestCrashLosesTheRunsAndRestarts(t *testing.T) {
 		t.Fatal(err)
 	}
 	crash := command(reg, "crash")
-	if ack, _ := e.Dispatch(context.Background(), crash); ack.State != wire.AckAccepted {
-		t.Fatal(ack)
+	// The child acks before it runs, then exits at once. Its ack can be
+	// lost with the link: a child that exits with frames unread (a ping)
+	// resets the socket, and the parent's read may fail before it reads
+	// the ack. Dispatch then answers the documented "sent, not answered"
+	// error (the hub marks the run lost, at most once). Either way the
+	// exit is reported lost and the build restarts.
+	ack, err := e.Dispatch(context.Background(), crash)
+	if err == nil && ack.State != wire.AckAccepted {
+		t.Fatalf("dispatch = %+v", ack)
+	}
+	if err != nil {
+		t.Logf("the crash took its ack with it: %v", err)
 	}
 	// The link's EOF can be reported first (lost false: the process may
 	// live on and redial) when the exit is slow to be reaped; the exit's
@@ -215,7 +225,6 @@ func TestCrashLosesTheRunsAndRestarts(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	var ack wire.Ack
 	for {
 		cmd := command(reg, "hello")
 		ack, err = e.Dispatch(context.Background(), cmd)
