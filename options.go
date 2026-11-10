@@ -110,8 +110,9 @@ func Base(path string) Option {
 // Title overrides the Console's page title.
 func Title(s string) Option { return func(c *config) { c.title = s } }
 
-// AllowOrigins are the CORS origins (default: localhost and 127.0.0.1
-// on any port) and, under Open, the extra Hosts the API answers.
+// AllowOrigins are the CORS origins (none by default: no CORS header
+// is sent) and, under Open, the extra Hosts the API answers. A request
+// with no credential (Open's Local principal) never gets CORS headers.
 func AllowOrigins(origins ...string) Option {
 	return func(c *config) { c.origins = append(c.origins, origins...) }
 }
@@ -155,13 +156,25 @@ func QueueTTL(d time.Duration) Option { return func(c *config) { c.policy.QueueT
 // with no decision, resuming it (default: never).
 func ApprovalExpiry(d time.Duration) Option { return func(c *config) { c.policy.ApprovalExpiry = d } }
 
+// AgentApprovalExpiry is ApprovalExpiry for one agent's runs: its
+// pending calls are denied ("approval expired") d after the run parked.
+func AgentApprovalExpiry(agent string, d time.Duration) Option {
+	return func(c *config) {
+		if c.policy.AgentApprovalExpiry == nil {
+			c.policy.AgentApprovalExpiry = map[string]time.Duration{}
+		}
+		c.policy.AgentApprovalExpiry[agent] = d
+	}
+}
+
+// TimerPoll is how often the scheduler looks for due timers (queue
+// time-to-live, approval expiry, pin age); default 1 s.
+func TimerPoll(d time.Duration) Option { return func(c *config) { c.timerPoll = d } }
+
 // MaxPinAge migrates a run parked this long to its agent's prod
 // version, or cancels it (cause version_retired) when there is none
 // (default 30 days; negative: never).
 func MaxPinAge(d time.Duration) Option { return func(c *config) { c.policy.MaxPinAge = d } }
-
-// timerPoll overrides how often the timer loop looks (tests).
-func timerPoll(d time.Duration) Option { return func(c *config) { c.timerPoll = d } }
 
 // silence overrides how long a held run may go unacked (tests).
 func silence(d time.Duration) Option { return func(c *config) { c.silence = d } }

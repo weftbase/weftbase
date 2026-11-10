@@ -15,7 +15,10 @@ import (
 // (plan §6.4). Each SSE frame is one event: `id:` is its seq, `event:`
 // its type, `data:` the event as JSON. A reconnect sends Last-Event-ID
 // (or ?after=) and gets every stored event after it, then the live
-// ones, each once, in seq order; every replayed and live row is matched
+// ones, each once, in seq order. With no cursor the stream starts at
+// the beginning of the outbox (after=0, the default: a consumer that
+// must miss nothing); ?after=now starts at the tail, live events only
+// (a UI that has just read the state and wants what changes next); every replayed and live row is matched
 // against the caller's scope (events.Selector), never against what
 // the query asks. ?type= (repeatable or comma-separated),
 // ?resource_kind= and ?resource_id= narrow the stream. A subscriber
@@ -50,10 +53,19 @@ func (s *Server) serveEvents(w http.ResponseWriter, r *http.Request) {
 	if cursor == "" {
 		cursor = q.Get("after")
 	}
-	if cursor != "" {
+	switch {
+	case cursor == "now":
+		// The tail: what is stored now is not replayed.
+		head, err := s.events.Head(r.Context())
+		if err != nil {
+			writeError(w, r, http.StatusInternalServerError, "internal", "outbox head: "+err.Error())
+			return
+		}
+		after = head
+	case cursor != "":
 		n, err := strconv.ParseInt(cursor, 10, 64)
 		if err != nil || n < 0 {
-			badRequest(w, r, "Last-Event-ID (or after) must be an event seq (a non-negative integer)")
+			badRequest(w, r, "Last-Event-ID (or after) must be an event seq (a non-negative integer), or after=now")
 			return
 		}
 		after = n
@@ -79,7 +91,7 @@ func (s *Server) serveEvents(w http.ResponseWriter, r *http.Request) {
 	defer sub.Close()
 	w.WriteHeader(http.StatusOK)
 	sw := &sseWriter{w: w, rc: http.NewResponseController(w)}
-	sw.flush()
+	sw.open()
 	ticker := time.NewTicker(pingEvery)
 	defer ticker.Stop()
 	for sw.err == nil {

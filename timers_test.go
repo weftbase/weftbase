@@ -11,6 +11,7 @@ import (
 	"github.com/weftbase/weft/core/wefttest"
 
 	"github.com/weftbase/weftbase/client/wire"
+	"github.com/weftbase/weftbase/events"
 	"github.com/weftbase/weftbase/registry"
 	"github.com/weftbase/weftbase/sessions"
 	"github.com/weftbase/weftbase/tenant"
@@ -23,7 +24,7 @@ import (
 // steer reaches a running embedded run.
 
 func TestQueueTTLEndToEnd(t *testing.T) {
-	app, ts, _ := startApp(t, t.TempDir(), QueueTTL(200*time.Millisecond), timerPoll(20*time.Millisecond))
+	app, ts, _ := startApp(t, t.TempDir(), QueueTTL(200*time.Millisecond), TimerPoll(20*time.Millisecond))
 	agent := core.New(wefttest.Script(wefttest.Say("never")), core.Name("unserved"))
 	m, err := core.Manifest(agent)
 	if err != nil {
@@ -53,7 +54,7 @@ func TestSilentWorkerLosesItsRun(t *testing.T) {
 }
 
 func TestApprovalExpiryEndToEnd(t *testing.T) {
-	app, ts, _ := startApp(t, t.TempDir(), BuildDigest(digestA), ApprovalExpiry(300*time.Millisecond), timerPoll(20*time.Millisecond))
+	app, ts, _ := startApp(t, t.TempDir(), BuildDigest(digestA), ApprovalExpiry(300*time.Millisecond), TimerPoll(20*time.Millisecond))
 	var refunded atomic.Int32
 	model := wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order":42}`}), wefttest.Say("not refunded"))
 	if err := app.Agent(refunds(model, &refunded)); err != nil {
@@ -74,8 +75,19 @@ func TestApprovalExpiryEndToEnd(t *testing.T) {
 	if res.Status != sessions.StatusSucceeded || refunded.Load() != 0 {
 		t.Fatalf("the expiry's resume = %+v (refunded %d)", res, refunded.Load())
 	}
-	if got := strings.Join(runEvents(t, app, id), ","); got != "run.queued,run.started,run.parked,approval.expired" {
-		t.Errorf("events = %s", got)
+	if got := strings.Join(runEvents(t, app, id), ","); got != "run.queued,run.started,run.parked" {
+		t.Errorf("run events = %s", got)
+	}
+	// The expiry is the approval's own event, one per approval.
+	sel := events.ForScope(tenant.Default(), false)
+	sel.ResourceKind = "approval"
+	evs, err := app.Events().List(context.Background(), sel, 0, 100)
+	var types []string
+	for _, e := range evs {
+		types = append(types, e.Type)
+	}
+	if err != nil || strings.Join(types, ",") != "approval.requested,approval.expired" {
+		t.Errorf("approval events = %v (%v)", types, err)
 	}
 }
 

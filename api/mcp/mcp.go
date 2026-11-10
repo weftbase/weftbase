@@ -702,6 +702,15 @@ func pageSummary(what string, b []byte, list string) string {
 	return s
 }
 
+// rawRuns asks GET /v1/runs for every run as it is (chains=0): the MCP
+// tools read runs one by one — a resume is a run of its own with its own
+// failure to explain — where the list's default is one row per logical
+// run.
+func rawRuns(q url.Values) url.Values {
+	q.Set("chains", "0")
+	return q
+}
+
 func (m *mcpReader) runs(ctx context.Context, _ *sdk.CallToolRequest, in mcpRunsIn) (*sdk.CallToolResult, any, error) {
 	q := url.Values{}
 	setStr(q, "agent", in.Agent)
@@ -716,7 +725,7 @@ func (m *mcpReader) runs(ctx context.Context, _ *sdk.CallToolRequest, in mcpRuns
 	setStr(q, "before", in.Before)
 	setStr(q, "before_id", in.BeforeID)
 	setStr(q, "error_class", in.ErrorClass)
-	b, err := m.get(ctx, "/v1/runs", q)
+	b, err := m.get(ctx, "/v1/runs", rawRuns(q))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -743,7 +752,7 @@ func (m *mcpReader) search(ctx context.Context, _ *sdk.CallToolRequest, in mcpSe
 		// is present; sort=started is the search's own default order.
 		q.Set("sort", "started")
 	}
-	b, err := m.get(ctx, "/v1/runs", q)
+	b, err := m.get(ctx, "/v1/runs", rawRuns(q))
 	if err != nil {
 		return nil, nil, err
 	}

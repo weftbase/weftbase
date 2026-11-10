@@ -1,6 +1,6 @@
-import { Link, Outlet, createFileRoute } from "@tanstack/react-router"
+import { Outlet, createFileRoute, useLocation } from "@tanstack/react-router"
 
-import { PageHeader } from "@/components/console/page-header"
+import { LinkTabs, Page, PageHeader } from "@/components/console/page-header"
 
 const SECTIONS = [
   { to: "/settings/general", label: "General" },
@@ -14,31 +14,23 @@ export const Route = createFileRoute("/settings")({
 })
 
 function Settings() {
+  const path = useLocation({ select: (l) => l.pathname })
   return (
-    <div className="mx-auto flex max-w-[1000px] flex-col gap-6">
-      <PageHeader
-        title="Settings"
-        description="How this server is set up, and how the Console looks to you."
-      />
-      <div className="flex flex-wrap gap-8">
-        <nav
-          aria-label="Settings"
-          className="flex w-[180px] flex-none flex-col gap-1 max-[760px]:w-full max-[760px]:flex-row max-[760px]:flex-wrap"
-        >
-          {SECTIONS.map((s) => (
-            <Link
-              key={s.to}
-              to={s.to}
-              className="flex h-9 items-center rounded-md px-2.5 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground aria-[current=page]:bg-accent aria-[current=page]:text-foreground aria-[current=page]:shadow-nav-active"
-            >
-              {s.label}
-            </Link>
-          ))}
-        </nav>
-        <div className="min-w-0 flex-1">
-          <Outlet />
-        </div>
+    <Page
+      header={<PageHeader title="Settings" />}
+      bar={
+        <LinkTabs
+          tabs={SECTIONS.map((s) => ({
+            label: s.label,
+            link: { to: s.to },
+            active: path.endsWith(s.to),
+          }))}
+        />
+      }
+    >
+      <div className="flex max-w-3xl flex-col gap-4">
+        <Outlet />
       </div>
-    </div>
+    </Page>
   )
 }

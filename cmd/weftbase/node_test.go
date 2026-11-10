@@ -46,6 +46,30 @@ func (s *syncBuffer) String() string {
 	return s.b.String()
 }
 
+// await waits until the output holds every want: a node serves before
+// it prints its banner, so a test that reads the banner as soon as the
+// port answers can read it empty.
+func (s *syncBuffer) await(t *testing.T, want ...string) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		out, missing := s.String(), ""
+		for _, w := range want {
+			if !strings.Contains(out, w) {
+				missing = w
+				break
+			}
+		}
+		if missing == "" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the output never said %q:\n%s", missing, out)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // freeBase is a loopback port whose n-1 successors were free too.
 func freeBase(t *testing.T, n int) int {
 	t.Helper()
@@ -227,6 +251,7 @@ func TestDevServer(t *testing.T) {
 	if fi, _ := os.Stat(keyPath); runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
 		t.Errorf("bootstrap.key mode %v, want 0600", fi.Mode().Perm())
 	}
+	out.await(t, "weftbase: sign in to the Console: ")
 	if strings.Contains(out.String(), key) {
 		t.Errorf("the banner printed the key:\n%s", out.String())
 	}
@@ -363,9 +388,7 @@ func TestServeRoles(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("ingest without a key = %d, want 401", resp.StatusCode)
 	}
-	if !strings.Contains(out.String(), "(roles ingest)") || !strings.Contains(out.String(), "bootstrap key from WEFTBASE_BOOTSTRAP_KEY") {
-		t.Errorf("serve banner:\n%s", out.String())
-	}
+	out.await(t, "(roles ingest)", "bootstrap key from WEFTBASE_BOOTSTRAP_KEY")
 	if _, err := os.Stat(filepath.Join(disc, discovery.FileName)); !os.IsNotExist(err) {
 		t.Errorf("serve wrote a discovery file: %v", err)
 	}
@@ -389,6 +412,7 @@ func TestServeRoles(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("api-only OTLP = %d, want 404", resp.StatusCode)
 	}
+	out.await(t, "(roles api)")
 	if strings.Contains(out.String(), "#signin=") {
 		t.Errorf("--console=false printed a sign-in link:\n%s", out.String())
 	}
@@ -426,9 +450,7 @@ func TestPortPolicy(t *testing.T) {
 	setVar(t, &devSpan, 2)
 	var out syncBuffer
 	stop := startCmd(t, []string{"dev", "--data", t.TempDir()}, loop(base+1), &out)
-	if !strings.Contains(out.String(), "listening on "+loop(base+1)+" instead") {
-		t.Errorf("no move line:\n%s", out.String())
-	}
+	out.await(t, "listening on "+loop(base+1)+" instead")
 	stop()
 
 	_, errb, code := cli("dev", "--addr", loop(base), "--data", t.TempDir())

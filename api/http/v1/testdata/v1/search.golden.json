@@ -1,7 +1,9 @@
 {
   "total": 3,
+  "total_exact": true,
   "runs": [
     {
+      "display_status": "succeeded",
       "id": "r_sub",
       "parent_run_id": "",
       "parent_call_id": "",
@@ -62,6 +64,7 @@
       }
     },
     {
+      "display_status": "succeeded",
       "id": "r_ok",
       "parent_run_id": "",
       "parent_call_id": "",
@@ -109,6 +112,7 @@
       "prompt_preview": "Where is order 42?"
     },
     {
+      "display_status": "failed",
       "id": "r_fail",
       "parent_run_id": "",
       "parent_call_id": "",

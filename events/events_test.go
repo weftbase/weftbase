@@ -72,6 +72,30 @@ func TestEmitRollsBackWithTheChange(t *testing.T) {
 	}
 }
 
+// TestHubStartsBehindAnEarlySubscriber: a subscription that finished its
+// replay before the hub's Run read the head still gets the rows
+// committed in between (Run used to start at the head and skip them).
+func TestHubStartsBehindAnEarlySubscriber(t *testing.T) {
+	l, db := newLog(t)
+	def := tenant.Default()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sub, err := l.Hub().Subscribe(ctx, ForScope(def, true), 0, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close()
+	emit(t, l, db, def, RunStarted, "r1") // before Run exists
+	go func() { _ = l.Hub().Run(ctx) }()
+	if e := recv(t, sub); e.Seq != 1 || e.ResourceID != "r1" {
+		t.Fatalf("got %+v, want seq 1", e)
+	}
+	emit(t, l, db, def, RunFinished, "r1")
+	if e := recv(t, sub); e.Seq != 2 {
+		t.Fatalf("got %+v, want seq 2", e)
+	}
+}
+
 // TestHubReplayThenLive: a subscription replays the stored events after
 // its cursor, then delivers new ones once each, in seq order, matching
 // its scope only.
@@ -114,16 +138,112 @@ func TestHubReplayThenLive(t *testing.T) {
 	}
 }
 
+// TestHubLongReplayStreams: a replay far longer than the buffer (and
+// than one page) is streamed to a slow reader, each row once, in order,
+// then live rows follow. The replay used to fill the buffer before the
+// reader could read, overflow, and then list the same page forever, so
+// Subscribe never returned.
+func TestHubLongReplayStreams(t *testing.T) {
+	l, db := newLog(t)
+	def := tenant.Default()
+	if err := db.InTx(context.Background(), func(tx store.Tx) error {
+		for i := 0; i < 1200; i++ {
+			if _, err := l.Emit(tx, def, Event{Type: RunStarted, ResourceKind: "run", ResourceID: "r"}, nil); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = l.Hub().Run(ctx) }()
+	sub, err := l.Hub().Subscribe(ctx, ForScope(def, true), 0, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close()
+	for want := int64(1); want <= 1200; want++ {
+		if e := recv(t, sub); e.Seq != want {
+			t.Fatalf("replayed seq %d, want %d", e.Seq, want)
+		}
+		if want == 600 {
+			// Live rows committed mid-replay come once, after the stored ones.
+			emit(t, l, db, def, RunFinished, "r")
+			emit(t, l, db, def, RunFinished, "r")
+		}
+	}
+	for want := int64(1201); want <= 1202; want++ {
+		if e := recv(t, sub); e.Seq != want {
+			t.Fatalf("seq %d, want %d", e.Seq, want)
+		}
+	}
+	emit(t, l, db, def, RunFinished, "r")
+	if e := recv(t, sub); e.Seq != 1203 {
+		t.Fatalf("live seq %d, want 1203", e.Seq)
+	}
+}
+
+// TestHubCloseDuringReplay: closing a subscription whose replay waits
+// on the reader ends it: C closes and the replay goroutine exits.
+func TestHubCloseDuringReplay(t *testing.T) {
+	l, db := newLog(t)
+	for i := 0; i < 10; i++ {
+		emit(t, l, db, tenant.Default(), RunStarted, "r")
+	}
+	sub, err := l.Hub().Subscribe(context.Background(), ForScope(tenant.Default(), true), 0, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recv(t, sub)
+	sub.Close()
+	n := 0
+	for range sub.C {
+		n++
+	}
+	// What was buffered, and at most the one send under way at Close.
+	if n > 3 || sub.Err() != nil {
+		t.Errorf("after Close: %d more rows, err %v; want at most the buffer (2) and one more, and nil", n, sub.Err())
+	}
+	// A replay whose ctx ends ends the subscription with that error.
+	ctx, cancel := context.WithCancel(context.Background())
+	sub2, err := l.Hub().Subscribe(ctx, ForScope(tenant.Default(), true), 0, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recv(t, sub2)
+	cancel()
+	for range sub2.C {
+	}
+	if !errors.Is(sub2.Err(), context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", sub2.Err())
+	}
+}
+
+// TestHubOverflow: once live, a reader that falls behind its buffer is
+// ended with ErrOverflow (it reconnects with its last seq).
 func TestHubOverflow(t *testing.T) {
 	l, db := newLog(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	for i := 0; i < 5; i++ {
-		emit(t, l, db, tenant.Default(), RunStarted, "r")
-	}
+	go func() { _ = l.Hub().Run(ctx) }()
 	sub, err := l.Hub().Subscribe(ctx, ForScope(tenant.Default(), true), 0, 2)
 	if err != nil {
 		t.Fatal(err)
+	}
+	waitLive(t, sub)
+	for i := 0; i < 5; i++ {
+		emit(t, l, db, tenant.Default(), RunStarted, "r")
+	}
+	// Read nothing until the pump has found the buffer full: reading
+	// earlier makes room, and how many fit would depend on timing.
+	deadline := time.Now().Add(5 * time.Second)
+	for sub.Err() == nil {
+		if time.Now().After(deadline) {
+			t.Fatal("no overflow within 5s")
+		}
+		time.Sleep(time.Millisecond)
 	}
 	n := 0
 	for range sub.C {
@@ -131,6 +251,24 @@ func TestHubOverflow(t *testing.T) {
 	}
 	if n != 2 || !errors.Is(sub.Err(), ErrOverflow) {
 		t.Errorf("read %d then %v, want 2 then ErrOverflow", n, sub.Err())
+	}
+}
+
+// waitLive waits until s has finished its replay.
+func waitLive(t *testing.T, s *Sub) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		s.mu.Lock()
+		live := !s.replaying
+		s.mu.Unlock()
+		if live {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("replay did not finish within 5s")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
@@ -156,16 +294,26 @@ func TestRelayAdvancesWithItsWork(t *testing.T) {
 			return nil
 		}, nil)
 	}()
+	// Wait on the stored cursor, not on the handler's count: the handler
+	// runs inside the transaction, so the count moves before the commit
+	// that advances the cursor.
 	deadline := time.Now().Add(5 * time.Second)
-	for seen.Load() < 2 && time.Now().Before(deadline) {
+	for {
+		cur, err := l.Cursor(context.Background(), "test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cur == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("cursor = %d after 5s, want 2", cur)
+		}
 		time.Sleep(5 * time.Millisecond)
 	}
 	cancel()
 	<-done
 	if seen.Load() != 2 {
 		t.Fatalf("relayed %d events, want 2", seen.Load())
-	}
-	if cur, _ := l.Cursor(context.Background(), "test"); cur != 2 {
-		t.Errorf("cursor = %d, want 2", cur)
 	}
 }

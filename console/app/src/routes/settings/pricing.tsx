@@ -1,70 +1,94 @@
-import { useSuspenseQuery } from "@tanstack/react-query"
+import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 
-import { Badge } from "@/components/ui/badge"
-import { Card } from "@/components/ui/card"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { DataTable } from "@/components/console/data-table"
+import type { Column } from "@/components/console/data-table"
+import { ErrorState, LoadingRows } from "@/components/console/empty-state"
+import { Section } from "@/components/console/page-header"
 import { q } from "@/lib/api/queries"
+import type { PricingTable } from "@/lib/api/types"
 
+// Settings, Pricing: the table costs are computed from (read-only; set
+// with the server's --pricing flag). USD per 1M tokens.
 export const Route = createFileRoute("/settings/pricing")({
-  loader: ({ context: { queryClient } }) =>
-    queryClient.ensureQueryData(q.pricing()),
   component: Pricing,
 })
 
-const usd = (n: number) => `$${n.toFixed(2)}`
+type Price = PricingTable["models"][number]
+const rate = (n: number | undefined) => (n === undefined ? "—" : `$${n}`)
+
+const COLUMNS: Column<Price>[] = [
+  {
+    key: "provider",
+    header: "Provider",
+    width: "minmax(100px, 160px)",
+    muted: true,
+    cell: (p) => p.provider ?? "any",
+  },
+  {
+    key: "model",
+    header: "Model",
+    width: "minmax(160px, 1fr)",
+    mono: true,
+    cell: (p) => p.model_glob,
+  },
+  {
+    key: "in",
+    header: "Input",
+    width: "80px",
+    align: "right",
+    mono: true,
+    cell: (p) => rate(p.input),
+  },
+  {
+    key: "out",
+    header: "Output",
+    width: "80px",
+    align: "right",
+    mono: true,
+    cell: (p) => rate(p.output),
+  },
+  {
+    key: "cached",
+    header: "Cached in",
+    width: "88px",
+    align: "right",
+    mono: true,
+    cell: (p) => rate(p.cached_input),
+  },
+  {
+    key: "write",
+    header: "Cache write",
+    width: "96px",
+    align: "right",
+    mono: true,
+    cell: (p) => rate(p.cache_write),
+  },
+]
 
 function Pricing() {
-  const { data } = useSuspenseQuery(q.pricing())
+  const pricing = useQuery(q.pricing())
+  if (pricing.error) return <ErrorState error={pricing.error} what="Pricing" />
+  if (!pricing.data) return <LoadingRows />
+  const p = pricing.data
   return (
-    <section className="flex flex-col gap-4">
-      <div>
-        <h2 className="text-lg">Pricing</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          The prices used to cost each model call, per million tokens. A model
-          with no price shows its cost as unknown.
-        </p>
-      </div>
-      <Card className="overflow-x-auto py-0">
-        <Table className="min-w-[560px]">
-          <TableHeader>
-            <TableRow>
-              <TableHead>Model</TableHead>
-              <TableHead className="text-right">Input</TableHead>
-              <TableHead className="text-right">Output</TableHead>
-              <TableHead className="text-right">Source</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {data.map((p) => (
-              <TableRow key={`${p.provider}/${p.model}`}>
-                <TableCell className="font-mono text-[13px]">
-                  <span className="text-subtle-foreground">{p.provider}/</span>
-                  {p.model}
-                </TableCell>
-                <TableCell className="text-right font-mono text-[13px] text-muted-foreground">
-                  {usd(p.input_per_mtok)}
-                </TableCell>
-                <TableCell className="text-right font-mono text-[13px] text-muted-foreground">
-                  {usd(p.output_per_mtok)}
-                </TableCell>
-                <TableCell className="text-right">
-                  <Badge variant="outline" size="tag" className="font-mono">
-                    {p.source}
-                  </Badge>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </Card>
-    </section>
+    <Section
+      title="Prices, USD per 1M tokens"
+      action={
+        <span>
+          {p.source === "default" ? "Shipped table" : (p.path ?? p.source)},
+          dated {p.dated}
+        </span>
+      }
+    >
+      <DataTable
+        label="Prices"
+        bordered
+        stickyHeader={false}
+        columns={COLUMNS}
+        rows={p.models}
+        rowKey={(m) => `${m.provider ?? "*"}/${m.model_glob}`}
+      />
+    </Section>
   )
 }

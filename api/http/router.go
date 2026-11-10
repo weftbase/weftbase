@@ -45,9 +45,9 @@ type Config struct {
 	Console http.Handler
 	// Ready reports readiness (/readyz); nil is always ready.
 	Ready func(context.Context) error
-	// AllowOrigins are the CORS origins (default: localhost and
-	// 127.0.0.1 on any port) and, for the Local principal, the extra
-	// Hosts the API answers.
+	// AllowOrigins are the CORS origins (none by default: no CORS
+	// header is sent) and, for the Local principal, the extra Hosts the
+	// API answers. The Local principal never gets CORS headers.
 	AllowOrigins []string
 	// RequestLog is the request log; nil makes a fresh one.
 	RequestLog *reqlog.Logger
@@ -117,6 +117,8 @@ func (rt *Router) ownRoutes() []Route {
 		out = append(out,
 			Route{"POST", "/v1/auth/sessions", authz.Public, http.HandlerFunc(rt.serveSignIn)},
 			Route{"DELETE", "/v1/auth/sessions/current", authz.AuthSession, http.HandlerFunc(rt.serveSignOut)},
+			Route{"DELETE", "/v1/auth/sessions", authz.KeysManage, http.HandlerFunc(rt.serveEndAll)},
+			Route{"POST", "/v1/auth/links", authz.AuthLink, http.HandlerFunc(rt.serveLink)},
 		)
 	}
 	return out
@@ -194,6 +196,7 @@ func (rt *Router) wrap(route Route) http.Handler {
 	label := route.Method + " " + route.Pattern
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cw := &countingWriter{ResponseWriter: w}
+		defer rt.metrics.begin(label)()
 		defer func() { rt.metrics.request(label, cw.status()) }()
 		w = cw.writer()
 		if r.URL.Query().Has("token") {
@@ -223,6 +226,9 @@ func (rt *Router) wrap(route Route) http.Handler {
 			writeError(w, r, http.StatusInternalServerError, "internal", "the credential could not be checked")
 			return
 		}
+		if p.Kind == authz.Local {
+			stripCORS(w.Header())
+		}
 		if !rt.guard(w, r, p) {
 			return
 		}
@@ -230,6 +236,9 @@ func (rt *Router) wrap(route Route) http.Handler {
 			writeError(w, r, http.StatusForbidden, "forbidden",
 				"not allowed to "+string(route.Action)+": "+d.Reason)
 			return
+		}
+		if p.Kind == authz.Operator && route.Pattern != "/v1/auth/sessions/current" {
+			rt.renew(w, r) // the Console session slides with its use
 		}
 		route.Handler.ServeHTTP(w, r.WithContext(authz.With(r.Context(), p, sc)))
 	})

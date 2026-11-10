@@ -10,8 +10,10 @@
 package rest
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -115,6 +117,58 @@ func (c *Client) Get(ctx context.Context, path string, q url.Values) ([]byte, er
 		return nil, apiError(path, resp.StatusCode, body)
 	}
 	return body, nil
+}
+
+// Post answers POST path with body as JSON (nil: no body) and returns
+// the response body; errors as Get's.
+func (c *Client) Post(ctx context.Context, path string, body any) ([]byte, error) {
+	return c.send(ctx, http.MethodPost, path, body)
+}
+
+// Delete answers DELETE path (DELETE /v1/runs/{id}, /v1/sessions/{id})
+// and returns the response body; errors as Get's.
+func (c *Client) Delete(ctx context.Context, path string) ([]byte, error) {
+	return c.send(ctx, http.MethodDelete, path, nil)
+}
+
+// send is Post and Delete: method path with body as JSON (nil: none).
+func (c *Client) send(ctx context.Context, method, path string, body any) ([]byte, error) {
+	var rd io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		rd = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.base+path, rd)
+	if err != nil {
+		return nil, err
+	}
+	if rd != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("weftbase not reachable at %s: %w (weftbase dev starts one; --url or WEFTBASE_URL points at another)", c.Redacted(), err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	out, err := io.ReadAll(io.LimitReader(resp.Body, MaxBody))
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: %w", method, path, err)
+	}
+	if resp.StatusCode/100 != 2 {
+		err := apiError(path, resp.StatusCode, out)
+		var se *StatusError
+		if errors.As(err, &se) {
+			se.Line = method + strings.TrimPrefix(se.Line, "GET")
+		}
+		return nil, err
+	}
+	return out, nil
 }
 
 // apiError is a non-2xx answer as one line: the server's error message

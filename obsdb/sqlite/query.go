@@ -211,6 +211,16 @@ func runWhere(q obsdb.RunQuery, now time.Time) (string, []any) {
 			args = append(args, id)
 		}
 	}
+	if q.IDs != nil {
+		if len(q.IDs) == 0 {
+			conds = append(conds, "0 = 1")
+		} else {
+			conds = append(conds, "run_id IN ("+strings.TrimSuffix(strings.Repeat("?,", len(q.IDs)), ",")+")") // the primary key
+			for _, id := range q.IDs {
+				args = append(args, id)
+			}
+		}
+	}
 	if q.PublicID != "" {
 		conds = append(conds, "public_id = ? AND public_id <> ''") // runs_public
 		args = append(args, q.PublicID)

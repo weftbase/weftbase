@@ -1,7 +1,9 @@
 {
   "total": 1,
+  "total_exact": true,
   "runs": [
     {
+      "display_status": "succeeded",
       "id": "r_sub/0/call_3",
       "parent_run_id": "r_sub",
       "parent_call_id": "call_3",

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,6 +23,10 @@ import (
 var binA, binB string
 
 func TestMain(m *testing.M) {
+	if mode := os.Getenv(fakeChildEnv); mode != "" {
+		fakeChild(mode) // this binary, started by an executor as its build
+		return
+	}
 	dir, err := os.MkdirTemp("", "wb-local")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -57,7 +62,7 @@ func BuildFixture(out, tag, pkg string) error {
 func newExec(t *testing.T, c Config) *Executor {
 	t.Helper()
 	if c.Output == nil {
-		c.Output = io.Discard
+		c.Output = testOutput(t)
 	}
 	c.SocketDir = t.TempDir()
 	e, err := New(c)
@@ -191,12 +196,19 @@ func TestCrashLosesTheRunsAndRestarts(t *testing.T) {
 		t.Fatal(err)
 	}
 	crash := command(reg, "crash")
-	if ack, _ := e.Dispatch(context.Background(), crash); ack.State != wire.AckAccepted {
-		t.Fatal(ack)
+	// The child acks before it runs (then exits at once): the ack arrives.
+	ack, err := e.Dispatch(context.Background(), crash)
+	if err != nil || ack.State != wire.AckAccepted {
+		t.Fatalf("dispatch = %+v, %v", ack, err)
 	}
-	f := next(t, e, func(f wire.Frame) bool { return f.Event == wire.EventDisconnected })
+	// The link's EOF can be reported first (lost false: the process may
+	// live on and redial) when the exit is slow to be reaped; the exit's
+	// own frame, lost, always follows.
 	var d wire.Disconnected
-	if f.Decode(&d) != nil || !d.Lost || !strings.Contains(d.Reason, "exit status 3") {
+	f := next(t, e, func(f wire.Frame) bool {
+		return f.Event == wire.EventDisconnected && f.Decode(&d) == nil && d.Lost
+	})
+	if !strings.Contains(d.Reason, "exit status 3") {
 		t.Fatalf("disconnected = %s", f.Data)
 	}
 	deadline := time.Now().Add(15 * time.Second)
@@ -206,7 +218,6 @@ func TestCrashLosesTheRunsAndRestarts(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	var ack wire.Ack
 	for {
 		cmd := command(reg, "hello")
 		ack, err = e.Dispatch(context.Background(), cmd)
@@ -306,4 +317,32 @@ func TestRetireThenStartOnDemand(t *testing.T) {
 	if ack, err := e.Dispatch(context.Background(), command(reg, "hello")); err != nil || ack.State != wire.AckBusy || e.Running() {
 		t.Errorf("after Drain = %+v, %v; running %v", ack, err, e.Running())
 	}
+}
+
+// testOutput is a child's stdout and stderr in the test's log, shown
+// when the test fails. Writes after the test ended are dropped (a child
+// can outlive its test by a drain).
+func testOutput(t *testing.T) io.Writer {
+	w := &tlog{t: t}
+	t.Cleanup(func() {
+		w.mu.Lock()
+		w.done = true
+		w.mu.Unlock()
+	})
+	return w
+}
+
+type tlog struct {
+	mu   sync.Mutex
+	t    *testing.T
+	done bool
+}
+
+func (w *tlog) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.done {
+		w.t.Logf("child: %s", strings.TrimRight(string(p), "\n"))
+	}
+	return len(p), nil
 }

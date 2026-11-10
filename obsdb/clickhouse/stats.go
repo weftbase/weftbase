@@ -96,6 +96,7 @@ func statsSpans(runs string) string {
 			AND sOp IN ('invoke_agent', 'chat', 'execute_tool')
 			AND SpanAttributes['weft.chat.role'] = ''
 			AND NOT (sOp = 'execute_tool' AND SpanAttributes['weft.tool.denied'] = 'true')
+			AND NOT (sOp = 'execute_tool' AND SpanAttributes['weft.tool.pending'] = 'true')
 			AND Timestamp >= fromUnixTimestamp64Nano(?)
 		LIMIT 1 BY TraceId, SpanId) AS s
 	LEFT JOIN (SELECT TraceId AS aTrace, ParentSpanId AS aParent, max(if(match(SpanAttributes['weft.attempt.index'], '^[0-9]+$'), toInt64OrZero(SpanAttributes['weft.attempt.index']), toInt64(0))) AS aMax

@@ -402,7 +402,7 @@ func TestFromEnv(t *testing.T) {
 		t.Errorf("a URL only: %v", err)
 	}
 	t.Setenv(EnvSocket, "/nowhere.sock")
-	t.Setenv(EnvToken, "tk")
+	t.Setenv(EnvWorkerToken, "tk")
 	t.Setenv(EnvBuildDigest, digest)
 	c := newConfig([]Option{FromEnv()})
 	if c.err != nil || c.socket != "/nowhere.sock" || c.token != "tk" || c.digest != digest || c.placement != wire.PlacementLocal {

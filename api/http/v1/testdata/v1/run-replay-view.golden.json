@@ -1,4 +1,5 @@
 {
+  "display_status": "succeeded",
   "id": "r_unknown",
   "parent_run_id": "",
   "parent_call_id": "",
@@ -47,6 +48,7 @@
   "request_count": 1,
   "prompt_preview": "Where is order 42?",
   "children": [],
+  "children_total": 0,
   "holes": [
     {
       "hole": "derived",

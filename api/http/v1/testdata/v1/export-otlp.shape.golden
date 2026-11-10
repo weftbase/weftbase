@@ -30,6 +30,7 @@
 .traces.resourceSpans[]
 .traces.resourceSpans[].resource.attributes[]
 .traces.resourceSpans[].resource.attributes[].key=string
+.traces.resourceSpans[].resource.attributes[].value.intValue=string
 .traces.resourceSpans[].resource.attributes[].value.stringValue=string
 .traces.resourceSpans[].resource.attributes[].value{}
 .traces.resourceSpans[].resource.attributes[]{}

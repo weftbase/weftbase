@@ -101,6 +101,16 @@ func (sw *sseWriter) frame(format string, args ...any) {
 	_, sw.err = fmt.Fprintf(sw.w, format, args...)
 }
 
+// open sends the first bytes of a stream at once: the headers and a
+// comment line. A proxy that holds headers back until a body byte
+// passes, and a client that waits for one, both see the stream open now
+// rather than at the first frame or ping (15 s on a quiet stream). A
+// comment is no event: an SSE client's handlers never see it.
+func (sw *sseWriter) open() {
+	sw.frame(": open\n\n")
+	sw.flush()
+}
+
 func (sw *sseWriter) flush() {
 	if sw.err != nil {
 		return
@@ -447,7 +457,7 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 	h.Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	sw := &sseWriter{w: w, rc: http.NewResponseController(w)}
-	sw.flush()
+	sw.open()
 	sent := newLiveDedup(liveDedupSize)
 	if r.Header.Get("Last-Event-ID") != "" {
 		// Nothing is evicted while the backfill writes, nor until the
@@ -456,6 +466,9 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 		s.backfill(ctx, sw, sel, kinds, sent, filter)
 	}
 
+	// One view of the ledger for the connection: its reads are kept for
+	// controlTTL, not re-read on every frame.
+	ctl := s.control(r)
 	ticker := time.NewTicker(pingEvery)
 	defer ticker.Stop()
 	for sw.err == nil {
@@ -486,7 +499,8 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 			if key, ok := liveDedupKey(f); ok && sent.seen(key) {
 				continue
 			}
-			writeFrame(sw, f, s.coster(ctx))
+			ctl.fresh()
+			writeFrame(sw, f, s.coster(ctx), ctl)
 		}
 	}
 }
@@ -545,7 +559,7 @@ type removedRunDTO struct {
 //
 // A run frame's row carries its cost (plan A5) as every run row does:
 // c reads the run's children to tell its own usage from theirs.
-func writeFrame(sw *sseWriter, f obsdb.Frame, c *coster) {
+func writeFrame(sw *sseWriter, f obsdb.Frame, c *coster, ctl *control) {
 	switch f.Kind {
 	case obsdb.FrameRecord:
 		if f.Record == nil {
@@ -581,7 +595,17 @@ func writeFrame(sw *sseWriter, f obsdb.Frame, c *coster) {
 			sw.frame("id: %d\nevent: run\ndata: %s\n\n", f.Seq, data)
 			break
 		}
-		rowJSON, err := json.Marshal(c.row(*f.Run))
+		// The row as a list draws it: the ledger's fields too. A ledger
+		// that cannot be read is no reason to guess: the frame is held
+		// back (logged), the next one carries the row.
+		one := []runRow{c.row(*f.Run)}
+		ctl.decorate(one)
+		if ctl.err != nil {
+			slog.Warn("weftbase: a run frame was held back: the control store could not be read", "run", f.Run.ID, "err", ctl.err)
+			ctl.reset()
+			return
+		}
+		rowJSON, err := json.Marshal(one[0])
 		if err != nil {
 			return
 		}

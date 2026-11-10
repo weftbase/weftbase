@@ -6,6 +6,7 @@
   "first_seen": "2020-01-01T09:00:00.123Z",
   "last_seen": "2020-01-01T09:03:00.323Z",
   "status": "interrupted",
+  "display_status": "interrupted",
   "usage": {
     "input_tokens": 18,
     "output_tokens": 6
@@ -33,6 +34,7 @@
   },
   "runs": [
     {
+      "display_status": "succeeded",
       "id": "r_ok",
       "parent_run_id": "",
       "parent_call_id": "",
@@ -80,6 +82,7 @@
       "prompt_preview": "Where is order 42?"
     },
     {
+      "display_status": "failed",
       "id": "r_fail",
       "parent_run_id": "",
       "parent_call_id": "",
@@ -127,6 +130,7 @@
       "prompt_preview": "Where is order 43?"
     },
     {
+      "display_status": "interrupted",
       "id": "r_stale",
       "parent_run_id": "",
       "parent_call_id": "",

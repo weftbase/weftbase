@@ -72,15 +72,18 @@ const decisionsCap = 32
 // is not_recorded. Notes are the block's honesty lines: a read that
 // failed beside it, decision records past the read's cap.
 type decisionDoc struct {
-	Run    string        `json:"run"`
-	At     time.Time     `json:"at"`
-	Actor  string        `json:"actor,omitempty"`
-	Source string        `json:"source"`
-	Calls  []decidedCall `json:"calls"`
-	More   int           `json:"more,omitempty"`
-	Hole   string        `json:"hole,omitempty"`
-	Notes  []string      `json:"notes,omitempty"`
-	Error  string        `json:"error,omitempty"`
+	Run   string    `json:"run"`
+	At    time.Time `json:"at"`
+	Actor string    `json:"actor,omitempty"`
+	// ActorKind is set where Actor is the ledger's record of who
+	// decided (operator: a Console session; key: an API key's id).
+	ActorKind string        `json:"actor_kind,omitempty"`
+	Source    string        `json:"source"`
+	Calls     []decidedCall `json:"calls"`
+	More      int           `json:"more,omitempty"`
+	Hole      string        `json:"hole,omitempty"`
+	Notes     []string      `json:"notes,omitempty"`
+	Error     string        `json:"error,omitempty"`
 }
 
 // decidedCall is one parked call's decision. Outcome is approved,
@@ -96,7 +99,9 @@ type decisionDoc struct {
 // handler, so no tool event or span carries it), ResultBadge why it has
 // none. At is the decision's own time when a record names one.
 type decidedCall struct {
-	CallID      string     `json:"call_id"`
+	CallID string `json:"call_id"`
+	// ApprovalID is the ledger's approval record of the call.
+	ApprovalID  string     `json:"approval_id,omitempty"`
 	Name        string     `json:"name,omitempty"`
 	Outcome     string     `json:"outcome"`
 	Derived     bool       `json:"derived,omitempty"`

@@ -131,6 +131,17 @@ func TestEventsStreamReplay(t *testing.T) {
 		t.Fatalf("filtered replay %+v, want only id 5", e)
 	}
 
+	// after=now starts at the tail: nothing stored is replayed, the
+	// next event arrives.
+	c3 := openStream(t, s, "/v1/events?after=now", s.key, "")
+	time.Sleep(50 * time.Millisecond) // the subscription is in place before the mint
+	if _, _, err := s.keys.Mint(ctx, tenant.Default(), keys.Secret, "c", events.System); err != nil {
+		t.Fatal(err)
+	}
+	if e := next(t, c3); e.id != "6" || e.event != events.KeyMinted {
+		t.Fatalf("after=now: first frame %+v, want only the live id 6", e)
+	}
+
 	if resp, body := s.do(t, req{path: "/v1/events", key: s.key, header: map[string]string{"Last-Event-ID": "x"}}); resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("bad cursor: %d %s", resp.StatusCode, body)
 	}

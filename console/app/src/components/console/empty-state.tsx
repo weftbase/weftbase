@@ -1,30 +1,112 @@
+import { useRouter } from "@tanstack/react-router"
+import { InboxIcon, TriangleAlertIcon } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import * as React from "react"
 
-import { Card } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import {
+  ApiError,
+  isNotFound,
+  isUnavailable,
+  isUnsupported,
+} from "@/lib/api/errors"
+import { cn } from "@/lib/utils"
 
-// EmptyState (design system): a centred card with a graphite icon tile,
-// one line saying what is missing and one saying how to add the first.
+/** EmptyState: nothing to show, said plainly, with what to do next. */
 export function EmptyState({
-  icon: Icon,
+  icon: Icon = InboxIcon,
   title,
   children,
+  action,
+  className,
 }: {
-  icon: LucideIcon
+  icon?: LucideIcon
   title: string
   children?: React.ReactNode
+  action?: React.ReactNode
+  className?: string
 }) {
   return (
-    <Card className="items-center gap-2.5 px-6 py-10 text-center">
-      <span className="flex size-10 items-center justify-center rounded-icon tile">
-        <Icon className="size-[18px]" />
-      </span>
-      <div className="text-sm font-semibold">{title}</div>
-      {children && (
-        <div className="max-w-sm text-[13px] text-muted-foreground">
-          {children}
-        </div>
+    <div
+      className={cn(
+        "flex flex-col items-center gap-1 px-4 py-10 text-center",
+        className
       )}
-    </Card>
+    >
+      <Icon className="mb-1 size-5 text-subtle-foreground" aria-hidden />
+      <p className="text-sm font-medium">{title}</p>
+      {children && (
+        <div className="max-w-sm text-xs text-muted-foreground">{children}</div>
+      )}
+      {action && <div className="mt-2">{action}</div>}
+    </div>
+  )
+}
+
+/** ErrorState: a request failed. It shows the server's own message, the
+ * request id when there is one, and a retry. A 404 and a 501 read as
+ * what they are, not as a crash. */
+export function ErrorState({
+  error,
+  what = "This",
+  onRetry,
+  className,
+}: {
+  error: unknown
+  /** What failed to load: "The run", "Sessions". */
+  what?: string
+  onRetry?: () => void
+  className?: string
+}) {
+  const router = useRouter()
+  const title = isNotFound(error)
+    ? `${what} was not found`
+    : isUnsupported(error)
+      ? `${what} is not available on this server`
+      : isUnavailable(error)
+        ? `${what} could not load: the store is unavailable, retry`
+        : `${what} could not load`
+  const message = error instanceof Error ? error.message : String(error)
+  return (
+    <EmptyState
+      icon={TriangleAlertIcon}
+      title={title}
+      className={className}
+      action={
+        !isNotFound(error) &&
+        !isUnsupported(error) && (
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => (onRetry ? onRetry() : void router.invalidate())}
+          >
+            Try again
+          </Button>
+        )
+      }
+    >
+      <span className="block font-mono break-words">{message}</span>
+      {error instanceof ApiError && error.requestId && (
+        <span className="mt-1 block font-mono text-subtle-foreground">
+          request {error.requestId}
+        </span>
+      )}
+    </EmptyState>
+  )
+}
+
+/** Skeleton rows for a loading list: `rows` lines at the row height. */
+export function LoadingRows({ rows = 6 }: { rows?: number }) {
+  return (
+    <div role="status" aria-label="Loading" className="animate-pulse">
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="flex h-8 items-center border-b px-2">
+          <div
+            className="h-2.5 rounded-sm bg-muted"
+            style={{ width: `${30 + ((i * 17) % 45)}%` }}
+          />
+        </div>
+      ))}
+    </div>
   )
 }

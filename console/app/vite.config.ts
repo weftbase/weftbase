@@ -10,6 +10,8 @@ import tailwindcss from "@tailwindcss/vite"
 //
 // Relative asset URLs: the Go handler writes one <base href> per request,
 // so the same bundle mounts at any prefix.
+const API = process.env.WEFTBASE_API ?? "http://127.0.0.1:7331"
+
 const config = defineConfig(({ command }) => ({
   resolve: { tsconfigPaths: true },
   // Relative in the build only: the dev server serves modules from "/".
@@ -17,10 +19,11 @@ const config = defineConfig(({ command }) => ({
   build: { sourcemap: false },
   // `weftbase dev` serves the API on :7331. The proxy keeps the browser
   // same-origin, so the session cookie and CSRF rules are the real ones.
+  // WEFTBASE_API points the proxy at a server on another port.
   server: {
     proxy: {
-      "/v1": { target: "http://127.0.0.1:7331", changeOrigin: false },
-      "/otlp": { target: "http://127.0.0.1:7331", changeOrigin: false },
+      "/v1": { target: API, changeOrigin: false },
+      "/otlp": { target: API, changeOrigin: false },
     },
   },
   plugins: [

@@ -1,9 +1,12 @@
 // Package local is the local placement (P§5.7, M§4.3), the default
 // for builds: a supervised child process per build, talking the worker
 // protocol over a Unix socket. The supervisor starts the build with
-// WEFTBASE_SOCKET, WEFTBASE_TOKEN (a per-child secret), WEFTBASE_BUILD_DIGEST
-// and WEFTBASE_PLACEMENT=local; the build (client/worker.Serve) dials
-// back and registers.
+// WEFTBASE_SOCKET, WEFTBASE_WORKER_TOKEN (a per-child secret for the
+// link), WEFTBASE_BUILD_DIGEST and WEFTBASE_PLACEMENT=local; the build
+// (client/worker.Serve) dials back and registers. Telemetry is the
+// node's to supply (Config.Telemetry): WEFTBASE_URL and WEFTBASE_TOKEN,
+// an ingest key, so the build's exporter.Install() reports to the node
+// that supervises it.
 //
 // One Executor is one build. It implements worker.Executor: the hub
 // dispatches to it like to any placement. The child is started on
@@ -34,8 +37,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/weftbase/weftbase/client/wire"
@@ -72,6 +77,12 @@ type Config struct {
 	// Env are extra environment variables (KEY=VALUE) for the child,
 	// after the node's own and before the WEFTBASE_* ones.
 	Env []string
+	// Telemetry, when set, is asked at every start of the child for
+	// where its traces and logs go: the node's base URL and an API key
+	// that may ingest. Both non-empty: the child gets WEFTBASE_URL and
+	// WEFTBASE_TOKEN. The node's own values of these (and of every
+	// WEFTBASE_* the supervisor sets) are never inherited.
+	Telemetry func() (url, key string)
 	// Digest is the build's digest; default sha256 of Path.
 	Digest string
 	// SocketDir is where the socket is made (default os.TempDir()). A
@@ -123,6 +134,10 @@ type link struct {
 	conn net.Conn
 	wmu  sync.Mutex
 	done chan struct{}
+	// reads counts the frames read; handing is set while the reader
+	// waits for the hub to take one (awaitReader).
+	reads   atomic.Int64
+	handing atomic.Bool
 }
 
 func (l *link) write(f wire.Frame) error {
@@ -300,13 +315,41 @@ func (e *Executor) ensure(ctx context.Context) (*link, error) {
 	return e.link, nil
 }
 
+// supervisorEnv are the variables the supervisor sets for a child. The
+// node's own values of them are never inherited: a node that itself
+// runs with WEFTBASE_TOKEN (a key of another node, or an operator's)
+// must not hand that credential to its builds; with no Telemetry the
+// child gets no WEFTBASE_URL/WEFTBASE_TOKEN at all.
+var supervisorEnv = []string{
+	buildworker.EnvURL, buildworker.EnvToken, buildworker.EnvSocket,
+	buildworker.EnvWorkerToken, buildworker.EnvBuildDigest, buildworker.EnvPlacement,
+}
+
+// nodeEnv is the node's environment without supervisorEnv.
+func nodeEnv() []string {
+	env := os.Environ()
+	out := env[:0:0]
+	for _, kv := range env {
+		k, _, _ := strings.Cut(kv, "=")
+		if !slices.Contains(supervisorEnv, k) {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
 // startLocked starts the child. e.mu is held.
 func (e *Executor) startLocked() error {
 	cmd := exec.Command(e.c.Path, e.c.Args...)
-	cmd.Env = append(os.Environ(), e.c.Env...)
+	cmd.Env = append(nodeEnv(), e.c.Env...)
+	if e.c.Telemetry != nil {
+		if url, key := e.c.Telemetry(); url != "" && key != "" {
+			cmd.Env = append(cmd.Env, buildworker.EnvURL+"="+url, buildworker.EnvToken+"="+key)
+		}
+	}
 	cmd.Env = append(cmd.Env,
 		buildworker.EnvSocket+"="+e.sock,
-		buildworker.EnvToken+"="+e.token,
+		buildworker.EnvWorkerToken+"="+e.token,
 		buildworker.EnvBuildDigest+"="+e.c.Digest,
 		buildworker.EnvPlacement+"="+wire.PlacementLocal,
 	)
@@ -328,13 +371,22 @@ func (e *Executor) startLocked() error {
 }
 
 // exited records the child's end: the runs it held are lost; a crash
-// of a current build restarts it after a backoff.
+// of a current build restarts it after a backoff. The link's reader is
+// drained to EOF first: frames the child wrote just before it exited (a
+// finished ack) are still in the socket, and they must reach the hub
+// before the disconnected frame that loses the runs still held.
 func (e *Executor) exited(cmd *exec.Cmd, done chan struct{}, err error, upFor time.Duration) {
 	e.mu.Lock()
 	if e.proc != cmd {
 		e.mu.Unlock()
 		return
 	}
+	l := e.link
+	e.mu.Unlock()
+	if l != nil {
+		e.awaitReader(l)
+	}
+	e.mu.Lock()
 	e.proc, e.exitErr = nil, err
 	close(done)
 	expected := e.expectExit || e.draining || e.base.Err() != nil
@@ -347,7 +399,7 @@ func (e *Executor) exited(cmd *exec.Cmd, done chan struct{}, err error, upFor ti
 		e.restarts++
 		e.restartAt = time.Now().Add(d)
 	}
-	l := e.link
+	l = e.link
 	e.link = nil
 	e.failWaitersLocked()
 	e.mu.Unlock()
@@ -390,6 +442,39 @@ func backoff(n int) time.Duration {
 		d = 500 * time.Millisecond * (1 << n)
 	}
 	return d/2 + mrand.N(d/2+1)
+}
+
+// exitDrain is how long an exited child's link may go without the
+// reader making progress before it is closed (a descendant that
+// inherited the socket could hold it open past the exit).
+const exitDrain = 2 * time.Second
+
+// awaitReader waits for l's reader to read what the exited child left
+// in the socket and end (dropped closes l.done). A reader waiting on
+// the hub to take a frame is progress, however long; a reader that read
+// nothing for exitDrain while not handing a frame over is waiting on a
+// socket no exited process will write, and the connection is closed.
+func (e *Executor) awaitReader(l *link) {
+	t := time.NewTicker(exitDrain)
+	defer t.Stop()
+	last := l.reads.Load()
+	for {
+		select {
+		case <-l.done:
+			return
+		case <-e.base.Done():
+			_ = l.conn.Close()
+			return
+		case <-t.C:
+			if n := l.reads.Load(); n != last || l.handing.Load() {
+				last = n
+				continue
+			}
+			e.c.Logger.Warn("local: an exited build's link stayed open; closing it", "digest", e.c.Digest)
+			_ = l.conn.Close()
+			return
+		}
+	}
 }
 
 func (e *Executor) failWaitersLocked() {
@@ -472,7 +557,21 @@ func (e *Executor) serve(conn net.Conn) {
 		r := reg
 		e.reg = &r
 	}
+	e.mu.Unlock()
+	// The welcome is the link's first frame: it is written before the
+	// link is published, so no dispatch can put a run frame ahead of it
+	// (the child drops a link whose first frame is not the welcome).
 	l := &link{conn: conn, done: make(chan struct{})}
+	if beforeWelcome != nil {
+		beforeWelcome(e)
+	}
+	w, _ := wire.NewFrame(wire.EventWelcome, "", wire.Welcome{WorkerID: e.workerID, PingMS: e.c.Ping.Milliseconds()})
+	if err := l.write(w); err != nil {
+		close(l.done)
+		_ = conn.Close()
+		return
+	}
+	e.mu.Lock()
 	old := e.link
 	e.link = l
 	close(e.linkUp)
@@ -480,11 +579,6 @@ func (e *Executor) serve(conn net.Conn) {
 	e.mu.Unlock()
 	if old != nil {
 		_ = old.conn.Close()
-	}
-	w, _ := wire.NewFrame(wire.EventWelcome, "", wire.Welcome{WorkerID: e.workerID, PingMS: e.c.Ping.Milliseconds()})
-	if err := l.write(w); err != nil {
-		e.dropped(l, err)
-		return
 	}
 	go e.ping(l)
 	_ = conn.SetReadDeadline(time.Time{})
@@ -494,6 +588,7 @@ func (e *Executor) serve(conn net.Conn) {
 			e.dropped(l, err)
 			return
 		}
+		l.reads.Add(1)
 		if f.Event != wire.EventAck {
 			continue
 		}
@@ -511,13 +606,19 @@ func (e *Executor) serve(conn net.Conn) {
 			ch <- a
 			continue
 		}
+		l.handing.Store(true)
 		select {
 		case e.events <- wire.AckFrame(a):
+			l.handing.Store(false)
 		case <-e.base.Done():
 			return
 		}
 	}
 }
+
+// beforeWelcome, when set (tests only), runs just before a link's
+// welcome is written.
+var beforeWelcome func(*Executor)
 
 func sameAgents(a, b wire.Registration) bool {
 	if len(a.Agents) != len(b.Agents) {

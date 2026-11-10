@@ -185,7 +185,7 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		// The fixture's run reports attempts and a fallback (U4's
 		// problem counters); TestProblemCountersFromARealRun pins those
 		// fields from real runs that have them.
-		{"run-compacted.golden.json", "/v1/runs/" + url.PathEscape(res.ID), []string{".own_usage", ".delegated_usage", ".children[]", ".children_count", ".compactions[]", ".holes[]", ".delegated_cost_reason", ".delegated_cost_usd=<nil>", ".attempts_retried", ".fallbacks"}},
+		{"run-compacted.golden.json", "/v1/runs/" + url.PathEscape(res.ID), []string{".own_usage", ".delegated_usage", ".children[]", ".children_count", ".compactions[]", ".holes[]", ".delegated_cost_reason", ".delegated_cost_usd=<nil>", ".attempts_retried", ".fallbacks", ".chain"}}, // the fixture's run waits on a person: a chain
 		// The session marker's turn also carries its summarizer figure
 		// (UX-B-13, U15.1-fix); the plain real run is no session turn.
 		{"run-session-compacted.golden.json", "/v1/runs/" + url.PathEscape(res.ID), []string{".compactions[]", ".summarizer"}},

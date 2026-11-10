@@ -1,0 +1,72 @@
+{
+  "weft_version": "v0.24.2",
+  "server_version": "v0.1.0",
+  "capabilities": [],
+  "capabilities_off": [
+    {
+      "name": "ingest",
+      "reason": "this node does not run the ingest role: OTLP at /otlp/v1/* is served by the nodes started with --roles ingest"
+    },
+    {
+      "name": "runs",
+      "reason": "this server runs no agents (no run ledger): POST /v1/runs, cancel, steer, resume and /v1/approvals answer 501"
+    },
+    {
+      "name": "agents",
+      "reason": "this server has no agent registry: /v1/agents and /v1/tools answer 501"
+    },
+    {
+      "name": "events",
+      "reason": "this server has no control-store outbox: GET /v1/events answers 501"
+    }
+  ],
+  "principal": {
+    "kind": "local",
+    "id": "local",
+    "scope": {
+      "project": "prj_default",
+      "env": "test",
+      "tenant": "ten_project"
+    },
+    "all_tenants": true
+  },
+  "ingest": {
+    "dropped": [],
+    "accepted": 0,
+    "refused": 0
+  },
+  "pricing": {
+    "source": "default",
+    "dated": "2026-10-10",
+    "models": 47
+  },
+  "db": {
+    "kind": "sqlite"
+  },
+  "interrupted_after_ms": 30000,
+  "content": {
+    "ingest": "as_received",
+    "latest": {
+      "run_id": "r_stale",
+      "mark": "unmarked",
+      "note": "the latest run carries no content mark: no events stored, a weft older than the mark, or a non-weft exporter",
+      "started": "2020-01-01T09:03:00.123Z",
+      "weft_version": "v0.6.0",
+      "service": "weftbase-test"
+    }
+  },
+  "retention": null,
+  "manifest_check": {
+    "source": "file",
+    "agents": 1,
+    "checked": 1,
+    "stale": [
+      "orders"
+    ],
+    "latest": {
+      "orders": "sha256:demo-fleet"
+    }
+  },
+  "pid": 1234
+}
+

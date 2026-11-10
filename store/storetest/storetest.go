@@ -395,12 +395,20 @@ func testLedger(t *testing.T, db store.Runner) {
 	if err != nil || parked.Status != sessions.StatusParked || parked.ParkedAt == nil || len(parked.Pending) != 1 {
 		t.Fatalf("parked = %+v, %v", parked, err)
 	}
-	res, err := l.Resume(ctx, s, events.System, run.ID, []wire.Decision{{CallID: "c1", Decision: "approve"}})
-	if err != nil || res.AgentVersion != vs[0].ID || res.ResolvedVia != registry.ViaPin || res.ResumeOf != run.ID {
-		t.Fatalf("Resume = %+v, %v", res, err)
+	apps, err := l.Approvals(ctx, s, sessions.ApprovalQuery{RunID: run.ID})
+	if err != nil || len(apps.Approvals) != 1 {
+		t.Fatalf("the parked run's approvals = %+v, %v", apps, err)
 	}
-	if _, err := l.Resume(ctx, s, events.System, run.ID, nil); !errors.Is(err, sessions.ErrNotParked) {
-		t.Errorf("a second resume = %v", err)
+	decided, err := l.Decide(ctx, s, events.System, apps.Approvals[0].ID, "approve", "", "", apps.Approvals[0].ArgsSHA256)
+	if err != nil || decided.ResumedBy == "" {
+		t.Fatalf("Decide = %+v, %v", decided, err)
+	}
+	res, err := l.Get(ctx, s, decided.ResumedBy)
+	if err != nil || res.AgentVersion != vs[0].ID || res.ResolvedVia != registry.ViaPin || res.ResumeOf != run.ID || res.ChainID != run.ID {
+		t.Fatalf("the resume = %+v, %v", res, err)
+	}
+	if _, err := l.Cancel(ctx, s, events.System, run.ID, ""); !errors.Is(err, sessions.ErrAlreadyResumed) {
+		t.Errorf("a cancel of the resumed parked run = %v", err)
 	}
 	// The queue time-to-live fails a run nobody dispatched.
 	c.add(2 * time.Hour)
@@ -483,9 +491,6 @@ func testCrossTenant(t *testing.T, db store.Runner) {
 		if _, err := l.Cancel(ctx, o, events.System, run.ID, ""); !errors.Is(err, store.ErrNotFound) {
 			t.Errorf("%s cancels %s's run: %v", o, a, err)
 		}
-		if _, err := l.Resume(ctx, o, events.System, run.ID, nil); !errors.Is(err, store.ErrNotFound) {
-			t.Errorf("%s resumes %s's run: %v", o, a, err)
-		}
 		if _, err := q.Get(ctx, o, item); !errors.Is(err, store.ErrNotFound) {
 			t.Errorf("%s reads %s's queue item: %v", o, a, err)
 		}
@@ -497,6 +502,13 @@ func testCrossTenant(t *testing.T, db store.Runner) {
 		inTx(t, db, func(tx store.Tx) error { return q.CancelTimer(tx, o, timer) })
 		if evs, err := log.List(ctx, events.ForScope(o, false), 0, 100); err != nil || len(evs) != 0 {
 			t.Errorf("%s sees %d of %s's events (%v)", o, len(evs), a, err)
+		}
+		// A delete names nothing of a's (its audit event is o's own).
+		if n, _, err := l.Delete(ctx, o, events.System, []string{run.ID}); err != nil || n != 0 {
+			t.Errorf("%s deletes %d of %s's runs: %v", o, n, a, err)
+		}
+		if _, err := l.Get(ctx, a, run.ID); err != nil {
+			t.Errorf("%s's delete removed %s's run: %v", o, a, err)
 		}
 	}
 	if got, err := l.Get(ctx, a, run.ID); err != nil || got.Status != sessions.StatusQueued {

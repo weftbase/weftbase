@@ -258,6 +258,15 @@ func runsInner(q obsdb.RunQuery, cut runsCut) (string, []any) {
 	if q.CallerRunID != "" {
 		eq("CallerRunID", q.CallerRunID)
 	}
+	if q.IDs != nil {
+		// RunId is the grouping key: narrowing on it is the whole filter.
+		if len(q.IDs) == 0 {
+			narrow = append(narrow, "0 = 1")
+		} else {
+			narrow = append(narrow, "RunId IN ("+placeholders(len(q.IDs))+")")
+			narrowArgs = append(narrowArgs, anys(q.IDs)...)
+		}
+	}
 	if q.TurnBelow > 0 {
 		conds = append(conds, "Turn < ?")
 		args = append(args, q.TurnBelow)

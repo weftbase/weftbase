@@ -3,6 +3,7 @@ package v1
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -297,6 +298,22 @@ func (rc runCost) total() (float64, bool) {
 
 func (s *Server) coster(ctx context.Context) *coster {
 	return &coster{ctx: ctx, db: s.db, table: s.pricing, kids: map[string][]obsdb.RunRow{}, memo: map[string]runCost{}, partKids: map[string]bool{}, capped: map[string]bool{}}
+}
+
+// under counts the runs under id at any depth, from the children
+// already read (prime, primeTrees): no read of its own. truncated says
+// a level was not read whole.
+func (c *coster) under(id string, depth int) (n int, truncated bool) {
+	if depth > 32 {
+		return 0, true
+	}
+	truncated = c.capped[id] || c.partKids[id]
+	for _, k := range subagents(id, c.kids[id]) {
+		below, cut := c.under(k.ID, depth+1)
+		n += 1 + below
+		truncated = truncated || cut
+	}
+	return n, truncated
 }
 
 // prime records a run's children already read (a run document's).
@@ -610,9 +627,49 @@ const derivedUsageUnknown = "the stock spans report no (or zero) usage (gen_ai.u
 
 // row is row(rec) with its cost.
 func (c *coster) row(rec obsdb.RunRow) runRow {
+	// A running run's row has no usage yet (the run reports it when it
+	// ends): what its finished steps have reported so far stands in,
+	// marked usage_partial, and is priced like any usage.
+	partial := false
+	if rec.Status == obsdb.StatusRunning && rec.Usage == (core.Usage{}) && rec.ParentRunID == "" {
+		if steps, used := progress(c.ctx, c.db, rec.ID); steps > 0 {
+			rec.Usage, partial = used, true
+			rec.Steps = max(rec.Steps, steps)
+		}
+	}
 	out := row(rec)
+	out.UsagePartial = partial
 	c.fill(&out, rec)
+	if partial {
+		// Priced so far, on the run's own model: its children's part,
+		// if any, joins when the run ends.
+		f := price(c.table, rec.Provider, rec.Model, rec.Usage).fields()
+		if f.CostReason == "" {
+			f.CostReason = "so far: the steps that have ended"
+		}
+		out.costFields = f
+	}
 	return out
+}
+
+// progress is what a running run has done so far, from its step_finish
+// events: the steps that ended, and their usage.
+func progress(ctx context.Context, db obsdb.DB, id string) (steps int, used core.Usage) {
+	page, err := db.Events(ctx, id, -1, 5000)
+	if err != nil {
+		return 0, core.Usage{}
+	}
+	for _, e := range page.Events {
+		var ev struct {
+			Type  string     `json:"type"`
+			Usage core.Usage `json:"usage"`
+		}
+		if json.Unmarshal(e.Event, &ev) == nil && ev.Type == "step_finish" {
+			steps++
+			used = used.Add(ev.Usage)
+		}
+	}
+	return steps, used
 }
 
 // fill sets a run row's cost blocks.

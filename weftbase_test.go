@@ -212,7 +212,7 @@ func TestKernelDataDirLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a.SetHolder("http://127.0.0.1:7331")
+	a.Serving("http://127.0.0.1:7331")
 	if _, err := New(DataDir(dir)); !errors.Is(err, ErrLocked) {
 		t.Errorf("second New = %v, want ErrLocked", err)
 	}

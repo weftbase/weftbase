@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -401,6 +402,23 @@ func (r *Registry) Lookup(tx store.Tx, s tenant.Scope, id string) (Version, erro
 	return r.version(tx, s, id)
 }
 
+// LookupLabeled is Lookup with the labels the version holds now, in tx:
+// what an event names a version by ({id, number, labels}).
+func (r *Registry) LookupLabeled(tx store.Tx, s tenant.Scope, id string) (Version, error) {
+	v, err := r.Lookup(tx, s, id)
+	if err != nil {
+		return v, err
+	}
+	labels, err := r.labelsOf(tx, s, v.Agent)
+	for l, lid := range labels {
+		if lid == v.ID {
+			v.Labels = append(v.Labels, l)
+		}
+	}
+	slices.Sort(v.Labels)
+	return v, err
+}
+
 // Version reads one AgentVersion with its labels.
 func (r *Registry) Version(ctx context.Context, s tenant.Scope, id string) (Version, error) {
 	if err := checkScope(s); err != nil {
@@ -575,4 +593,38 @@ func (r *Registry) BuildAgents(ctx context.Context, s tenant.Scope, digest strin
 		return rows.Err()
 	})
 	return kind, agents, err
+}
+
+// SetPlacement records the placement (embedded, local, …) that
+// registered a build: the hub calls it in the registration's
+// transaction.
+func (r *Registry) SetPlacement(tx store.Tx, s tenant.Scope, digest, placement string) error {
+	_, err := store.Exec(tx, `UPDATE builds SET placement = ? WHERE project_id = ? AND env = ? AND digest = ?`,
+		placement, s.Project(), s.Env(), digest)
+	return err
+}
+
+// Placements is every build's placement by build id ("" when the build
+// was registered before placements were recorded).
+func (r *Registry) Placements(ctx context.Context, s tenant.Scope) (map[string]string, error) {
+	if err := checkScope(s); err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	err := r.db.Read(ctx, func(tx store.Tx) error {
+		rows, err := store.Query(tx, `SELECT id, placement FROM builds WHERE project_id = ? AND env = ?`, s.Project(), s.Env())
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var id, p string
+			if err := rows.Scan(&id, &p); err != nil {
+				return err
+			}
+			out[id] = p
+		}
+		return rows.Err()
+	})
+	return out, err
 }

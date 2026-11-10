@@ -1,18 +1,15 @@
-// Routing: every screen is a URL, and each URL loads the screen it names
-// (on mock data). Runs the real route tree in memory, no DOM.
+// Routing: every screen is a URL, and each URL loads the screen it names.
+// Runs the real route tree in memory, no DOM. Routes have no loaders
+// (screens fetch with TanStack Query and show their own loading and
+// error states), so nothing here touches the network.
 import { QueryClient } from "@tanstack/react-query"
-import {
-  createMemoryHistory,
-  createRouter,
-  isNotFound,
-} from "@tanstack/react-router"
+import { createMemoryHistory, createRouter } from "@tanstack/react-router"
 import { describe, expect, it } from "vitest"
 
-import { RUNS, SESSIONS, TRACES, AGENTS, APPROVALS } from "@/lib/api/mock-data"
+import { toRunsQuery } from "@/lib/runs"
+import { validateRuns } from "@/lib/search"
 import { mountRewrite } from "@/router"
 import { routeTree } from "@/routeTree.gen"
-import { validateRuns } from "@/lib/search"
-import { toFilters } from "@/routes/runs/index"
 
 function routerAt(path: string) {
   return createRouter({
@@ -36,22 +33,18 @@ async function leaf(path: string) {
 describe("routes", () => {
   const cases: [string, string][] = [
     ["/", "/"],
+    ["/?range=7d", "/"],
     ["/runs", "/runs/"],
     ["/runs?status=failed&agent=billing-refund", "/runs/"],
-    [`/runs/${RUNS[0].id}`, "/runs/$runId"],
-    [`/runs/${RUNS[0].id}?view=raw`, "/runs/$runId"],
+    ["/runs?tab=traces", "/runs/"],
+    ["/runs/r_ok", "/runs/$runId"],
+    ["/runs/r_ok?tab=raw&span=0102", "/runs/$runId"],
     ["/sessions", "/sessions/"],
-    [`/sessions/${SESSIONS[0].id}`, "/sessions/$sessionId"],
-    ["/traces", "/traces/"],
-    [
-      `/traces/${TRACES[0].id}?span=${TRACES[0].spans[0].id}`,
-      "/traces/$traceId",
-    ],
+    ["/sessions/s_orders", "/sessions/$sessionId"],
+    ["/traces/0102030405060708090a0b0c0d0e0f10", "/traces/$traceId"],
     ["/agents", "/agents/"],
-    [`/agents/${AGENTS[0].name}?tab=versions`, "/agents/$name"],
+    ["/agents/support-triage?tab=versions", "/agents/$name"],
     ["/approvals", "/approvals/"],
-    [`/approvals/${APPROVALS[0].id}`, "/approvals/$approvalId"],
-    ["/audit", "/audit"],
     ["/settings/general", "/settings/general"],
     ["/settings/pricing", "/settings/pricing"],
     ["/settings/appearance", "/settings/appearance"],
@@ -62,32 +55,50 @@ describe("routes", () => {
     expect(r.status).toBe("success")
   })
 
+  it("has no Audit page and no top-level Traces page", () => {
+    const paths = Object.keys(routerAt("/").routesByPath)
+    expect(paths).not.toContain("/audit")
+    expect(paths).not.toContain("/traces")
+    expect(paths).toContain("/traces/$traceId")
+  })
+
   it("redirects /settings to /settings/general", async () => {
     const { router } = await leaf("/settings")
     expect(router.state.location.pathname).toBe("/settings/general")
   })
 
-  it("shows not found for an unknown run", async () => {
-    const router = routerAt("/runs/run_missing")
-    await router.load()
-    expect(router.state.matches.some((m) => isNotFound(m.error))).toBe(true)
-  })
-
-  it("keeps filters and the selection in the URL", async () => {
+  it("keeps filters in the URL and drops what it does not know", async () => {
     const { router } = await leaf(
-      `/runs?status=waiting&tool=issue_refund&run=${RUNS[2].id}`
+      "/runs?status=waiting&agent=deployer&range=7d&q=refund"
     )
-    expect(router.state.location.search).toMatchObject({
+    expect(router.state.matches.at(-1)?.search).toMatchObject({
       status: "waiting",
-      tool: "issue_refund",
-      run: RUNS[2].id,
+      agent: "deployer",
+      range: "7d",
+      q: "refund",
     })
-  })
-
-  it("carries the environment from page to page", async () => {
-    const { router } = await leaf("/runs?env=test")
-    await router.navigate({ to: "/agents" })
-    expect(router.state.location.search).toMatchObject({ env: "test" })
+    // What a screen reads is the validator's output: known keys only.
+    expect(
+      Object.keys(
+        validateRuns({ status: "waiting", bogus: "1", range: "2y" })
+      ).sort()
+    ).toEqual([
+      "agent",
+      "error",
+      "min_cost",
+      "min_tokens",
+      "model",
+      "q",
+      "range",
+      "session",
+      "sort",
+      "status",
+      "sub",
+      "tab",
+      "tag",
+      "tool",
+    ])
+    expect(validateRuns({ range: "2y" }).range).toBeUndefined()
   })
 
   it("percent-encodes child run ids with slashes", () => {
@@ -99,18 +110,20 @@ describe("routes", () => {
     expect(loc.href).toBe("/runs/run_8f2a1c%2F2%2F0")
   })
 
-  it("maps URL filters to API filters and drops unknown values", () => {
-    const s = validateRuns({
-      status: "bogus",
-      error: "tool_error",
-      agent: "",
-      q: "refund",
-    })
+  it("maps URL filters to API parameters", () => {
+    const s = validateRuns({ status: "bogus", agent: "", q: "refund" })
     expect(s.status).toBeUndefined()
     expect(s.agent).toBeUndefined()
-    expect(toFilters(s)).toMatchObject({
-      error_class: "tool_error",
-      q: "refund",
+    expect(toRunsQuery(s)).toMatchObject({ q: "refund", limit: 50 })
+    // The status filter is the status as shown, in a search too.
+    expect(
+      toRunsQuery(
+        validateRuns({ status: "waiting", range: "24h" }),
+        "2020-01-01T00:00:00.000Z"
+      )
+    ).toMatchObject({
+      display_status: "waiting",
+      since: "2020-01-01T00:00:00.000Z",
     })
   })
 

@@ -3,8 +3,8 @@ module github.com/weftbase/weftbase/client
 go 1.26.0
 
 require (
-	github.com/weftbase/weft v0.0.0-00010101000000-000000000000
-	github.com/weftbase/weft/core v0.21.0
+	github.com/weftbase/weft v0.24.2
+	github.com/weftbase/weft/core v0.24.2
 	go.opentelemetry.io/otel v1.46.0
 	go.opentelemetry.io/otel/log v0.22.0
 	go.opentelemetry.io/otel/sdk v1.46.0

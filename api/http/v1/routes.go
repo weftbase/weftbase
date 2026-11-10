@@ -2,6 +2,7 @@ package v1
 
 import (
 	"net/http"
+	"slices"
 
 	"github.com/weftbase/weftbase/authz"
 	"github.com/weftbase/weftbase/obsdb"
@@ -56,6 +57,7 @@ func (s *Server) Routes() []Route {
 		{"GET", "/v1/sessions/{id}/public_id", authz.SessionsRead, run(s.serveSessionPublicID)},
 		{"GET", "/v1/sessions/{id}/timeline", authz.SessionsRead, run(s.serveSessionTimeline)},
 		{"GET", "/v1/sessions/{id}/entries", authz.SessionsRead, run(s.serveSessionEntries)},
+		{"GET", "/v1/sessions/{id}/conversation", authz.RunsContent, run(s.serveSessionConversation)},
 		{"GET", "/v1/sessions/{id}/export", authz.RunsContent, run(s.serveSessionExport)},
 		{"GET", "/v1/sessions/{id}/stream", authz.RunsContent, run(s.serveSessionStream)},
 		{"GET", "/v1/public/{id}", authz.SessionsRead, run(s.servePublic)},
@@ -66,7 +68,7 @@ func (s *Server) Routes() []Route {
 		{"GET", "/v1/diff", authz.RunsContent, s.serveDiff},
 
 		{"GET", "/v1/events", authz.EventsRead, s.serveEvents},
-	}, s.controlRoutes()...)
+	}, slices.Concat(s.controlRoutes(), s.approvalRoutes(), s.inventoryRoutes())...)
 }
 
 // IngestRoutes is the OTLP/HTTP receiver (observe/ingest) at

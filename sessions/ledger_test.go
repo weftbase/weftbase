@@ -42,8 +42,15 @@ func setup(t *testing.T, opts ...sessions.Option) *fixture {
 
 func setupClock(t *testing.T, now func() time.Time, opts ...sessions.Option) *fixture {
 	t.Helper()
+	return setupAt(t, ":memory:", now, opts...)
+}
+
+// setupAt is setupClock over a control store at path (a file: the
+// concurrency tests need connections of their own).
+func setupAt(t *testing.T, path string, now func() time.Time, opts ...sessions.Option) *fixture {
+	t.Helper()
 	ctx := context.Background()
-	db, err := sqlite.Open(ctx, ":memory:")
+	db, err := sqlite.Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,6 +119,47 @@ func (f *fixture) types(t *testing.T, runID string) []string {
 	return out
 }
 
+// typesOf is every event's type under one resource kind, oldest first.
+func (f *fixture) typesOf(t *testing.T, kind string) []string {
+	t.Helper()
+	sel := events.ForScope(f.s, false)
+	sel.ResourceKind = kind
+	evs, err := f.log.List(context.Background(), sel, 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, e := range evs {
+		out = append(out, e.Type)
+	}
+	return out
+}
+
+// decide decides every pending approval of a parked run with one
+// decision (the only door a parked run resumes through besides the
+// timers) and returns the resume it admitted.
+func (f *fixture) decide(t *testing.T, actor events.Actor, runID, decision string) sessions.Run {
+	t.Helper()
+	ctx := context.Background()
+	page, err := f.l.Approvals(ctx, f.s, sessions.ApprovalQuery{RunID: runID, Status: sessions.ApprovalPending})
+	if err != nil || len(page.Approvals) == 0 {
+		t.Fatalf("pending approvals of %s = %+v, %v", runID, page, err)
+	}
+	var resumed string
+	for _, a := range page.Approvals {
+		got, err := f.l.Decide(ctx, f.s, actor, a.ID, decision, "", "", a.ArgsSHA256)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resumed = got.ResumedBy
+	}
+	res, err := f.l.Get(ctx, f.s, resumed)
+	if err != nil {
+		t.Fatalf("the resume %q: %v", resumed, err)
+	}
+	return res
+}
+
 func TestAdmitRunFinish(t *testing.T) {
 	ctx := context.Background()
 	f := setup(t)
@@ -172,7 +220,7 @@ func TestCancelRules(t *testing.T) {
 	// Queued: canceled at once; the claim then dispatches nothing.
 	queued, _ := f.l.Admit(ctx, f.s, events.System, in)
 	r, err := f.l.Cancel(ctx, f.s, events.System, queued.ID, "changed my mind")
-	if err != nil || r.Status != sessions.StatusCanceled || r.CancelCause != wire.CauseUser {
+	if err != nil || r.Status != sessions.StatusCancelled || r.CancelCause != wire.CauseUser {
 		t.Fatalf("cancel queued = %+v, %v", r, err)
 	}
 	if _, err := f.q.Claim(ctx, queue.ClaimFilter{Owner: "x"}); !errors.Is(err, queue.ErrEmpty) {
@@ -190,10 +238,10 @@ func TestCancelRules(t *testing.T) {
 	f.tx(t, func(tx store.Tx) error {
 		return f.l.Finished(tx, l.Scope, running.ID, wire.Ack{Status: wire.StatusCanceled, Cause: wire.CauseUser})
 	})
-	if got, _ := f.l.Get(ctx, f.s, running.ID); got.Status != sessions.StatusCanceled {
+	if got, _ := f.l.Get(ctx, f.s, running.ID); got.Status != sessions.StatusCancelled {
 		t.Errorf("after the worker's end = %s", got.Status)
 	}
-	if ts := strings.Join(f.types(t, running.ID), ","); ts != "run.queued,run.started,run.canceled" {
+	if ts := strings.Join(f.types(t, running.ID), ","); ts != "run.queued,run.started,run.cancelled" {
 		t.Errorf("events = %s", ts)
 	}
 }
@@ -213,8 +261,8 @@ func TestParkResumeAndLost(t *testing.T) {
 	if parked.Status != sessions.StatusParked || len(parked.Pending) != 1 || parked.FinishedAt != nil {
 		t.Fatalf("parked = %+v", parked)
 	}
-	if _, err := f.l.Resume(ctx, f.s, events.System, run.ID, []wire.Decision{{CallID: "call_1", Decision: "maybe"}}); !errors.Is(err, sessions.ErrInvalid) {
-		t.Errorf("bad decision = %v", err)
+	if run.ChainID != run.ID {
+		t.Errorf("a first run's chain = %q", run.ChainID)
 	}
 	// A new version is labelled prod; the resume still pins the old one.
 	body := []byte(`{"weft":1,"agents":[{"name":"support","v":2}]}`)
@@ -225,14 +273,11 @@ func TestParkResumeAndLost(t *testing.T) {
 	if err := f.reg.PromoteIn(ctx, f.s, registry.PromoteRequest{Agent: "support", Label: "prod", Version: vs[0].ID}); err != nil {
 		t.Fatal(err)
 	}
-	res, err := f.l.Resume(ctx, f.s, events.System, run.ID, []wire.Decision{{CallID: "call_1", Decision: "approve"}})
-	if err != nil || res.AgentVersion != f.v.ID || res.ResolvedVia != registry.ViaPin || res.ResumeOf != run.ID {
-		t.Fatalf("resume = %+v, %v", res, err)
+	res := f.decide(t, events.System, run.ID, "approve")
+	if res.AgentVersion != f.v.ID || res.ResolvedVia != registry.ViaPin || res.ResumeOf != run.ID || res.ChainID != run.ID {
+		t.Fatalf("resume = %+v", res)
 	}
-	if _, err := f.l.Resume(ctx, f.s, events.System, run.ID, nil); !errors.Is(err, sessions.ErrNotParked) {
-		t.Errorf("second resume = %v", err)
-	}
-	if _, err := f.l.Cancel(ctx, f.s, events.System, run.ID, ""); !errors.Is(err, sessions.ErrNotParked) {
+	if _, err := f.l.Cancel(ctx, f.s, events.System, run.ID, ""); !errors.Is(err, sessions.ErrAlreadyResumed) {
 		t.Errorf("cancel of a resumed parked run = %v", err)
 	}
 	l2, cmd, ok := f.claim(t)

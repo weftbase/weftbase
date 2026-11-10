@@ -1,159 +1,260 @@
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query"
-import { Link, createFileRoute, useNavigate } from "@tanstack/react-router"
-import { MessageSquareIcon } from "lucide-react"
-import * as React from "react"
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
+import { Link, createFileRoute } from "@tanstack/react-router"
 
-import { EmptyState } from "@/components/console/empty-state"
-import { FilterSelect, SearchFilter } from "@/components/console/filters"
-import { LinkTab, LinkTabs } from "@/components/console/link-tabs"
-import { PageHeader } from "@/components/console/page-header"
-import { SessionStateBadge } from "@/components/console/status"
-import { Card } from "@/components/ui/card"
+import { useLiveState } from "@/components/console/app-shell"
+import { DataTable } from "@/components/console/data-table"
+import type { Column } from "@/components/console/data-table"
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+  EmptyState,
+  ErrorState,
+  LoadingRows,
+} from "@/components/console/empty-state"
+import {
+  FilterBar,
+  FilterSelect,
+  SearchInput,
+} from "@/components/console/filter-bar"
+import { Page, PageHeader } from "@/components/console/page-header"
+import { RelativeTime } from "@/components/console/relative-time"
+import { sessionTitle } from "@/components/console/session/model"
+import { OutcomeStrip } from "@/components/console/session/outcome-strip"
+import { LivePill, StatusDot } from "@/components/console/status"
+import { Button } from "@/components/ui/button"
 import { q } from "@/lib/api/queries"
-import { ago, cost, dateTime, tokens } from "@/lib/format"
-import { useEnv, validateSessions } from "@/lib/search"
+import { STATUS_LABEL, sessionStatus } from "@/lib/api/status"
+import type { SessionRow } from "@/lib/api/types"
+import { cost, count, tokens } from "@/lib/format"
+import { SESSION_STATES, useSetSearch, validateSessions } from "@/lib/search"
 import type { SessionsSearch } from "@/lib/search"
 
+// Sessions: the dense list of conversations, newest activity first,
+// live. One filter bar (search, status, agent), all of it in the URL.
+// The search also finds a session by its public id or its own id.
 export const Route = createFileRoute("/sessions/")({
   validateSearch: validateSessions,
-  loaderDeps: ({ search }) => ({
-    env: search.env ?? "live",
-    f: { state: search.state, agent: search.agent, q: search.q },
-  }),
-  loader: ({ context: { queryClient }, deps: { env, f } }) =>
-    queryClient.ensureQueryData(q.sessions(env, f)),
   head: () => ({ meta: [{ title: "Sessions · weftbase" }] }),
-  component: Sessions,
+  component: SessionsPage,
 })
 
-function Sessions() {
+const STATE_LABEL: Record<(typeof SESSION_STATES)[number], string> = {
+  running: "Running",
+  waiting: "Waiting on a person",
+  failed: "Has a failed turn",
+  succeeded: "Succeeded",
+  interrupted: "Interrupted",
+}
+
+const COLUMNS: Column<SessionRow>[] = [
+  {
+    key: "title",
+    header: "Session",
+    width: "minmax(220px, 1fr)",
+    cell: (s) => (
+      <span
+        className={
+          s.title || s.first_prompt ? "font-medium" : "text-muted-foreground"
+        }
+      >
+        {sessionTitle(s)}
+      </span>
+    ),
+  },
+  {
+    key: "agent",
+    hideBelow: 560,
+    header: "Agent",
+    width: "minmax(96px, 160px)",
+    muted: true,
+    cell: (s) => s.agent || "—",
+  },
+  {
+    key: "status",
+    header: "Status",
+    width: "200px",
+    cell: (s) => {
+      const state = sessionStatus(s)
+      return (
+        <span className="flex items-center gap-1.5">
+          <StatusDot state={state} />
+          <span className="w-[72px] flex-none truncate">
+            {STATUS_LABEL[state]}
+          </span>
+          <OutcomeStrip session={s} />
+        </span>
+      )
+    },
+  },
+  {
+    key: "turns",
+    hideBelow: 700,
+    header: "Turns",
+    width: "56px",
+    align: "right",
+    mono: true,
+    cell: (s) => count(s.turns),
+  },
+  {
+    key: "last",
+    header: "Last activity",
+    width: "96px",
+    align: "right",
+    muted: true,
+    cell: (s) => <RelativeTime time={s.last_seen} />,
+  },
+  {
+    key: "tokens",
+    hideBelow: 860,
+    header: "Tokens",
+    width: "72px",
+    align: "right",
+    mono: true,
+    cell: (s) => tokens(s.usage.input_tokens + s.usage.output_tokens),
+  },
+  {
+    key: "cost",
+    header: "Cost",
+    width: "80px",
+    align: "right",
+    mono: true,
+    cell: (s) => <span title={s.cost_reason}>{cost(s)}</span>,
+  },
+]
+
+function SessionsPage() {
   const search = Route.useSearch()
-  const env = useEnv()
-  const navigate = useNavigate({ from: Route.fullPath })
-  const { data } = useSuspenseQuery(
-    q.sessions(env, { state: search.state, agent: search.agent, q: search.q })
+  const set = useSetSearch<SessionsSearch>(Route.fullPath)
+  const live = useLiveState()
+  const sessions = useInfiniteQuery(
+    q.sessionsList({ q: search.q, state: search.state, agent: search.agent })
   )
-  const agents = useQuery(q.agents(env))
-  const set = React.useCallback(
-    (patch: Partial<SessionsSearch>) =>
-      void navigate({ search: (prev) => ({ ...prev, ...patch }) }),
-    [navigate]
-  )
-  const setQ = React.useCallback(
-    (v: string | undefined) => set({ q: v }),
-    [set]
-  )
+  // Agent names: every agent that ran in the last 30 days.
+  const agents = useQuery(q.options("agent"))
+  const names = (agents.data?.groups.map((g) => g.key) ?? []).filter(Boolean)
+  if (search.agent && !names.includes(search.agent)) names.push(search.agent)
+
+  const filtered = Boolean(search.q || search.state || search.agent)
+  const rows = sessions.data?.pages.flatMap((p) => p.sessions) ?? []
+  const total = sessions.data?.pages[0]?.total
+
   return (
-    <div className="mx-auto flex max-w-[1200px] flex-col gap-4">
-      <PageHeader
-        title="Sessions"
-        description="Conversations that span many runs, with their turns and approvals."
-      >
-        <LinkTabs label="Session state">
-          <LinkTab to="/sessions" search={(p) => ({ ...p, state: undefined })}>
-            All
-          </LinkTab>
-          <LinkTab
-            to="/sessions"
-            search={(p) => ({ ...p, state: "active" as const })}
-          >
-            Active
-          </LinkTab>
-          <LinkTab
-            to="/sessions"
-            search={(p) => ({ ...p, state: "waiting" as const })}
-          >
-            Waiting
-          </LinkTab>
-          <LinkTab
-            to="/sessions"
-            search={(p) => ({ ...p, state: "idle" as const })}
-          >
-            Idle
-          </LinkTab>
-        </LinkTabs>
-      </PageHeader>
-      <div
-        className="flex flex-wrap items-center gap-2.5"
-        role="group"
-        aria-label="Filters"
-      >
-        <SearchFilter
-          value={search.q}
-          onChange={setQ}
-          placeholder="Filter by id or agent"
+    <Page
+      flush
+      header={<PageHeader title="Sessions" meta={<LivePill state={live} />} />}
+      bar={
+        <FilterBar
+          right={
+            total !== undefined && (
+              <span className="font-mono tabular-nums">
+                {count(total)} {total === 1 ? "session" : "sessions"}
+              </span>
+            )
+          }
+        >
+          <SearchInput
+            value={search.q}
+            onChange={(v) => set({ q: v })}
+            placeholder="Search sessions or paste an id"
+          />
+          <FilterSelect
+            label="Status"
+            value={search.state}
+            options={SESSION_STATES.map((s) => ({
+              value: s,
+              label: STATE_LABEL[s],
+            }))}
+            onChange={(state) => set({ state })}
+          />
+          <FilterSelect
+            label="Agent"
+            value={search.agent}
+            options={names.sort().map((n) => ({ value: n, label: n }))}
+            onChange={(agent) => set({ agent })}
+          />
+        </FilterBar>
+      }
+    >
+      {sessions.error ? (
+        <ErrorState
+          error={sessions.error}
+          what="Sessions"
+          onRetry={() => void sessions.refetch()}
         />
-        <FilterSelect
-          label="Agent"
-          value={search.agent}
-          options={(agents.data ?? []).map((a) => a.name)}
-          onChange={(v) => set({ agent: v })}
-        />
-      </div>
-      {data.items.length === 0 ? (
-        <EmptyState icon={MessageSquareIcon} title="No sessions match">
-          Sessions appear when an agent runs with a{" "}
-          <span className="font-mono">session_id</span>.
-        </EmptyState>
+      ) : !sessions.data ? (
+        <LoadingRows rows={12} />
+      ) : rows.length === 0 ? (
+        filtered ? (
+          <EmptyState
+            title="No sessions match these filters"
+            action={
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() =>
+                  set({ q: undefined, state: undefined, agent: undefined })
+                }
+              >
+                Clear filters
+              </Button>
+            }
+          >
+            <RunWithPublicId word={search.q} />
+          </EmptyState>
+        ) : (
+          <EmptyState title="No sessions yet">
+            A session appears here when runs share a session id: each run is one
+            turn of the conversation.
+          </EmptyState>
+        )
       ) : (
-        <Card className="overflow-x-auto py-0">
-          <Table className="min-w-[760px]">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Session</TableHead>
-                <TableHead>Agent</TableHead>
-                <TableHead>State</TableHead>
-                <TableHead className="text-right">Turns</TableHead>
-                <TableHead className="text-right">Tokens</TableHead>
-                <TableHead className="text-right">Cost</TableHead>
-                <TableHead className="text-right">Last activity</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.items.map((s) => (
-                <TableRow key={s.id} className="relative">
-                  <TableCell className="font-mono text-[13px] text-muted-foreground">
-                    <Link
-                      to="/sessions/$sessionId"
-                      params={{ sessionId: s.id }}
-                      className="after:absolute after:inset-0 focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-ring"
-                    >
-                      {s.id}
-                    </Link>
-                  </TableCell>
-                  <TableCell className="font-medium">{s.agent}</TableCell>
-                  <TableCell>
-                    <SessionStateBadge state={s.state} />
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-[13px] text-muted-foreground">
-                    {s.turns}
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-[13px] text-muted-foreground">
-                    {tokens(s.usage.input_tokens + s.usage.output_tokens)}
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-[13px] text-muted-foreground">
-                    {cost(s.cost)}
-                  </TableCell>
-                  <TableCell
-                    className="text-right text-[13px] text-subtle-foreground"
-                    title={dateTime(s.last_activity_at)}
-                  >
-                    {ago(s.last_activity_at)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </Card>
+        <DataTable
+          label="Sessions"
+          columns={COLUMNS}
+          rows={rows}
+          rowKey={(s) => s.id}
+          rowLink={(s) => ({
+            to: "/sessions/$sessionId",
+            params: { sessionId: s.id },
+          })}
+          footer={
+            sessions.hasNextPage ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={sessions.isFetchingNextPage}
+                onClick={() => void sessions.fetchNextPage()}
+              >
+                {sessions.isFetchingNextPage ? "Loading…" : "Load more"}
+              </Button>
+            ) : undefined
+          }
+        />
       )}
-    </div>
+    </Page>
+  )
+}
+
+/** RunWithPublicId: the search found no session, but the word may be a
+ * public id that runs outside any session carry. Then the run is one
+ * click away instead of a dead end. */
+function RunWithPublicId({ word }: { word: string | undefined }) {
+  const id = word?.trim() ?? ""
+  const runs = useQuery({
+    ...q.runsPage({ public_id: id, limit: 1 }),
+    enabled: id !== "" && !/\s/.test(id),
+  })
+  const run = runs.data?.runs.at(0)
+  if (!run) return null
+  return (
+    <>
+      A run of {run.agent} carries the public id{" "}
+      <span className="font-mono">{id}</span>, outside any session.{" "}
+      <Link
+        to="/runs/$runId"
+        params={{ runId: run.id }}
+        className="font-medium text-foreground underline-offset-2 hover:underline"
+      >
+        Open the run
+      </Link>
+    </>
   )
 }

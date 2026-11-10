@@ -333,6 +333,14 @@ func (q *Queue) Release(ctx context.Context, l Lease, delay time.Duration) error
 	})
 }
 
+// Return hands l's item back unworked in tx, keeping its place: run_at
+// is left as it was and the attempt is not counted (a worker that
+// answered busy). The caller keeps it from being claimed again at once
+// (the hub pauses the route on that worker).
+func (q *Queue) Return(tx store.Tx, l Lease) error {
+	return q.fenced(tx, l, `status = ?, attempts = attempts - 1, lease_until = ''`, StatusReady)
+}
+
 // Cancel completes a ready item in tx without running it (the work it
 // stood for ended another way: a canceled run, a run whose queue time
 // ran out). A leased item is left to its holder; an item already done

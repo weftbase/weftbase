@@ -1,7 +1,9 @@
 {
   "total": 8,
+  "total_exact": true,
   "runs": [
     {
+      "display_status": "failed",
       "id": "ul_loop",
       "parent_run_id": "",
       "parent_call_id": "",
@@ -51,6 +53,7 @@
       "requests_badge": "not_recorded"
     },
     {
+      "display_status": "failed",
       "id": "ul_6",
       "parent_run_id": "",
       "parent_call_id": "",
@@ -100,6 +103,7 @@
       "requests_badge": "not_recorded"
     },
     {
+      "display_status": "failed",
       "id": "ul_5",
       "parent_run_id": "",
       "parent_call_id": "",
@@ -149,6 +153,7 @@
       "requests_badge": "not_recorded"
     },
     {
+      "display_status": "failed",
       "id": "ul_4",
       "parent_run_id": "",
       "parent_call_id": "",
@@ -198,6 +203,7 @@
       "requests_badge": "not_recorded"
     },
     {
+      "display_status": "failed",
       "id": "ul_3",
       "parent_run_id": "",
       "parent_call_id": "",
@@ -247,6 +253,7 @@
       "requests_badge": "not_recorded"
     },
     {
+      "display_status": "failed",
       "id": "ul_2",
       "parent_run_id": "",
       "parent_call_id": "",
@@ -296,6 +303,7 @@
       "requests_badge": "not_recorded"
     },
     {
+      "display_status": "failed",
       "id": "ul_1",
       "parent_run_id": "",
       "parent_call_id": "",
@@ -345,6 +353,7 @@
       "requests_badge": "not_recorded"
     },
     {
+      "display_status": "failed",
       "id": "ul_0",
       "parent_run_id": "",
       "parent_call_id": "",

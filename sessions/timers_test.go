@@ -134,19 +134,20 @@ func TestApprovalExpiryDenies(t *testing.T) {
 		cmd.Resume.Decisions[0].Reason != "approval expired" || cmd.AgentVersion != parked.AgentVersion {
 		t.Fatalf("the expiry's resume = %+v", cmd)
 	}
-	if ts := strings.Join(f.types(t, parked.ID), ","); ts != "run.queued,run.started,run.parked,approval.expired" &&
-		ts != "run.queued,run.parked,approval.expired" {
-		t.Errorf("events = %s", ts)
+	if ts := strings.Join(f.types(t, parked.ID), ","); ts != "run.queued,run.started,run.parked" && ts != "run.queued,run.parked" {
+		t.Errorf("run events = %s", ts)
+	}
+	// One approval.expired per approval the expiry denied.
+	if ts := strings.Join(f.typesOf(t, "approval"), ","); ts != "approval.requested,approval.expired" {
+		t.Errorf("approval events = %s", ts)
 	}
 	// A run decided before its expiry is left alone.
 	decided := f.park(t, ctx)
-	if _, err := f.l.Resume(ctx, f.s, events.System, decided.ID, []wire.Decision{{CallID: "call_1", Decision: "approve"}}); err != nil {
-		t.Fatal(err)
-	}
+	f.decide(t, events.System, decided.ID, "approve")
 	c.add(2 * time.Hour)
 	f.fire(t)
-	if ts := f.types(t, decided.ID); ts[len(ts)-1] == events.ApprovalExpired {
-		t.Error("a decided run expired")
+	if ts := f.typesOf(t, "approval"); ts[len(ts)-1] == events.ApprovalExpired {
+		t.Errorf("a decided run expired: %v", ts)
 	}
 }
 
@@ -177,9 +178,9 @@ func TestMaxPinAgeMigrates(t *testing.T) {
 	if got.MigratedTo != vs[0].ID || got.PinExpiredAt == nil || got.Status != sessions.StatusParked {
 		t.Fatalf("after the maximum pin age = %+v", got)
 	}
-	res, err := f.l.Resume(ctx, f.s, events.System, parked.ID, []wire.Decision{{CallID: "call_1", Decision: "approve"}})
-	if err != nil || res.AgentVersion != vs[0].ID || res.ResolvedVia != sessions.ViaMigrate {
-		t.Fatalf("the migrated run's resume = %+v, %v", res, err)
+	res := f.decide(t, events.System, parked.ID, "approve")
+	if res.AgentVersion != vs[0].ID || res.ResolvedVia != sessions.ViaMigrate {
+		t.Fatalf("the migrated run's resume = %+v", res)
 	}
 	if ts := f.types(t, parked.ID); ts[len(ts)-1] != events.RunMigrated {
 		t.Errorf("events = %v", ts)

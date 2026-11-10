@@ -14,9 +14,13 @@ import (
 
 // parkTimers schedules a parked run's approval expiry and maximum pin
 // age, per the Policy.
-func (l *Ledger) parkTimers(tx store.Tx, s tenant.Scope, runID string) error {
+func (l *Ledger) parkTimers(tx store.Tx, s tenant.Scope, runID, agent string) error {
 	now := l.now()
-	if d := l.policy.ApprovalExpiry; d > 0 {
+	expiry := l.policy.ApprovalExpiry
+	if d, ok := l.policy.AgentApprovalExpiry[agent]; ok {
+		expiry = d
+	}
+	if d := expiry; d > 0 {
 		if _, err := l.q.At(tx, s, queue.Timer{Kind: TimerApprovalExpiry, Ref: runID, DueAt: now.Add(d)}); err != nil {
 			return err
 		}
@@ -70,23 +74,15 @@ func (l *Ledger) queueTTL(tx store.Tx, s tenant.Scope, runID string) error {
 }
 
 // approvalExpiry resumes a parked run that nobody decided in time with
-// every pending call denied, and records approval.expired.
+// every pending call denied: each approval still pending writes its own
+// approval.expired, and the resume its run.queued.
 func (l *Ledger) approvalExpiry(tx store.Tx, s tenant.Scope, runID string) error {
 	parked, ok, err := l.getOpt(tx, s, runID)
 	if err != nil || !ok || parked.Status != StatusParked || parked.ResumedBy != "" {
 		return err
 	}
-	decisions := make([]wire.Decision, len(parked.Pending))
-	calls := make([]string, len(parked.Pending))
-	for i, p := range parked.Pending {
-		decisions[i] = wire.Decision{CallID: p.CallID, Decision: "deny", Reason: "approval expired"}
-		calls[i] = p.CallID
-	}
-	res, err := l.resume(tx, s, events.System, parked, decisions)
-	if err != nil {
-		return err
-	}
-	return l.emit(tx, s, events.System, events.ApprovalExpired, parked, map[string]any{"calls": calls, "resumed_by": res.ID})
+	_, err = l.resumeDecided(tx, s, events.System, parked, nil, ApprovalExpired, "approval expired")
+	return err
 }
 
 // maxPinAge migrates a parked run that outlived its maximum pin age to

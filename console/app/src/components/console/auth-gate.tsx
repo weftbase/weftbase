@@ -1,0 +1,188 @@
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import * as React from "react"
+import { toast } from "sonner"
+
+import { AppShell } from "@/components/console/app-shell"
+import { ErrorState } from "@/components/console/empty-state"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { WeftbaseBrand } from "@/components/ui/weftbase-logo"
+import { onSignInLink, signInFromLink, tokenFromPaste } from "@/lib/api/auth"
+import { isUnauthorized } from "@/lib/api/errors"
+import { api } from "@/lib/api/http"
+import { q } from "@/lib/api/queries"
+
+// The Console's front door. In order:
+// 1. if the address carries a one-time sign-in token (#signin=…), take it
+//    out of the address and exchange it for the session cookie;
+// 2. ask the server who we are (GET /v1/meta);
+// 3. 401 → the signed-out screen; anything else that fails → an error
+//    with a retry; success → the shell.
+// A 401 on any later request sends the app back through step 2
+// (router.tsx invalidates ["meta"]).
+export function AuthGate() {
+  const qc = useQueryClient()
+  const [linking, setLinking] = React.useState(true)
+  const [linkError, setLinkError] = React.useState<unknown>(null)
+
+  React.useEffect(() => {
+    let live = true
+    signInFromLink()
+      .catch((e: unknown) => live && setLinkError(e))
+      .finally(() => live && setLinking(false))
+    return () => {
+      live = false
+    }
+  }, [])
+
+  // A link opened in this tab later (same page, only the hash changes).
+  React.useEffect(
+    () =>
+      onSignInLink((token) => {
+        api
+          .signIn(token)
+          .then(() => {
+            setLinkError(null)
+            // Everything read before belongs to the old session.
+            void qc.invalidateQueries()
+          })
+          .catch((e: unknown) => setLinkError(e))
+      }),
+    [qc]
+  )
+
+  const meta = useQuery({ ...q.meta(), enabled: !linking })
+
+  // Signed in already, a link that failed (used, expired) is said once,
+  // as a toast: the session in use goes on.
+  const signedIn = !!meta.data
+  React.useEffect(() => {
+    if (!signedIn || linkError === null || linkError === undefined) return
+    toast.error("The sign-in link did not work", {
+      id: "signin-link",
+      description: errorText(linkError),
+    })
+    setLinkError(null)
+  }, [signedIn, linkError])
+
+  if (meta.error && isUnauthorized(meta.error))
+    return (
+      <SignedOut
+        linkError={linkError}
+        clearLinkError={() => setLinkError(null)}
+        onSignedIn={() => {
+          setLinkError(null)
+          void qc.invalidateQueries({ queryKey: ["meta"] })
+        }}
+      />
+    )
+  if (meta.data) return <AppShell meta={meta.data} />
+  if (meta.error)
+    return (
+      <Centered>
+        <ErrorState
+          error={meta.error}
+          what="The server"
+          onRetry={() => void meta.refetch()}
+        />
+      </Centered>
+    )
+  return (
+    <Centered>
+      <p role="status" className="text-xs text-muted-foreground">
+        Connecting…
+      </p>
+    </Centered>
+  )
+}
+
+function Centered({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex h-svh flex-col items-center justify-center gap-4 bg-background p-4">
+      <WeftbaseBrand />
+      {children}
+    </div>
+  )
+}
+
+const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
+function SignedOut({
+  linkError,
+  clearLinkError,
+  onSignedIn,
+}: {
+  /** Why the last link opened in this tab did not sign in. Read on every
+   * render: a link can be opened while this screen is up. */
+  linkError: unknown
+  clearLinkError: () => void
+  onSignedIn: () => void
+}) {
+  const [text, setText] = React.useState("")
+  const [busy, setBusy] = React.useState(false)
+  const [formError, setFormError] = React.useState<unknown>(null)
+  const error = formError ?? linkError
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const token = tokenFromPaste(text)
+    if (!token) return
+    setBusy(true)
+    setFormError(null)
+    clearLinkError()
+    try {
+      await api.signIn(token)
+      setText("")
+      onSignedIn()
+    } catch (err) {
+      setFormError(err)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Centered>
+      <div className="w-full max-w-sm rounded-card border bg-card p-4 shadow-card">
+        <h1 className="text-sm font-semibold">You are signed out</h1>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Get a sign-in link and open it, or paste it here. A link works once
+          and for 15 minutes.
+        </p>
+        <ul className="mt-2 flex flex-col gap-1 text-xs text-muted-foreground">
+          <li>
+            Next to <code className="font-mono">weftbase dev</code>: run{" "}
+            <code className="font-mono text-foreground">weftbase signin</code>
+          </li>
+          <li>
+            Another server:{" "}
+            <code className="font-mono text-foreground">
+              weftbase signin --url &lt;server&gt; --token &lt;secret key&gt;
+            </code>
+          </li>
+          <li>The demo: press Enter in its terminal.</li>
+        </ul>
+        <form onSubmit={(e) => void submit(e)} className="mt-3 flex gap-2">
+          <Input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Paste the sign-in link"
+            aria-label="Sign-in link"
+            autoComplete="off"
+            spellCheck={false}
+            // The link is a credential: never shown back in clear.
+            type="password"
+          />
+          <Button type="submit" disabled={busy || text.trim() === ""}>
+            {busy ? "Signing in…" : "Sign in"}
+          </Button>
+        </form>
+        {error !== null && error !== undefined && (
+          <p role="alert" className="mt-2 text-xs text-danger-foreground">
+            {errorText(error)}
+          </p>
+        )}
+      </div>
+    </Centered>
+  )
+}

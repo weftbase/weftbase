@@ -1,4 +1,5 @@
 {
+  "display_status": "succeeded",
   "id": "otel-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7",
   "parent_run_id": "",
   "parent_call_id": "",
@@ -43,6 +44,7 @@
   "requests_badge": "derived",
   "derived": true,
   "children": [],
+  "children_total": 0,
   "holes": [
     {
       "hole": "derived",

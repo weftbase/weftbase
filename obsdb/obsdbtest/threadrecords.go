@@ -221,5 +221,15 @@ func sessionIDsFilter(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		if got := ids(obsdb.RunQuery{SessionIDs: []string{"sa", "sb", "sc"}, PublicID: "pub_x"}); !slices.Equal(got, []string{"sa-t1", "sa-t2", "sc-t1"}) {
 			t.Errorf("SessionIDs [sa sb sc] under pub_x = %v", got)
 		}
+		// RunQuery.IDs: one read for a set of runs, other filters beside.
+		if got := ids(obsdb.RunQuery{IDs: []string{"sa-t2", "lone", "nope"}}); !slices.Equal(got, []string{"lone", "sa-t2"}) {
+			t.Errorf("IDs = %v", got)
+		}
+		if got := ids(obsdb.RunQuery{IDs: []string{"sa-t2", "sb-t1"}, PublicID: "pub_x"}); !slices.Equal(got, []string{"sa-t2"}) {
+			t.Errorf("IDs under pub_x = %v", got)
+		}
+		if got := ids(obsdb.RunQuery{IDs: []string{}}); len(got) != 0 {
+			t.Errorf("IDs [] = %v, want none", got)
+		}
 	}
 }

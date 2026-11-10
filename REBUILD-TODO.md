@@ -141,6 +141,68 @@ diff, holes), `observe/export`, `sessions` (timeline, export, delete),
 - The weft integration points above, when weft's `weftbase-gaps` lands.
 - weft-arena is still unpinned (step 1).
 
+## v0.1.0 server surface: done (ahead of Phase 2, first slices)
+
+What the Console and a first user need from the server, built on the
+Phase 1 ledger (`docs/architecture.md`, "What the reads join").
+Commits `d8ff2e34`, `68cef3ee`, `76b4a861` and the one after them.
+
+| Item | Status | Notes |
+|---|---|---|
+| weft v0.24.2 | done | both `go.mod` files require the published tags; `go.work` no longer names `../weft` (CI and a fresh clone use v0.24.2 from the module proxy) |
+| the demo | done | `examples/demo` (`make demo`): five agents, both placements, scripted models only; a thread-backed session, retries, a fallback model, typed output, an MCP tool, a run that parks twice, an expiring approval, a queued run, manifest drift, stock OTLP traces; `TestDemo` asserts each over `/v1` |
+| local builds report to their node | done | the supervisor hands the child `WEFTBASE_URL` + `WEFTBASE_TOKEN` (a worker key it mints); the link secret is `WEFTBASE_WORKER_TOKEN`; `App.Serving(url)` |
+| approvals as a resource | done (first slice of P§10) | `approvals` table (migration `0004`), one record per parked call; list, get, decide (bound by `args_sha256`, actor recorded, `resolve` too), resume when all are decided, expiry per agent (`AgentApprovalExpiry`); events `approval.requested`, `approval.decided` with `chain_run_id` |
+| run rows say their state | done | `display_status`, `agent_version`, `resolved_via`, `placement`, `manifest_drift`, `approvals_outcome`, `usage_partial` (a running run's usage so far); queued runs listed from the ledger |
+| chains (a park and its resumes are one run) | done | one row per chain by default on the list and the search (`chains=0`: every run; pages are filled; `total_exact`), `chain` on run detail, `spans?tree=1&chain=1`, `logs?chain=1` |
+| delete | done | the whole logical run or session from both stores, audited; 409 `run_active` while in hand |
+| agent inventory | done | `/v1/agents?include=summary`, `/v1/agents/{name}`, versions diff, `/v1/tools`, per-version manifest drift |
+| stats | done | `by=total` (outcomes, approvals expired and denied, cost, durations, bucket timestamps), `buckets=`, `outcomes` on `by=agent`; agrees with the list for a window |
+| sessions | done | the conversation endpoint (turns with an index, waits, marks, skipped turn numbers explained), `session_id` on `POST /v1/runs` |
+| sign-in | done | `POST /v1/auth/links`, `weftbase signin`; the session cookie slides (12 h from last use, 30 days at most) |
+| streams | done | `/v1/events?after=now`; every stream opens at once; `weftbase_http_requests_in_flight` in `/metrics` |
+
+## v0.1.0: released 2026-11-10
+
+Done, in order: CI green on the pull request (#1; it found and fixed a
+local-executor race, the welcome written after the link was published,
+and two test races); `make stress` by hand (exit 0); `console/dist`
+fresh (CI's console job checks it); the CHANGELOG dated; `client/v0.1.0`
+tagged; the root requires it, with no `replace` in `go.work` and plain
+`make tidy` / `make gowork-off`; `v0.1.0` tagged; `go install
+github.com/weftbase/weftbase/cmd/weftbase@v0.1.0` checked from a clean
+directory.
+
+weft: no v0.24.3 is needed. The `thread/pool` CI failures were three
+tests that assumed a scheduling order; the fix is tests and comments
+only, on weft `main` (7059609a) with CI green. weftbase stays on
+v0.24.2, and the workspace no longer builds against a weft checkout:
+CI and a fresh clone get v0.24.2 from the module proxy.
+
+Known and accepted for v0.1.0 (each is in `CHANGELOG.md`, "Not in
+v0.1.0", or below):
+
+- Step 5b (peel the read logic out of `api/http/v1`) and code
+  generation from `api/openapi/v1.yaml` are not done. The handlers and
+  `client/rest` are written by hand; `make api-check` keeps the spec and
+  the route table to the same operations, but the response schemas in
+  the spec are loose for most reads.
+- `store/storetest` has no conformance group for approvals or deletes
+  (covered by `sessions/approvals_test.go` and the HTTP tests in
+  `phase1_test.go`). It matters when a second control-store backend
+  arrives.
+- The fold of chains and `display_status` runs in the handler after the
+  trace store pages: a filled page reads up to 40 store pages, and
+  `total` is exact only where `total_exact` says so.
+- `GET /v1/stats?by=total` and the `outcomes` of `by=agent` read run
+  rows (at most 20,000 per answer, `capped`).
+- `weftbase signin` has no CLI test (the endpoint has; it was run by
+  hand).
+- The local placement's two limits (a restored build runs with the
+  node's environment; a crashed node does not re-adopt its children):
+  `docs/architecture.md`, Known limits.
+- weft-arena is not pinned to this repository (step 1).
+
 ## Commits
 
 | Commit | Step | Summary |

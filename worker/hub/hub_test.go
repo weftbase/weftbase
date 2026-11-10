@@ -192,12 +192,17 @@ func TestAcksDriveTheLedger(t *testing.T) {
 	}
 }
 
+// TestBusyRequeuesRejectedAndErrorsEnd: a busy answer hands the run
+// back in its place (dispatched again as a new command, before the runs
+// admitted after it, never marked lost); a rejection fails the run; a
+// dispatch error loses it (at most once).
 func TestBusyRequeuesRejectedAndErrorsEnd(t *testing.T) {
 	f := newFake("a")
 	f.answers = []func(wire.Command) (wire.Ack, error){
 		func(c wire.Command) (wire.Ack, error) {
 			return wire.Ack{CommandID: c.CommandID, State: wire.AckBusy}, nil
 		},
+		nil, // the busy run, again: accepted
 		func(c wire.Command) (wire.Ack, error) {
 			return wire.Ack{CommandID: c.CommandID, State: wire.AckRejected, Error: "not today"}, nil
 		},
@@ -205,25 +210,23 @@ func TestBusyRequeuesRejectedAndErrorsEnd(t *testing.T) {
 	}
 	e := setup(t, time.Second, f)
 	busy := e.admit(t)
-	// busy: handed back and dispatched again later (released for 1 s),
-	// as a new command — never marked lost.
 	cmds := waitCommands(t, f, 1)
 	if cmds[0].RunID != busy {
 		t.Fatal(cmds)
 	}
 	rejected := e.admit(t)
+	broken := e.admit(t)
+	cmds = waitCommands(t, f, 2)
+	if cmds[1].RunID != busy || cmds[1].CommandID == cmds[0].CommandID {
+		t.Fatalf("the busy run's second dispatch = %+v (the runs admitted after it went first?)", cmds[1])
+	}
 	if r := e.wait(t, rejected, status(sessions.StatusFailed)); !strings.Contains(r.Error, "rejected: not today") {
 		t.Errorf("rejected = %+v", r)
 	}
-	broken := e.admit(t)
 	if r := e.wait(t, broken, status(sessions.StatusFailed)); !strings.HasPrefix(r.Error, sessions.ErrWorkerLost) {
 		t.Errorf("dispatch error = %+v", r)
 	}
-	cmds = waitCommands(t, f, 4)
-	if cmds[3].RunID != busy || cmds[3].CommandID == cmds[0].CommandID {
-		t.Fatalf("the busy run's second dispatch = %+v", cmds[3])
-	}
-	if r, _ := e.l.Get(context.Background(), e.s, busy); r.Status != sessions.StatusQueued {
+	if r, _ := e.l.Get(context.Background(), e.s, busy); r.Status != sessions.StatusQueued || r.Error != "" {
 		t.Errorf("busy run = %+v", r)
 	}
 }
@@ -253,5 +256,5 @@ func TestLeaseOutlivesItsTTLWhileHeld(t *testing.T) {
 		t.Fatalf("cancels = %+v", cancels)
 	}
 	e.f.send(wire.Ack{CommandID: cmd.CommandID, State: wire.AckFinished, RunID: id, Status: wire.StatusCanceled, Cause: wire.CauseUser})
-	e.wait(t, id, status(sessions.StatusCanceled))
+	e.wait(t, id, status(sessions.StatusCancelled))
 }

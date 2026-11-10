@@ -34,6 +34,7 @@ import (
 	"github.com/weftbase/weftbase/obsdb"
 	"github.com/weftbase/weftbase/obsdb/clickhouse"
 	obsqlite "github.com/weftbase/weftbase/obsdb/sqlite"
+	"github.com/weftbase/weftbase/observe/ingest"
 	"github.com/weftbase/weftbase/queue"
 	"github.com/weftbase/weftbase/registry"
 	"github.com/weftbase/weftbase/sessions"
@@ -77,10 +78,12 @@ type App struct {
 	hub      *hub.Hub
 	locals   map[string]*localBuild // by digest
 
-	mu       sync.Mutex
-	cancel   context.CancelFunc
-	done     chan struct{}
-	shutdown bool
+	mu        sync.Mutex
+	url       string              // where the node is served (Serving)
+	buildKeys map[string]buildKey // each local build's ingest key, by digest, minted on first use
+	cancel    context.CancelFunc
+	done      chan struct{}
+	shutdown  bool
 }
 
 // New opens the stores and wires the node. It fails on a store it
@@ -150,6 +153,7 @@ func New(opts ...Option) (_ *App, err error) {
 	a.events = events.New(a.control)
 	a.keys = keys.New(a.control, a.events)
 	a.sessions = authz.NewSessions(a.control)
+	a.sessions.Audit(a.events)
 	a.registry = registry.New(a.control, a.events)
 	a.queue = queue.New(a.control)
 	a.ledger = sessions.New(a.control, a.events, a.registry, a.queue, sessions.WithPolicy(c.policy))
@@ -160,7 +164,11 @@ func New(opts ...Option) (_ *App, err error) {
 	a.ledger.SetCanceler(a.hub)
 	a.ledger.SetSteerer(a.hub)
 	a.locals = map[string]*localBuild{}
+	a.buildKeys = map[string]buildKey{}
 	if a.roles.has(RoleSupervisor) {
+		if err := a.revokeStaleBuildKeys(ctx); err != nil {
+			return nil, fmt.Errorf("weftbase: build keys: %w", err)
+		}
 		if err := a.restoreBuilds(); err != nil {
 			return nil, err
 		}
@@ -208,7 +216,11 @@ func New(opts ...Option) (_ *App, err error) {
 		}
 	}
 	if a.roles.has(RoleIngest) {
-		rc.Routes = append(rc.Routes, toRoutes(a.api.IngestRoutes())...)
+		for _, r := range toRoutes(a.api.IngestRoutes()) {
+			// A build's worker key ingests its own runs only.
+			r.Handler = ingest.Guard(r.Handler, buildGate{a}, strings.HasSuffix(r.Pattern, "/logs"))
+			rc.Routes = append(rc.Routes, r)
+		}
 	}
 	a.router = httpapi.New(rc)
 	return a, nil
@@ -291,9 +303,15 @@ func (a *App) lock(path string) error {
 	return nil
 }
 
-// SetHolder records the serving URL in the store locks, so a second
-// start names who holds them (best effort).
-func (a *App) SetHolder(url string) {
+// Serving tells the node the base URL it is served at (no trailing
+// slash; under a prefix, with it). Call it once the listener is up,
+// before Local: local builds are handed that URL for their telemetry,
+// and the store locks record it, so a second start names who holds
+// them (best effort).
+func (a *App) Serving(url string) {
+	a.mu.Lock()
+	a.url = strings.TrimRight(url, "/")
+	a.mu.Unlock()
 	for _, l := range a.locks {
 		l.SetHolder(dblock.Holder{URL: url, PID: os.Getpid()})
 	}
@@ -453,6 +471,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 	// before the stores close.
 	herr := a.hub.Close(ctx, time.Now().Add(a.cfg.drainTimeout()))
 	a.closeLocals()
+	a.revokeBuildKeys()
 	return errors.Join(herr, a.closeStores())
 }
 

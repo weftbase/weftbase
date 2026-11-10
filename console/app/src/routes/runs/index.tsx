@@ -1,253 +1,357 @@
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query"
-import { Link, createFileRoute, useNavigate } from "@tanstack/react-router"
-import { AlignLeftIcon, ArrowUpRightIcon } from "lucide-react"
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
+import { createFileRoute } from "@tanstack/react-router"
+import { TriangleAlertIcon } from "lucide-react"
 import * as React from "react"
 
-import { ApprovalCallout } from "@/components/console/approval-actions"
-import { EmptyState } from "@/components/console/empty-state"
+import { useLiveState } from "@/components/console/app-shell"
+import { DataTable } from "@/components/console/data-table"
+import type { Column } from "@/components/console/data-table"
 import {
-  ClearFilters,
+  EmptyState,
+  ErrorState,
+  LoadingRows,
+} from "@/components/console/empty-state"
+import {
+  FilterBar,
   FilterSelect,
-  SearchFilter,
-} from "@/components/console/filters"
-import { LinkTab, LinkTabs } from "@/components/console/link-tabs"
-import { PageHeader } from "@/components/console/page-header"
-import { RunsTable } from "@/components/console/runs-table"
-import { RunStatusBadge } from "@/components/console/status"
-import { StepTimeline } from "@/components/console/step-timeline"
-import { Card } from "@/components/ui/card"
+  SearchInput,
+} from "@/components/console/filter-bar"
+import { LinkTabs, Page, PageHeader } from "@/components/console/page-header"
+import { RelativeTime } from "@/components/console/relative-time"
+import { runColumns } from "@/components/console/run-columns"
+import { RunsFilterMenu } from "@/components/console/runs-filter"
+import { LivePill } from "@/components/console/status"
+import { Button } from "@/components/ui/button"
 import { q } from "@/lib/api/queries"
-import type { RunFilters } from "@/lib/api/types"
-import { cost, duration, tokens } from "@/lib/format"
-import { useEnv, validateRuns } from "@/lib/search"
+import { FILTERABLE, STATUS_LABEL } from "@/lib/api/status"
+import type { TraceRow } from "@/lib/api/types"
+import { count, duration, shortId } from "@/lib/format"
+import { runsCount, runsRows, toRunsQuery, unpricedLine } from "@/lib/runs"
+import {
+  RANGES,
+  RANGE_LABEL,
+  sinceOf,
+  useSetSearch,
+  validateRuns,
+} from "@/lib/search"
 import type { RunsSearch } from "@/lib/search"
 
+// Runs: the dense list of runs, newest first, live. A park and its
+// resume are one row. One filter bar (search, status, agent, time range,
+// then "+ Filter"), all of it in the URL; the headers of the columns the
+// server can order by sort. Traces that belong to no weft run are a
+// second tab, shown only when the server has any.
 export const Route = createFileRoute("/runs/")({
   validateSearch: validateRuns,
-  loaderDeps: ({ search }) => ({
-    env: search.env ?? "live",
-    f: toFilters(search),
-  }),
-  loader: ({ context: { queryClient }, deps: { env, f } }) =>
-    queryClient.ensureQueryData(q.runs(env, f)),
   head: () => ({ meta: [{ title: "Runs · weftbase" }] }),
-  component: Runs,
+  component: RunsPage,
 })
 
-/** toFilters maps the URL to the API's filter names. */
-export function toFilters(s: RunsSearch): RunFilters {
-  return {
-    status: s.status,
-    agent: s.agent,
-    model: s.model,
-    tool: s.tool,
-    error_class: s.error,
-    tenant: s.tenant,
-    q: s.q,
-  }
-}
-
-const uniq = (xs: (string | null)[]) =>
-  [...new Set(xs.filter((x): x is string => !!x))].sort()
-
-function Runs() {
+function RunsPage() {
   const search = Route.useSearch()
-  const env = useEnv()
-  const navigate = useNavigate({ from: Route.fullPath })
-  const { data } = useSuspenseQuery(q.runs(env, toFilters(search)))
-  const all = useQuery(q.runs(env, {}))
-  const set = React.useCallback(
-    (patch: Partial<RunsSearch>) =>
-      void navigate({ search: (prev) => ({ ...prev, ...patch }) }),
-    [navigate]
-  )
-  const setQ = React.useCallback(
-    (v: string | undefined) => set({ q: v }),
-    [set]
-  )
-  const opts = React.useMemo(() => {
-    const items = all.data?.items ?? []
-    return {
-      agent: uniq(items.map((r) => r.agent)),
-      model: uniq(items.map((r) => r.model)),
-      tool: uniq(items.flatMap((r) => r.tools)),
-      tenant: uniq(items.map((r) => r.tenant)),
-      error: uniq(items.map((r) => r.error_class)),
-    }
-  }, [all.data])
-  const filtered = !!(
-    search.agent ||
-    search.model ||
-    search.tool ||
-    search.tenant ||
-    search.error ||
-    search.q
-  )
-  const selected = search.run ?? data.items[0]?.id
+  const live = useLiveState()
+  // Raw traces: is there anything for the second tab?
+  const raw = useQuery(q.traces({ notRun: true, limit: 50 }))
+  const hasRaw = (raw.data?.total ?? 0) > 0
+  const onTraces = search.tab === "traces"
 
   return (
-    <div className="flex flex-wrap gap-5">
-      <section className="flex min-w-0 flex-[1_1_640px] flex-col gap-4">
-        <PageHeader
-          title="Runs"
-          description="Every agent run on this server, newest first."
-        >
-          <LinkTabs label="Run status">
-            <LinkTab to="/runs" search={(p) => ({ ...p, status: undefined })}>
-              All
-            </LinkTab>
-            <LinkTab
-              to="/runs"
-              search={(p) => ({ ...p, status: "running" as const })}
-            >
-              Running
-            </LinkTab>
-            <LinkTab
-              to="/runs"
-              search={(p) => ({ ...p, status: "waiting" as const })}
-            >
-              Waiting
-            </LinkTab>
-            <LinkTab
-              to="/runs"
-              search={(p) => ({ ...p, status: "failed" as const })}
-            >
-              Failed
-            </LinkTab>
-          </LinkTabs>
-        </PageHeader>
-        <div
-          className="flex flex-wrap items-center gap-2.5"
-          role="group"
-          aria-label="Filters"
-        >
-          <SearchFilter
-            value={search.q}
-            onChange={setQ}
-            placeholder="Filter by id, agent or model"
-          />
-          <FilterSelect
-            label="Agent"
-            value={search.agent}
-            options={opts.agent}
-            onChange={(v) => set({ agent: v })}
-          />
-          <FilterSelect
-            label="Model"
-            value={search.model}
-            options={opts.model}
-            onChange={(v) => set({ model: v })}
-          />
-          <FilterSelect
-            label="Tool"
-            value={search.tool}
-            options={opts.tool}
-            onChange={(v) => set({ tool: v })}
-          />
-          <FilterSelect
-            label="Tenant"
-            value={search.tenant}
-            options={opts.tenant}
-            onChange={(v) => set({ tenant: v })}
-          />
-          <FilterSelect
-            label="Error class"
-            value={search.error}
-            options={opts.error}
-            onChange={(v) => set({ error: v })}
-          />
-          <ClearFilters
-            shown={filtered}
-            onClear={() =>
-              set({
-                agent: undefined,
-                model: undefined,
-                tool: undefined,
-                tenant: undefined,
-                error: undefined,
-                q: undefined,
-              })
-            }
-          />
-        </div>
-        {data.items.length === 0 ? (
-          <EmptyState icon={AlignLeftIcon} title="No runs match these filters">
-            Clear a filter, or pick another status tab.
-          </EmptyState>
-        ) : (
-          <Card className="overflow-x-auto py-0">
-            <RunsTable runs={data.items} selected={selected} select />
-          </Card>
-        )}
-        <p className="text-xs text-subtle-foreground">
-          {data.total} {data.total === 1 ? "run" : "runs"}
-        </p>
-      </section>
-      {selected && <RunCard id={selected} />}
-    </div>
+    <Page
+      flush
+      header={<PageHeader title="Runs" meta={<LivePill state={live} />} />}
+      bar={
+        <>
+          {(hasRaw || onTraces) && (
+            <LinkTabs
+              tabs={[
+                {
+                  label: "Runs",
+                  link: { to: "/runs", search: { ...search, tab: undefined } },
+                  active: !onTraces,
+                },
+                {
+                  label: "Traces",
+                  link: { to: "/runs", search: { tab: "traces" } },
+                  active: onTraces,
+                  count: raw.data?.total,
+                },
+              ]}
+            />
+          )}
+          {!onTraces && <RunsFilters />}
+        </>
+      }
+    >
+      {onTraces ? <RawTraces /> : <RunsTable />}
+    </Page>
   )
 }
 
-/** RunCard is the artboard's right-hand detail card: the compact run. */
-function RunCard({ id }: { id: string }) {
-  const env = useEnv()
-  const run = useQuery(q.run(env, id))
-  const approvalId = run.data?.steps.find(
-    (s) => s.kind === "approval" && s.status === "waiting"
-  )?.approval_id
-  const approval = useQuery({
-    ...q.approval(env, approvalId ?? ""),
-    enabled: !!approvalId,
-  })
-  if (!run.data)
-    return (
-      <Card aria-busy className="min-h-64 min-w-[300px] flex-[0_1_360px]" />
-    )
-  const r = run.data
+function useRunsQuery() {
+  const search = Route.useSearch()
+  const since = React.useMemo(
+    () => (search.range ? sinceOf(search.range) : undefined),
+    [search.range]
+  )
+  return useInfiniteQuery(q.runs(toRunsQuery(search, since)))
+}
+
+/** Every filter the URL can hold, cleared. */
+const CLEARED: Record<Exclude<keyof RunsSearch, "tab">, undefined> = {
+  q: undefined,
+  status: undefined,
+  agent: undefined,
+  range: undefined,
+  tool: undefined,
+  model: undefined,
+  error: undefined,
+  min_cost: undefined,
+  min_tokens: undefined,
+  tag: undefined,
+  session: undefined,
+  sub: undefined,
+  sort: undefined,
+}
+
+const keys = (groups: { key: string }[] | undefined, also?: string) => {
+  const out = (groups?.map((g) => g.key) ?? []).filter(Boolean)
+  if (also && !out.includes(also)) out.push(also)
+  return out.sort()
+}
+
+function RunsFilters() {
+  const search = Route.useSearch()
+  const set = useSetSearch<RunsSearch>(Route.fullPath)
+  const runs = useRunsQuery()
+  // What the selects offer: what ran in the last 30 days.
+  const agents = useQuery(q.options("agent"))
+  const models = useQuery(q.options("model"))
+  const tools = useQuery(q.options("tool"))
+  const errors = useQuery(q.options("error_type"))
+  const total = runsCount(runs.data?.pages, runs.hasNextPage)
+
   return (
-    <aside
-      aria-label="Run detail"
-      className="min-w-[300px] flex-[0_1_360px] self-start"
+    <FilterBar
+      right={
+        total && (
+          <span className="font-mono tabular-nums" title={total.title}>
+            {total.text}
+            {total.more && (
+              <span className="font-sans text-muted-foreground">
+                {" "}
+                · {total.more}
+              </span>
+            )}
+          </span>
+        )
+      }
     >
-      <Card className="gap-[18px] p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="font-mono text-xs text-subtle-foreground">
-              {r.id}
-            </div>
-            <div className="mt-1 truncate text-lg font-semibold">{r.agent}</div>
-          </div>
-          <RunStatusBadge status={r.status} short />
-        </div>
-        <dl className="grid grid-cols-3 gap-3 text-[13px]">
-          <div>
-            <dt className="text-subtle-foreground">Time</dt>
-            <dd className="font-mono">{duration(r.duration_ms)}</dd>
-          </div>
-          <div>
-            <dt className="text-subtle-foreground">Tokens</dt>
-            <dd className="font-mono">
-              {tokens(r.usage.input_tokens + r.usage.output_tokens)}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-subtle-foreground">Cost</dt>
-            <dd className="font-mono">{cost(r.cost)}</dd>
-          </div>
-        </dl>
-        <StepTimeline steps={r.steps} />
-        {approval.data && (
-          <ApprovalCallout approval={approval.data} env={env} />
-        )}
-        <Link
-          to="/runs/$runId"
-          params={{ runId: r.id }}
-          className="inline-flex items-center gap-1.5 self-start text-sm font-medium hover:underline"
-        >
-          Open run
-          <ArrowUpRightIcon className="size-4" />
-        </Link>
-      </Card>
-    </aside>
+      <SearchInput
+        value={search.q}
+        onChange={(v) => set({ q: v })}
+        placeholder="Search runs"
+      />
+      <FilterSelect
+        label="Status"
+        value={search.status}
+        options={FILTERABLE.map((s) => ({ value: s, label: STATUS_LABEL[s] }))}
+        onChange={(status) => set({ status })}
+      />
+      <FilterSelect
+        label="Agent"
+        value={search.agent}
+        options={keys(agents.data?.groups, search.agent).map((n) => ({
+          value: n,
+          label: n,
+        }))}
+        onChange={(agent) => set({ agent })}
+      />
+      <FilterSelect
+        label="Time range"
+        any="Any time"
+        value={search.range}
+        options={RANGES.map((r) => ({ value: r, label: RANGE_LABEL[r] }))}
+        onChange={(range) => set({ range })}
+      />
+      <RunsFilterMenu
+        search={search}
+        set={set}
+        tools={keys(tools.data?.groups)}
+        models={keys(models.data?.groups)}
+        errors={keys(errors.data?.groups).filter((k) => k !== "cancelled")}
+      />
+    </FilterBar>
+  )
+}
+
+function RunsTable() {
+  const search = Route.useSearch()
+  const set = useSetSearch<RunsSearch>(Route.fullPath)
+  const runs = useRunsQuery()
+  const filtered = Object.keys(CLEARED).some(
+    (k) => search[k as keyof RunsSearch] !== undefined
+  )
+  const columns = React.useMemo(
+    () => runColumns({ sort: search.sort, onSort: (sort) => set({ sort }) }),
+    // set is a new function each render; the sort is what matters.
+    [search.sort]
+  )
+
+  if (runs.error)
+    return (
+      <ErrorState
+        error={runs.error}
+        what="Runs"
+        onRetry={() => void runs.refetch()}
+      />
+    )
+  if (!runs.data) return <LoadingRows rows={12} />
+  const rows = runsRows(runs.data.pages)
+  if (rows.length === 0 && !runs.hasNextPage)
+    return filtered ? (
+      <EmptyState
+        title="No runs match these filters"
+        action={
+          <Button size="sm" variant="secondary" onClick={() => set(CLEARED)}>
+            Clear filters
+          </Button>
+        }
+      />
+    ) : (
+      <EmptyState title="No runs yet">
+        Runs appear here as soon as an agent reports to this server.
+      </EmptyState>
+    )
+
+  const unpriced = unpricedLine(rows)
+  return (
+    <>
+      <DataTable
+        label="Runs"
+        columns={columns}
+        rows={rows}
+        rowKey={(r) => r.id}
+        rowLink={(r) => ({ to: "/runs/$runId", params: { runId: r.id } })}
+        footer={
+          runs.hasNextPage ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={runs.isFetchingNextPage}
+              onClick={() => void runs.fetchNextPage()}
+            >
+              {runs.isFetchingNextPage ? "Loading…" : "Load more"}
+            </Button>
+          ) : undefined
+        }
+      />
+      {unpriced && (
+        <p className="px-4 pb-3 text-center text-xs text-muted-foreground">
+          {unpriced}
+        </p>
+      )}
+    </>
+  )
+}
+
+const TRACE_COLUMNS: Column<TraceRow>[] = [
+  {
+    key: "error",
+    header: <span className="sr-only">Error</span>,
+    width: "28px",
+    cell: (t) =>
+      t.error ? (
+        <TriangleAlertIcon
+          aria-label="Has an error"
+          className="size-3.5 text-danger-foreground"
+        />
+      ) : null,
+  },
+  {
+    key: "root",
+    header: "Root span",
+    width: "minmax(200px, 1fr)",
+    cell: (t) =>
+      t.root ? (
+        <span className="font-medium">{t.root.name}</span>
+      ) : (
+        <span className="text-muted-foreground" title={t.reason}>
+          root span missing
+        </span>
+      ),
+  },
+  {
+    key: "service",
+    header: "Service",
+    width: "minmax(100px, 200px)",
+    muted: true,
+    cell: (t) => t.service || "—",
+  },
+  {
+    key: "id",
+    header: "Trace",
+    width: "100px",
+    mono: true,
+    muted: true,
+    cell: (t) => shortId(t.trace_id),
+  },
+  {
+    key: "spans",
+    header: "Spans",
+    width: "64px",
+    align: "right",
+    mono: true,
+    cell: (t) => count(t.span_count),
+  },
+  {
+    key: "duration",
+    header: "Duration",
+    width: "80px",
+    align: "right",
+    mono: true,
+    cell: (t) => duration(t.duration_ms),
+  },
+  {
+    key: "started",
+    header: "Started",
+    width: "80px",
+    align: "right",
+    muted: true,
+    cell: (t) => <RelativeTime time={t.start} />,
+  },
+]
+
+/** Traces that belong to no weft run (plain OTel traces sent here). */
+function RawTraces() {
+  const traces = useQuery(q.traces({ notRun: true, limit: 50 }))
+  if (traces.error) return <ErrorState error={traces.error} what="Traces" />
+  if (!traces.data) return <LoadingRows rows={8} />
+  if (traces.data.traces.length === 0)
+    return (
+      <EmptyState title="No traces outside runs">
+        Every trace this server has belongs to a run. Open a run to see its
+        trace.
+      </EmptyState>
+    )
+  return (
+    <DataTable
+      label="Traces"
+      columns={TRACE_COLUMNS}
+      rows={traces.data.traces}
+      rowKey={(t) => t.trace_id}
+      rowLink={(t) => ({
+        to: "/traces/$traceId",
+        params: { traceId: t.trace_id },
+      })}
+      footer={
+        // The tab counts them; only a list cut short says so.
+        traces.data.traces.length < traces.data.total ? (
+          <span>
+            {count(traces.data.traces.length)} of {count(traces.data.total)}{" "}
+            traces
+          </span>
+        ) : undefined
+      }
+    />
   )
 }

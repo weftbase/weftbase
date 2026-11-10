@@ -1,21 +1,43 @@
-import { useQuery } from "@tanstack/react-query"
-import { Link, Outlet, useNavigate } from "@tanstack/react-router"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import type { QueryClient } from "@tanstack/react-query"
+import {
+  Link,
+  Outlet,
+  useMatch,
+  useNavigate,
+  useRouter,
+  useRouterState,
+} from "@tanstack/react-router"
 import {
   CheckIcon,
-  MenuIcon,
+  CopyIcon,
+  LinkIcon,
+  LogOutIcon,
   MonitorIcon,
   MoonIcon,
-  PlusIcon,
+  PanelLeftIcon,
   SearchIcon,
   SunIcon,
+  UserIcon,
 } from "lucide-react"
 import * as React from "react"
+import { toast } from "sonner"
 
 import { CommandMenu } from "@/components/console/command-menu"
+import { useCopy } from "@/components/console/copy-id"
 import { NAV, SETTINGS_NAV } from "@/components/console/nav"
+import { NewRun } from "@/components/console/new-run"
 import type { NavItem } from "@/components/console/nav"
-import { Badge } from "@/components/ui/badge"
+import { ShortcutsSheet } from "@/components/console/shortcuts"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -31,194 +53,143 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { WeftbaseBrand } from "@/components/ui/weftbase-logo"
-import { api } from "@/lib/api/client"
+import { chainQuery } from "@/lib/api/chain"
+import { ApiError } from "@/lib/api/errors"
+import type { ChainView } from "@/lib/api/chain"
+import { api } from "@/lib/api/http"
+import { useApprovalsLive, useRunsLive } from "@/lib/api/live"
 import { q } from "@/lib/api/queries"
-import type { Env } from "@/lib/api/types"
-import { useEnv } from "@/lib/search"
+import type { StreamState } from "@/lib/api/stream"
+import type { Meta } from "@/lib/api/types"
+import { usePref } from "@/lib/prefs"
+import { dateTime } from "@/lib/format"
 import { setTheme, useTheme } from "@/lib/theme"
 import type { ThemePref } from "@/lib/theme"
 import { cn } from "@/lib/utils"
 
-// The Console shell (design system, Console layout): a 232px sidebar,
-// then a column with the 60px top bar and the page (padding 24px).
-// Under 760px the sidebar hides and a menu button takes its place.
+// The Console shell (CONSOLE-UX, Density): a 200px sidebar that collapses
+// to a 44px icon rail (remembered), then a column with the 40px top bar
+// and the page. Pages own their padding (components/console/page-header).
+// Under 1000px the sidebar is always the rail.
 
-const navItemClass =
-  "flex h-9 items-center gap-2.5 rounded-md px-2.5 text-sm font-medium text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring aria-[current=page]:bg-sidebar-accent aria-[current=page]:text-foreground aria-[current=page]:shadow-nav-active"
+const LiveContext = React.createContext<StreamState>("connecting")
+/** The state of the project-wide runs stream the shell keeps open. */
+export const useLiveState = () => React.useContext(LiveContext)
 
-function NavLink({ item, count }: { item: NavItem; count?: number }) {
+function NavLink({
+  item,
+  rail,
+  count,
+}: {
+  item: NavItem
+  rail: boolean
+  count?: number
+}) {
   const Icon = item.icon
-  return (
+  const link = (
     <Link
       to={item.to}
-      className={navItemClass}
       activeOptions={{ exact: item.to === "/" }}
-    >
-      <Icon className="size-[17px] flex-none" />
-      {item.label}
-      {count !== undefined && count > 0 && (
-        <span className="ml-auto count-badge" aria-label={`${count} waiting`}>
-          {count}
-        </span>
+      aria-label={rail ? item.label : undefined}
+      className={cn(
+        "relative flex h-7 items-center gap-2 rounded-input text-sm font-medium text-muted-foreground outline-none hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring aria-[current=page]:bg-sidebar-accent aria-[current=page]:text-foreground aria-[current=page]:shadow-nav-active",
+        rail ? "w-7 justify-center" : "px-2"
       )}
+    >
+      <Icon className="size-4 flex-none" />
+      {!rail && item.label}
+      {count !== undefined &&
+        count > 0 &&
+        (rail ? (
+          <span
+            aria-label={`${count} waiting`}
+            className="absolute top-0.5 right-0.5 size-1.5 rounded-full bg-warning"
+          />
+        ) : (
+          <span className="ml-auto count-badge" aria-label={`${count} waiting`}>
+            {count}
+          </span>
+        ))}
     </Link>
+  )
+  if (!rail) return link
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{link}</TooltipTrigger>
+      <TooltipContent side="right" sideOffset={6}>
+        {item.label}
+        {count ? ` · ${count} waiting` : ""}
+      </TooltipContent>
+    </Tooltip>
   )
 }
 
-function usePendingCount(): number | undefined {
-  const env = useEnv()
-  const stats = useQuery(q.stats(env))
-  return stats.data?.pending_approvals
-}
-
-function Sidebar() {
-  const pending = usePendingCount()
-  const meta = useQuery(q.meta())
-  const workspace = meta.data?.workspace ?? "Workspace"
+function Sidebar({ rail }: { rail: boolean }) {
+  // Tool calls waiting on a person: the Approvals count, kept current by
+  // the outbox stream (useApprovalsLive in the shell).
+  const waiting = useQuery(q.approvals({ status: "pending", limit: 1 }))
   return (
     <nav
       aria-label="Main"
-      className="flex w-[232px] flex-none flex-col gap-1 border-r border-sidebar-border bg-sidebar px-3.5 py-[18px] max-[760px]:hidden"
+      className={cn(
+        "flex flex-none flex-col border-r border-sidebar-border bg-sidebar",
+        rail ? "w-11" : "w-[200px] max-[1000px]:w-11"
+      )}
     >
       <Link
         to="/"
-        className="mb-1 rounded-md px-2 pt-1 pb-[18px]"
         aria-label="Weftbase overview"
+        className={cn(
+          "flex h-10 flex-none items-center border-b border-sidebar-border outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+          rail
+            ? "justify-center"
+            : "px-3 max-[1000px]:justify-center max-[1000px]:px-0"
+        )}
       >
-        <WeftbaseBrand />
-      </Link>
-      {NAV.map((item) => (
-        <NavLink
-          key={item.to}
-          item={item}
-          count={item.to === "/approvals" ? pending : undefined}
+        <WeftbaseBrand
+          markOnly={rail}
+          className="max-[1000px]:[&>span:last-child]:hidden"
         />
-      ))}
-      <div className="mt-auto flex flex-col gap-1">
-        <NavLink item={SETTINGS_NAV} />
-        <div className="mt-1.5 flex items-center gap-2.5 border-t border-sidebar-border p-2.5">
-          <span
-            aria-hidden
-            className="flex size-[30px] flex-none items-center justify-center rounded-full border bg-muted text-xs font-semibold text-muted-foreground"
-          >
-            {initials(workspace)}
-          </span>
-          <span className="min-w-0">
-            <span className="block truncate text-[13px] font-medium">
-              {workspace}
-            </span>
-            <span className="block text-xs text-subtle-foreground">
-              self-hosted
-            </span>
-          </span>
+      </Link>
+      <div
+        className={cn(
+          "flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto py-2",
+          rail
+            ? "items-center px-0"
+            : "px-2 max-[1000px]:items-center max-[1000px]:px-0"
+        )}
+      >
+        {NAV.map((item) => (
+          <ResponsiveNavLink
+            key={item.to}
+            item={item}
+            rail={rail}
+            count={item.to === "/approvals" ? waiting.data?.pending : undefined}
+          />
+        ))}
+        <div className="mt-auto flex flex-col gap-0.5">
+          <ResponsiveNavLink item={SETTINGS_NAV} rail={rail} />
         </div>
       </div>
     </nav>
   )
 }
 
-function initials(name: string): string {
-  const letters = name
-    .replace(/[^A-Za-z ]/g, "")
-    .split(" ")
-    .filter(Boolean)
-  return (
-    letters.length >= 2
-      ? letters[0][0] + letters[1][0]
-      : (letters[0] ?? "W").slice(0, 2)
-  ).toUpperCase()
+/** Under 1000px the sidebar is the rail whatever the preference says. */
+function ResponsiveNavLink(props: React.ComponentProps<typeof NavLink>) {
+  const narrow = useNarrow()
+  return <NavLink {...props} rail={props.rail || narrow} />
 }
 
-function MobileNav() {
-  const pending = usePendingCount()
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="min-[761px]:hidden"
-          aria-label="Open navigation"
-        >
-          <MenuIcon className="size-[18px]" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-56">
-        {[...NAV, SETTINGS_NAV].map((item) => (
-          <DropdownMenuItem key={item.to} asChild>
-            <Link to={item.to}>
-              <item.icon className="size-4" />
-              {item.label}
-              {item.to === "/approvals" && pending ? (
-                <span className="ml-auto count-badge">{pending}</span>
-              ) : null}
-            </Link>
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  )
-}
-
-const ENV_LABEL: Record<Env, string> = { live: "live", test: "test" }
-
-function EnvSwitcher() {
-  const env = useEnv()
-  const navigate = useNavigate()
-  const choose = (next: Env) =>
-    void navigate({
-      to: ".",
-      search: (prev: Record<string, unknown>) => ({
-        ...prev,
-        env: next === "live" ? undefined : next,
-      }),
-    })
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          className="inline-flex h-8 items-center gap-2 rounded-md border px-3 text-[13px] text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-          aria-label={`Environment: ${ENV_LABEL[env]}. Change environment`}
-        >
-          <span
-            aria-hidden
-            className={cn(
-              "size-[7px] rounded-full",
-              env === "live" ? "bg-success" : "bg-neutral"
-            )}
-          />
-          {ENV_LABEL[env]}
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-60">
-        <DropdownMenuLabel className="eyebrow">Environment</DropdownMenuLabel>
-        {(["live", "test"] as const).map((e) => (
-          <DropdownMenuItem key={e} onSelect={() => choose(e)}>
-            <span
-              aria-hidden
-              className={cn(
-                "size-[7px] rounded-full",
-                e === "live" ? "bg-success" : "bg-neutral"
-              )}
-            />
-            <span className="flex flex-col">
-              <span>{ENV_LABEL[e]}</span>
-              <span className="text-xs text-subtle-foreground">
-                {e === "live"
-                  ? "Production keys and traffic"
-                  : "Test keys, safe to break"}
-              </span>
-            </span>
-            {e === env && <CheckIcon className="ml-auto size-4" />}
-          </DropdownMenuItem>
-        ))}
-        <DropdownMenuSeparator />
-        <DropdownMenuLabel className="text-xs font-normal text-subtle-foreground">
-          Filter by tenant on each list page.
-        </DropdownMenuLabel>
-      </DropdownMenuContent>
-    </DropdownMenu>
+function useNarrow(): boolean {
+  return React.useSyncExternalStore(
+    (l) => {
+      const mq = matchMedia("(max-width: 1000px)")
+      mq.addEventListener("change", l)
+      return () => mq.removeEventListener("change", l)
+    },
+    () => matchMedia("(max-width: 1000px)").matches,
+    () => false
   )
 }
 
@@ -233,20 +204,16 @@ function ThemeToggle() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon-sm" aria-label="Change theme">
-          {dark ? (
-            <MoonIcon className="size-4" />
-          ) : (
-            <SunIcon className="size-4" />
-          )}
+        <Button variant="ghost" size="icon" aria-label="Change theme">
+          {dark ? <MoonIcon /> : <SunIcon />}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-40">
+      <DropdownMenuContent align="end" className="w-36">
         {THEMES.map((t) => (
           <DropdownMenuItem key={t.pref} onSelect={() => setTheme(t.pref)}>
-            <t.icon className="size-4" />
+            <t.icon className="size-3.5" />
             {t.label}
-            {t.pref === pref && <CheckIcon className="ml-auto size-4" />}
+            {t.pref === pref && <CheckIcon className="ml-auto size-3.5" />}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
@@ -254,83 +221,381 @@ function ThemeToggle() {
   )
 }
 
-function TopBar({ onSearch }: { onSearch: () => void }) {
+const PRINCIPAL: Record<Meta["principal"]["kind"], string> = {
+  operator: "Signed in with a sign-in link",
+  key: "Authenticated with an API key",
+  local: "Local access, no sign-in needed",
+}
+
+function AccountMenu({ meta }: { meta: Meta }) {
+  const qc = useQueryClient()
+  const p = meta.principal
+  const signOut = async () => {
+    try {
+      await api.signOut()
+    } finally {
+      // Whatever the answer, drop what this session loaded and ask the
+      // server who we are now.
+      qc.removeQueries({ predicate: (query) => query.queryKey[0] !== "meta" })
+      void qc.invalidateQueries({ queryKey: ["meta"] })
+    }
+  }
+  // A fresh one-time sign-in link. It is a credential: it lives in this
+  // mutation's state only (never logged, never stored) and is dropped
+  // when the dialog closes.
+  const [linking, setLinking] = React.useState(false)
+  const link = useMutation({
+    mutationFn: () => api.signInLink(window.location.origin),
+    gcTime: 0,
+  })
   return (
-    <header className="flex h-15 flex-none items-center gap-4 border-b px-6 max-[760px]:gap-2.5 max-[760px]:px-4">
-      <MobileNav />
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" aria-label="Account">
+            <UserIcon />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-60">
+          <DropdownMenuLabel className="flex flex-col gap-0.5 font-normal">
+            <span className="text-sm font-medium text-foreground">
+              {p.kind === "operator"
+                ? "Operator"
+                : p.kind === "key"
+                  ? "API key"
+                  : "Local"}
+            </span>
+            <span>{PRINCIPAL[p.kind]}</span>
+            <span className="truncate font-mono">{p.id}</span>
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onSelect={() => {
+              setLinking(true)
+              link.mutate()
+            }}
+          >
+            <LinkIcon className="size-3.5" />
+            New sign-in link…
+          </DropdownMenuItem>
+          {p.kind === "operator" && (
+            <DropdownMenuItem onSelect={() => void signOut()}>
+              <LogOutIcon className="size-3.5" />
+              Sign out
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Dialog
+        open={linking}
+        onOpenChange={(open) => {
+          setLinking(open)
+          if (!open) link.reset()
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <SignInLink
+            link={link.data}
+            error={link.error}
+            onDone={() => {
+              setLinking(false)
+              link.reset()
+            }}
+          />
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
+
+/** The sign-in link just made, to open the Console in another browser:
+ * shown once, with a copy button. */
+function SignInLink({
+  link,
+  error,
+  onDone,
+}: {
+  link: { link: string; expires_at: string } | undefined
+  error: unknown
+  onDone: () => void
+}) {
+  const [copied, copy] = useCopy()
+  return (
+    <div className="flex min-w-0 flex-col gap-3">
+      <DialogHeader>
+        <DialogTitle>New sign-in link</DialogTitle>
+        <DialogDescription>
+          Opens the Console in another browser. Works once
+          {link ? `, until ${dateTime(link.expires_at)}` : ""}.
+        </DialogDescription>
+      </DialogHeader>
+      {error ? (
+        <p role="alert" className="text-xs text-danger-foreground">
+          {error instanceof ApiError && error.status === 403
+            ? "This credential may not create sign-in links."
+            : error instanceof Error
+              ? error.message
+              : String(error)}
+        </p>
+      ) : (
+        <div className="flex items-center gap-2">
+          <output
+            aria-label="Sign-in link"
+            data-sign-in-link
+            className="flex h-7 min-w-0 flex-1 items-center rounded-input border bg-surface px-2 font-mono text-xs"
+          >
+            <span className="truncate">
+              {link?.link ?? "Creating the link…"}
+            </span>
+          </output>
+          <Button
+            variant="secondary"
+            disabled={!link}
+            onClick={() => link && copy(link.link)}
+          >
+            {copied ? <CheckIcon /> : <CopyIcon />}
+            {copied ? "Copied" : "Copy"}
+          </Button>
+        </div>
+      )}
+      <DialogFooter>
+        <Button variant="ghost" onClick={onDone}>
+          Done
+        </Button>
+      </DialogFooter>
+    </div>
+  )
+}
+
+/** The project and environment this session is scoped to. The server
+ * fixes both per credential, so this names them; it is not a switch. */
+function ScopeChip({ meta }: { meta: Meta }) {
+  const { project, env, tenant } = meta.principal.scope
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          tabIndex={0}
+          className="inline-flex h-7 flex-none items-center gap-1.5 rounded-input border px-2 text-sm outline-none focus-visible:outline-2 focus-visible:outline-ring"
+        >
+          <span className="max-w-40 truncate font-medium">{project}</span>
+          <span className="text-subtle-foreground">/</span>
+          <span
+            aria-hidden
+            className={cn(
+              "size-1.5 rounded-full",
+              env === "live" ? "bg-success" : "bg-neutral"
+            )}
+          />
+          <span className="text-muted-foreground">{env}</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" sideOffset={6}>
+        Project {project}, {env} environment
+        {meta.principal.all_tenants ? ", all tenants" : `, tenant ${tenant}`}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
+function TopBar({
+  meta,
+  onSearch,
+  onToggleSidebar,
+  newRunOpen,
+  onNewRunOpenChange,
+}: {
+  meta: Meta
+  onSearch: () => void
+  onToggleSidebar: () => void
+  newRunOpen: boolean
+  onNewRunOpenChange: (open: boolean) => void
+}) {
+  // On an agent's page, "New run" starts with that agent chosen.
+  const onAgent = useMatch({ from: "/agents/$name", shouldThrow: false })
+  return (
+    <header className="flex h-10 flex-none items-center gap-2 border-b px-2">
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label="Toggle sidebar"
+        title="Toggle sidebar (⌘B)"
+        onClick={onToggleSidebar}
+        className="max-[1000px]:hidden"
+      >
+        <PanelLeftIcon />
+      </Button>
+      <ScopeChip meta={meta} />
       <button
         type="button"
         onClick={onSearch}
-        className="flex h-9 max-w-[420px] min-w-0 flex-1 items-center gap-2 rounded-input border border-input bg-input-background px-3 text-left text-sm text-subtle-foreground shadow-input outline-none hover:border-ring/40 focus-visible:border-ring focus-visible:shadow-focus"
+        className="flex h-7 w-72 max-w-full min-w-0 items-center gap-1.5 rounded-input border border-input bg-input-background px-2 text-left text-sm text-subtle-foreground shadow-input outline-none hover:border-ring/40 focus-visible:border-ring focus-visible:shadow-focus"
       >
-        <SearchIcon className="size-4 flex-none" />
-        <span className="flex-1 truncate">Search runs, sessions, agents</span>
+        <SearchIcon className="size-3.5 flex-none" />
+        <span className="flex-1 truncate">Search or jump to</span>
         <Kbd size="sm">⌘K</Kbd>
       </button>
-      <div className="ml-auto flex items-center gap-2.5">
-        {api.kind === "mock" && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span tabIndex={0} className="max-[1000px]:hidden">
-                <Badge
-                  variant="outline"
-                  size="tag"
-                  className="font-mono text-muted-foreground"
-                >
-                  mock data
-                </Badge>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>
-              The /v1 API is not connected. Every number here is sample data.
-            </TooltipContent>
-          </Tooltip>
-        )}
-        <EnvSwitcher />
+      <div className="ml-auto flex items-center gap-1">
+        <NewRun
+          agent={onAgent?.params.name}
+          open={newRunOpen}
+          onOpenChange={onNewRunOpenChange}
+        />
         <ThemeToggle />
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span tabIndex={0} className="max-[560px]:hidden">
-              <Button size="sm" disabled>
-                <PlusIcon />
-                New run
-              </Button>
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>
-            Planned: starts a run on an agent label once workers connect.
-          </TooltipContent>
-        </Tooltip>
+        <AccountMenu meta={meta} />
       </div>
     </header>
   )
 }
 
-export function AppShell() {
+const APPROVAL_TOAST = "approval-waiting"
+/** How long the toast shows, and how long after it no new one is raised. */
+const APPROVAL_TOAST_MS = 6000
+const APPROVAL_TOAST_QUIET_MS = 5000
+
+/** Whether an approval asked for by `runId` is already in front of the
+ * person: the inbox is open, or the page is that run's (the run itself,
+ * its parent's, or any run of the chain it continues: a run that parked,
+ * resumed and parked again is one run on one page). */
+export function approvalOnScreen(
+  matches: readonly { routeId: string; params: Record<string, unknown> }[],
+  runId: string,
+  qc: QueryClient
+): boolean {
+  for (const m of matches) {
+    if (m.routeId === "/approvals/") return true
+    if (m.routeId !== "/runs/$runId" || runId === "") continue
+    const shown = String(m.params.runId)
+    // A subagent's run is `<parent>/<step>/<call>`: its parent's page
+    // shows it.
+    if (shown === runId || shown === runId.split("/")[0]) return true
+    const chain = qc.getQueryData<ChainView>(chainQuery(shown).queryKey)
+    if (chain?.runs.some((r) => r.id === runId.split("/")[0])) return true
+  }
+  return false
+}
+
+export function AppShell({ meta }: { meta: Meta }) {
   const [searchOpen, setSearchOpen] = React.useState(false)
+  const [sidebar, setSidebar] = usePref("wb.sidebar", "full")
+  const rail = sidebar === "rail"
+  const toggle = React.useEffectEvent(() => setSidebar(rail ? null : "rail"))
+  const live = useRunsLive()
+  const [keysOpen, setKeysOpen] = React.useState(false)
+  const [newRunOpen, setNewRunOpen] = React.useState(false)
+  const navigate = useNavigate()
+  const router = useRouter()
+  const qc = useQueryClient()
+  /** The run the toast on screen (if any) is about. */
+  const toastFor = React.useRef("")
+  /** Until when the toast shows, and until when no new one is raised. */
+  const toastTimes = React.useRef({ until: 0, quietUntil: 0 })
+  // The one toast: a tool call began to wait on a person. It is not
+  // raised for what is already on screen (the inbox, or that run's own
+  // page, which shows the request with Approve / Deny). It goes away by
+  // itself. A newer one takes the place of the one showing (same id)
+  // without keeping it up longer, and after it has gone the next one
+  // waits a little: when approvals come one after another the toast is
+  // not there all the time (the Approvals count in the nav is).
+  useApprovalsLive((e) => {
+    const runId = typeof e.data?.run_id === "string" ? e.data.run_id : ""
+    if (approvalOnScreen(router.state.matches, runId, qc)) return
+    const now = Date.now()
+    const t = toastTimes.current
+    const showing = now < t.until
+    if (!showing && now < t.quietUntil) return
+    if (!showing) t.until = now + APPROVAL_TOAST_MS
+    t.quietUntil = t.until + APPROVAL_TOAST_QUIET_MS
+    toastFor.current = runId
+    toast("A run is waiting for your approval", {
+      id: APPROVAL_TOAST,
+      duration: t.until - now,
+      onDismiss: () => {
+        t.until = 0
+      },
+      description:
+        typeof e.data?.agent === "string" && typeof e.data.tool === "string"
+          ? `${e.data.agent} wants to call ${e.data.tool}`
+          : undefined,
+      action: {
+        label: "Review",
+        onClick: () =>
+          void navigate({ to: "/approvals", search: { id: e.resource_id } }),
+      },
+    })
+  })
+  // Going to the inbox, or to the run the toast is about, answers it:
+  // take it down.
+  const page = useRouterState({
+    select: (s) => s.matches.map((m) => m.id).join(" "),
+  })
+  React.useEffect(() => {
+    if (approvalOnScreen(router.state.matches, toastFor.current, qc))
+      toast.dismiss(APPROVAL_TOAST)
+  }, [page, router, qc])
+
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() === "k" && (e.metaKey || e.ctrlKey)) {
+      const el = e.target as HTMLElement | null
+      if (
+        e.key === "?" &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !(
+          el &&
+          (["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName) ||
+            el.isContentEditable)
+        )
+      ) {
+        e.preventDefault()
+        setKeysOpen(true)
+        return
+      }
+      if (!(e.metaKey || e.ctrlKey)) return
+      const key = e.key.toLowerCase()
+      if (key === "k") {
         e.preventDefault()
         setSearchOpen((o) => !o)
+      } else if (key === "b") {
+        e.preventDefault()
+        toggle()
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [])
+
   return (
-    <div className="flex h-svh bg-background text-foreground">
-      <Sidebar />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar onSearch={() => setSearchOpen(true)} />
-        <main
-          id="main"
-          className="min-h-0 flex-1 overflow-auto p-6 max-[760px]:p-4"
+    <LiveContext value={live}>
+      <div className="flex h-svh bg-background text-foreground">
+        <a
+          href="#main"
+          className="sr-only focus:not-sr-only focus:absolute focus:top-1 focus:left-1 focus:z-50 focus:rounded-input focus:bg-background focus:px-2 focus:py-1"
         >
-          <Outlet />
-        </main>
+          Skip to content
+        </a>
+        <Sidebar rail={rail} />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <TopBar
+            meta={meta}
+            onSearch={() => setSearchOpen(true)}
+            onToggleSidebar={() => setSidebar(rail ? null : "rail")}
+            newRunOpen={newRunOpen}
+            onNewRunOpenChange={setNewRunOpen}
+          />
+          <main id="main" className="min-h-0 flex-1 overflow-hidden">
+            <Outlet />
+          </main>
+        </div>
+        <CommandMenu
+          open={searchOpen}
+          onOpenChange={setSearchOpen}
+          onNewRun={() => setNewRunOpen(true)}
+          onShortcuts={() => setKeysOpen(true)}
+        />
+        <ShortcutsSheet open={keysOpen} onOpenChange={setKeysOpen} />
       </div>
-      <CommandMenu open={searchOpen} onOpenChange={setSearchOpen} />
-    </div>
+    </LiveContext>
   )
 }

@@ -62,7 +62,13 @@ import (
 // page of run rows in the order asked, the order, and the next page's
 // offset (null on the last page).
 type searchPage struct {
-	Total      int      `json:"total"`
+	// Total and TotalExact: as on the list (runsPage).
+	Total      int  `json:"total"`
+	TotalExact bool `json:"total_exact"`
+	// Partial: as on the list — the page was cut by the read's budget,
+	// or the search reached its deepest offset (MaxSearchOffset) with
+	// rows left: next_offset is then null.
+	Partial    bool     `json:"partial,omitempty"`
 	Runs       []runRow `json:"runs"`
 	Sort       string   `json:"sort"`
 	NextOffset *int     `json:"next_offset"`
@@ -188,6 +194,14 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 	if query.Status, ok = statusParam(w, r, q); !ok {
 		return
 	}
+	// display_status and chains, as on the list (runview.go). The
+	// search pages and counts first: total and next_offset are the trace
+	// store's matches, and a page can hold fewer rows than limit.
+	v, ok := viewParams(w, r, q, &query.Status, false)
+	if !ok {
+		return
+	}
+	v.mapped = true
 	if v := q.Get("all"); v != "" {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
@@ -237,31 +251,90 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if byCost || minCost != nil {
-		s.serveCostSearch(w, r, srch, query, byCost, minCost, facets)
+		s.serveCostSearch(w, r, srch, query, byCost, minCost, facets, v)
 		return
 	}
-	page, err := srch.Search(r.Context(), query)
-	if errors.Is(err, obsdb.ErrInvalidSearch) {
-		badRequest(w, r, err.Error())
-		return
+	// As the list does: with a view that folds, the store is read until
+	// limit rows are kept; next_offset is the next store row to read.
+	want := obsdb.LimitOf(query.Limit)
+	if v.folds() {
+		query.Limit = max(want, fillStorePage)
 	}
-	if err != nil {
-		dbError(w, r, "search", "", err)
-		return
-	}
-	out := searchPage{Total: page.Total, Runs: make([]runRow, 0, len(page.Runs)), Sort: string(obsdb.SortStarted), Facets: facets}
+	out := searchPage{Runs: make([]runRow, 0, want), Sort: string(obsdb.SortStarted), Facets: facets, TotalExact: true}
 	if query.Sort != "" {
 		out.Sort = string(query.Sort)
 	}
 	c := s.coster(r.Context())
-	c.primeTrees(page.Runs)
-	for _, rec := range page.Runs {
-		out.Runs = append(out.Runs, c.row(rec))
+	ctl := s.control(r)
+	first, exhausted := query.Offset == 0, false
+	deadline := s.now().Add(fillBudget)
+	for scans := 0; ; scans++ {
+		page, err := srch.Search(r.Context(), query)
+		if errors.Is(err, obsdb.ErrInvalidSearch) {
+			badRequest(w, r, err.Error())
+			return
+		}
+		if err != nil {
+			dbError(w, r, "search", "", err)
+			return
+		}
+		out.Total = page.Total
+		c.primeTrees(page.Runs)
+		rows := make([]runRow, 0, len(page.Runs))
+		for _, rec := range page.Runs {
+			rows = append(rows, c.row(rec))
+		}
+		ctl.decorate(rows)
+		v.prepare(ctl, c, rows)
+		if ctl.unavailable(w, r) {
+			return
+		}
+		read := len(rows)
+		for i, row := range rows {
+			if kept, ok := v.keep(ctl, c, row); ok {
+				out.Runs = append(out.Runs, kept)
+			}
+			if v.folds() && len(out.Runs) >= want {
+				read = i + 1
+				break
+			}
+		}
+		query.Offset += read
+		exhausted = len(page.Runs) == 0 || query.Offset >= page.Total
+		if !v.folds() || exhausted || len(out.Runs) >= want {
+			break
+		}
+		if scans+1 >= fillScanPages || query.Offset > obsdb.MaxSearchOffset || !s.now().Before(deadline) {
+			out.Partial = true
+			break
+		}
 	}
-	if next := query.Offset + len(page.Runs); len(page.Runs) > 0 && next < page.Total {
-		out.NextOffset = &next
+	if next, cut := searchCursor(query.Offset, exhausted); next != nil || cut {
+		out.NextOffset, out.Partial = next, out.Partial || cut
+	}
+	if v.folds() {
+		out.TotalExact = first && exhausted
+		if out.TotalExact {
+			out.Total = len(out.Runs)
+		}
+	}
+	if ctl.unavailable(w, r) {
+		return
 	}
 	writeJSON(w, r, http.StatusOK, out)
+}
+
+// searchCursor is a filled search's next_offset: the next store row to
+// read, and only while the search can still be asked for it — past
+// MaxSearchOffset there is none, and the page says partial (cut).
+func searchCursor(offset int, exhausted bool) (next *int, cut bool) {
+	switch {
+	case exhausted:
+		return nil, false
+	case offset > obsdb.MaxSearchOffset:
+		return nil, true
+	}
+	return &offset, false
 }
 
 // serveCostSearch is a search with min_cost or sort=cost: the match's
@@ -270,7 +343,7 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 // ties keep the newest-first order; unpriced runs last), then paged by
 // query's offset and limit.
 func (s *Server) serveCostSearch(w http.ResponseWriter, r *http.Request, srch obsdb.Searcher,
-	query obsdb.SearchQuery, byCost bool, minCost *float64, facets *searchFacets) {
+	query obsdb.SearchQuery, byCost bool, minCost *float64, facets *searchFacets, v view) {
 	offset, limit := query.Offset, obsdb.LimitOf(query.Limit)
 	scan := query
 	scan.Offset, scan.Limit = 0, 500
@@ -340,11 +413,37 @@ func (s *Server) serveCostSearch(w http.ResponseWriter, r *http.Request, srch ob
 		n := costSortCap
 		out.CostSortCap = &n
 	}
-	for i := offset; i < len(hits) && i < offset+limit; i++ {
-		out.Runs = append(out.Runs, c.row(hits[i].rec))
+	ctl := s.control(r)
+	next := offset
+	for next < len(hits) && len(out.Runs) < limit && ctl.err == nil {
+		// A page's worth of rows at a time: decorated and their chains
+		// read together.
+		end := min(next+max(limit-len(out.Runs), 1), len(hits))
+		rows := make([]runRow, 0, end-next)
+		for _, h := range hits[next:end] {
+			rows = append(rows, c.row(h.rec))
+		}
+		ctl.decorate(rows)
+		v.prepare(ctl, c, rows)
+		for _, row := range rows {
+			next++
+			if kept, ok := v.keep(ctl, c, row); ok {
+				out.Runs = append(out.Runs, kept)
+				if len(out.Runs) >= limit {
+					break
+				}
+			}
+		}
 	}
-	if next := offset + len(out.Runs); len(out.Runs) > 0 && next < out.Total {
+	if ctl.unavailable(w, r) {
+		return
+	}
+	if next < len(hits) {
 		out.NextOffset = &next
+	}
+	out.TotalExact = !v.folds() || (offset == 0 && next >= len(hits))
+	if v.folds() && out.TotalExact {
+		out.Total = len(out.Runs)
 	}
 	writeJSON(w, r, http.StatusOK, out)
 }

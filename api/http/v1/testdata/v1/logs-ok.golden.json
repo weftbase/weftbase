@@ -9,7 +9,8 @@
       "attrs": {
         "order_id": "42"
       },
-      "span_id": "0102030405060708"
+      "span_id": "0102030405060708",
+      "run_id": "r_ok"
     },
     {
       "index": 1,
@@ -20,7 +21,8 @@
       "attrs": {
         "cache": "orders"
       },
-      "span_id": "0102030405060708"
+      "span_id": "0102030405060708",
+      "run_id": "r_ok"
     }
   ],
   "holes": []

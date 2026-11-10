@@ -1,152 +1,134 @@
-import { useSuspenseQuery } from "@tanstack/react-query"
+import { useQuery } from "@tanstack/react-query"
 import { Link, createFileRoute } from "@tanstack/react-router"
-import { ArrowLeftIcon } from "lucide-react"
+import { InfoIcon } from "lucide-react"
+import * as React from "react"
 
-import { CodeBlock } from "@/components/console/code-block"
-import { PageHeader } from "@/components/console/page-header"
-import { Badge } from "@/components/ui/badge"
-import { Card } from "@/components/ui/card"
+import { CopyId } from "@/components/console/copy-id"
+import { ErrorState } from "@/components/console/empty-state"
+import { Page, PageHeader } from "@/components/console/page-header"
+import { SpanDetail } from "@/components/console/run/span-detail"
+import { SplitPane } from "@/components/console/split-pane"
+import {
+  TraceWaterfall,
+  useTraceView,
+} from "@/components/console/trace-waterfall"
+import type { TraceInput } from "@/components/console/trace-waterfall"
 import { q } from "@/lib/api/queries"
-import type { Span } from "@/lib/api/types"
-import { dateTime, duration, json } from "@/lib/format"
-import { ensure } from "@/lib/load"
-import { useEnv, validateTrace } from "@/lib/search"
-import { cn } from "@/lib/utils"
+import { useSetSearch, validateTrace } from "@/lib/search"
+import type { TraceSearch } from "@/lib/search"
 
+// A raw trace: every span of one trace id, whether or not a weft run is
+// in it. The same waterfall as a run's timeline, with neutral rows for
+// stock spans; a span's detail is its timing and attributes. Reached
+// from the Traces tab of Runs and from a run's Details ("Open whole
+// trace").
 export const Route = createFileRoute("/traces/$traceId")({
   validateSearch: validateTrace,
-  loaderDeps: ({ search }) => ({ env: search.env ?? "live" }),
-  loader: ({ context: { queryClient }, deps: { env }, params }) =>
-    ensure(queryClient, q.trace(env, params.traceId)),
-  head: ({ params }) => ({
-    meta: [{ title: `${params.traceId.slice(0, 12)} · Traces · weftbase` }],
-  }),
+  head: () => ({ meta: [{ title: "Trace · weftbase" }] }),
   component: TracePage,
 })
 
-/** depthFirst orders spans as a tree, each with its depth. */
-function depthFirst(spans: Span[]): { span: Span; depth: number }[] {
-  const kids = new Map<string | null, Span[]>()
-  for (const s of spans)
-    kids.set(s.parent_id, [...(kids.get(s.parent_id) ?? []), s])
-  const out: { span: Span; depth: number }[] = []
-  const walk = (parent: string | null, depth: number) => {
-    for (const s of (kids.get(parent) ?? []).sort(
-      (a, b) => a.offset_ms - b.offset_ms
-    )) {
-      out.push({ span: s, depth })
-      walk(s.id, depth + 1)
-    }
-  }
-  walk(null, 0)
-  return out
-}
+const NONE: TraceInput = { spans: [] }
 
 function TracePage() {
   const { traceId } = Route.useParams()
   const search = Route.useSearch()
-  const env = useEnv()
-  const { data: t } = useSuspenseQuery(q.trace(env, traceId))
-  const rows = depthFirst(t.spans)
-  const total = Math.max(1, ...t.spans.map((s) => s.offset_ms + s.duration_ms))
-  const current = t.spans.find((s) => s.id === search.span) ?? t.spans[0]
+  const set = useSetSearch<TraceSearch>(Route.fullPath)
+  const trace = useQuery(q.trace(traceId))
+  const input = React.useMemo<TraceInput>(
+    () => (trace.data ? { spans: trace.data.spans } : NONE),
+    [trace.data]
+  )
+  const view = useTraceView(input)
+  const node = search.span ? view.model.byId.get(search.span) : undefined
+  const select = (id: string | undefined) => set({ span: id })
+  const runs = trace.data?.run_ids ?? []
+
   return (
-    <div className="mx-auto flex max-w-[1200px] flex-col gap-6">
-      <Link
-        to="/traces"
-        className="inline-flex items-center gap-1.5 self-start text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeftIcon className="size-4" />
-        Traces
-      </Link>
-      <PageHeader
-        eyebrow={<span className="normal-case">{t.id}</span>}
-        title={t.root}
-        description={`${t.span_count} spans from ${t.service}, ${duration(t.duration_ms)}, started ${dateTime(t.started_at)}.`}
-      >
-        {t.run_id && (
-          <Link
-            to="/runs/$runId"
-            params={{ runId: t.run_id }}
-            className="text-sm font-medium underline underline-offset-4"
+    <Page
+      header={
+        <PageHeader
+          title="Trace"
+          id={<CopyId id={traceId} label="trace id" />}
+        />
+      }
+      className="flex flex-col gap-3 overflow-hidden"
+    >
+      {trace.error ? (
+        <ErrorState error={trace.error} what="The trace" />
+      ) : trace.data ? (
+        <>
+          <p
+            className="flex flex-none items-start gap-1.5 text-xs text-muted-foreground"
+            title={
+              runs.length === 0 && trace.data.not_run?.fix
+                ? `To get a run page: ${trace.data.not_run.fix}.`
+                : undefined
+            }
           >
-            Open run {t.run_id}
-          </Link>
-        )}
-      </PageHeader>
-      <div className="flex flex-wrap gap-5">
-        <Card className="min-w-0 flex-[1_1_620px] gap-0 overflow-x-auto py-0">
-          <div className="grid min-w-[560px] grid-cols-[minmax(220px,40%)_1fr_72px] items-center gap-3 px-5 py-3">
-            <span className="table-head">Span</span>
-            <span className="table-head">Timeline</span>
-            <span className="text-right table-head">Time</span>
+            <InfoIcon className="mt-px size-3.5 flex-none text-subtle-foreground" />
+            {runs.length > 0 ? (
+              <span>
+                Every span of this trace as recorded; messages and tool
+                arguments are on the page of{" "}
+                {runs.length === 1 ? "its run" : "its runs"}:{" "}
+                {runs.slice(0, 6).map((id, i) => (
+                  <React.Fragment key={id}>
+                    {i > 0 && ", "}
+                    <Link
+                      to="/runs/$runId"
+                      params={{ runId: id }}
+                      className="font-mono text-foreground hover:underline"
+                    >
+                      {id}
+                    </Link>
+                  </React.Fragment>
+                ))}
+                {runs.length > 6 && ` and ${runs.length - 6} more`}.
+              </span>
+            ) : (
+              <span>
+                No agent run was recorded in this trace, so there are no
+                messages or tool arguments to show: only its spans, as they
+                arrived.
+              </span>
+            )}
+          </p>
+          <div
+            className="min-h-0 flex-1"
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && search.span) select(undefined)
+            }}
+          >
+            <SplitPane
+              id="trace"
+              gutter
+              defaultWidth={440}
+              minBeside={320}
+              detail={
+                node && (
+                  <SpanDetail
+                    key={node.id}
+                    node={node}
+                    model={view.model}
+                    onSelect={select}
+                    onClose={() => select(undefined)}
+                  />
+                )
+              }
+            >
+              <TraceWaterfall
+                id="trace"
+                view={view}
+                strip
+                selected={search.span}
+                onSelect={select}
+                autoFocus
+              />
+            </SplitPane>
           </div>
-          <ol className="min-w-[560px]">
-            {rows.map(({ span, depth }) => (
-              <li key={span.id}>
-                <Link
-                  to="/traces/$traceId"
-                  params={{ traceId }}
-                  search={(p) => ({ ...p, span: span.id })}
-                  aria-current={current.id === span.id ? "true" : undefined}
-                  className={cn(
-                    "grid h-11 grid-cols-[minmax(220px,40%)_1fr_72px] items-center gap-3 border-t px-5 hover:bg-muted/50",
-                    current.id === span.id && "bg-table-row-selected"
-                  )}
-                >
-                  <span
-                    className="flex min-w-0 items-center gap-2 text-sm"
-                    style={{ paddingLeft: depth * 16 }}
-                  >
-                    <span className="truncate">{span.name}</span>
-                    {span.error && (
-                      <Badge variant="failed" size="sm">
-                        Error
-                      </Badge>
-                    )}
-                  </span>
-                  <span className="relative h-2 rounded-full bg-muted">
-                    <span
-                      className={cn(
-                        "absolute inset-y-0 rounded-full",
-                        span.error
-                          ? "bg-danger"
-                          : depth === 0
-                            ? "bg-chart-2"
-                            : "bg-chart-3"
-                      )}
-                      style={{
-                        left: `${(span.offset_ms / total) * 100}%`,
-                        width: `${Math.max(1, (span.duration_ms / total) * 100)}%`,
-                      }}
-                    />
-                  </span>
-                  <span className="text-right font-mono text-[13px] text-muted-foreground">
-                    {duration(span.duration_ms)}
-                  </span>
-                </Link>
-              </li>
-            ))}
-          </ol>
-        </Card>
-        <section
-          aria-label="Span detail"
-          className="flex min-w-[300px] flex-[0_1_420px] flex-col gap-4"
-        >
-          <h2 className="text-lg">{current.name}</h2>
-          <dl className="grid grid-cols-2 gap-3 text-sm">
-            <div>
-              <dt className="eyebrow">Kind</dt>
-              <dd className="mt-1">{current.kind}</dd>
-            </div>
-            <div>
-              <dt className="eyebrow">Start</dt>
-              <dd className="mt-1 font-mono">+{duration(current.offset_ms)}</dd>
-            </div>
-          </dl>
-          <CodeBlock title="attributes" code={json(current.attributes)} />
-        </section>
-      </div>
-    </div>
+        </>
+      ) : null}
+    </Page>
   )
 }

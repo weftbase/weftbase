@@ -62,3 +62,30 @@ func TestGet(t *testing.T) {
 		t.Errorf("RunLink = %q", got)
 	}
 }
+
+// TestDelete: DELETE with the bearer, the body on a 2xx, the server's
+// message on a 409 named with its method.
+func TestDelete(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.Header.Get("Authorization") != "Bearer tok" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if r.URL.Path == "/v1/runs/busy" {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"error":{"code":"run_active","message":"run busy is running"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"deleted":"run"}`))
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "tok")
+	if b, err := c.Delete(context.Background(), RunPath("r1")); err != nil || string(b) != `{"deleted":"run"}` {
+		t.Errorf("Delete = %s, %v", b, err)
+	}
+	_, err := c.Delete(context.Background(), "/v1/runs/busy")
+	var se *StatusError
+	if !errors.As(err, &se) || se.Status != http.StatusConflict || !strings.HasPrefix(se.Line, "DELETE /v1/runs/busy: 409 run busy") {
+		t.Errorf("Delete of a busy run = %v", err)
+	}
+}

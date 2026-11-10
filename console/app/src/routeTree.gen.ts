@@ -10,13 +10,10 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ApprovalsRouteRouteImport } from './routes/approvals/route'
-import { Route as AuditRouteImport } from './routes/audit'
 import { Route as SettingsRouteRouteImport } from './routes/settings/route'
 import { Route as AgentsIndexRouteImport } from './routes/agents/index'
 import { Route as AgentsNameRouteImport } from './routes/agents/$name'
 import { Route as ApprovalsIndexRouteImport } from './routes/approvals/index'
-import { Route as ApprovalsApprovalIdRouteImport } from './routes/approvals/$approvalId'
 import { Route as RunsIndexRouteImport } from './routes/runs/index'
 import { Route as RunsRunIdRouteImport } from './routes/runs/$runId'
 import { Route as SessionsIndexRouteImport } from './routes/sessions/index'
@@ -25,22 +22,12 @@ import { Route as SettingsIndexRouteImport } from './routes/settings/index'
 import { Route as SettingsAppearanceRouteImport } from './routes/settings/appearance'
 import { Route as SettingsGeneralRouteImport } from './routes/settings/general'
 import { Route as SettingsPricingRouteImport } from './routes/settings/pricing'
-import { Route as TracesIndexRouteImport } from './routes/traces/index'
 import { Route as TracesTraceIdRouteImport } from './routes/traces/$traceId'
+import { Route as RunsRunIdCompareRouteImport } from './routes/runs/$runId_.compare'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApprovalsRouteRoute = ApprovalsRouteRouteImport.update({
-  id: '/approvals',
-  path: '/approvals',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AuditRoute = AuditRouteImport.update({
-  id: '/audit',
-  path: '/audit',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsRouteRoute = SettingsRouteRouteImport.update({
@@ -59,14 +46,9 @@ const AgentsNameRoute = AgentsNameRouteImport.update({
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApprovalsIndexRoute = ApprovalsIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => ApprovalsRouteRoute,
-} as any)
-const ApprovalsApprovalIdRoute = ApprovalsApprovalIdRouteImport.update({
-  id: '/$approvalId',
-  path: '/$approvalId',
-  getParentRoute: () => ApprovalsRouteRoute,
+  id: '/approvals/',
+  path: '/approvals/',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const RunsIndexRoute = RunsIndexRouteImport.update({
   id: '/runs/',
@@ -108,24 +90,21 @@ const SettingsPricingRoute = SettingsPricingRouteImport.update({
   path: '/pricing',
   getParentRoute: () => SettingsRouteRoute,
 } as any)
-const TracesIndexRoute = TracesIndexRouteImport.update({
-  id: '/traces/',
-  path: '/traces/',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const TracesTraceIdRoute = TracesTraceIdRouteImport.update({
   id: '/traces/$traceId',
   path: '/traces/$traceId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RunsRunIdCompareRoute = RunsRunIdCompareRouteImport.update({
+  id: '/runs/$runId_/compare',
+  path: '/runs/$runId/compare',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/approvals': typeof ApprovalsRouteRouteWithChildren
   '/settings': typeof SettingsRouteRouteWithChildren
-  '/audit': typeof AuditRoute
   '/agents/$name': typeof AgentsNameRoute
-  '/approvals/$approvalId': typeof ApprovalsApprovalIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
   '/sessions/$sessionId': typeof SessionsSessionIdRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
@@ -137,13 +116,11 @@ export interface FileRoutesByFullPath {
   '/runs/': typeof RunsIndexRoute
   '/sessions/': typeof SessionsIndexRoute
   '/settings/': typeof SettingsIndexRoute
-  '/traces/': typeof TracesIndexRoute
+  '/runs/$runId/compare': typeof RunsRunIdCompareRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/audit': typeof AuditRoute
   '/agents/$name': typeof AgentsNameRoute
-  '/approvals/$approvalId': typeof ApprovalsApprovalIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
   '/sessions/$sessionId': typeof SessionsSessionIdRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
@@ -155,16 +132,13 @@ export interface FileRoutesByTo {
   '/runs': typeof RunsIndexRoute
   '/sessions': typeof SessionsIndexRoute
   '/settings': typeof SettingsIndexRoute
-  '/traces': typeof TracesIndexRoute
+  '/runs/$runId/compare': typeof RunsRunIdCompareRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/approvals': typeof ApprovalsRouteRouteWithChildren
   '/settings': typeof SettingsRouteRouteWithChildren
-  '/audit': typeof AuditRoute
   '/agents/$name': typeof AgentsNameRoute
-  '/approvals/$approvalId': typeof ApprovalsApprovalIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
   '/sessions/$sessionId': typeof SessionsSessionIdRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
@@ -176,17 +150,14 @@ export interface FileRoutesById {
   '/runs/': typeof RunsIndexRoute
   '/sessions/': typeof SessionsIndexRoute
   '/settings/': typeof SettingsIndexRoute
-  '/traces/': typeof TracesIndexRoute
+  '/runs/$runId_/compare': typeof RunsRunIdCompareRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/approvals'
     | '/settings'
-    | '/audit'
     | '/agents/$name'
-    | '/approvals/$approvalId'
     | '/runs/$runId'
     | '/sessions/$sessionId'
     | '/settings/appearance'
@@ -198,13 +169,11 @@ export interface FileRouteTypes {
     | '/runs/'
     | '/sessions/'
     | '/settings/'
-    | '/traces/'
+    | '/runs/$runId/compare'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/audit'
     | '/agents/$name'
-    | '/approvals/$approvalId'
     | '/runs/$runId'
     | '/sessions/$sessionId'
     | '/settings/appearance'
@@ -216,15 +185,12 @@ export interface FileRouteTypes {
     | '/runs'
     | '/sessions'
     | '/settings'
-    | '/traces'
+    | '/runs/$runId/compare'
   id:
     | '__root__'
     | '/'
-    | '/approvals'
     | '/settings'
-    | '/audit'
     | '/agents/$name'
-    | '/approvals/$approvalId'
     | '/runs/$runId'
     | '/sessions/$sessionId'
     | '/settings/appearance'
@@ -236,22 +202,21 @@ export interface FileRouteTypes {
     | '/runs/'
     | '/sessions/'
     | '/settings/'
-    | '/traces/'
+    | '/runs/$runId_/compare'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  ApprovalsRouteRoute: typeof ApprovalsRouteRouteWithChildren
   SettingsRouteRoute: typeof SettingsRouteRouteWithChildren
-  AuditRoute: typeof AuditRoute
   AgentsNameRoute: typeof AgentsNameRoute
   RunsRunIdRoute: typeof RunsRunIdRoute
   SessionsSessionIdRoute: typeof SessionsSessionIdRoute
   TracesTraceIdRoute: typeof TracesTraceIdRoute
   AgentsIndexRoute: typeof AgentsIndexRoute
+  ApprovalsIndexRoute: typeof ApprovalsIndexRoute
   RunsIndexRoute: typeof RunsIndexRoute
   SessionsIndexRoute: typeof SessionsIndexRoute
-  TracesIndexRoute: typeof TracesIndexRoute
+  RunsRunIdCompareRoute: typeof RunsRunIdCompareRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -261,20 +226,6 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/approvals': {
-      id: '/approvals'
-      path: '/approvals'
-      fullPath: '/approvals'
-      preLoaderRoute: typeof ApprovalsRouteRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/audit': {
-      id: '/audit'
-      path: '/audit'
-      fullPath: '/audit'
-      preLoaderRoute: typeof AuditRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings': {
@@ -300,17 +251,10 @@ declare module '@tanstack/react-router' {
     }
     '/approvals/': {
       id: '/approvals/'
-      path: '/'
+      path: '/approvals'
       fullPath: '/approvals/'
       preLoaderRoute: typeof ApprovalsIndexRouteImport
-      parentRoute: typeof ApprovalsRouteRoute
-    }
-    '/approvals/$approvalId': {
-      id: '/approvals/$approvalId'
-      path: '/$approvalId'
-      fullPath: '/approvals/$approvalId'
-      preLoaderRoute: typeof ApprovalsApprovalIdRouteImport
-      parentRoute: typeof ApprovalsRouteRoute
+      parentRoute: typeof rootRouteImport
     }
     '/runs/': {
       id: '/runs/'
@@ -368,13 +312,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsPricingRouteImport
       parentRoute: typeof SettingsRouteRoute
     }
-    '/traces/': {
-      id: '/traces/'
-      path: '/traces'
-      fullPath: '/traces/'
-      preLoaderRoute: typeof TracesIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/traces/$traceId': {
       id: '/traces/$traceId'
       path: '/traces/$traceId'
@@ -382,22 +319,15 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TracesTraceIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/runs/$runId_/compare': {
+      id: '/runs/$runId_/compare'
+      path: '/runs/$runId/compare'
+      fullPath: '/runs/$runId/compare'
+      preLoaderRoute: typeof RunsRunIdCompareRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
-
-interface ApprovalsRouteRouteChildren {
-  ApprovalsApprovalIdRoute: typeof ApprovalsApprovalIdRoute
-  ApprovalsIndexRoute: typeof ApprovalsIndexRoute
-}
-
-const ApprovalsRouteRouteChildren: ApprovalsRouteRouteChildren = {
-  ApprovalsApprovalIdRoute: ApprovalsApprovalIdRoute,
-  ApprovalsIndexRoute: ApprovalsIndexRoute,
-}
-
-const ApprovalsRouteRouteWithChildren = ApprovalsRouteRoute._addFileChildren(
-  ApprovalsRouteRouteChildren,
-)
 
 interface SettingsRouteRouteChildren {
   SettingsAppearanceRoute: typeof SettingsAppearanceRoute
@@ -419,17 +349,16 @@ const SettingsRouteRouteWithChildren = SettingsRouteRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  ApprovalsRouteRoute: ApprovalsRouteRouteWithChildren,
   SettingsRouteRoute: SettingsRouteRouteWithChildren,
-  AuditRoute: AuditRoute,
   AgentsNameRoute: AgentsNameRoute,
   RunsRunIdRoute: RunsRunIdRoute,
   SessionsSessionIdRoute: SessionsSessionIdRoute,
   TracesTraceIdRoute: TracesTraceIdRoute,
   AgentsIndexRoute: AgentsIndexRoute,
+  ApprovalsIndexRoute: ApprovalsIndexRoute,
   RunsIndexRoute: RunsIndexRoute,
   SessionsIndexRoute: SessionsIndexRoute,
-  TracesIndexRoute: TracesIndexRoute,
+  RunsRunIdCompareRoute: RunsRunIdCompareRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

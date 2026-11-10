@@ -1,4 +1,41 @@
 {
+  "display_status": "waiting",
+  "chain": {
+    "runs": [
+      {
+        "id": "r_off",
+        "display_status": "waiting",
+        "started": "(time)",
+        "finished": "(time)"
+      }
+    ],
+    "display_status": "waiting",
+    "approvals_expired": 0,
+    "approvals_denied": 0,
+    "approvals_approved": 0,
+    "approvals_pending": 0,
+    "stopped_by": "parked",
+    "started": "(time)",
+    "finished": null,
+    "duration_ms": 0,
+    "waiting_ms": 0,
+    "steps": 3,
+    "usage": {
+      "input_tokens": 40,
+      "output_tokens": 20
+    },
+    "cost_usd": 0,
+    "cost_known": true,
+    "waits": [
+      {
+        "run": "r_off",
+        "from": "(time)",
+        "to": null,
+        "approvals": [],
+        "decided_by": []
+      }
+    ]
+  },
   "id": "r_off",
   "parent_run_id": "",
   "parent_call_id": "",
@@ -57,6 +94,7 @@
   },
   "children": [
     {
+      "display_status": "succeeded",
       "id": "r_off/1/c_sub",
       "parent_run_id": "r_off",
       "parent_call_id": "c_sub",
@@ -110,6 +148,7 @@
       ]
     }
   ],
+  "children_total": 1,
   "holes": [
     {
       "hole": "stripped",

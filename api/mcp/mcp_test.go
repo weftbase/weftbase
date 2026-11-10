@@ -273,12 +273,12 @@ func mcpCalls() []mcpCall {
 	return []mcpCall{
 		{tool: "meta", route: "/v1/meta"},
 		// I3: a read-time status word is the API's filter, as the tool documents.
-		{tool: "runs", args: map[string]any{"agent": "orders", "status": "parked"}, route: "/v1/runs?agent=orders&status=parked", shape: rowsOf("runs", nil)},
-		{tool: "runs", args: map[string]any{"agent": "orders", "full": true}, route: "/v1/runs?agent=orders"},
-		{tool: "search", args: map[string]any{"q": "order", "status": "succeeded"}, route: "/v1/runs?q=order&sort=started&status=succeeded", shape: rowsOf("runs", nil)},
+		{tool: "runs", args: map[string]any{"agent": "orders", "status": "parked"}, route: "/v1/runs?agent=orders&status=parked&chains=0", shape: rowsOf("runs", nil)},
+		{tool: "runs", args: map[string]any{"agent": "orders", "full": true}, route: "/v1/runs?agent=orders&chains=0"},
+		{tool: "search", args: map[string]any{"q": "order", "status": "succeeded"}, route: "/v1/runs?q=order&sort=started&status=succeeded&chains=0", shape: rowsOf("runs", nil)},
 		// U33.1: error_class on search and runs, the route's filter.
-		{tool: "search", args: map[string]any{"error_class": "upstream down", "all": true}, route: "/v1/runs?all=1&error_class=upstream+down&sort=started", shape: rowsOf("runs", nil)},
-		{tool: "runs", args: map[string]any{"error_class": "upstream down"}, route: "/v1/runs?error_class=upstream+down", shape: rowsOf("runs", nil)},
+		{tool: "search", args: map[string]any{"error_class": "upstream down", "all": true}, route: "/v1/runs?all=1&error_class=upstream+down&sort=started&chains=0", shape: rowsOf("runs", nil)},
+		{tool: "runs", args: map[string]any{"error_class": "upstream down"}, route: "/v1/runs?error_class=upstream+down&chains=0", shape: rowsOf("runs", nil)},
 		{tool: "stats", args: map[string]any{"by": "agent", "since": "2000-01-01T00:00:00Z", "until": "2100-01-01T00:00:00Z"},
 			route: "/v1/stats?by=agent&since=2000-01-01T00%3A00%3A00Z&until=2100-01-01T00%3A00%3A00Z", shape: compactStats},
 		{tool: "stats", args: map[string]any{"by": "tool", "since": "2000-01-01T00:00:00Z", "until": "2100-01-01T00:00:00Z", "full": true},
@@ -301,7 +301,7 @@ func mcpCalls() []mcpCall {
 		{tool: "trace", args: map[string]any{"trace_id": derivedTraceID}, route: "/v1/traces/" + derivedTraceID,
 			shape: func(b []byte) []byte { return compactSpans(b, "") }},
 		{tool: "transcript", args: map[string]any{"id": "r_ok"}, route: "/v1/runs/r_ok/transcript"},
-		{tool: "live", route: "/v1/runs?all=1&status=running", shape: rowsOf("runs", nil)},
+		{tool: "live", route: "/v1/runs?all=1&status=running&chains=0", shape: rowsOf("runs", nil)},
 		{tool: "agents", route: "/v1/manifest", wantErr: "404 no manifest"},
 		{tool: "explain_failure", args: map[string]any{"id": "r_fail"}},
 	}

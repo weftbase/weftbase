@@ -4,30 +4,19 @@ import {
   Link,
   Scripts,
   createRootRouteWithContext,
-  retainSearchParams,
-  useRouter,
 } from "@tanstack/react-router"
 import type { ErrorComponentProps } from "@tanstack/react-router"
-import {
-  FileQuestionIcon,
-  LucideProvider,
-  TriangleAlertIcon,
-} from "lucide-react"
+import { FileQuestionIcon, LucideProvider } from "lucide-react"
 
-import { AppShell } from "@/components/console/app-shell"
-import { EmptyState } from "@/components/console/empty-state"
-import { Button } from "@/components/ui/button"
+import { AuthGate } from "@/components/console/auth-gate"
+import { EmptyState, ErrorState } from "@/components/console/empty-state"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { validateRoot } from "@/lib/search"
 import { themeBootstrap } from "@/lib/theme"
 import type { RouterContext } from "@/router"
 import appCss from "../styles.css?url"
 
 export const Route = createRootRouteWithContext<RouterContext>()({
-  validateSearch: validateRoot,
-  // The environment follows you from page to page.
-  search: { middlewares: [retainSearchParams(["env"])] },
   head: () => ({
     meta: [
       { charSet: "utf-8" },
@@ -49,8 +38,8 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       <LucideProvider strokeWidth={1.75}>
         <TooltipProvider delayDuration={200}>
-          <AppShell />
-          <Toaster position="bottom-right" />
+          <AuthGate />
+          <Toaster />
         </TooltipProvider>
       </LucideProvider>
     </QueryClientProvider>
@@ -59,39 +48,20 @@ function RootComponent() {
 
 export function NotFound() {
   return (
-    <div className="mx-auto max-w-md pt-16">
-      <EmptyState icon={FileQuestionIcon} title="Nothing at this address">
-        The link may be old, or the item was deleted.{" "}
-        <Link
-          to="/"
-          className="font-medium text-foreground underline underline-offset-4"
-        >
-          Go to the overview
-        </Link>
-      </EmptyState>
-    </div>
+    <EmptyState icon={FileQuestionIcon} title="Nothing at this address">
+      The link may be old, or the item was deleted.{" "}
+      <Link
+        to="/"
+        className="font-medium text-foreground underline underline-offset-4"
+      >
+        Go to the overview
+      </Link>
+    </EmptyState>
   )
 }
 
 function RouteError({ error }: ErrorComponentProps) {
-  const router = useRouter()
-  return (
-    <div className="mx-auto max-w-md pt-16">
-      <EmptyState icon={TriangleAlertIcon} title="This page could not load">
-        <span className="block font-mono text-xs">
-          {error instanceof Error ? error.message : String(error)}
-        </span>
-        <Button
-          size="sm"
-          variant="secondary"
-          className="mt-4"
-          onClick={() => void router.invalidate()}
-        >
-          Try again
-        </Button>
-      </EmptyState>
-    </div>
-  )
+  return <ErrorState error={error} what="This page" />
 }
 
 // The <base> is React-owned and carries the runtime mount, so hydration

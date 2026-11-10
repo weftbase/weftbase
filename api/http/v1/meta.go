@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/weftbase/weftbase/authz"
@@ -28,6 +29,10 @@ type metaDoc struct {
 	// ingest (the ingest role), clickhouse (the trace store), and later
 	// workers, approvals and tenants. Never null.
 	Capabilities []string `json:"capabilities"`
+	// CapabilitiesOff are the features this node does not have, each
+	// with why: a role the node does not run, a store that cannot
+	// answer. [] when everything is on.
+	CapabilitiesOff []capabilityOff `json:"capabilities_off"`
 	// Principal is who is asking and the scope it acts in.
 	Principal metaPrincipal `json:"principal"`
 	// Ingest is the ingest health (U5): the services whose heartbeats
@@ -157,9 +162,10 @@ var contentNotes = map[string][2]string{
 func (s *Server) serveMeta(w http.ResponseWriter, r *http.Request) {
 	p, sc, _ := authz.From(r.Context())
 	doc := metaDoc{
-		WeftVersion:   weftVersion(),
-		ServerVersion: release.Version,
-		Capabilities:  append([]string{}, s.capabilities...),
+		WeftVersion:     weftVersion(),
+		ServerVersion:   release.Version,
+		Capabilities:    append([]string{}, s.capabilities...),
+		CapabilitiesOff: s.capabilitiesOff(),
 		Principal: metaPrincipal{
 			Kind: string(p.Kind), ID: p.ID, KeyKind: string(p.KeyKind), AllTenants: p.AllTenants,
 			Scope: metaScope{Project: sc.Project(), Env: sc.Env(), Tenant: sc.Tenant()},
@@ -366,4 +372,41 @@ func manifestAgentDocs(manifest []byte) ([]agentDoc, error) {
 		out = append(out, agentDoc{named.Name, append(b, '\n')})
 	}
 	return out, nil
+}
+
+// capabilityOff is one feature that is off, and why.
+type capabilityOff struct {
+	Name   string `json:"name"`
+	Reason string `json:"reason"`
+}
+
+// capabilitiesOff lists what this node cannot do.
+func (s *Server) capabilitiesOff() []capabilityOff {
+	out := []capabilityOff{}
+	off := func(name, reason string) { out = append(out, capabilityOff{Name: name, Reason: reason}) }
+	if !slices.Contains(s.capabilities, "ingest") {
+		off("ingest", "this node does not run the ingest role: OTLP at /otlp/v1/* is served by the nodes started with --roles ingest")
+	}
+	if s.ledger == nil {
+		off("runs", "this server runs no agents (no run ledger): POST /v1/runs, cancel, steer, resume and /v1/approvals answer 501")
+	}
+	if s.registry == nil {
+		off("agents", "this server has no agent registry: /v1/agents and /v1/tools answer 501")
+	}
+	if s.events == nil {
+		off("events", "this server has no control-store outbox: GET /v1/events answers 501")
+	}
+	if _, ok := s.db.(obsdb.Searcher); !ok {
+		off("search", "the trace database cannot search: GET /v1/runs with q, tool, model, error, since, until, min_tokens, min_cost or sort answers 501")
+	}
+	if _, ok := s.db.(obsdb.Aggregator); !ok {
+		off("stats", offStats)
+	}
+	if _, ok := s.db.(obsdb.TreeReader); !ok {
+		off("spans_tree", offSpansTree)
+	}
+	if _, ok := s.db.(obsdb.SessionEventReader); !ok {
+		off("session_timeline", offTimeline)
+	}
+	return out
 }

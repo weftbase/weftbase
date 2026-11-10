@@ -1,4 +1,5 @@
 {
+  "display_status": "succeeded",
   "id": "s_compact_001-t2",
   "parent_run_id": "",
   "parent_call_id": "",
@@ -46,6 +47,7 @@
   "request_count": 1,
   "prompt_preview": "q2",
   "children": [],
+  "children_total": 0,
   "holes": [],
   "compactions": [
     {

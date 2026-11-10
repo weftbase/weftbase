@@ -39,11 +39,17 @@ func (e *env) outbox(t *testing.T, typ string) []events.Event {
 	return out
 }
 
+// running admits a run and has the worker start it. The command count
+// is taken before the admit: the hub can dispatch before Admit returns.
 func running(t *testing.T, e *env) (string, wire.Command) {
 	t.Helper()
+	n := len(e.f.commands())
 	id := e.admit(t)
-	cmd := waitCommands(t, e.f, len(e.f.commands())+1)
-	c := cmd[len(cmd)-1]
+	cmd := waitCommands(t, e.f, n+1)
+	c := cmd[n]
+	if c.RunID != id {
+		t.Fatalf("command %d is for %s, want %s", n, c.RunID, id)
+	}
 	e.f.send(wire.Ack{CommandID: c.CommandID, State: wire.AckRunStarted, RunID: id})
 	e.wait(t, id, status(sessions.StatusRunning))
 	return id, c
@@ -95,7 +101,10 @@ func TestDisconnectLosesTheRunsThatWentWithIt(t *testing.T) {
 // run unheard for the silence bound is lost; a beating one is not, and
 // a duplicate or unknown ack is not a beat that rescues a stalled one.
 func TestSilentWorkerLosesTheRun(t *testing.T) {
-	e := setup(t, 40*time.Millisecond, newFake("a"), func(c *hub.Config) { c.Silence = 250 * time.Millisecond })
+	// The lease (5 s, kept alive by the hub) outlasts the silence bound
+	// (1 s), which outlasts the beat (50 ms) twentyfold: the stalled run
+	// is lost by the silence bound alone, the beating one never.
+	e := setup(t, 5*time.Second, newFake("a"), func(c *hub.Config) { c.Silence = time.Second })
 	beating, bc := running(t, e)
 	stop := make(chan struct{})
 	defer close(stop)
@@ -112,11 +121,7 @@ func TestSilentWorkerLosesTheRun(t *testing.T) {
 	stalled, sc := running(t, e)
 	e.f.send(wire.Ack{CommandID: sc.CommandID, State: "bogus", RunID: stalled})
 	r := e.wait(t, stalled, status(sessions.StatusFailed))
-	// The silence bound loses it ("no ack from the worker"); on a slow
-	// machine the item's 40 ms lease can lapse first, and the reclaim
-	// loses it instead ("the worker stopped answering"). Both end it
-	// worker_lost and neither sends it again (at-most-once).
-	if !strings.Contains(r.Error, "no ack from the worker") && !strings.Contains(r.Error, "the worker stopped answering") {
+	if !strings.Contains(r.Error, "no ack from the worker") {
 		t.Errorf("stalled = %+v", r)
 	}
 	if r, _ := e.l.Get(context.Background(), e.s, beating); r.Status != sessions.StatusRunning {
