@@ -95,7 +95,7 @@ Then, with the API key as a bearer:
 
 ```sh
 curl -X POST :7331/v1/runs -d '{"agent":"support","input":{"prompt":"Where is order 1042?"}}'
-curl -X POST :7331/v1/agents/support/labels/prod -d '{"version":"agv_…"}'   # promote
+curl -X POST :7331/v1/agents/support/labels/prod -d '{"version":"agv_…","expected":"agv_…"}'   # promote (expected: what prod holds now, "" for a new label)
 curl :7331/v1/approvals?status=pending                                       # calls waiting for a person
 curl -X POST :7331/v1/approvals/appr_…/decision -d '{"decision":"approve","args_sha256":"…"}'
 ```
