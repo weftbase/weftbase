@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest"
 
 import { DataTable } from "@/components/console/data-table"
 import { JsonView } from "@/components/console/json-view"
+import { RelativeTime } from "@/components/console/relative-time"
 import { StatStrip } from "@/components/console/stat-strip"
 import { StatusBadge } from "@/components/console/status"
 import type { RunRow } from "@/lib/api/types"
@@ -102,5 +103,22 @@ describe("JsonView", () => {
     expect(screen.queryByText('"wefttest"')).toBeNull()
     fireEvent.click(screen.getByText(/"model":/).closest("button")!)
     expect(screen.getByText('"wefttest"')).toBeTruthy()
+  })
+})
+
+describe("RelativeTime", () => {
+  it("reads now in a cell and just now at the end of a sentence", () => {
+    const time = new Date().toISOString()
+    const { container, rerender } = render(<RelativeTime time={time} />)
+    expect(container.textContent).toBe("now")
+    rerender(<RelativeTime time={time} sentence />)
+    expect(container.textContent).toBe("just now")
+    rerender(
+      <RelativeTime
+        time={new Date(Date.now() - 90_000).toISOString()}
+        sentence
+      />
+    )
+    expect(container.textContent).toBe("1m ago")
   })
 })

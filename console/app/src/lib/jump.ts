@@ -4,7 +4,7 @@
 // by prefix), a session and a public id; anything else is a run search.
 
 /** The shortest text worth looking up as an id. */
-export const ID_MIN = 6
+const ID_MIN = 6
 
 /** idCandidate is the text as an id to look up, or undefined when it
  * cannot be one (it has spaces, or it is too short). */

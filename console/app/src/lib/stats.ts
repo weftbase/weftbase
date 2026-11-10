@@ -104,13 +104,14 @@ export const BREAKDOWN_LABEL: Record<Breakdown, string> = {
   error: "Error kind",
 }
 
-/** What each segment's rows count, for the table's caption. */
-export const BREAKDOWN_NOTE: Record<Breakdown, string> = {
-  agent: "Top-level runs. Failure rate: failed out of finished runs.",
+/** What a segment's rows count, where they do not add up to the
+ * figures above (a run that used two models is in two rows): the
+ * table's caption. The agent and error-kind rows are plain top-level
+ * runs and need none. */
+export const BREAKDOWN_NOTE: Partial<Record<Breakdown, string>> = {
   model:
     "Every run that used the model, subagent runs included. Failure rate and durations are per model call.",
   tool: "Every run that called the tool, subagent runs included. Failure rate and durations are per call.",
-  error: "Failed top-level runs by error kind.",
 }
 
 const ms = (d: { p50: number; p95: number } | null | undefined) => ({

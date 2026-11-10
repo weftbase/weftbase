@@ -13,6 +13,7 @@ import { cost, count, tokens } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 import { SessionLink } from "./marker"
+import { forkOrigin } from "./model"
 import { OutcomeStrip } from "./outcome-strip"
 
 function Group({
@@ -59,14 +60,6 @@ function Row({
   )
 }
 
-/** forkOrigin splits a fork's "<origin session>#<entry>". */
-function forkOrigin(v: string): { session: string; entry?: string } {
-  const i = v.lastIndexOf("#")
-  return i < 0
-    ? { session: v }
-    : { session: v.slice(0, i), entry: v.slice(i + 1) }
-}
-
 function statusWords(s: SessionRow): string {
   const extra: string[] = []
   if (s.pending) extra.push(`${count(s.pending)} waiting on a person`)
@@ -77,8 +70,8 @@ function statusWords(s: SessionRow): string {
   return extra.join(" · ")
 }
 
-/** SessionRail: the session's facts, beside the conversation. Each fact
- * lives here once: the agent and the version it runs, how the turns
+/** SessionRail: the session's facts, beside the conversation. A fact
+ * that is not known has no row. Each fact lives here once: the agent and the version it runs, how the turns
  * went, the totals, when, the ids, and where the session came from. */
 export function SessionRail({
   session,
@@ -112,8 +105,8 @@ export function SessionRail({
       className={cn("flex flex-col text-xs", className)}
     >
       <Group title="Agent">
-        <Row label="Agent">
-          {s.agent ? (
+        {s.agent && (
+          <Row label="Agent">
             <Link
               to="/agents/$name"
               params={{ name: s.agent }}
@@ -121,19 +114,13 @@ export function SessionRail({
             >
               {s.agent}
             </Link>
-          ) : (
-            "—"
-          )}
-        </Row>
-        <Row
-          label="Version"
-          title={
-            v
-              ? `${v.id}: the version of the newest turn`
-              : "The newest turn was not admitted through this server, so it carries no version."
-          }
-        >
-          {v ? (
+          </Row>
+        )}
+        {v && (
+          <Row
+            label="Version"
+            title={`${v.id}: the version of the newest turn`}
+          >
             <span className="flex min-w-0 items-center gap-1.5">
               <span className="font-mono">v{v.number}</span>
               {(v.labels ?? []).map((l) => (
@@ -145,10 +132,8 @@ export function SessionRail({
                 </span>
               ))}
             </span>
-          ) : (
-            <span className="text-muted-foreground">unknown</span>
-          )}
-        </Row>
+          </Row>
+        )}
         <Row label="Status">
           <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <span>{STATUS_LABEL[sessionStatus(s)]}</span>
@@ -183,18 +168,18 @@ export function SessionRail({
             </span>
           </span>
         </Row>
-        <Row label="Cost" mono title={s.cost_reason}>
-          {cost(s)}
-        </Row>
-        {delegated.length > 0 && (
+        {cost(s) !== "unknown" && (
+          <Row label="Cost" mono title={s.cost_reason}>
+            {cost(s)}
+          </Row>
+        )}
+        {delegated.length > 0 && delegatedCost !== undefined && (
           <Row
             label="Delegated"
             mono
             title="The cost of the sessions this one handed work to; not part of Cost."
           >
-            {delegatedCost !== undefined
-              ? cost({ cost_usd: delegatedCost, cost_known: true })
-              : "unknown"}
+            {cost({ cost_usd: delegatedCost, cost_known: true })}
           </Row>
         )}
       </Group>

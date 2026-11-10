@@ -119,8 +119,15 @@ function Line({
           >
             {name}
           </span>
+          {/* The icon and the role over the line say call or result;
+              only an error is worth a word. */}
           {what && (
-            <span className="flex-none text-xs text-subtle-foreground">
+            <span
+              className={cn(
+                "flex-none text-xs",
+                tone === "danger" ? "text-danger-foreground" : "sr-only"
+              )}
+            >
               {what}
             </span>
           )}

@@ -16,9 +16,8 @@ import {
   LoadingRows,
 } from "@/components/console/empty-state"
 import { Page, PageHeader } from "@/components/console/page-header"
-import { StatusBadge } from "@/components/console/status"
 import { Button } from "@/components/ui/button"
-import { chainQuery } from "@/lib/api/chain"
+import { chainQuery, chainStep } from "@/lib/api/chain"
 import type { ChainView } from "@/lib/api/chain"
 import { q } from "@/lib/api/queries"
 import {
@@ -115,7 +114,9 @@ function Compare({ a, b }: { a: string; b: string }) {
         const doc = docs[i]
         return doc ? [{ doc, only: p.only }] : []
       }),
-      (id) => facts.get(id)
+      (id) => facts.get(id),
+      // Steps are numbered through each chain, as on the run's page.
+      (id) => chainStep(A, id, 0) ?? chainStep(B, id, 0)
     )
     // docs is a new array each render: `key` says when its content changed.
   }, [A, B, ready, pairs, key])
@@ -199,14 +200,15 @@ function Compare({ a, b }: { a: string; b: string }) {
                 <span className="text-muted-foreground"> {model.aligned}</span>
               )}
             </p>
-            {identical > 0 && (
+            {/* Folded, each stretch of identical steps has its own
+                "Show"; this folds them again. */}
+            {identical > 0 && search.all && (
               <Button
                 size="sm"
                 variant="ghost"
-                aria-pressed={search.all === true}
-                onClick={() => set({ all: search.all ? undefined : true })}
+                onClick={() => set({ all: undefined })}
               >
-                {search.all ? "Hide identical steps" : "Show identical steps"}
+                Hide identical steps
               </Button>
             )}
           </div>
@@ -218,10 +220,7 @@ function Compare({ a, b }: { a: string; b: string }) {
           ))}
           <CompareTimeline
             items={itemsOf(model, search.all === true)}
-            heads={{
-              a: <Head side="a" chain={A} />,
-              b: <Head side="b" chain={B} />,
-            }}
+            runs={{ a, b }}
             onShowAll={() => set({ all: true })}
           />
         </section>
@@ -230,7 +229,8 @@ function Compare({ a, b }: { a: string; b: string }) {
   )
 }
 
-/** One run in the header: its side, its status, its name as a link. */
+/** One run in the header: its side and its name as a link (its status
+ * is in the totals under it). */
 function Side({
   side,
   id,
@@ -244,22 +244,10 @@ function Side({
     <span className="inline-flex min-w-0 items-center gap-1.5">
       <SideTag side={side} />
       {chain ? (
-        <>
-          <StatusBadge state={chain.status} />
-          <RunLink chain={chain} />
-        </>
+        <RunLink chain={chain} />
       ) : (
         <span className="font-mono text-xs">{shortId(id)}</span>
       )}
-    </span>
-  )
-}
-
-function Head({ side, chain }: { side: "a" | "b"; chain: ChainView }) {
-  return (
-    <span className="inline-flex max-w-full min-w-0 items-center gap-1.5 align-middle text-xs">
-      <SideTag side={side} />
-      <RunLink chain={chain} />
     </span>
   )
 }

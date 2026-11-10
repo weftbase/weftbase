@@ -39,7 +39,6 @@ function Appearance() {
         </RadioGroup>
       </Section>
       <p className="text-xs text-muted-foreground">
-        Kept in this browser. Density is compact; there is no other setting.
         Press <Kbd size="sm">?</Kbd> anywhere for the keyboard shortcuts.
       </p>
     </>

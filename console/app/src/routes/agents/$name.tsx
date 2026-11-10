@@ -118,10 +118,7 @@ function AgentPage() {
             )}
           </Section>
           {a.version_list.length > 0 && (
-            <Section
-              title="Versions"
-              action={<span>{count(a.version_list.length)}, newest first</span>}
-            >
+            <Section title="Versions">
               <Versions agent={a} shown={version?.id} />
             </Section>
           )}
@@ -137,12 +134,12 @@ function HeaderFacts({ agent }: { agent: AgentDetail }) {
   const finished = s.succeeded + s.failed
   return (
     <>
-      <span className="truncate">{agent.model.name || "no model"}</span>
+      {agent.model.name && <span className="truncate">{agent.model.name}</span>}
       {agent.placement && <span>{agent.placement}</span>}
       {labelVersions(agent).map((p) => (
         <span key={p.label} className="flex flex-none items-center gap-1">
           <LabelChip label={p.label} />
-          <span className="font-mono">{p.number ? `v${p.number}` : "?"}</span>
+          {p.number && <span className="font-mono">v{p.number}</span>}
         </span>
       ))}
       <span className="truncate max-[1100px]:hidden">

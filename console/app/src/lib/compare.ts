@@ -52,6 +52,11 @@ export interface CompareStep {
   runId: string
   /** The step's ordinal in its own run. */
   step: number
+  /** Its number as its run's page shows it: counted through the chain
+   * (lib/api/chain.ts, chainStep). */
+  no: number
+  /** The span of its model call: what selects its row on the run page. */
+  spanId?: string
   name: string
   /** ok | parked | error | … */
   status: string
@@ -92,6 +97,11 @@ export interface CompareRow {
   segment: number
   /** The aligned step ordinal, as the server numbers it. */
   step: number
+  /** The row's number: the aligned ordinal counted through the chain,
+   * so a resumed run's first step follows the parked run's last. It is
+   * A's own number (B's where A has no run); a side whose own number is
+   * another says so in its cell. */
+  no: number
   kind: RowKind
   what: Difference[]
   /** Columns that could not be compared, in words. */
@@ -120,6 +130,9 @@ export interface CompareModel {
 export interface StepFacts {
   durationMs?: number
   model?: string
+  /** The span of the step's model call (the call's own, not an
+   * attempt's, when both are there). */
+  spanId?: string
   /** The tools of the step that are subagents. */
   handoffs: Set<string>
 }
@@ -153,6 +166,8 @@ export function stepFacts(
         str(s.attrs["gen_ai.response.model"]) ??
         str(s.attrs["gen_ai.request.model"]) ??
         f.model
+      if (s.attrs["weft.attempt.index"] === undefined) f.spanId = s.span_id
+      else f.spanId ??= s.span_id
     }
     const from = Date.parse(s.start)
     const to = Date.parse(s.end)
@@ -236,6 +251,7 @@ function callsOf(
 function stepOf(
   runId: string,
   step: number,
+  before: number,
   side: DiffSide,
   other: DiffSide | null,
   row: Pick<DiffRow, "changes" | "differs">,
@@ -251,6 +267,8 @@ function stepOf(
   return {
     runId,
     step,
+    no: before + step,
+    spanId: facts?.spanId,
     name: stepName(calls, side),
     status: side.status,
     failed: side.status === "error",
@@ -299,16 +317,34 @@ function differences(
 /** Facts of every run of a side, by run id. */
 export type FactsOf = (runId: string) => Map<number, StepFacts> | undefined
 
+/** How many steps a run's chain took before that run (chainStep); when
+ * it does not say, the steps of the documents before are counted. */
+export type StepsBefore = (runId: string) => number | undefined
+
 /** buildCompare turns the diff documents of two (chains of) runs into
- * rows. `facts` supplies what the runs' spans add (stepFacts). */
+ * rows. `facts` supplies what the runs' spans add (stepFacts), `before`
+ * where each run's steps start in its chain. */
 export function buildCompare(
   segments: readonly CompareSegment[],
-  facts: FactsOf = () => undefined
+  facts: FactsOf = () => undefined,
+  before: StepsBefore = () => undefined
 ): CompareModel {
   const rows: CompareRow[] = []
   const holes: Hole[] = []
   let aligned: string | undefined
+  // The steps each side has taken in the documents so far.
+  const counted = { a: 0, b: 0 }
   segments.forEach(({ doc, only }, segment) => {
+    const base = {
+      a: before(doc.a.run_id) ?? counted.a,
+      b: before(doc.b.run_id) ?? counted.b,
+    }
+    for (const r of doc.steps) {
+      if (r.a && only !== "b")
+        counted.a = Math.max(counted.a, base.a + (r.a_step ?? r.step) + 1)
+      if (r.b && only !== "a")
+        counted.b = Math.max(counted.b, base.b + (r.b_step ?? r.step) + 1)
+    }
     holes.push(...doc.holes)
     if (doc.aligned && !only) aligned = alignedNote(doc)
     const fa = facts(doc.a.run_id)
@@ -323,6 +359,7 @@ export function buildCompare(
         stepOf(
           doc.a.run_id,
           r.a_step ?? r.step,
+          base.a,
           sa,
           sb,
           flags,
@@ -333,6 +370,7 @@ export function buildCompare(
         stepOf(
           doc.b.run_id,
           r.b_step ?? r.step,
+          base.b,
           sb,
           sa,
           flags,
@@ -351,6 +389,7 @@ export function buildCompare(
         key: `${segment}:${r.step}`,
         segment,
         step: r.step,
+        no: (only === "b" ? base.b : base.a) + r.step,
         kind,
         what,
         unknown: only ? [] : r.unknown.map((c) => COLUMN[c]),
@@ -451,5 +490,5 @@ export function summaryOf(model: CompareModel): string {
   const first = model.rows.find(
     (r) => r.kind === "changed" || r.kind === "only_a" || r.kind === "only_b"
   )
-  return `${model.differing} of ${steps(total)} differ${model.differing === 1 ? "s" : ""}${first ? `, from step #${first.step}` : ""}.`
+  return `${model.differing} of ${steps(total)} differ${model.differing === 1 ? "s" : ""}${first ? `, from step #${first.no}` : ""}.`
 }

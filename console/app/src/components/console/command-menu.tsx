@@ -32,7 +32,8 @@ import { rowCause, rowStatus } from "@/lib/runs"
 import { setTheme } from "@/lib/theme"
 
 /** What typed text resolves to as an id: runs and sessions whose id is,
- * or starts with, it; else the session a public id stands for. */
+ * or starts with, it; else the session a public id stands for; else
+ * the runs that carry that public id without a session. */
 function useJump(id: string | undefined) {
   const on = id !== undefined
   const key = id ?? ""
@@ -56,8 +57,16 @@ function useJump(id: string | undefined) {
     enabled: on && none,
     retry: false,
   })
+  // A public id on runs that are no session's: the runs themselves.
+  const publicRuns = useQuery({
+    queryKey: ["jump", "public runs", key],
+    queryFn: () => api.runs({ public_id: key, limit: 3 }),
+    enabled: on && none && publicId.isError,
+    retry: false,
+  })
+  const byId = on ? exactFirst(runs.data ?? [], key) : []
   return {
-    runs: on ? exactFirst(runs.data ?? [], key) : [],
+    runs: byId.length > 0 || !on ? byId : (publicRuns.data?.runs ?? []),
     sessions: on ? (sessions.data?.sessions ?? []) : [],
     publicSession: on ? publicId.data?.session_id : undefined,
   }

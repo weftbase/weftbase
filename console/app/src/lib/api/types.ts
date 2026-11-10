@@ -272,6 +272,8 @@ export interface RunsQuery {
   /** A run id: its children. "*": every run. Absent: top-level runs. */
   parent?: string
   id_prefix?: string
+  /** The app's public id: the runs that carry it. */
+  public_id?: string
   error_type?: string
   // Any of these makes the request a search:
   q?: string
@@ -752,7 +754,12 @@ export interface SessionTimeline {
 /** conversationTurn (conversation.go): one turn as a person reads it. A
  * park and its resumes are one turn (`runs` has every run). */
 export interface ConversationTurn {
+  /** The number the app's thread gave the turn. It can jump: a resume
+   * or a steered message takes a number of its own. */
   turn: number
+  /** The turn's position in the session as a person counts (1-based);
+   * absent from a server that does not send it yet. */
+  index?: number
   /** The turn's first run; `runs` every run of it, oldest first. */
   run_id: string
   runs: string[]
@@ -809,6 +816,14 @@ export interface Conversation {
   session?: SessionFacts
   /** The sessions this one handed work to. */
   delegated?: SessionFacts[] | null
+  /** Turn numbers no turn of the session carries, each with the
+   * server's reason when it knows one. */
+  skipped_turns?: SkippedTurn[] | null
+}
+
+export interface SkippedTurn {
+  turn: number
+  reason?: string
 }
 
 /** sessionRow as GET /v1/sessions and the conversation send it: the

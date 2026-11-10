@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router"
 import { ChevronRightIcon, HourglassIcon } from "lucide-react"
 import * as React from "react"
 
@@ -5,6 +6,7 @@ import { JsonView } from "@/components/console/json-view"
 import { Value } from "@/components/console/run/messages"
 import { shortModel } from "@/components/console/trace-waterfall/model"
 import { Button } from "@/components/ui/button"
+import { SideTag } from "./totals"
 import type {
   CompareCall,
   CompareItem,
@@ -28,12 +30,12 @@ const DIFFERS = "bg-warning-muted"
 
 export function CompareTimeline({
   items,
-  heads,
+  runs,
   onShowAll,
 }: {
   items: CompareItem[]
-  /** The column heads: each run's name. */
-  heads: { a: React.ReactNode; b: React.ReactNode }
+  /** The run each side's steps open on: the page of its whole chain. */
+  runs: { a: string; b: string }
   onShowAll: () => void
 }) {
   return (
@@ -46,16 +48,20 @@ export function CompareTimeline({
         <div role="columnheader" className="px-3 table-head">
           Step
         </div>
-        <div role="columnheader" className="min-w-0 truncate border-l px-3">
-          {heads.a}
-        </div>
-        <div role="columnheader" className="min-w-0 truncate border-l px-3">
-          {heads.b}
-        </div>
+        {(["a", "b"] as const).map((side) => (
+          <div
+            key={side}
+            role="columnheader"
+            aria-label={`Run ${side.toUpperCase()}`}
+            className="flex min-w-0 items-center border-l px-3"
+          >
+            <SideTag side={side} />
+          </div>
+        ))}
       </div>
       {items.map((item) =>
         item.type === "row" ? (
-          <Row key={item.row.key} row={item.row} />
+          <Row key={item.row.key} row={item.row} runs={runs} />
         ) : item.type === "fold" ? (
           <FoldLine key={item.key} rows={item.rows} onShowAll={onShowAll} />
         ) : (
@@ -115,7 +121,13 @@ const WORD: Record<CompareRow["kind"], string> = {
   unknown: "not compared",
 }
 
-function Row({ row }: { row: CompareRow }) {
+function Row({
+  row,
+  runs,
+}: {
+  row: CompareRow
+  runs: { a: string; b: string }
+}) {
   const quiet = row.kind === "same" || row.kind === "kept"
   const marked = row.kind !== "same" && row.kind !== "kept"
   return (
@@ -125,7 +137,7 @@ function Row({ row }: { row: CompareRow }) {
         className="flex min-w-0 flex-col gap-0.5 px-3 py-2 text-xs"
       >
         <span className="flex h-5 items-center font-mono text-muted-foreground tabular-nums">
-          #{row.step}
+          #{row.no}
         </span>
         {row.what.map((w) => (
           <span key={w} className="truncate text-warning-foreground">
@@ -158,6 +170,7 @@ function Row({ row }: { row: CompareRow }) {
       </div>
       {(["a", "b"] as const).map((side) => {
         const step = row[side]
+        const other = row[side === "a" ? "b" : "a"]
         return (
           <div
             key={side}
@@ -165,7 +178,12 @@ function Row({ row }: { row: CompareRow }) {
             className={cn("min-w-0 border-l px-3 py-2", quiet && "opacity-70")}
           >
             {step ? (
-              <StepCell step={step} />
+              <StepCell
+                step={step}
+                runId={runs[side]}
+                rowNo={row.no}
+                showModel={!!other && other.model !== step.model}
+              />
             ) : (
               <p className="flex h-5 items-center text-xs text-subtle-foreground">
                 {absent(row, side)}
@@ -185,9 +203,22 @@ function absent(row: CompareRow, side: "a" | "b"): string {
   return `${name} has no step here`
 }
 
-function StepCell({ step }: { step: CompareStep }) {
+function StepCell({
+  step,
+  runId,
+  rowNo,
+  showModel,
+}: {
+  step: CompareStep
+  /** The run page the step opens on. */
+  runId: string
+  /** The row's number: the step's own is said only when it is another. */
+  rowNo: number
+  /** The step's model is said where the other side's is another. */
+  showModel: boolean
+}) {
   const Icon = step.failed ? SPAN_KINDS.failed.icon : SPAN_KINDS.model.icon
-  const model = shortModel(step.model)
+  const model = showModel ? shortModel(step.model) : undefined
   const used = step.inputTokens + step.outputTokens
   return (
     <div className="flex min-w-0 flex-col gap-1">
@@ -199,15 +230,26 @@ function StepCell({ step }: { step: CompareStep }) {
             step.failed ? "text-danger-foreground" : "text-muted-foreground"
           )}
         />
-        <span
+        <Link
+          to="/runs/$runId"
+          params={{ runId }}
+          search={{ span: step.spanId }}
+          title={`Open step #${step.no} on its run's page`}
           className={cn(
-            "min-w-0 truncate text-sm font-medium",
+            "min-w-0 truncate rounded-sm text-sm font-medium outline-none hover:underline focus-visible:outline-2 focus-visible:outline-ring",
             step.failed && "text-danger-foreground"
           )}
-          title={step.name}
         >
           {step.name}
-        </span>
+        </Link>
+        {step.no !== rowNo && (
+          <span
+            className="flex-none font-mono text-xs text-subtle-foreground tabular-nums"
+            title="This step's number in its own run"
+          >
+            #{step.no}
+          </span>
+        )}
         {model && (
           <span className="flex-none text-xs text-subtle-foreground max-xl:hidden">
             {model}

@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { wholeOf } from "@/components/console/run/transcript-tab"
-import { liveRunOf } from "@/components/console/run/use-run"
+import { describeWait, liveRunOf } from "@/components/console/run/use-run"
 import { buildTrace } from "@/components/console/trace-waterfall/model"
 import {
   chainStep,
@@ -12,6 +12,7 @@ import {
   locateStep,
   logFrontier,
   treeRunIds,
+  waitOf,
 } from "@/lib/api/chain"
 import type { ChainView } from "@/lib/api/chain"
 import { api } from "@/lib/api/http"
@@ -348,5 +349,32 @@ describe("offset", () => {
     expect(offset(0.4)).toBe("+0ms")
     expect(offset(820)).toBe("+820ms")
     expect(offset(2350)).toBe("+2.35s")
+  })
+})
+
+describe("who decided a wait", () => {
+  const wait = waitOf({
+    run: "a",
+    resumed_by: "b",
+    from: iso(0),
+    to: iso(5000),
+    approvals: [],
+    decided_by: [
+      { kind: "operator", id: "op_maria" },
+      { kind: "key", id: "key_01ABCD4HH1" },
+    ],
+  })
+
+  it("is named as everywhere else, the signed-in operator as you", () => {
+    expect(describeWait(wait)).toBe(
+      "Decided by operator op_maria, API key …4HH1"
+    )
+    expect(describeWait(wait, { kind: "operator", id: "op_maria" })).toBe(
+      "Decided by you, API key …4HH1"
+    )
+  })
+
+  it("says nothing while the wait lasts", () => {
+    expect(describeWait({ ...wait, to: null })).toBeUndefined()
   })
 })

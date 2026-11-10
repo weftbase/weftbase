@@ -69,10 +69,8 @@ export function CompareDialog({
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Compare with…</DialogTitle>
-          <DialogDescription>
-            {agent
-              ? `Choose another run of ${agent}. The two are shown side by side, step by step.`
-              : "Choose another run. The two are shown side by side, step by step."}
+          <DialogDescription className="sr-only">
+            Choose the run to show beside this one, step by step.
           </DialogDescription>
         </DialogHeader>
         <form

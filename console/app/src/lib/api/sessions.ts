@@ -12,6 +12,7 @@ import type {
   SessionRow,
   SessionsPage,
   SessionsQuery,
+  SkippedTurn,
 } from "./types"
 
 /** What the Sessions list can filter on. */
@@ -21,7 +22,7 @@ export interface SessionsFilter {
   agent?: string
 }
 
-export const SESSIONS_PAGE = 50
+const SESSIONS_PAGE = 50
 
 /** toSessionsQuery maps the list's filters onto GET /v1/sessions.
  * "waiting" is the server's awaiting=1 (a turn waits on a person) and
@@ -106,6 +107,8 @@ export interface ConversationView {
   turns: ConversationTurn[]
   sessionMarks: SessionEntry[]
   marksCapped: boolean
+  /** Turn numbers the server says no turn carries (when it says). */
+  skipped: SkippedTurn[]
 }
 
 function viewOf(pages: Conversation[]): ConversationView {
@@ -126,24 +129,8 @@ function viewOf(pages: Conversation[]): ConversationView {
     turns: pages.flatMap((p) => p.turns),
     sessionMarks: last.session_marks ?? [],
     marksCapped: pages.some((p) => p.marks_capped),
+    skipped: last.skipped_turns ?? [],
   }
-}
-
-/** loadConversation reads the turns from `from` to the newest. "tail"
- * is the newest TURNS_PAGE turns, in one request (`tail=1`). */
-export async function loadConversation(
-  id: string,
-  from: number | "tail"
-): Promise<ConversationView> {
-  if (from === "tail")
-    return viewOf([await api.conversation(id, { tail: true })])
-  let page = await api.conversation(id, { offset: from, limit: TURNS_PAGE })
-  const pages = [page]
-  while (page.next_offset !== null && page.turns.length > 0) {
-    page = await api.conversation(id, { offset: page.next_offset, limit: 100 })
-    pages.push(page)
-  }
-  return viewOf(pages)
 }
 
 // ── The windowed conversation ───────────────────────────────────────

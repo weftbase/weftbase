@@ -13,6 +13,8 @@ import type {
 } from "@/components/console/trace-waterfall"
 import { chainQuery, inFlightQuery, runningChildren } from "@/lib/api/chain"
 import type { ChainView } from "@/lib/api/chain"
+import { actorText, useMe } from "@/lib/actor"
+import type { ActorLike } from "@/lib/actor"
 import { isNotFound } from "@/lib/api/errors"
 import { useRunLive } from "@/lib/api/live"
 import { q } from "@/lib/api/queries"
@@ -157,6 +159,7 @@ const isQueued = (c: ChainView) =>
 
 export function useRun(id: string): RunData {
   const qc = useQueryClient()
+  const me = useMe()
   const chainQ = useQuery({
     ...chainQuery(id),
     retry: (n, e) => !isNotFound(e) && n < 2,
@@ -259,7 +262,7 @@ export function useRun(id: string): RunData {
         run: w.run,
         from: w.from,
         to: w.to,
-        decided: describeWait(w),
+        decided: describeWait(w, me),
       })),
       live,
       liveRuns,
@@ -276,7 +279,7 @@ export function useRun(id: string): RunData {
           },
       running: status === "running" && !queued,
     }
-  }, [chain, id, live, liveRuns, status, queued])
+  }, [chain, id, live, liveRuns, status, queued, me])
 
   return {
     id,
@@ -291,13 +294,17 @@ export function useRun(id: string): RunData {
   }
 }
 
-/** describeWait: "issue_refund approved by operator op_1", for a wait
- * that ended. */
+/** describeWait: "issue_refund approved by you", for a wait that
+ * ended. `me` is the signed-in principal (useMe). */
 export function describeWait(
-  w: ChainView["waits"][number]
+  w: ChainView["waits"][number],
+  me?: ActorLike
 ): string | undefined {
   if (w.to === null) return undefined
   const calls = w.approvals.map((a) => `${a.tool} ${a.status}`).join(", ")
-  const who = w.decidedBy.length > 0 ? ` by ${w.decidedBy.join(", ")}` : ""
+  const names = [
+    ...new Set(w.decidedBy.map((a) => actorText(a, me)).filter(Boolean)),
+  ]
+  const who = names.length > 0 ? ` by ${names.join(", ")}` : ""
   return `${calls || "Decided"}${who}`
 }

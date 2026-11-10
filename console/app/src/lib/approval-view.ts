@@ -49,26 +49,6 @@ export function approvalState(a: Pick<Approval, "status">): {
   }
 }
 
-/** Who decided: "operator op_…", "API key key_…", or "system" (the
- * server itself: an approval that expired); undefined when nobody has.
- * short keeps the end of a long id (a list cell). */
-export function decidedBy(
-  a: Pick<Approval, "actor">,
-  short = false
-): string | undefined {
-  if (a.actor?.kind === "system" && !a.actor.id) return "system"
-  if (!a.actor?.id) return undefined
-  const kind =
-    a.actor.kind === "key"
-      ? "API key"
-      : a.actor.kind === "operator"
-        ? "operator"
-        : (a.actor.kind ?? "")
-  const id =
-    short && a.actor.id.length > 12 ? `…${a.actor.id.slice(-6)}` : a.actor.id
-  return `${kind} ${id}`.trim()
-}
-
 /** The version an approval's run ran, as the run page names it: "v2"
  * and the labels on it now ("v2 staging"). undefined when the approval
  * carries none (a run the server did not admit). */

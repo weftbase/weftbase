@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge"
 import type { ChainView } from "@/lib/api/chain"
 import { q } from "@/lib/api/queries"
 import type { PosEvent } from "@/lib/api/types"
-import { dateTime, duration } from "@/lib/format"
+import { count, dateTime, duration } from "@/lib/format"
 
 import { Facts, Inline, Muted } from "./fold"
 import type { RunVersion } from "./use-run"
@@ -261,7 +261,9 @@ export function DetailsTab({
                       ? "Run"
                       : i === 0
                         ? "Run (parked)"
-                        : `Resumed as`,
+                        : i === 1
+                          ? "Resumed as"
+                          : `Resumed as (${i})`,
                     <CopyId key={r.id} id={r.id} full label="run id" />,
                   ] as const
               ),
@@ -339,9 +341,11 @@ export function DetailsTab({
         </div>
       </Section>
 
-      <Section title="Events" action={`${run.event_count} recorded`}>
+      <Section title="Events">
         <div className={box}>
-          <Inline label="The raw event list: position, time, type, summary">
+          <Inline
+            label={`${count(run.event_count)} ${run.event_count === 1 ? "event" : "events"} of the run, as recorded`}
+          >
             <Events runId={run.id} t0={t0} />
           </Inline>
         </div>

@@ -18,13 +18,14 @@ import { Page, PageHeader } from "@/components/console/page-header"
 import { RelativeTime } from "@/components/console/relative-time"
 import { SplitPane } from "@/components/console/split-pane"
 import { Button } from "@/components/ui/button"
+import { actorText, useMe } from "@/lib/actor"
+import type { ActorLike } from "@/lib/actor"
 import { q } from "@/lib/api/queries"
 import type { Approval } from "@/lib/api/types"
 import {
   approvalState,
   approvalVersion,
   argsSummary,
-  decidedBy,
 } from "@/lib/approval-view"
 import type { ApprovalTone } from "@/lib/approval-view"
 import { count, dateTime } from "@/lib/format"
@@ -75,7 +76,7 @@ const STATUS_LABEL: Record<(typeof APPROVAL_STATUSES)[number], string> = {
   cancelled: "Cancelled",
 }
 
-const COLUMNS: Column<Approval>[] = [
+const columns = (me: ActorLike | undefined): Column<Approval>[] => [
   {
     key: "status",
     header: "Status",
@@ -110,9 +111,11 @@ const COLUMNS: Column<Approval>[] = [
     muted: true,
     cell: (a) =>
       a.status === "pending" ? (
-        <span className="text-subtle-foreground">waiting</span>
+        "—"
       ) : (
-        <span title={decidedBy(a)}>{decidedBy(a, true) ?? "—"}</span>
+        <span title={a.actor?.id || undefined}>
+          {actorText(a.actor, me) ?? "—"}
+        </span>
       ),
   },
   {
@@ -129,6 +132,8 @@ const COLUMNS: Column<Approval>[] = [
 function ApprovalsPage() {
   const search = Route.useSearch()
   const set = useSetSearch<ApprovalsSearch>(Route.fullPath)
+  const me = useMe()
+  const cols = React.useMemo(() => columns(me), [me])
   // Pages on demand, in the server's order (pending first, oldest first;
   // then decided, newest first). The outbox stream refetches the loaded
   // pages; an approval that moved between two of them meanwhile is shown
@@ -297,7 +302,7 @@ function ApprovalsPage() {
         ) : (
           <DataTable
             label="Approvals"
-            columns={COLUMNS}
+            columns={cols}
             rows={rows}
             rowKey={(a) => a.id}
             selectedKey={search.id}
@@ -321,12 +326,7 @@ function ApprovalsPage() {
                     {count(rows.length)} of {count(head.total)}
                   </span>
                 </>
-              ) : (
-                <span>
-                  {count(rows.length)}{" "}
-                  {rows.length === 1 ? "approval" : "approvals"}, all shown
-                </span>
-              )
+              ) : undefined
             }
           />
         )}
@@ -383,6 +383,7 @@ function Detail({
   listed: Approval | undefined
   onClose: () => void
 }) {
+  const me = useMe()
   const one = useQuery({ ...q.approval(id), enabled: !listed })
   const a = listed ?? one.data
   if (!a)
@@ -392,7 +393,7 @@ function Detail({
       <LoadingRows rows={4} />
     )
   const pending = a.status === "pending"
-  const who = decidedBy(a)
+  const who = actorText(a.actor, me)
   return (
     <section aria-label="Approval" className="flex flex-col text-sm">
       <header className="flex h-10 flex-none items-center gap-2 border-b px-3">
@@ -422,8 +423,7 @@ function Detail({
           </Link>{" "}
           {pending ? "wants to call" : "asked to call"}{" "}
           <span className="font-mono text-xs font-medium">{a.tool}</span> with
-          exactly these arguments
-          {pending ? ". Its run waits for the decision." : "."}
+          exactly these arguments.
         </p>
         <JsonView value={a.args} depth={4} />
         {pending ? (
@@ -441,14 +441,17 @@ function Detail({
             {a.decided_at && (
               <>
                 {" "}
-                <RelativeTime time={a.decided_at} />
+                <RelativeTime time={a.decided_at} sentence />
               </>
             )}
             .
           </p>
         )}
         <dl className="grid grid-cols-[96px_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-xs">
-          {a.reason && <Row label="Reason">{a.reason}</Row>}
+          {/* An expiry's reason only says that it expired. */}
+          {a.reason && a.status !== "expired" && (
+            <Row label="Reason">{a.reason}</Row>
+          )}
           {a.content && (
             <Row label="Answer given">
               <span className="font-mono whitespace-pre-wrap">{a.content}</span>
@@ -479,7 +482,6 @@ function Detail({
               <RelativeTime time={a.requested_at} />
             </span>
           </Row>
-          {a.decided_at && <Row label="Decided">{dateTime(a.decided_at)}</Row>}
           <Row label="Call">
             <span className="font-mono">{a.call_id}</span>
           </Row>

@@ -3,62 +3,11 @@
 
 import { ApiError } from "./api/errors"
 import type {
-  AgentSummary,
-  AgentsSummary,
   ManifestLimits,
   StoredManifest,
-  ToolsDoc,
   VersionChanges,
 } from "./api/types"
 import { bytes, count } from "./format"
-
-const n = (k: number, one: string, many = `${one}s`) =>
-  `${count(k)} ${k === 1 ? one : many}`
-
-/** The list's header count: "4 agents · 11 tools · 2 placements". */
-export function inventoryLine(t: AgentsSummary["totals"]): string {
-  return [
-    n(t.agents, "agent"),
-    n(t.tools, "tool"),
-    n((t.placements ?? []).length, "placement"),
-  ].join(" · ")
-}
-
-/** versionNumbers maps a version id (agv_…) to its number, from every
- * source the lists already hold: each agent's newest version and the
- * versions the tool inventory names. The agents list has no numbers for
- * the versions its labels point to; this fills them in. */
-export function versionNumbers(
-  agents: readonly AgentSummary[],
-  tools?: ToolsDoc
-): Map<string, number> {
-  const out = new Map<string, number>()
-  for (const a of agents)
-    if (a.summary.version) out.set(a.summary.version, a.summary.number)
-  for (const t of tools?.tools ?? [])
-    for (const a of t.agents)
-      for (const v of a.versions) out.set(v.id, v.number)
-  return out
-}
-
-/** The labels of an agent with the version each points to, "prod"
- * first, then by name. number is undefined when it is not known. */
-export function labelPointers(
-  labels: Record<string, string>,
-  numbers: ReadonlyMap<string, number>
-): { label: string; version: string; number: number | undefined }[] {
-  return Object.entries(labels)
-    .map(([label, version]) => ({
-      label,
-      version,
-      number: numbers.get(version),
-    }))
-    .sort(
-      (a, b) =>
-        Number(b.label === "prod") - Number(a.label === "prod") ||
-        a.label.localeCompare(b.label)
-    )
-}
 
 const list = (xs: readonly string[]) => xs.join(", ")
 

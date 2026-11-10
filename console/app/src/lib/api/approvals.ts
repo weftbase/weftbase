@@ -41,11 +41,6 @@ export function decisionError(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
-/** actorLabel: "operator op_…", "key key_…". */
-export function actorLabel(a: Approval["actor"]): string | undefined {
-  return a ? `${a.kind} ${a.id}` : undefined
-}
-
 /** The keys a decision makes stale. */
 export const afterDecision = [
   ["run"],

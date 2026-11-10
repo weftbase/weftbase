@@ -214,7 +214,7 @@ function Waterfall({
   const nameW =
     chosenName !== undefined
       ? Math.min(nameLimit, Math.max(NAME_MIN, chosenName))
-      : Math.min(autoName, Math.max(NAME_MIN, size.w * 0.45 || autoName))
+      : Math.min(autoName, Math.max(NAME_MIN, size.w * 0.5 || autoName))
   const chartW = Math.max(0, size.w - nameW)
   // The plot leaves room for the label after the last bar: the widest
   // plot at which every bar's label still ends inside the chart.
@@ -439,9 +439,11 @@ function Waterfall({
   )
   const stuck = stickyRows(rows, scrollTop)
 
+  // A trace without a row yet (a queued run) has no time to rule.
+  const none = model.nodes.length === 0
   const tickList = React.useMemo(
-    () => ticks(scale, v0, v1, plotW),
-    [scale, v0, v1, plotW]
+    () => (none ? [] : ticks(scale, v0, v1, plotW)),
+    [none, scale, v0, v1, plotW]
   )
   const playing = !playback.atEnd
   const headX = xOf(playback.at)
@@ -586,11 +588,13 @@ function Waterfall({
           >
             <ListTreeIcon className="size-3.5 text-subtle-foreground" />
             <span className="font-medium">Steps</span>
-            <span className="font-mono text-subtle-foreground">
-              {filtering
-                ? `${count(rows.length)} of ${count(model.nodes.length)}`
-                : count(model.nodes.length)}
-            </span>
+            {!none && (
+              <span className="font-mono text-subtle-foreground">
+                {filtering
+                  ? `${count(rows.length)} of ${count(model.nodes.length)}`
+                  : count(model.nodes.length)}
+              </span>
+            )}
           </div>
           <div
             role="slider"
@@ -1454,9 +1458,13 @@ function Footer({
           ))}
         </SelectContent>
       </Select>
-      <span className="ml-1 font-mono text-xs whitespace-nowrap text-muted-foreground tabular-nums @max-md:hidden">
-        {p.atEnd ? duration(total) : `${duration(at)} / ${duration(total)}`}
-      </span>
+      {/* At rest the total is the page's Duration; the readout is the
+          playhead's. */}
+      {!p.atEnd && (
+        <span className="ml-1 font-mono text-xs whitespace-nowrap text-muted-foreground tabular-nums @max-md:hidden">
+          {duration(at)} / {duration(total)}
+        </span>
+      )}
 
       <div className="ml-auto flex items-center gap-0.5">
         {SPAN_KIND_ORDER.map((k) => {

@@ -13,14 +13,8 @@ import {
 } from "@/components/console/agent/inventory"
 import { niceMax, outcomeCounts } from "@/components/console/runs-chart"
 import { filterChips, parseFilter } from "@/components/console/runs-filter"
-import {
-  changeLines,
-  inventoryLine,
-  labelPointers,
-  limitRows,
-  moveError,
-  versionNumbers,
-} from "@/lib/agents"
+import { changeLines, limitRows, moveError } from "@/lib/agents"
+import { actorText } from "@/lib/actor"
 import { ApiError } from "@/lib/api/errors"
 import type {
   AgentDetail,
@@ -35,7 +29,6 @@ import {
   approvalState,
   approvalVersion,
   argsSummary,
-  decidedBy,
 } from "@/lib/approval-view"
 import { exactFirst, idCandidate, matches } from "@/lib/jump"
 import {
@@ -227,9 +220,11 @@ describe("the overview", () => {
       `${t.failed} of ${t.succeeded + t.failed} failed`
     )
     expect(f.failureRate.tone).toBe("danger")
-    // Part of the cost is unpriced: a lower bound, never a bare figure.
+    // No tokens were counted, so there is no cost to show; with tokens
+    // and an unpriced part it is a lower bound, never a bare figure.
     expect(t.cost_known).toBe(false)
-    expect(f.cost.value).toMatch(/^≥ \$/)
+    expect(f.cost.value).toBe("—")
+    expect(figuresOf({ ...t, input_tokens: 1200 }).cost.value).toMatch(/^≥ \$/)
   })
 
   it("reads no tokens and no cost as a dash", () => {
@@ -275,12 +270,12 @@ describe("the overview", () => {
   it("breaks down by tool per call, with no tokens or cost to show", () => {
     const stats = statsTool as unknown as Stats
     const rs = breakdownRows("tool", stats)
-    const addr = rs.find((r) => r.key === "update_address")!
-    expect(addr.failureRate).toBe(1)
-    expect(addr.failureNote).toMatch(/^\d+ of \d+ calls failed$/)
-    expect(addr.tokens).toBeUndefined()
-    expect(addr.cost).toBe("—")
-    expect(addr.link).toEqual({ tool: "update_address", sub: true })
+    const search = rs.find((r) => r.key === "web_search")!
+    expect(search.failureRate).toBe(0.25)
+    expect(search.failureNote).toBe("1 of 4 calls failed")
+    expect(search.tokens).toBeUndefined()
+    expect(search.cost).toBe("—")
+    expect(search.link).toEqual({ tool: "web_search", sub: true })
     // Most runs first.
     expect(rs.map((r) => r.runs)).toEqual(
       [...rs.map((r) => r.runs)].sort((a, b) => b - a)
@@ -320,15 +315,6 @@ describe("the agent inventory", () => {
   const detail = agentDetail as unknown as AgentDetail
   const toolsDoc = tools as unknown as ToolsDoc
 
-  it("counts it in the header", () => {
-    expect(inventoryLine(summary.totals)).toBe(
-      "2 agents · 12 tools · 2 placements"
-    )
-    expect(inventoryLine({ agents: 1, tools: 1, placements: null })).toBe(
-      "1 agent · 1 tool · 0 placements"
-    )
-  })
-
   it("counts registered agents, and says how many are not", () => {
     // The rows hold one agent no build registered; `totals.agents`
     // counts the registered ones only. The header counts the rows.
@@ -338,7 +324,7 @@ describe("the agent inventory", () => {
       unregistered: 1,
     })
     expect(inventoryHeader(summary)).toBe(
-      "2 agents · 1 not registered · 12 tools · 2 placements"
+      "2 registered · 1 seen in runs only · 12 tools · 2 placements"
     )
     expect(
       inventoryHeader({
@@ -398,23 +384,6 @@ describe("the agent inventory", () => {
     expect(
       summary.agents.filter((a) => !a.registered).map((a) => a.name)
     ).toEqual(["billing"])
-  })
-
-  it("shows the version each label points to", () => {
-    const numbers = versionNumbers(summary.agents, toolsDoc)
-    const support = summary.agents.find((a) => a.name === "support")!
-    expect(
-      labelPointers(support.labels, numbers).map((p) => [p.label, p.number])
-    ).toEqual([
-      ["prod", 1],
-      ["staging", 2],
-    ])
-    // Without the tool inventory only the newest version's number is known.
-    expect(
-      labelPointers(support.labels, versionNumbers(summary.agents)).map(
-        (p) => p.number
-      )
-    ).toEqual([undefined, 2])
   })
 
   it("says what changed in a version", () => {
@@ -516,9 +485,10 @@ describe("approvals", () => {
       label: "Pending",
       tone: "waiting",
     })
-    expect(decidedBy(pending)).toBeUndefined()
+    expect(actorText(pending.actor)).toBeUndefined()
     expect(approvalState(denied).label).toBe("Denied")
-    expect(decidedBy(denied)).toMatch(/^API key key_/)
+    expect(actorText(denied.actor)).toMatch(/^API key …\w{4}$/)
+    expect(actorText(denied.actor, denied.actor)).toBe("you")
     expect(denied.args_sha256).toMatch(/^[0-9a-f]{64}$/)
   })
 

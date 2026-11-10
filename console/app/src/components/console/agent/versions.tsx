@@ -43,7 +43,7 @@ const LABEL_RE = /^[a-z0-9][a-z0-9._-]{0,62}$/
 /** Move label: point a label at this version (promote or roll back).
  * The request names what the label holds now (`expected`), so if
  * someone moved it meanwhile the server refuses and nothing changes. */
-export function MoveLabel({
+function MoveLabel({
   agent,
   version,
   onClose,

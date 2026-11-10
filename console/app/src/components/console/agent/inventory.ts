@@ -17,13 +17,16 @@ export function agentCounts(agents: AgentsSummary["agents"]): {
   return { registered, unregistered: agents.length - registered }
 }
 
-/** The header line: "2 agents · 1 not registered · 13 tools ·
- * 2 placements". "not registered" is left out when every agent is. */
+/** The header line: "5 registered · 3 seen in runs only · 13 tools ·
+ * 2 placements" (the two add up to the table's rows, which the Agents
+ * tab counts); "5 agents · …" when every agent is registered. */
 export function inventoryHeader(doc: AgentsSummary): string {
   const c = agentCounts(doc.agents)
   return [
-    n(c.registered, "agent"),
-    c.unregistered > 0 && `${count(c.unregistered)} not registered`,
+    c.unregistered > 0
+      ? `${count(c.registered)} registered`
+      : n(c.registered, "agent"),
+    c.unregistered > 0 && `${count(c.unregistered)} seen in runs only`,
     n(doc.totals.tools, "tool"),
     n((doc.totals.placements ?? []).length, "placement"),
   ]

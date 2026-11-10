@@ -99,7 +99,8 @@ export function Inline({
   )
 }
 
-/** Facts: label / value rows of a detail. */
+/** Facts: label / value rows of a detail. A row without a value, or
+ * whose value is unknown, is left out (tables keep their dash). */
 export function Facts({
   rows,
   className,
@@ -109,7 +110,13 @@ export function Facts({
 }) {
   const shown = rows.filter(
     (r): r is readonly [string, React.ReactNode] =>
-      !!r && r[1] !== undefined && r[1] !== null && r[1] !== ""
+      !!r &&
+      r[1] !== undefined &&
+      r[1] !== null &&
+      r[1] !== "" &&
+      // A fact nobody knows is not a fact: the row is left out.
+      r[1] !== "unknown" &&
+      r[1] !== "—"
   )
   if (shown.length === 0) return null
   return (

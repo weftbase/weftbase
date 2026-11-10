@@ -17,12 +17,19 @@ export const Route = createFileRoute("/settings/general")({
   component: General,
 })
 
-/** Facts: label and value rows in one bordered container. */
-export function Facts({
-  rows,
+/** A value there is nothing to say about: its row is left out. */
+const unknown = (v: React.ReactNode) =>
+  v === null || v === undefined || v === "" || v === "—" || v === "unknown"
+
+/** Facts: label and value rows in one bordered container. A row whose
+ * value is not known is not drawn. */
+function Facts({
+  rows: all,
 }: {
   rows: [string, React.ReactNode, ("text" | "danger")?][]
 }) {
+  const rows = all.filter(([, value]) => !unknown(value))
+  if (rows.length === 0) return null
   return (
     <dl className="overflow-hidden rounded-alert border bg-card">
       {rows.map(([label, value, kind]) => (
@@ -216,7 +223,7 @@ function General() {
               "Database",
               `${m.db.kind}${m.db.size !== undefined ? ` · ${bytes(m.db.size)}` : ""}`,
             ],
-            ["Path", m.db.path ?? "—"],
+            ["Path", m.db.path],
             [
               "Retention",
               m.retention
@@ -245,7 +252,8 @@ function General() {
               ? ([
                   [
                     "Latest run",
-                    `${m.content.latest.mark}: ${m.content.latest.note}${m.content.latest.fix ? ` ${m.content.latest.fix}` : ""}`,
+                    // The note usually says the mark in words already.
+                    `${m.content.latest.note.toLowerCase().includes(m.content.latest.mark.toLowerCase()) ? "" : `${m.content.latest.mark}: `}${m.content.latest.note}${m.content.latest.fix ? ` ${m.content.latest.fix}` : ""}`,
                     "text",
                   ],
                 ] as [string, React.ReactNode, "text"][])
@@ -265,7 +273,7 @@ function General() {
           Give the app this server&apos;s address and an API key (
           <code className="font-mono">weftbase dev</code> keeps one in{" "}
           <code className="font-mono">&lt;data&gt;/bootstrap.key</code>), then
-          install the exporter once at start. Its runs appear under Runs.
+          install the exporter once at start.
         </p>
         <Snippet
           text={`export WEFTBASE_URL=${url}\nexport WEFTBASE_TOKEN=<an API key>`}

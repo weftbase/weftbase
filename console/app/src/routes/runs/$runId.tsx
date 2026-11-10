@@ -168,6 +168,7 @@ function Run({ runId }: { runId: string }) {
             defaultWidth={480}
             min={360}
             max={900}
+            minBeside={320}
             detail={
               node && (
                 <SpanDetail
@@ -384,11 +385,6 @@ function Header({
               )}
             </span>
           )}
-          {run && (
-            <span className="truncate" title={dateTime(chain.totals.started)}>
-              {run.model.name}
-            </span>
-          )}
         </>
       }
       actions={
@@ -497,8 +493,19 @@ function stripOf(data: RunData, view: TraceView): Stat[] {
     ...counters,
   ].filter(Boolean)
 
-  const shownTokens = playing ? s.tokensIn + s.tokensOut : total
   const share = total > 0 ? (s.tokensIn + s.tokensOut) / total : 0
+  // A run that is going: its row carries the usage and cost so far when
+  // the server knows them. Until it does, the tokens are those of the
+  // model calls that have ended (their spans), and with none of either
+  // the cells read "—", never a made-up zero.
+  const going = chain.status === "running"
+  const ended = s.tokensIn + s.tokensOut
+  const fromSpans = going && total === 0 && ended > 0
+  const noUsage = going && total === 0 && ended === 0
+  const [tokensIn, tokensOut] =
+    playing || fromSpans
+      ? [s.tokensIn, s.tokensOut]
+      : [t.usage.input_tokens, t.usage.output_tokens]
 
   return [
     {
@@ -522,14 +529,16 @@ function stripOf(data: RunData, view: TraceView): Stat[] {
       value:
         playing && t.cost_known && t.cost_usd !== null
           ? usd(t.cost_usd * share)
-          : view.live && !t.cost_known
+          : going && (total === 0 || (!t.cost_known && t.cost_usd === null))
             ? "—"
             : cost(t),
       hint: playing
         ? "so far, by tokens"
-        : unpriced.length > 0
-          ? "children unpriced"
-          : undefined,
+        : going
+          ? undefined
+          : unpriced.length > 0
+            ? "children unpriced"
+            : undefined,
       title: [
         `This run's own model calls: ${cost(t)}${last.cost_reason ? ` (${last.cost_reason})` : ""}.`,
         hasChildren
@@ -542,13 +551,17 @@ function stripOf(data: RunData, view: TraceView): Stat[] {
     },
     {
       label: "Tokens",
-      value: tokens(shownTokens),
-      hint: playing
-        ? `${tokens(s.tokensIn)} in · ${tokens(s.tokensOut)} out`
-        : `${tokens(t.usage.input_tokens)} in · ${tokens(t.usage.output_tokens)} out`,
-      title: hasChildren
-        ? `Own: ${tokens(own)} · child runs: ${tokens(delegated)}`
-        : "Input and output tokens of every model call",
+      value: noUsage ? "—" : tokens(tokensIn + tokensOut),
+      hint: noUsage
+        ? undefined
+        : `${tokens(tokensIn)} in · ${tokens(tokensOut)} out`,
+      title: noUsage
+        ? "No model call has ended yet"
+        : fromSpans
+          ? "Of the model calls that have ended so far"
+          : hasChildren && !going
+            ? `Own: ${tokens(own)} · child runs: ${tokens(delegated)}`
+            : "Input and output tokens of every model call",
     },
     {
       label: "Model calls",
@@ -624,17 +637,32 @@ function WhatHappened({
   const node =
     status === "failed" || status === "cancelled" ? failing : undefined
   const text = sentence(chain, node)
-  const holes: Hole[] = [...chain.holes, ...chain.runs.flatMap((r) => r.holes)]
   const derived = chain.runs.some((r) => r.derived)
+  // A derived run's own hole says what the sentence below says.
+  const holes: Hole[] = [
+    ...chain.holes,
+    ...chain.runs.flatMap((r) => r.holes),
+  ].filter((h) => !(derived && h.hole === "derived"))
+  // One sentence each; the first is shown, the rest (and what the
+  // server says to do about it) are in the tooltip.
   const notes = [
     chain.last.ledger_only && !data.queued
-      ? "nothing is stored for it but the run ledger's row (its trace was deleted, or never arrived)."
+      ? "Only the run ledger's row is stored for this run: its trace was deleted, or never arrived."
       : "",
     derived
-      ? "Built from stock OpenTelemetry GenAI spans: there are no weft records, so messages, requests and tool arguments cannot be shown."
+      ? "This run was built from stock OpenTelemetry spans, which carry no messages, requests or tool arguments, so those cannot be shown."
       : "",
-    ...holes.map((h) => h.reason),
+    ...holes.map(
+      (h) => `Some of this run is missing: ${h.reason.replace(/\.$/, "")}.`
+    ),
   ].filter(Boolean)
+  const fixes = [
+    ...new Set(
+      [...chain.holes, ...chain.runs.flatMap((r) => r.holes)]
+        .map((h) => h.fix)
+        .filter((f): f is string => !!f)
+    ),
+  ]
 
   return (
     <>
@@ -681,13 +709,16 @@ function WhatHappened({
       {notes.length > 0 && (
         <p
           className="flex flex-none items-start gap-1.5 text-xs text-muted-foreground"
-          title={notes.join("\n\n")}
+          title={[
+            ...notes.slice(1),
+            ...fixes.map((f) => `To record it: ${f.replace(/\.$/, "")}.`),
+          ].join("\n\n")}
         >
           <InfoIcon className="mt-px size-3.5 flex-none text-subtle-foreground" />
           <span className="line-clamp-2">
-            Some of this run is missing: {notes[0]}
+            {notes[0]}
             {notes.length > 1 &&
-              ` (and ${notes.length - 1} more; hover to read)`}
+              ` (And ${notes.length - 1} more: hover to read.)`}
           </span>
         </p>
       )}

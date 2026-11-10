@@ -9,7 +9,7 @@ import { Kbd } from "@/components/ui/kbd"
 
 // The one sheet of keyboard shortcuts ("?" anywhere outside a field).
 
-export const SHORTCUTS: { title: string; keys: [string[], string][] }[] = [
+const SHORTCUTS: { title: string; keys: [string[], string][] }[] = [
   {
     title: "Anywhere",
     keys: [

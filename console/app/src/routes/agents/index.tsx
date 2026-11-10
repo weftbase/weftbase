@@ -2,7 +2,6 @@ import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 
 import {
-  agentCounts,
   inventoryHeader,
   labelVersions,
 } from "@/components/console/agent/inventory"
@@ -44,9 +43,9 @@ function columns(range: Window): Column<AgentSummary>[] {
           {!a.registered && (
             <span
               className="flex-none text-xs text-subtle-foreground"
-              title="Seen in runs only (a subagent, or traces from an app): no build has registered it with this server, so it has no versions, labels or manifest here."
+              title="A subagent, or traces from an app: no build has registered it with this server, so it has no versions, labels or manifest here."
             >
-              not registered
+              seen in runs only
             </span>
           )}
         </span>
@@ -213,9 +212,9 @@ function AgentsPage() {
               label: "Agents",
               link: { to: "/agents", search: { ...search, tab: undefined } },
               active: !onTools,
-              // The registered ones, as the header counts them; the
-              // header says how many more were only seen in runs.
-              count: agents.data && agentCounts(agents.data.agents).registered,
+              // The table's rows; the header splits them into
+              // registered and seen in runs only.
+              count: agents.data?.agents.length,
             },
             {
               label: "Tools",

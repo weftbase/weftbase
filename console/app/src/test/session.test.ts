@@ -7,27 +7,29 @@
 // started through POST /v1/runs with the demo's scripted prompts).
 // session-timeline.json is the server's golden: it is where grants,
 // compactions, steered messages and labels come from, since the demo's
-// sessions have no thread records.
+// sessions had no thread records then. conversation-desk.json is a
+// capture from the demo too (round 3): the thread-backed `desk` session
+// (GET /v1/sessions/{id}/conversation?tail=1, unedited), whose thread
+// numbers its turns 1, 2, 4, 6, 8, 9, 10, 11, 12.
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
-  actorName,
   buildItems,
-  gapText,
   markMarkers,
   offPath,
   outcomeStrip,
+  positionOfTurn,
   sessionTitle,
   summaryParts,
   summaryTitle,
   turnMarkers,
   turnNote,
+  turnParam,
   waitMarker,
 } from "@/components/console/session/model"
 import { deleteError } from "@/components/console/session/session-menu"
 import { ApiError } from "@/lib/api/errors"
 import {
-  loadConversation,
   mergeEarlier,
   mergeTail,
   refreshConversation,
@@ -44,6 +46,7 @@ import type {
   SessionsPage,
 } from "@/lib/api/types"
 
+import deskDoc from "./fixtures/conversation-desk.json"
 import failedDoc from "./fixtures/conversation-failed.json"
 import refundsDoc from "./fixtures/conversation-refunds.json"
 import waitingDoc from "./fixtures/conversation-waiting.json"
@@ -54,6 +57,7 @@ import sessionsGolden from "./fixtures/sessions.json"
 const refunds = refundsDoc as unknown as Conversation
 const failed = failedDoc as unknown as Conversation
 const waiting = waitingDoc as unknown as Conversation
+const desk = deskDoc as unknown as Conversation
 const timeline = timelineDoc as unknown as SessionTimeline
 const demo = sessionsDemo as unknown as SessionsPage
 const golden = sessionsGolden as unknown as SessionsPage
@@ -72,6 +76,8 @@ const view = (c: Conversation, over: Partial<ConversationView> = {}) =>
     turns: c.turns,
     sessionMarks: c.session_marks ?? [],
     marksCapped: false,
+    skipped: c.skipped_turns ?? [],
+    session: c.session,
     ...over,
   }) satisfies ConversationView
 
@@ -143,17 +149,17 @@ describe("a park and its resume are one turn", () => {
     if (first.type !== "turn") throw new Error("not a turn")
     expect(first.turn.runs.length).toBe(2)
     expect(first.markers.map((m) => m.text)).toEqual([
-      "Waited 5.0s for approval · issue_refund approved by key …RMAVCWT9",
+      "Waited 5.0s · issue_refund approved by API key …CWT9",
     ])
     expect(first.note).toBeNull()
   })
 
   it("opens to who, how and when, with the exact arguments", () => {
-    const m = waitMarker(refunds.turns[0].waits![0], NOW)
+    const m = waitMarker(refunds.turns[0].waits![0], NOW)!
     const fact = (label: string) => m.facts.find((f) => f.label === label)
     expect(fact("Tool")?.value).toBe("issue_refund")
     expect(fact("Decision")?.value).toBe("approved")
-    expect(fact("Decided by")?.value).toBe("key …RMAVCWT9")
+    expect(fact("Decided by")?.value).toBe("API key …CWT9")
     expect(fact("Asked")).toBeDefined()
     expect(fact("Resumed")).toBeDefined()
     expect(m.args).toEqual([
@@ -165,13 +171,12 @@ describe("a park and its resume are one turn", () => {
     expect(m.pendingRun).toBeUndefined()
   })
 
-  it("names who decided once", () => {
-    expect(actorName({ kind: "operator", id: "operator" })).toBe("operator")
-    expect(actorName({ kind: "operator", id: "op_01HZX3K9QW7N" })).toBe(
-      "operator …X3K9QW7N"
+  it("says who decided as you when it is the signed-in principal", () => {
+    const w = refunds.turns[0].waits![0]
+    const me = w.decided_by![0]
+    expect(waitMarker(w, NOW, { me })!.text).toBe(
+      "Waited 5.0s · issue_refund approved by you"
     )
-    expect(actorName({ kind: "key", id: "k", name: "ci" })).toBe("key ci")
-    expect(actorName(undefined)).toBeUndefined()
   })
 
   it("names the run to decide while the wait lasts", () => {
@@ -197,8 +202,10 @@ describe("a park and its resume are one turn", () => {
         ],
       },
       NOW
+    )!
+    expect(denied.text).toMatch(
+      /^Waited 5\.0s · issue_refund denied by API key …\w{4} · too late$/
     )
-    expect(denied.text).toContain("issue_refund denied by key")
     expect(denied.tone).toBe("danger")
     expect(denied.facts.find((f) => f.label === "Reason")?.value).toBe(
       "too late"
@@ -206,8 +213,8 @@ describe("a park and its resume are one turn", () => {
     const two = waitMarker(
       { ...w, approvals: [a, { ...a, id: "appr_2", tool: "send_email" }] },
       NOW
-    )
-    expect(two.text).toContain("for 2 approvals · all approved by key")
+    )!
+    expect(two.text).toContain("· all 2 calls approved by API key")
   })
 })
 
@@ -260,7 +267,11 @@ describe("a turn without a reply says why", () => {
       ended_by: "run_x",
       ended_by_turn: 5,
     })
-    expect(turnNote(interrupted)?.text).toMatch(/^Interrupted by turn 5:/)
+    // The turn that ended it is named by its position, when it is known.
+    expect(turnNote(interrupted, 4)?.text).toMatch(/^Interrupted by turn 4:/)
+    expect(turnNote(interrupted)?.text).toMatch(
+      /^Interrupted by a newer message:/
+    )
     expect(offPath(interrupted)).toBe(false)
     const rolled = turn({
       display_status: "cancelled",
@@ -269,7 +280,7 @@ describe("a turn without a reply says why", () => {
       ended_by_turn: 5,
       off_path: true,
     })
-    expect(turnNote(rolled)?.text).toMatch(/^Rolled back by turn 5:/)
+    expect(turnNote(rolled, 4)?.text).toMatch(/^Rolled back by turn 4:/)
     expect(offPath(rolled)).toBe(true)
     const item = buildItems(view(refunds, { turns: [rolled] }), NOW).find(
       (i) => i.type === "turn"
@@ -320,8 +331,8 @@ describe("thread marks (the server's golden timeline)", () => {
   })
 
   it("a steered message", () => {
-    expect(texts).toContain("Message steered into the turn")
     const m = markers.find((x) => x.kind === "message")!
+    expect(m.text).toMatch(/^Message steered into the turn/)
     expect(m.facts.find((f) => f.label === "Content")?.value).toBe(
       "removed before it reached this server"
     )
@@ -378,19 +389,176 @@ describe("thread marks (the server's golden timeline)", () => {
     expect(of("something.new", {}).text).toBe("something new")
   })
 
-  it("a grant used several times is one line", () => {
+  it("a grant allowing the same tool several times is one line", () => {
     const base = timeline.marks[0]
     const use = (n: number) => ({
       ...base,
       kind: "grant.use",
       entry: `u${n}`,
       at: `2020-01-01T09:00:1${n}.000Z`,
-      fields: { grant_id: "e32", tool: "send_email" },
+      fields: { grant_id: "e32", tool: "send_email", call_id: `c${n}` },
     })
     const out = markMarkers([use(1), use(2), use(3)])
     expect(out.map((m) => m.text)).toEqual([
-      "Grant used 3 times for send_email",
+      "send_email allowed by a grant, 3 times",
     ])
+  })
+
+  it("a plain message's receipt is not a line; a message's receipts are one", () => {
+    const base = timeline.marks[0]
+    const receipt = (fields: Record<string, unknown>, text?: string) => ({
+      ...base,
+      kind: "receipt",
+      fields,
+      content: text ? { text } : undefined,
+    })
+    expect(
+      markMarkers([receipt({ input: "send", state: "accepted" }, "hello")])
+    ).toEqual([])
+    const out = markMarkers([
+      receipt(
+        { input: "steer", state: "queued", receipt_id: "r1" },
+        "be brief"
+      ),
+      receipt({ input: "steer", state: "delivered", receipt_id: "r1" }),
+    ])
+    expect(out.map((m) => m.text)).toEqual([
+      "Message steered into the turn: “be brief”",
+    ])
+    expect(
+      markMarkers([
+        receipt({ input: "steer", state: "queued", receipt_id: "r1" }, "x"),
+      ])[0].text
+    ).toBe("Message steered into the turn (queued): “x”")
+  })
+})
+
+// The demo's thread-backed session, as the server sent it.
+describe("the desk conversation (a capture from the demo)", () => {
+  const items = buildItems(view(desk), NOW)
+  const turns = items.filter((i) => i.type === "turn")
+  const lines = (position: number) =>
+    turns.find((t) => t.position === position)!.markers.map((m) => m.text)
+
+  it("numbers the turns by position, whatever the thread numbered them", () => {
+    expect(desk.turns.map((t) => t.turn)).toEqual([
+      1, 2, 4, 6, 8, 9, 10, 11, 12,
+    ])
+    expect(turns.map((t) => t.position)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9])
+    expect(desk.total_turns).toBe(9)
+    // Nothing is said about the numbers the thread skipped.
+    expect(items.filter((i) => i.type === "gap")).toEqual([])
+    // A turn is linked by the thread's number (the one its run carries).
+    expect(turns.map((t) => turnParam(t.turn, t.position))).toEqual([
+      1, 2, 4, 6, 8, 9, 10, 11, 12,
+    ])
+    expect(positionOfTurn(view(desk), 10)).toBe(7)
+    expect(positionOfTurn(view(desk), 7)).toBeUndefined()
+  })
+
+  it("prefers the server's index, and counts from the page's offset without it", () => {
+    const indexed = buildItems(
+      view(desk, {
+        turns: desk.turns.map((t, i) => ({ ...t, index: i + 11 })),
+      }),
+      NOW
+    ).filter((i) => i.type === "turn")
+    expect(indexed.map((t) => t.position)).toEqual([
+      11, 12, 13, 14, 15, 16, 17, 18, 19,
+    ])
+    const paged = buildItems(
+      view(desk, { offset: 5, turns: desk.turns.slice(5), totalTurns: 9 }),
+      NOW
+    ).filter((i) => i.type === "turn")
+    expect(paged.map((t) => t.position)).toEqual([6, 7, 8, 9])
+  })
+
+  it("says a skipped number only with the server's reason", () => {
+    const withReasons = buildItems(
+      view(desk, {
+        skipped: [
+          { turn: 3 },
+          { turn: 7, reason: "Turn 7 was a message steered into turn 6." },
+        ],
+      }),
+      NOW
+    )
+    const at = withReasons.findIndex((i) => i.type === "gap")
+    expect(withReasons.filter((i) => i.type === "gap")).toEqual([
+      {
+        type: "gap",
+        key: "skipped:7",
+        text: "Turn 7 was a message steered into turn 6.",
+      },
+    ])
+    // Just before the turn that follows the skipped number.
+    const next = withReasons[at + 1]
+    expect(next.type === "turn" && next.turn.turn).toBe(8)
+  })
+
+  it("a wait and the decision that ended it are one line", () => {
+    expect(lines(2)).toEqual([
+      "Waited 3.0s · add_gift_wrap approved by op_maria",
+      "Grant given: add_gift_wrap may run without asking, for this session · gift wrap is free this month",
+    ])
+    const wait = turns[1].markers[0]
+    expect(wait.kind).toBe("wait")
+    const labels = wait.facts.map((f) => f.label)
+    expect(labels).toEqual(expect.arrayContaining(["Who", "How", "When"]))
+    expect(labels).toEqual(expect.arrayContaining(["Asked", "Resumed"]))
+  })
+
+  it("a grant's answer is one line, with no wait to speak of", () => {
+    expect(lines(3)).toEqual(["add_gift_wrap allowed by a grant from op_maria"])
+    expect(turns[2].markers[0].kind).toBe("grant")
+    // The mint is in an earlier turn: without it the tool is not known.
+    expect(turnMarkers(desk.turns[2], NOW).map((m) => m.text)).toEqual([
+      "Call allowed by a grant from op_maria",
+    ])
+  })
+
+  it("a steered message is one line with its text; receipts of plain messages are none", () => {
+    expect(lines(4)).toEqual([
+      "Message steered into the turn: “Only this month's orders, please.”",
+    ])
+    expect(
+      desk.turns
+        .flatMap((t) => t.marks ?? [])
+        .filter((m) => m.kind === "receipt").length
+    ).toBe(6)
+    expect(
+      turns.flatMap((t) => t.markers).filter((m) => m.kind === "message").length
+    ).toBe(1)
+  })
+
+  it("a turn a newer message ended says so once, by position", () => {
+    const interrupted = turns[5]
+    expect(interrupted.turn.ended_by_turn).toBe(10)
+    expect(interrupted.endedBy).toBe(7)
+    expect(interrupted.note?.text).toMatch(/^Interrupted by turn 7:/)
+    // The interrupt and rewind marks would say it a second time.
+    expect(interrupted.markers).toEqual([])
+    const rolled = turns[7]
+    expect(rolled.offPath).toBe(true)
+    expect(rolled.endedBy).toBe(9)
+    expect(rolled.markers).toEqual([])
+  })
+
+  it("the fork says where it came from, once, above its first turn", () => {
+    const fork = view(desk, {
+      session: {
+        ...desk.session!,
+        forked_from_session: "s_origin#e_1",
+      },
+      turns: [{ ...desk.turns[1] }],
+    })
+    expect(buildItems(fork, NOW)[0]).toEqual({
+      type: "origin",
+      key: "origin",
+      session: "s_origin",
+      turn: 1,
+    })
+    expect(buildItems(view(desk), NOW)[0].type).toBe("turn")
   })
 })
 
@@ -445,42 +613,28 @@ describe("the conversation's items", () => {
     expect(items[1].type).toBe("turn")
   })
 
-  it("explains a gap in turn numbers in one line", () => {
-    const [a, b, c] = failed.turns
-    expect(gapText(a, b)).toBeUndefined()
-    expect(gapText(a, { ...c, turn: 3 })).toBe(
-      "Turn 2 is not in this server's records (deleted, or never reported)."
-    )
-    expect(gapText(a, { ...c, turn: 5 })).toBe(
-      "Turns 2–4 are not in this server's records (deleted, or never reported)."
-    )
-    expect(gapText(undefined, { ...c, turn: 2 })).toMatch(/^Turn 1 is not/)
-    // A resume that took a turn number of its own is not a hole.
-    expect(gapText(refunds.turns[0], { ...refunds.turns[1], turn: 3 })).toBe(
-      "Turn 2 is turn 1 continuing after its wait, shown above as one turn."
-    )
-    // Runs that carry no turn number make no claim.
-    expect(gapText({ ...a, turn: 0 }, { ...b, turn: 0 })).toBeUndefined()
+  it("says nothing about a jump in the thread's turn numbers", () => {
+    const [a, , c] = failed.turns
     const items = buildItems(
       view(failed, { turns: [a, { ...c, turn: 4 }] }),
       NOW
     )
-    expect(items.map((i) => i.type)).toEqual(["turn", "gap", "turn"])
+    expect(items.map((i) => i.type)).toEqual(["turn", "turn"])
+    expect(items.map((i) => i.type === "turn" && i.position)).toEqual([1, 2])
   })
 })
 
 describe("the list", () => {
   it("draws one dot per turn and folds a decided park", () => {
-    // The server counts turns: a resume is not one (`turns` 2, 3 runs).
-    const s = {
-      ...demo.sessions.find((x) => x.resumes === 1)!,
-      turns: 2,
-    }
-    expect(s.outcomes).toEqual(["resumed", "succeeded", "succeeded"])
+    // The server counts turns: a resume is not one (the desk session:
+    // 9 turns, 11 runs, two of them resumes).
+    const s = desk.session!
+    expect(s.runs).toBe(11)
+    expect(s.outcomes!.filter((w) => w === "resumed").length).toBe(2)
     const strip = outcomeStrip(s)
-    expect(strip.dots).toEqual(["succeeded", "succeeded"])
+    expect(strip.dots.length).toBe(9)
     expect(strip.earlier).toBe(0)
-    expect(strip.title).toBe("2 turns: 2 succeeded")
+    expect(strip.title).toBe("9 turns: 7 succeeded, 2 cancelled")
   })
 
   it("shows a failed turn inside a session that ended well", () => {
@@ -591,50 +745,12 @@ describe("reading", () => {
 
   it("a short conversation is one request", async () => {
     serve(() => refunds)
-    const v = await loadConversation(refunds.session_id, "tail")
+    const v = await refreshConversation(refunds.session_id, () => undefined)
     expect(urls.length).toBe(1)
+    expect(urls[0]).toContain("tail=true")
     expect(v.offset).toBe(0)
     expect(v.turns.length).toBe(2)
     expect(v.totalTurns).toBe(2)
-  })
-
-  const page = (offset: number, n: number, total: number): Conversation => ({
-    ...refunds,
-    total_turns: total,
-    offset,
-    next_offset: offset + n < total ? offset + n : null,
-    turns: Array.from({ length: n }, (_, i) => ({
-      ...refunds.turns[1],
-      turn: offset + i + 1,
-      run_id: `run_${offset + i + 1}`,
-    })),
-  })
-  /** A session of `total` turns, as the server pages it. */
-  const session = (total: () => number) =>
-    serve((u) => {
-      const n = total()
-      const limit = Number(u.searchParams.get("limit") ?? 20)
-      const offset = u.searchParams.has("tail")
-        ? Math.max(0, n - limit)
-        : Number(u.searchParams.get("offset") ?? 0)
-      return page(offset, Math.min(limit, n - offset), n)
-    })
-  const numbers = (v: ConversationView) => v.turns.map((t) => t.turn)
-  const range = (from: number, to: number) =>
-    Array.from({ length: to - from + 1 }, (_, i) => from + i)
-
-  it("a long one opens on its newest turns, in one request", async () => {
-    session(() => 26)
-    const v = await loadConversation("s", "tail")
-    expect(urls.length).toBe(1)
-    expect(urls[0]).toContain("tail=true")
-    expect(v.offset).toBe(6)
-    expect(v.tailOffset).toBe(6)
-    expect(numbers(v)).toEqual(range(7, 26))
-    // Pinned to a turn, it reads from there to the newest.
-    const pinned = await loadConversation("s", 0)
-    expect(pinned.turns.length).toBe(26)
-    expect(pinned.offset).toBe(0)
   })
 })
 

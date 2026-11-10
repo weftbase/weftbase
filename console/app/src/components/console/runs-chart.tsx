@@ -73,7 +73,6 @@ export function RunsChart({
     const b = series.at(i)
     return b ? fmt.format(new Date(b.t)) : ""
   }
-  const total = series.reduce((a, b) => a + b.runs, 0)
   // "In progress" is in the legend only when the window has any.
   const shown = SERIES.filter(
     (s) => s.key !== "open" || counts.some((c) => c.open > 0)
@@ -95,9 +94,7 @@ export function RunsChart({
           </span>
         ))}
         <span className="ml-auto font-mono tabular-nums" aria-live="off">
-          {h && hover !== null
-            ? `from ${at(hover)}`
-            : `${count(total)} ${total === 1 ? "run" : "runs"}`}
+          {h && hover !== null ? `from ${at(hover)}` : ""}
         </span>
       </div>
       <div className="flex gap-2">

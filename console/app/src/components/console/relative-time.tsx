@@ -31,19 +31,24 @@ export function useNow(): number {
   )
 }
 
-/** RelativeTime: "5m ago", kept current; the exact time is the title. */
+/** RelativeTime: "5m ago", kept current; the exact time is the title.
+ * `sentence`: it ends a sentence ("Approved by you just now"), where
+ * a table cell's "now" reads "just now". */
 export function RelativeTime({
   time,
   className,
+  sentence = false,
 }: {
   time: string | null | undefined
   className?: string
+  sentence?: boolean
 }) {
   const t = useNow()
   if (!time) return <span className={className}>—</span>
+  const text = ago(time, Math.max(t, Date.now()))
   return (
     <time dateTime={time} title={dateTime(time)} className={className}>
-      {ago(time, Math.max(t, Date.now()))}
+      {sentence && text === "now" ? "just now" : text}
     </time>
   )
 }

@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
+import { Link, createFileRoute } from "@tanstack/react-router"
 
 import { useLiveState } from "@/components/console/app-shell"
 import { DataTable } from "@/components/console/data-table"
@@ -196,7 +196,9 @@ function SessionsPage() {
                 Clear filters
               </Button>
             }
-          />
+          >
+            <RunWithPublicId word={search.q} />
+          </EmptyState>
         ) : (
           <EmptyState title="No sessions yet">
             A session appears here when runs share a session id: each run is one
@@ -223,15 +225,36 @@ function SessionsPage() {
               >
                 {sessions.isFetchingNextPage ? "Loading…" : "Load more"}
               </Button>
-            ) : (
-              <span>
-                {count(rows.length)}{" "}
-                {rows.length === 1 ? "session" : "sessions"}, all shown
-              </span>
-            )
+            ) : undefined
           }
         />
       )}
     </Page>
+  )
+}
+
+/** RunWithPublicId: the search found no session, but the word may be a
+ * public id that runs outside any session carry. Then the run is one
+ * click away instead of a dead end. */
+function RunWithPublicId({ word }: { word: string | undefined }) {
+  const id = word?.trim() ?? ""
+  const runs = useQuery({
+    ...q.runsPage({ public_id: id, limit: 1 }),
+    enabled: id !== "" && !/\s/.test(id),
+  })
+  const run = runs.data?.runs.at(0)
+  if (!run) return null
+  return (
+    <>
+      A run of {run.agent} carries the public id{" "}
+      <span className="font-mono">{id}</span>, outside any session.{" "}
+      <Link
+        to="/runs/$runId"
+        params={{ runId: run.id }}
+        className="font-medium text-foreground underline-offset-2 hover:underline"
+      >
+        Open the run
+      </Link>
+    </>
   )
 }

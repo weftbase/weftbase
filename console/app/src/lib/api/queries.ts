@@ -6,6 +6,7 @@
 //   ["meta"]  ["pricing"]  ["agents"]  ["agent", name, "versions"]
 //   ["runs", "list", query]      infinite, pages of RunsList
 //   ["runs", "page", query]      one RunsList (overview, counts)
+//   ["runs", "failed", since, limit]  one RunsList (overview)
 //   ["run", id]  ["run", id, "spans" | "events" | "transcript" | …]
 //   ["sessions", "list", query]  ["session", id]  ["session", id, …]
 //   ["sessions", "pages", filter]  infinite, pages of SessionsPage
@@ -19,10 +20,11 @@
 
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query"
 
-import { api } from "./http"
+import { ApiError } from "./errors"
+import { api, isSearch } from "./http"
 import { loadSessions, refreshConversation } from "./sessions"
 import type { ConversationView, SessionsFilter } from "./sessions"
-import type { RunsCursor, RunsQuery, StatsBy } from "./types"
+import type { RunsCursor, RunsList, RunsQuery, StatsBy } from "./types"
 
 export const q = {
   meta: () =>
@@ -43,7 +45,7 @@ export const q = {
   runs: (query: RunsQuery) =>
     infiniteQueryOptions({
       queryKey: ["runs", "list", query],
-      queryFn: ({ pageParam }) => api.runs(query, pageParam),
+      queryFn: ({ pageParam }) => runsWithPublicId(query, pageParam),
       initialPageParam: undefined as RunsCursor | undefined,
       getNextPageParam: (last) => last.next ?? undefined,
     }),
@@ -52,6 +54,22 @@ export const q = {
     queryOptions({
       queryKey: ["runs", "page", query],
       queryFn: () => api.runs(query),
+    }),
+  /** The runs that failed since `since`, newest first: the same runs
+   * the stats count as failed in that window. A server that cannot
+   * combine `display_status` with `since` answers 400: then the newest
+   * failed runs of any time, and the caller keeps those in its window. */
+  failedSince: (since: string, limit: number) =>
+    queryOptions({
+      queryKey: ["runs", "failed", since, limit],
+      queryFn: async () => {
+        try {
+          return await api.runs({ display_status: "failed", since, limit })
+        } catch (e) {
+          if (!(e instanceof ApiError) || e.status !== 400) throw e
+          return api.runs({ display_status: "failed", limit })
+        }
+      },
     }),
   run: (id: string) =>
     queryOptions({ queryKey: ["run", id], queryFn: () => api.run(id) }),
@@ -204,6 +222,34 @@ export const q = {
           client.getQueryData<ConversationView>(conversationKey(id))
         ),
     }),
+}
+
+/** One page of the Runs list. On the first page of a search for one
+ * word (and nothing else that makes it a search), the word is also
+ * looked up as an app's public id, and the runs that carry it come
+ * first: the text search does not read public ids. */
+async function runsWithPublicId(
+  query: RunsQuery,
+  cursor: RunsCursor | undefined
+): Promise<RunsList> {
+  const word = query.q?.trim()
+  const { q: _text, ...rest } = query
+  if (cursor || !word || /\s/.test(word) || isSearch(rest))
+    return api.runs(query, cursor)
+  const [page, carrying] = await Promise.all([
+    api.runs(query),
+    // The lookup is an extra: the search stands without it.
+    api.runs({ ...rest, public_id: word, limit: 5 }).catch(() => undefined),
+  ])
+  const seen = new Set(page.runs.map((r) => r.id))
+  const first = (carrying?.runs ?? []).filter((r) => !seen.has(r.id))
+  return first.length === 0
+    ? page
+    : {
+        ...page,
+        runs: [...first, ...page.runs],
+        total: page.total + first.length,
+      }
 }
 
 /** Rows per page of the Approvals inbox. */

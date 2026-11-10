@@ -14,7 +14,6 @@ import {
 } from "@/components/console/trace-waterfall"
 import type { TraceInput } from "@/components/console/trace-waterfall"
 import { q } from "@/lib/api/queries"
-import { count } from "@/lib/format"
 import { useSetSearch, validateTrace } from "@/lib/search"
 import type { TraceSearch } from "@/lib/search"
 
@@ -51,14 +50,6 @@ function TracePage() {
         <PageHeader
           title="Trace"
           id={<CopyId id={traceId} label="trace id" />}
-          meta={
-            trace.data && (
-              <span>
-                {count(trace.data.spans.length)}{" "}
-                {trace.data.spans.length === 1 ? "span" : "spans"}
-              </span>
-            )
-          }
         />
       }
       className="flex flex-col gap-3 overflow-hidden"
@@ -67,12 +58,20 @@ function TracePage() {
         <ErrorState error={trace.error} what="The trace" />
       ) : trace.data ? (
         <>
-          <p className="flex flex-none items-start gap-1.5 text-xs text-muted-foreground">
+          <p
+            className="flex flex-none items-start gap-1.5 text-xs text-muted-foreground"
+            title={
+              runs.length === 0 && trace.data.not_run?.fix
+                ? `To get a run page: ${trace.data.not_run.fix}.`
+                : undefined
+            }
+          >
             <InfoIcon className="mt-px size-3.5 flex-none text-subtle-foreground" />
             {runs.length > 0 ? (
               <span>
-                Every span of this trace, as recorded.{" "}
-                {runs.length === 1 ? "The run in it: " : "The runs in it: "}
+                Every span of this trace as recorded; messages and tool
+                arguments are on the page of{" "}
+                {runs.length === 1 ? "its run" : "its runs"}:{" "}
                 {runs.slice(0, 6).map((id, i) => (
                   <React.Fragment key={id}>
                     {i > 0 && ", "}
@@ -85,19 +84,13 @@ function TracePage() {
                     </Link>
                   </React.Fragment>
                 ))}
-                {runs.length > 6 && ` and ${runs.length - 6} more`}. A run's own
-                page shows its messages and tool arguments.
+                {runs.length > 6 && ` and ${runs.length - 6} more`}.
               </span>
             ) : (
               <span>
-                No weft run is in this trace
-                {trace.data.not_run?.reason
-                  ? `: ${trace.data.not_run.reason}`
-                  : ""}
-                . Its spans are shown as recorded; there are no messages or tool
-                arguments to show.
-                {trace.data.not_run?.fix &&
-                  ` To get them: ${trace.data.not_run.fix}.`}
+                No agent run was recorded in this trace, so there are no
+                messages or tool arguments to show: only its spans, as they
+                arrived.
               </span>
             )}
           </p>
@@ -111,6 +104,7 @@ function TracePage() {
               id="trace"
               gutter
               defaultWidth={440}
+              minBeside={320}
               detail={
                 node && (
                   <SpanDetail

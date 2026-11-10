@@ -56,7 +56,9 @@ export function MarkerLine({ marker }: { marker: Marker }) {
             marker.tone === "danger" && "text-danger-foreground"
           )}
         />
-        <span className="min-w-0 truncate">{marker.text}</span>
+        <span className="min-w-0 truncate" title={marker.text}>
+          {marker.text}
+        </span>
         <ChevronRightIcon
           aria-hidden
           className={cn(

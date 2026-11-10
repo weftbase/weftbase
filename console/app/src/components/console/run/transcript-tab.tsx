@@ -172,12 +172,6 @@ export function TranscriptTab({
         {asOf !== undefined && (
           <span>what the model had seen when step {asOf} began</span>
         )}
-        {chain.runs.length > 1 && asOf === undefined && (
-          <span className="ml-auto">
-            One conversation across {chain.runs.length - 1}{" "}
-            {chain.runs.length === 2 ? "wait" : "waits"} on a person
-          </span>
-        )}
       </div>
       {!doc ? (
         <Muted>Loading the transcript…</Muted>

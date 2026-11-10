@@ -182,11 +182,10 @@ function Attention({
   const pending = useQuery(
     q.approvals({ status: "pending", limit: ATTENTION_ROWS })
   )
-  // A plain list (not a search), so cancelled runs are not in it; the
-  // window is applied here.
-  const failed = useQuery(
-    q.runsPage({ display_status: "failed", limit: ATTENTION_ROWS })
-  )
+  // The window's failed runs, as the figures above count them (an
+  // older server answers the newest of any time: the filter below
+  // keeps the window's).
+  const failed = useQuery(q.failedSince(since, ATTENTION_ROWS))
   const error = pending.error ?? failed.error
   const waiting: Item[] = (pending.data?.approvals ?? []).map((a) => ({
     kind: "approval",
@@ -306,22 +305,9 @@ function Attention({
           ))}
           {(moreWaiting > 0 || moreFailed > 0) && (
             <li className="flex h-7 items-center justify-center gap-1.5 text-xs text-muted-foreground">
-              <span>
-                {count(shown.length)} of {count(waitingTotal + failedTotal)}{" "}
-                shown
-              </span>
-              {moreWaiting > 0 && (
-                <>
-                  <span aria-hidden>·</span>
-                  {inbox(moreWaiting, "more waiting")}
-                </>
-              )}
-              {moreFailed > 0 && (
-                <>
-                  <span aria-hidden>·</span>
-                  {failedRuns(moreFailed, "more failed")}
-                </>
-              )}
+              {moreWaiting > 0 && inbox(moreWaiting, "more waiting")}
+              {moreWaiting > 0 && moreFailed > 0 && <span aria-hidden>·</span>}
+              {moreFailed > 0 && failedRuns(moreFailed, "more failed")}
             </li>
           )}
         </ul>
@@ -378,7 +364,7 @@ function BreakdownTable({ by, range }: { by: Breakdown; range: Window }) {
       columns={columns}
       rows={rows}
       rowKey={(r) => r.key}
-      footer={<span>{BREAKDOWN_NOTE[by]}</span>}
+      footer={BREAKDOWN_NOTE[by] && <span>{BREAKDOWN_NOTE[by]}</span>}
     />
   )
 }

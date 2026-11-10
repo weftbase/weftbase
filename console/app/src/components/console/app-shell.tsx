@@ -451,7 +451,7 @@ function TopBar({
 const APPROVAL_TOAST = "approval-waiting"
 /** How long the toast shows, and how long after it no new one is raised. */
 const APPROVAL_TOAST_MS = 6000
-const APPROVAL_TOAST_QUIET_MS = 20_000
+const APPROVAL_TOAST_QUIET_MS = 5000
 
 /** Whether an approval asked for by `runId` is already in front of the
  * person: the inbox is open, or the page is that run's (the run itself,

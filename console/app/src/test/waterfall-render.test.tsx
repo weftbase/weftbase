@@ -122,5 +122,14 @@ describe("TraceWaterfall", () => {
       />
     )
     expect(screen.getByText("Waiting for the first step…")).toBeTruthy()
+    // Nothing to rule and nothing to count: no tick, no "1ms" readout.
+    expect(screen.queryByText("0s")).toBeNull()
+    expect(screen.queryByText(/^\d+ms$/)).toBeNull()
+  })
+
+  it("at rest the footer has no time readout; the page's Duration says it", () => {
+    render(<TraceWaterfall trace={{ spans, rootRunId: "r" }} />)
+    // Once: the label after the root's bar, not also in the footer.
+    expect(screen.getAllByText("3.00s")).toHaveLength(1)
   })
 })

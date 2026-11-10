@@ -19,7 +19,8 @@ import type {
 } from "@/components/console/trace-waterfall"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { actorLabel } from "@/lib/api/approvals"
+import { actorText, useMe } from "@/lib/actor"
+import type { ActorLike } from "@/lib/actor"
 import { approvalsOf, chainStep, chainSteps } from "@/lib/api/chain"
 import type { ChainView } from "@/lib/api/chain"
 import { q } from "@/lib/api/queries"
@@ -62,7 +63,28 @@ const ICON: Record<TraceNode["base"], LucideIcon> = {
   marker: FoldVerticalIcon,
 }
 
-function StateBadge({ node }: { node: TraceNode }) {
+const RUN_STATE: Record<
+  ChainView["status"],
+  ["failed" | "waiting" | "running" | "succeeded" | "neutral", string]
+> = {
+  queued: ["neutral", "Queued"],
+  running: ["running", "Running"],
+  waiting: ["waiting", "Waiting"],
+  succeeded: ["succeeded", "OK"],
+  failed: ["failed", "Failed"],
+  cancelled: ["neutral", "Cancelled"],
+  interrupted: ["neutral", "Interrupted"],
+}
+
+function StateBadge({
+  node,
+  run,
+}: {
+  node: TraceNode
+  /** The row is the run itself: its state is the run's. */
+  run?: ChainView["status"]
+}) {
+  if (run) return <Badge variant={RUN_STATE[run][0]}>{RUN_STATE[run][1]}</Badge>
   if (node.failed) return <Badge variant="failed">Failed</Badge>
   if (node.kind === "waiting")
     return node.wait?.to === null ? (
@@ -139,6 +161,29 @@ function Unavailable({ error, what }: { error: unknown; what: string }) {
       {what} could not be read:{" "}
       {error instanceof Error ? error.message : String(error)}
     </Muted>
+  )
+}
+
+type FactRow = readonly [string, React.ReactNode] | false | null | undefined
+
+/** "Timing & usage": absent when it has no fact and nothing else to say. */
+function Timing({
+  rows,
+  children,
+}: {
+  rows: FactRow[]
+  children?: React.ReactNode
+}) {
+  const any = rows.some(
+    (r) => !!r && r[1] !== undefined && r[1] !== null && r[1] !== ""
+  )
+  const more = React.Children.toArray(children).length > 0
+  if (!any && !more) return null
+  return (
+    <Fold id="detail.timing" title="Timing & usage">
+      <Facts rows={rows} />
+      {children}
+    </Fold>
   )
 }
 
@@ -276,8 +321,9 @@ function ModelCall({
     prev.catalog_hash !== cur.catalog_hash
 
   const attempts = s?.attempts ?? []
-  const troubled =
-    attempts.length > 1 || attempts.some((a) => a.outcome && a.outcome !== "ok")
+  // One attempt that failed is the Error section; the list is for a call
+  // that was tried more than once.
+  const troubled = attempts.length > 1
   const errors = attempts.filter((a) => a.error)
   const u = s?.usage
   const params = s?.request?.body.params
@@ -344,7 +390,7 @@ function ModelCall({
         )}
       </Fold>
 
-      <Fold id="detail.output" title="Output" hint={s?.reason}>
+      <Fold id="detail.output" title="Output">
         {fullQ.isLoading ? (
           <Loading what="the reply" />
         ) : reply ? (
@@ -387,52 +433,56 @@ function ModelCall({
         </Fold>
       )}
 
-      <Fold id="detail.timing" title="Timing & usage">
+      <Timing
+        rows={[
+          // The head says how long the call took: the latency is said
+          // only when it is another figure (attempts, a wait between).
+          [
+            "Latency",
+            s?.latency_ms !== undefined &&
+            duration(s.latency_ms) !== duration(node.end - node.start)
+              ? duration(s.latency_ms)
+              : undefined,
+          ],
+          [
+            "First token",
+            s?.ttft_ms !== undefined &&
+            duration(s.ttft_ms) !== duration(node.end - node.start)
+              ? duration(s.ttft_ms)
+              : undefined,
+          ],
+          ["Finish reason", s?.reason],
+          // The row names its model; here only a call another model
+          // answered.
+          [
+            "Model",
+            s?.model.answered && s.model.answered !== s.model.requested
+              ? `${s.model.requested} → answered by ${s.model.answered}`
+              : undefined,
+          ],
+          [
+            "Cached input",
+            u?.cached_input_tokens ? tokens(u.cached_input_tokens) : undefined,
+          ],
+          [
+            "Cache write",
+            u?.cache_write_tokens ? tokens(u.cache_write_tokens) : undefined,
+          ],
+          [
+            "Reasoning tokens",
+            u?.reasoning_tokens ? tokens(u.reasoning_tokens) : undefined,
+          ],
+          // A known cost's caveat is the Cost cell's tooltip.
+          ["Cost note", s && !s.cost_known ? s.cost_reason : undefined],
+          [
+            "Settings",
+            params && Object.keys(params).length > 0 ? (
+              <span className="font-mono">{JSON.stringify(params)}</span>
+            ) : undefined,
+          ],
+        ]}
+      >
         {stepQ.error && <Unavailable error={stepQ.error} what="The step" />}
-        <Facts
-          rows={[
-            [
-              "Latency",
-              s?.latency_ms !== undefined ? duration(s.latency_ms) : undefined,
-            ],
-            [
-              "First token",
-              s?.ttft_ms !== undefined ? duration(s.ttft_ms) : undefined,
-            ],
-            ["Finish reason", s?.reason],
-            [
-              "Model",
-              s
-                ? s.model.answered && s.model.answered !== s.model.requested
-                  ? `${s.model.requested} → answered by ${s.model.answered}`
-                  : [s.model.provider, s.model.requested]
-                      .filter(Boolean)
-                      .join(" / ")
-                : undefined,
-            ],
-            [
-              "Cached input",
-              u?.cached_input_tokens
-                ? tokens(u.cached_input_tokens)
-                : undefined,
-            ],
-            [
-              "Cache write",
-              u?.cache_write_tokens ? tokens(u.cache_write_tokens) : undefined,
-            ],
-            [
-              "Reasoning tokens",
-              u?.reasoning_tokens ? tokens(u.reasoning_tokens) : undefined,
-            ],
-            ["Cost note", s?.cost_reason],
-            [
-              "Settings",
-              params && Object.keys(params).length > 0 ? (
-                <span className="font-mono">{JSON.stringify(params)}</span>
-              ) : undefined,
-            ],
-          ]}
-        />
         {troubled && (
           <div className="flex flex-col gap-1">
             <span className="table-head">Attempts</span>
@@ -460,14 +510,19 @@ function ModelCall({
                     </span>
                   )}
                   {a.model !== s?.model.requested && (
-                    <span className="text-warning-foreground">fallback</span>
+                    <span
+                      className="ml-auto rounded-sm bg-warning-muted px-1 font-sans text-[11px] leading-4 font-medium text-warning-foreground"
+                      title={`Not the model the call asked for (${s?.model.requested})`}
+                    >
+                      Fallback
+                    </span>
                   )}
                 </li>
               ))}
             </ol>
           </div>
         )}
-      </Fold>
+      </Timing>
 
       <Raw
         node={node}
@@ -515,7 +570,8 @@ function useToolCall(node: TraceNode, runId: string | undefined) {
 function approvalFacts(
   node: TraceNode,
   chain: ChainView,
-  entry: ToolEntry | undefined
+  entry: ToolEntry | undefined,
+  me: ActorLike | undefined
 ): (readonly [string, React.ReactNode] | undefined)[] {
   const a = node.span?.attrs ?? {}
   const decided = approvalsOf(chain).find(
@@ -525,10 +581,13 @@ function approvalFacts(
   const denied = a["weft.tool.denied"] === true
   if (!approved && !denied && !entry?.approval && !decided) return []
   const who =
-    actorLabel(decided?.actor) ??
-    str(a["weft.tool.approved_by"]) ??
-    str(a["weft.tool.denied_by"]) ??
-    str(a["weft.approval.actor"])
+    actorText(decided?.actor, me) ??
+    actorText(
+      str(a["weft.tool.approved_by"]) ??
+        str(a["weft.tool.denied_by"]) ??
+        str(a["weft.approval.actor"]),
+      me
+    )
   const outcome = approved
     ? "approved"
     : denied
@@ -542,6 +601,7 @@ function approvalFacts(
 
 function ToolCall({ node, chain }: { node: TraceNode; chain: ChainView }) {
   const { stepQ, call } = useToolCall(node, node.runId)
+  const me = useMe()
   const a = node.span?.attrs ?? {}
   const entry = toolEntry(stepQ.data, node.tool ?? node.label)
   const isError = call?.result?.is_error === true || node.failed
@@ -549,7 +609,7 @@ function ToolCall({ node, chain }: { node: TraceNode; chain: ChainView }) {
     num(a["weft.tool.timeout_ms"]) ?? (entry?.timeout_ms || undefined)
   return (
     <>
-      <Fold id="detail.input" title="Input" hint="arguments">
+      <Fold id="detail.input" title="Input">
         {stepQ.isLoading ? (
           <Loading what="the arguments" />
         ) : stepQ.error ? (
@@ -592,40 +652,31 @@ function ToolCall({ node, chain }: { node: TraceNode; chain: ChainView }) {
           </Text>
         </Fold>
       )}
-      <Fold id="detail.timing" title="Timing & usage">
-        <Facts
-          rows={[
-            [
-              "Queue wait",
-              num(a["weft.tool.queue_ms"]) !== undefined
-                ? duration(num(a["weft.tool.queue_ms"]))
-                : undefined,
-            ],
-            ["Timeout", timeout ? duration(timeout) : undefined],
-            [
-              "Result size",
-              num(a["weft.tool.result_bytes"]) !== undefined
-                ? bytes(num(a["weft.tool.result_bytes"]))
-                : undefined,
-            ],
-            [
-              "Result cap",
-              entry?.max_result_bytes
-                ? bytes(entry.max_result_bytes)
-                : undefined,
-            ],
-            ["Comes from", entry?.source ?? str(a["weft.tool.origin"])],
-            [
-              "Call id",
-              node.callId ? (
-                <span className="font-mono">{node.callId}</span>
-              ) : undefined,
-            ],
-            ...approvalFacts(node, chain, entry),
-            ["Note", node.glyph?.title],
-          ]}
-        />
-      </Fold>
+      <Timing
+        rows={[
+          [
+            "Queue wait",
+            num(a["weft.tool.queue_ms"]) !== undefined
+              ? duration(num(a["weft.tool.queue_ms"]))
+              : undefined,
+          ],
+          ["Timeout", timeout ? duration(timeout) : undefined],
+          // The Output section's title carries the size of a result.
+          [
+            "Result size",
+            isError && num(a["weft.tool.result_bytes"]) !== undefined
+              ? bytes(num(a["weft.tool.result_bytes"]))
+              : undefined,
+          ],
+          [
+            "Result cap",
+            entry?.max_result_bytes ? bytes(entry.max_result_bytes) : undefined,
+          ],
+          ["Comes from", entry?.source ?? str(a["weft.tool.origin"])],
+          ...approvalFacts(node, chain, entry, me),
+          ["Note", node.glyph?.title],
+        ]}
+      />
       <Raw node={node} />
     </>
   )
@@ -644,7 +695,7 @@ function Handoff({ node, chain }: { node: TraceNode; chain: ChainView }) {
   const prompt = str(args?.prompt)
   return (
     <>
-      <Fold id="detail.input" title="Input" hint="what the agent was asked">
+      <Fold id="detail.input" title="Input">
         {stepQ.isLoading ? (
           <Loading what="the handoff" />
         ) : prompt ? (
@@ -657,7 +708,7 @@ function Handoff({ node, chain }: { node: TraceNode; chain: ChainView }) {
           </Muted>
         )}
       </Fold>
-      <Fold id="detail.output" title="Output" hint="what it answered">
+      <Fold id="detail.output" title="Output">
         {call?.result && !call.result.is_error ? (
           <Value value={call.result.content} />
         ) : (
@@ -680,24 +731,15 @@ function Handoff({ node, chain }: { node: TraceNode; chain: ChainView }) {
           </Text>
         </Fold>
       )}
-      <Fold id="detail.timing" title="Timing & usage">
-        <Facts
-          rows={[
-            ["Agent", child?.agent ?? node.label],
-            [
-              "Model",
-              child
-                ? `${child.model.provider} / ${child.model.name}`
-                : node.secondary,
-            ],
-            [
-              "Cost note",
-              child && !child.cost_known ? child.cost_reason : undefined,
-            ],
-            ["Ended by", child?.stopped_by],
-          ]}
-        />
-      </Fold>
+      <Timing
+        rows={[
+          [
+            "Cost note",
+            child && !child.cost_known ? child.cost_reason : undefined,
+          ],
+          ["Ended by", child?.stopped_by],
+        ]}
+      />
       <Raw node={node} />
     </>
   )
@@ -705,6 +747,7 @@ function Handoff({ node, chain }: { node: TraceNode; chain: ChainView }) {
 
 function Waiting({ node, chain }: { node: TraceNode; chain: ChainView }) {
   const { stepQ, call } = useToolCall(node, node.runId)
+  const me = useMe()
   const mine = approvalsOf(chain).filter(
     (a) =>
       a.run_id === node.runId && (!node.callId || a.call_id === node.callId)
@@ -714,11 +757,7 @@ function Waiting({ node, chain }: { node: TraceNode; chain: ChainView }) {
   const wait = chain.waits.find((w) => w.run === node.runId)
   return (
     <>
-      <Fold
-        id="detail.input"
-        title="Input"
-        hint="the call waiting for a decision"
-      >
+      <Fold id="detail.input" title="Input">
         {open ? (
           <Muted>
             The call and its exact arguments are in the callout above the
@@ -733,11 +772,11 @@ function Waiting({ node, chain }: { node: TraceNode; chain: ChainView }) {
         )}
       </Fold>
       {!open && (
-        <Fold id="detail.output" title="Output" hint="the decision">
+        <Fold id="detail.output" title="Output">
           <Facts
             rows={[
               ["Decision", decided?.status ?? "none: the run ended first"],
-              ["Decided by", actorLabel(decided?.actor)],
+              ["Decided by", actorText(decided?.actor, me)],
               [
                 "Decided",
                 decided?.decided_at ? dateTime(decided.decided_at) : undefined,
@@ -759,19 +798,6 @@ function Waiting({ node, chain }: { node: TraceNode; chain: ChainView }) {
           />
         </Fold>
       )}
-      <Fold id="detail.timing" title="Timing & usage">
-        <Facts
-          rows={[
-            ["Asked", dateTime(new Date(node.start).toISOString())],
-            [
-              "Call id",
-              node.callId ? (
-                <span className="font-mono">{node.callId}</span>
-              ) : undefined,
-            ],
-          ]}
-        />
-      </Fold>
       <Raw node={node} />
     </>
   )
@@ -826,20 +852,6 @@ function RootAgent({ chain }: { node: TraceNode; chain: ChainView }) {
           </Text>
         </Fold>
       )}
-      <Fold id="detail.timing" title="Timing & usage">
-        <Facts
-          rows={[
-            ["Started", dateTime(chain.totals.started)],
-            [
-              "Finished",
-              chain.totals.finished && finished
-                ? dateTime(chain.totals.finished)
-                : undefined,
-            ],
-            ["Ended by", last.stopped_by],
-          ]}
-        />
-      </Fold>
     </>
   )
 }
@@ -855,21 +867,19 @@ function Other({ node }: { node: TraceNode }) {
           </Text>
         </Fold>
       )}
-      <Fold id="detail.timing" title="Timing & usage">
-        <Facts
-          rows={[
-            ["Started", dateTime(new Date(node.start).toISOString())],
-            ["Service", s?.service],
-            ["Span kind", s?.kind],
-            ["Note", node.note],
-          ]}
-        />
+      <Timing
+        rows={[
+          ["Service", s?.service],
+          ["Span kind", s?.kind],
+          ["Note", node.note],
+        ]}
+      >
         {node.spans.length === 0 && node.running && (
           <Muted>
             This call is in flight; its details arrive when it ends.
           </Muted>
         )}
-      </Fold>
+      </Timing>
       <Raw node={node} />
     </>
   )
@@ -965,6 +975,19 @@ export function SpanDetail({
       ? ["Running for", duration(d)]
       : ["Duration", duration(d)]
   const attempts = stepQ.data?.attempts?.length ?? 0
+  const unused =
+    node.failed && !node.tokensIn && !node.tokensOut && !stepQ.data?.cost_usd
+  // A time of day, the date on hover.
+  const clock = (label: string, iso: string): Cell => [
+    label,
+    new Date(iso).toLocaleTimeString("en-GB"),
+    dateTime(iso),
+  ]
+  const over =
+    !!chain &&
+    chain.status !== "running" &&
+    chain.status !== "queued" &&
+    chain.status !== "waiting"
   const some = (list: (Cell | undefined)[]) =>
     list.filter((c): c is Cell => c !== undefined)
   const cells: Cell[] =
@@ -980,22 +1003,17 @@ export function SpanDetail({
             step,
           ])
         : isRoot
-          ? some([
-              took,
-              [
-                "Started",
-                new Date(node.start).toLocaleTimeString("en-GB"),
-                dateTime(new Date(node.start).toISOString()),
-              ],
-              ["Steps", count(chainSteps(chain))],
-              chain.totals.waitingMs > 0
-                ? ["Waited", duration(chain.totals.waitingMs)]
+          ? // The run itself: its duration, cost and tokens are the page's
+            // stat strip; here is what the strip does not say.
+            some([
+              clock("Started", chain.totals.started),
+              over && chain.totals.finished
+                ? clock("Finished", chain.totals.finished)
                 : undefined,
-              costCell(chain.totals),
-              ...tokenCells(
-                chain.totals.usage.input_tokens,
-                chain.totals.usage.output_tokens
-              ),
+              ["Steps", count(chainSteps(chain))],
+              over && chain.last.stopped_by
+                ? ["Ended by", chain.last.stopped_by]
+                : undefined,
             ])
           : node.base === "agent"
             ? // A child run's totals arrive when it ends.
@@ -1021,10 +1039,19 @@ export function SpanDetail({
                   started,
                   step,
                   attempts > 1 ? ["Attempts", count(attempts)] : undefined,
-                  stepCost
-                    ? costCell(stepCost)
-                    : ["Cost", stepQ.isLoading ? "…" : "unknown"],
-                  ...tokenCells(node.tokensIn ?? 0, node.tokensOut ?? 0),
+                  // A call that failed before it used a token has neither
+                  // tokens nor a cost to show.
+                  ...(unused
+                    ? []
+                    : [
+                        stepCost
+                          ? costCell(stepCost)
+                          : ([
+                              "Cost",
+                              stepQ.isLoading ? "…" : "unknown",
+                            ] as Cell),
+                        ...tokenCells(node.tokensIn ?? 0, node.tokensOut ?? 0),
+                      ]),
                 ])
               : some([took, started, step])
 
@@ -1058,8 +1085,12 @@ export function SpanDetail({
           <Icon className="size-3" />
         </span>
         <h2 className="min-w-0 truncate text-sm font-semibold">{node.label}</h2>
-        <span className="flex-none text-xs text-subtle-foreground">{what}</span>
-        <StateBadge node={node} />
+        {what !== node.label && (
+          <span className="flex-none text-xs text-subtle-foreground">
+            {what}
+          </span>
+        )}
+        <StateBadge node={node} run={isRoot ? chain.status : undefined} />
         <div className="ml-auto flex flex-none items-center gap-1">
           {isHandoff && (node.span?.run_id ?? node.runId) && (
             <Button asChild size="sm" variant="secondary">

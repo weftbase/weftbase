@@ -15,6 +15,7 @@ import { api } from "./http"
 import { displayStatus } from "./status"
 import type { DisplayStatus } from "./status"
 import type {
+  Actor,
   Approval,
   CostFields,
   Hole,
@@ -38,8 +39,8 @@ export interface ChainWait {
   to: number | null
   /** The calls waited on, as the server records them. */
   approvals: Approval[]
-  /** Who decided: "operator op_…", "key key_…". */
-  decidedBy: string[]
+  /** Who decided, as the server names them (print with actorText). */
+  decidedBy: Actor[]
 }
 
 export interface ChainTotals extends Pick<
@@ -79,7 +80,7 @@ export function waitOf(w: WaitDoc): ChainWait {
     from: ms(w.from),
     to: w.to ? ms(w.to) : null,
     approvals: w.approvals ?? [],
-    decidedBy: (w.decided_by ?? []).map((a) => `${a.kind} ${a.id}`),
+    decidedBy: w.decided_by ?? [],
   }
 }
 

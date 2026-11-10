@@ -32,12 +32,13 @@ reference implementations of everything below.
 | Nothing to show / failed / loading | `EmptyState`, `ErrorState`, `LoadingRows` (`empty-state.tsx`) | `ErrorState error={query.error} what="The run"` reads 404 and 501 as what they are. |
 | An id | `CopyId` (`copy-id.tsx`) | Click copies. Shows the id's end; `full` for all of it. `useCopy()` for other copy buttons. |
 | JSON | `JsonView` (`json-view.tsx`) | `value`, `depth` (levels open). Collapsible, copyable. |
-| A time | `RelativeTime`, `useNow()` (`relative-time.tsx`) | One shared 10 s clock. Use `useNow()` for the duration of something still going. |
-| Main + detail | `SplitPane` (`split-pane.tsx`) | `id` (remembers the width), `detail` (null closes it; main goes full width). Divider: drag, ←/→. `gutter` makes the divider a 12px gap between two bordered containers. |
+| A time | `RelativeTime`, `useNow()` (`relative-time.tsx`) | One shared 10 s clock. `sentence` where it ends a sentence ("now" reads "just now"). Use `useNow()` for the duration of something still going. |
+| Who did something | `actorText(actor, me)`, `useMe()` (`lib/actor.ts`) | "you" for the signed-in principal, "operator op_maria", "API key …4HH1", "system". Every actor printed goes through it. |
+| Main + detail | `SplitPane` (`split-pane.tsx`) | `id` (remembers the width), `detail` (null closes it; main goes full width). Divider: drag, ←/→. `gutter` makes the divider a 12px gap between two bordered containers. In a pane too narrow for `minMain` beside the detail, the detail is a sheet of at most 420px: over the main area, or with `minBeside` beside it while the main area keeps that much (the run page: the selected row stays readable). |
 | A trace | `TraceWaterfall` (`trace-waterfall/`) | See "Waterfall: the component" below. `compact` for a session turn. |
 | Deciding an approval | `DecideForm` (`approval/decide.tsx`) | `approval` (a pending `Approval`), `onDecided?`, `showArgs?`. Approve / Deny with a reason / More → "Answer for the tool". Sends the approval's own `args_sha256`; says a 409 in a sentence; refreshes runs, sessions and approvals. |
 | Parts of a detail | `Fold`, `Inline`, `Facts`, `Text`, `Muted` (`run/fold.tsx`); `Messages`, `Value` (`run/messages.tsx`) | A remembered collapsible section; a small disclosure; label/value rows; a conversation with tool calls folded to one line; recorded content as JSON or text. |
-| ⌘K | `CommandMenu` (`command-menu.tsx`) | Pages, New run, agents; a run, session or public id jumps there (`lib/jump.ts`); else a run search. It filters its own rows (`shouldFilter={false}`): add a group there when a new kind of thing becomes findable. `?` opens `ShortcutsSheet` (`shortcuts.tsx`): list a new key there. |
+| ⌘K | `CommandMenu` (`command-menu.tsx`) | Pages, New run, agents; a run, session or public id jumps there (`lib/jump.ts`; a public id that only runs carry jumps to the run); else a run search. It filters its own rows (`shouldFilter={false}`): add a group there when a new kind of thing becomes findable. `?` opens `ShortcutsSheet` (`shortcuts.tsx`): list a new key there. |
 | Runs columns | `RUN_COLUMNS`, `RUN_COLUMNS_OF_AGENT`, `runColumns({ sort, onSort })` (`run-columns.tsx`) | Reuse for any list of runs (a session's turns, an agent's activity). Every cell reads the row through `lib/runs.ts` (`rowStatus`, `rowTimes`, `rowTokens`, `rowCost`, …), which uses the row's `chain` when it has one. |
 | A switch between a few views | `Segmented` (`segmented.tsx`) | `options: {label, link, active}[]`; each option is a link (a time window, what a table groups by). |
 | Bars over time | `RunsChart` (`runs-chart.tsx`) | `series` of `OutcomeBucket` (stats `by=total`), stacked by outcome in a fixed order, 2px gaps, legend + hover readout + a table for screen readers. Colours: `--chart-succeeded/cancelled/waiting/failed/open`. |
@@ -124,15 +125,16 @@ The inventory and the inbox: `q.agentsSummary(since)`, `q.agent(name)`,
 current from the outbox stream (`streamEvents` in `stream.ts`,
 `GET /v1/events`) and raises the one toast: not for an approval that is
 already on screen (the inbox, or that run's page; `approvalOnScreen` in
-`app-shell.tsx`), up for 6 s, one at a time, and not again for 20 s
-after it went.
+`app-shell.tsx`), up for 6 s, one at a time, and not again for 5 s
+after it went. Toasts sit at the bottom left of the content area
+(`ui/sonner.tsx`): beside the sidebar, above a page's bottom bar.
 
-Runs lists always ask for `chains=1` (`api.runs` adds it). The server's
-run search (any of `q`, `tool`, `model`, `since`, `sort`, `min_cost`,
-`min_tokens`) answers neither `chains` nor `display_status`: build the
-query with `toRunsQuery(search, since)` and pass the rows through
-`keepShown(rows, search)` (`lib/runs.ts`), which sends the trace store's
-status word instead and folds and filters the page.
+Runs lists always ask for `chains=1` (`api.runs` adds it) and filter on
+the status as shown (`display_status`), in a search too: build the query
+with `toRunsQuery(search, since)` (`lib/runs.ts`). A search (any of `q`,
+`tool`, `model`, `since`, `sort`, `min_cost`, `min_tokens`) is
+offset-paged and its `total` counts rows before chains are folded
+(`isSearching`): count the rows loaded instead.
 
 ## URL state (`src/lib/search.ts`)
 
@@ -284,9 +286,10 @@ documents (`src/test/session.test.ts`):
 | Function | Answers |
 |---|---|
 | `summaryParts(turn, now)` | The collapsed line: `4 model calls · 3 tools · 10.5s · $0.01`. |
-| `turnNote(turn)` | In words, why a turn has no reply (failed, cancelled, interrupted, rolled back, running). |
-| `turnMarkers(turn, now)` | The one-line markers of a turn: its waits on a person (the ledger's `waits`) and its thread `marks` (approvals, grants, steered messages, compactions, forks, handoffs), an approval told once. |
-| `buildItems(view, now)` | The page's items in order: "earlier turns", turns, gap lines, session-level marks. |
+| `turnNote(turn, endedBy?)` | In words, why a turn has no reply (failed, cancelled, interrupted, rolled back, running). |
+| `turnMarkers(turn, now, ctx?)` | The one-line markers of a turn, each thing told once: a wait on a person with the decision that ended it ("Waited 3.0s · refund approved by you"; no wait wording under 100 ms), a grant's answer, a steered message with its text, compactions, forks, handoffs. Receipts of plain messages and marks that repeat the turn's closing sentence are not lines. |
+| `buildItems(view, now, me?)` | The page's items in order: "earlier turns", where a fork came from, turns, session-level marks, and a line per skipped turn number the server gives a reason for. |
+| `turnPosition`, `turnParam(turn, position)` | A turn is shown by its position (1, 2, 3…: the server's `index`, else the page's offset + its place) and linked (`?turn=`, `#turn-N`) by the thread's own turn number, the one its run carries. |
 | `outcomeStrip(sessionRow)` | The list's dots, one per turn (a decided park folded into its turn). |
 
 A park and its resume are one turn. `OutcomeStrip`, `MarkerLine` and

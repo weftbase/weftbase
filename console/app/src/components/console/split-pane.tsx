@@ -8,12 +8,18 @@ import { cn } from "@/lib/utils"
 // width. The detail's width is remembered per `id`. The divider is a
 // focusable separator: ←/→ resize by 16px, Home/End go to the limits.
 // When the pane is too narrow to leave the main area `minMain` pixels
-// beside the detail, the detail becomes a sheet over the main area (it
-// keeps its own close button and Esc), so nothing is squeezed.
+// beside the detail, the detail becomes a sheet, at most 420px wide (it
+// keeps its own close button and Esc; no divider). With `minBeside` the
+// main area stays beside the sheet, narrower, as long as it keeps that
+// much (the run page: the selected row stays readable next to its
+// detail); otherwise, and under that, the sheet lies over the main area.
 //
 //   <SplitPane id="run" detail={span && <SpanDetail span={span} />}>
 //     <Waterfall … />
 //   </SplitPane>
+const SHEET_MAX = 420
+const SHEET_MIN = 320
+
 export function SplitPane({
   id,
   children,
@@ -23,6 +29,7 @@ export function SplitPane({
   max = 800,
   gutter = false,
   minMain = 520,
+  minBeside,
   className,
 }: {
   /** Names the remembered width. */
@@ -39,6 +46,9 @@ export function SplitPane({
   /** The least width the main area keeps beside the detail; under it
    * the detail is laid over the main area. */
   minMain?: number
+  /** In a narrow pane, keep the main area beside the detail while it
+   * has at least this much. Unset: the detail is laid over it. */
+  minBeside?: number
   className?: string
 }) {
   const [stored, setStored] = usePref(`wb.split.${id}`, String(defaultWidth))
@@ -58,6 +68,17 @@ export function SplitPane({
     return () => ro.disconnect()
   }, [])
   const sheet = space !== undefined && space - min < minMain
+  // The sheet: as wide as chosen, at most SHEET_MAX; beside the main
+  // area when that leaves it `minBeside`, giving up width down to
+  // SHEET_MIN for it.
+  const gap = gutter ? 12 : 0
+  const beside =
+    sheet && minBeside !== undefined && space - gap - minBeside >= SHEET_MIN
+  const sheetWidth = !sheet
+    ? 0
+    : beside
+      ? Math.min(width, SHEET_MAX, space - gap - (minBeside ?? 0))
+      : Math.min(width, SHEET_MAX, Math.max(280, space - 40))
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault()
@@ -85,12 +106,20 @@ export function SplitPane({
       ref={root}
       className={cn("relative flex h-full min-h-0 min-w-0", className)}
     >
-      <div className="min-h-0 min-w-0 flex-1 overflow-auto">{children}</div>
+      <div
+        className="min-h-0 min-w-0 flex-1 overflow-auto"
+        style={open && beside ? { paddingRight: sheetWidth + gap } : undefined}
+      >
+        {children}
+      </div>
       {open && sheet && (
         <aside
-          data-sheet
-          className="absolute inset-y-0 right-0 z-20 min-h-0 overflow-auto border-l bg-background shadow-card"
-          style={{ width: Math.min(width, Math.max(280, space - 40)) }}
+          data-sheet={beside ? "beside" : "over"}
+          className={cn(
+            "absolute inset-y-0 right-0 z-20 min-h-0 overflow-auto",
+            !beside && "border-l bg-background shadow-card"
+          )}
+          style={{ width: sheetWidth }}
         >
           {detail}
         </aside>

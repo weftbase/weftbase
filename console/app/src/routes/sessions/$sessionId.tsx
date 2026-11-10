@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, createFileRoute } from "@tanstack/react-router"
+import { GitForkIcon } from "lucide-react"
 import * as React from "react"
 
 import { CopyId } from "@/components/console/copy-id"
@@ -13,14 +14,16 @@ import { useNow } from "@/components/console/relative-time"
 import { MarkerLine } from "@/components/console/session/marker"
 import {
   buildItems,
+  positionOfTurn,
   sessionTitle,
-  turnNumber,
+  turnParam,
 } from "@/components/console/session/model"
 import { SessionRail } from "@/components/console/session/rail"
 import { SessionMenu } from "@/components/console/session/session-menu"
 import { TurnBlock } from "@/components/console/session/turn"
 import { LivePill, StatusBadge } from "@/components/console/status"
 import { Button } from "@/components/ui/button"
+import { useMe } from "@/lib/actor"
 import { useSessionLive } from "@/lib/api/live"
 import { conversationKey, q } from "@/lib/api/queries"
 import { TURNS_PAGE, loadEarlier, mergeEarlier } from "@/lib/api/sessions"
@@ -35,7 +38,9 @@ import type { SessionSearch } from "@/lib/search"
 // turn's waterfall in place) and the agent's reply; what happened on
 // the way (a wait on a person, a compaction, a fork) is a one-line
 // marker where it happened. The session's facts are in a slim rail.
-// `?turn=` is the turn whose waterfall is open.
+// Turns are numbered by position (1, 2, 3…). `?turn=` is the turn whose
+// waterfall is open, by the thread's own turn number (the one its run
+// carries, so the run page's breadcrumb links back with it).
 export const Route = createFileRoute("/sessions/$sessionId")({
   validateSearch: validateSession,
   head: () => ({ meta: [{ title: "Session · weftbase" }] }),
@@ -54,6 +59,7 @@ function Session({ sessionId }: { sessionId: string }) {
   const qc = useQueryClient()
   const stream = useSessionLive(sessionId)
   const now = useNow()
+  const me = useMe()
 
   // One list with a live window at its end: the page opens on the newest
   // turns, and a live tick reads those again and nothing else. "Earlier
@@ -77,8 +83,8 @@ function Session({ sessionId }: { sessionId: string }) {
   }
 
   const items = React.useMemo(
-    () => (view ? buildItems(view, Math.max(now, Date.now())) : []),
-    [view, now]
+    () => (view ? buildItems(view, Math.max(now, Date.now()), me) : []),
+    [view, now, me]
   )
 
   // A link to a turn that is not loaded: read back to it.
@@ -86,7 +92,7 @@ function Session({ sessionId }: { sessionId: string }) {
   const has =
     wanted === undefined ||
     items.some(
-      (i) => i.type === "turn" && turnNumber(i.turn, i.ordinal) === wanted
+      (i) => i.type === "turn" && turnParam(i.turn, i.position) === wanted
     )
   const reading = earlier.isPending
   const stuck = earlier.isError
@@ -255,6 +261,14 @@ function Session({ sessionId }: { sessionId: string }) {
                         </span>
                       </div>
                     )
+                  case "origin":
+                    return (
+                      <ForkedFrom
+                        key={item.key}
+                        session={item.session}
+                        turn={item.turn}
+                      />
+                    )
                   case "gap":
                     return (
                       <p
@@ -271,7 +285,7 @@ function Session({ sessionId }: { sessionId: string }) {
                       </div>
                     )
                   case "turn": {
-                    const n = turnNumber(item.turn, item.ordinal)
+                    const n = turnParam(item.turn, item.position)
                     return (
                       <TurnBlock
                         key={item.key}
@@ -302,5 +316,37 @@ function Session({ sessionId }: { sessionId: string }) {
         </>
       )}
     </Page>
+  )
+}
+
+/** ForkedFrom: where a forked session came from, said once above its
+ * first turn. The origin numbers its turns by position too, so its
+ * conversation is asked for the position of the turn the fork was made
+ * after; the line stands without the number until (or unless) it is
+ * known. */
+function ForkedFrom({ session, turn }: { session: string; turn?: number }) {
+  const origin = useQuery({
+    ...q.conversationWindow(session),
+    enabled: turn !== undefined,
+    retry: false,
+  })
+  const at =
+    turn !== undefined && origin.data
+      ? positionOfTurn(origin.data, turn)
+      : undefined
+  return (
+    <p className="flex min-w-0 items-center gap-1.5 pl-9 text-xs text-muted-foreground">
+      <GitForkIcon aria-hidden className="size-3.5 flex-none" />
+      <span className="flex-none">Forked from</span>
+      <Link
+        to="/sessions/$sessionId"
+        params={{ sessionId: session }}
+        search={{ turn }}
+        className="min-w-0 truncate font-mono text-foreground underline-offset-2 hover:underline"
+      >
+        {session}
+      </Link>
+      {at !== undefined && <span className="flex-none">at its turn {at}</span>}
+    </p>
   )
 }

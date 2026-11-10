@@ -39,7 +39,7 @@ function RootComponent() {
       <LucideProvider strokeWidth={1.75}>
         <TooltipProvider delayDuration={200}>
           <AuthGate />
-          <Toaster position="bottom-right" />
+          <Toaster />
         </TooltipProvider>
       </LucideProvider>
     </QueryClientProvider>

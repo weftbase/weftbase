@@ -242,12 +242,7 @@ function RunsTable() {
             >
               {runs.isFetchingNextPage ? "Loading…" : "Load more"}
             </Button>
-          ) : (
-            <span>
-              {count(rows.length)} {rows.length === 1 ? "run" : "runs"}, all
-              shown
-            </span>
-          )
+          ) : undefined
         }
       />
       {unpriced && (
@@ -349,10 +344,13 @@ function RawTraces() {
         params: { traceId: t.trace_id },
       })}
       footer={
-        <span>
-          {count(traces.data.traces.length)} of {count(traces.data.total)}{" "}
-          traces
-        </span>
+        // The tab counts them; only a list cut short says so.
+        traces.data.traces.length < traces.data.total ? (
+          <span>
+            {count(traces.data.traces.length)} of {count(traces.data.total)}{" "}
+            traces
+          </span>
+        ) : undefined
       }
     />
   )

@@ -6,7 +6,6 @@ import { describe, expect, it } from "vitest"
 import { approvalOnScreen } from "@/components/console/app-shell"
 import { chainQuery } from "@/lib/api/chain"
 import type { ChainView } from "@/lib/api/chain"
-import { decidedBy } from "@/lib/approval-view"
 
 const on = (routeId: string, params: Record<string, unknown> = {}) => [
   { routeId: "__root__", params },
@@ -43,15 +42,5 @@ describe("the approval toast", () => {
     expect(
       approvalOnScreen(on("/sessions/$sessionId", { sessionId: "s" }), "", qc)
     ).toBe(false)
-  })
-})
-
-describe("who decided", () => {
-  it("names the system for an approval that expired", () => {
-    expect(decidedBy({ actor: { kind: "system", id: "" } })).toBe("system")
-    expect(decidedBy({ actor: { kind: "operator", id: "op_maria" } })).toBe(
-      "operator op_maria"
-    )
-    expect(decidedBy({})).toBeUndefined()
   })
 })

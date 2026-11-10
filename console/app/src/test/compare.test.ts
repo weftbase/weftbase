@@ -158,6 +158,46 @@ describe("buildCompare", () => {
     ])
   })
 
+  it("numbers the steps through the chain, as the run's page does", () => {
+    // The resume's first step follows the parked run's last: no #0 twice.
+    const m = buildCompare([{ doc: refunds }, { doc: resume }])
+    expect(m.rows.map((r) => r.no)).toEqual([0, 1, 2, 3])
+    expect(m.rows.map((r) => r.a?.no)).toEqual([0, 1, 2, 3])
+    expect(m.rows.map((r) => r.b?.no)).toEqual([0, 1, 2, undefined])
+    expect(summaryOf(m)).toBe("4 of 4 steps differ, from step #0.")
+    // The page says where each run's steps start in its chain (chainStep):
+    // a side whose earlier run took more steps keeps its own number.
+    const before = (id: string) =>
+      id === resume.a.run_id ? 2 : id === resume.b.run_id ? 5 : 0
+    const n = buildCompare(
+      [{ doc: refunds }, { doc: resume }],
+      undefined,
+      before
+    )
+    expect(n.rows.map((r) => r.no)).toEqual([0, 1, 2, 3])
+    expect(n.rows[2].b?.no).toBe(5)
+  })
+
+  it("names the span that selects a step's row on the run page", () => {
+    const facts = stepFacts(spans, failed.a.run_id)
+    const m = buildCompare([{ doc: failed }], (id) =>
+      id === failed.a.run_id ? facts : undefined
+    )
+    const id = m.rows[0].a?.spanId
+    expect(id).toBe(
+      spans.find(
+        (s) =>
+          s.run_id === failed.a.run_id &&
+          s.attrs["weft.step.index"] === 0 &&
+          s.attrs["gen_ai.operation.name"] === "chat" &&
+          s.attrs["weft.attempt.index"] === undefined
+      )?.span_id
+    )
+    expect(id).toBeTruthy()
+    // No spans, no selection: the link opens the run.
+    expect(m.rows[0].b?.spanId).toBeUndefined()
+  })
+
   it("shows a run alone where the other chain has none", () => {
     // What the page does when only A was resumed: the resume against
     // itself, its B side dropped.

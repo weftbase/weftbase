@@ -13,7 +13,7 @@ import { bytes, dateTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 import { MarkerLine, OpenWait } from "./marker"
-import { summaryParts, summaryTitle, turnNumber } from "./model"
+import { summaryParts, summaryTitle, turnParam } from "./model"
 import type { Item, TurnNote } from "./model"
 
 type TurnItem = Extract<Item, { type: "turn" }>
@@ -42,13 +42,15 @@ export function TurnBlock({
   onToggle: () => void
 }) {
   const { turn, markers, note } = item
-  const n = turnNumber(turn, item.ordinal)
+  // Shown by its position (1, 2, 3…); linked by the thread's own number.
+  const n = item.position
+  const param = turnParam(turn, n)
   // A rolled-back turn is off the conversation's path: folded to a line.
   const [unfolded, setUnfolded] = React.useState(false)
   if (item.offPath && !unfolded && !open)
     return (
       <article
-        id={`turn-${n}`}
+        id={`turn-${param}`}
         aria-label={`Turn ${n}, rolled back`}
         className="grid grid-cols-[28px_minmax(0,1fr)] gap-x-2 opacity-60"
       >
@@ -62,7 +64,7 @@ export function TurnBlock({
           <ChevronRightIcon aria-hidden className="size-3.5 flex-none" />
           <span className="flex-none">
             Rolled back
-            {turn.ended_by_turn ? ` by turn ${turn.ended_by_turn}` : ""}
+            {item.endedBy ? ` by turn ${item.endedBy}` : ""}
           </span>
           <span className="min-w-0 truncate text-subtle-foreground">
             {turn.input}
@@ -73,14 +75,21 @@ export function TurnBlock({
 
   return (
     <article
-      id={`turn-${n}`}
+      id={`turn-${param}`}
       aria-label={`Turn ${n}`}
       className={cn(
         "grid grid-cols-[28px_minmax(0,1fr)] gap-x-2 gap-y-1.5",
         item.offPath && "opacity-60"
       )}
     >
-      <Gutter title={`Turn ${n} · ${dateTime(turn.started)}`}>{n}</Gutter>
+      <Gutter
+        title={
+          `Turn ${n} · ${dateTime(turn.started)}` +
+          (param !== n ? ` · numbered ${param} by the app's thread` : "")
+        }
+      >
+        {n}
+      </Gutter>
       <div className="min-w-0 rounded-alert bg-muted px-3 py-2">
         {turn.input ? (
           <LongText text={turn.input} />

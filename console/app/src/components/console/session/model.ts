@@ -1,22 +1,24 @@
 // The conversation's logic, without React: what a turn's one-line
-// summary says, which one-line markers a turn gets (waits on a person,
-// approvals, grants, steered messages, compactions, forks, handoffs),
+// summary says, which one-line markers a turn gets (waits on a person
+// with what was decided, grants, steered messages, compactions, forks,
+// handoffs), the number a turn is shown and linked by,
 // what is said in words when a turn has no reply, and the list of items
 // the page draws top to bottom. Tested on the server's own documents
 // (src/test/session.test.ts).
 
+import { actorText } from "@/lib/actor"
+import type { ActorLike } from "@/lib/actor"
 import type { ConversationView } from "@/lib/api/sessions"
 import { outcomeStatus } from "@/lib/api/status"
 import type { DisplayStatus } from "@/lib/api/status"
 import type {
-  Actor,
   Approval,
   ConversationTurn,
   SessionEntry,
   SessionRow,
   WaitDoc,
 } from "@/lib/api/types"
-import { cost, dateTime, duration, shortId, tokens } from "@/lib/format"
+import { cost, dateTime, duration, tokens } from "@/lib/format"
 
 // ── The summary line ────────────────────────────────────────────────
 
@@ -24,20 +26,20 @@ const plural = (n: number, one: string, many = `${one}s`) =>
   `${n} ${n === 1 ? one : many}`
 
 /** A duration for a sentence: one decimal under a minute ("4.1s"). */
-export function shortDuration(ms: number): string {
+function shortDuration(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
   return duration(ms)
 }
 
 /** An open turn is still being worked on (or waited on). */
-export const isOpen = (t: Pick<ConversationTurn, "display_status">) =>
+const isOpen = (t: Pick<ConversationTurn, "display_status">) =>
   t.display_status === "running" ||
   t.display_status === "waiting" ||
   t.display_status === "queued"
 
 /** turnElapsed: first start to last end; an open turn is measured to now. */
-export function turnElapsed(t: ConversationTurn, now: number): number {
+function turnElapsed(t: ConversationTurn, now: number): number {
   if (!isOpen(t)) return t.duration_ms
   return Math.max(t.duration_ms, now - Date.parse(t.started))
 }
@@ -98,10 +100,14 @@ const CANCEL_CAUSE: Record<string, string> = {
   deadline: "because its deadline passed",
 }
 
-/** endedNote: a newer message ended this turn (interrupt | rollback). */
-function endedNote(t: ConversationTurn): TurnNote | undefined {
+/** endedNote: a newer message ended this turn (interrupt | rollback).
+ * `endedBy` is the position of that message's turn, when it is known. */
+function endedNote(
+  t: ConversationTurn,
+  endedBy?: number
+): TurnNote | undefined {
   if (!t.ended_kind && !t.ended_by) return undefined
-  const by = t.ended_by_turn ? `turn ${t.ended_by_turn}` : "a newer message"
+  const by = endedBy ? `turn ${endedBy}` : "a newer message"
   if (t.ended_kind === "rollback")
     return {
       tone: "muted",
@@ -115,8 +121,11 @@ function endedNote(t: ConversationTurn): TurnNote | undefined {
 
 /** turnNote: what stands where the reply would be, in words. null when
  * the turn has its reply and nothing more needs saying. */
-export function turnNote(t: ConversationTurn): TurnNote | null {
-  const ended = endedNote(t)
+export function turnNote(
+  t: ConversationTurn,
+  endedBy?: number
+): TurnNote | null {
+  const ended = endedNote(t, endedBy)
   if (ended) return ended
   switch (t.display_status) {
     case "succeeded":
@@ -196,23 +205,26 @@ export interface Marker {
   /** An open wait: the run whose calls a person can decide now. */
   pendingRun?: string
   tone?: "warning" | "danger"
+  /** The decision of a call (or, "asked", its request still open): the
+   * wait it ended tells it, in the wait's own line. */
+  decides?: "decided" | "asked"
+  /** The tool that call is of, when the record names it. */
+  tool?: string
+}
+
+/** What the markers need from outside the turn. */
+export interface MarkerContext {
+  /** The signed-in principal: its own decisions read "you". */
+  me?: ActorLike
+  /** The tool each grant covers, by grant id (the mint can be in an
+   * earlier turn than the use). */
+  grants?: ReadonlyMap<string, string>
 }
 
 const str = (v: unknown): string | undefined =>
   typeof v === "string" && v !== "" ? v : undefined
 const num = (v: unknown): number | undefined =>
   typeof v === "number" ? v : undefined
-
-/** actorName: "operator op_1", "key …VCWT9". */
-export function actorName(a: Actor | undefined): string | undefined {
-  if (!a) return undefined
-  const id = str(a.name) ?? (a.id ? shortId(a.id) : undefined)
-  // An operator whose id is the word "operator" is said once.
-  return (
-    [a.kind, id === a.kind ? undefined : id].filter(Boolean).join(" ") ||
-    undefined
-  )
-}
 
 const VERB: Record<string, string> = {
   approve: "approved",
@@ -230,16 +242,36 @@ const verb = (word: string | undefined) =>
 
 const unique = <T>(xs: T[]) => [...new Set(xs)]
 
-/** waitMarker: one wait on a person, from the park until the resume. */
-export function waitMarker(w: WaitDoc, now: number): Marker {
+/** A line starts with a capital, except a tool's name. */
+const startLine = (s: string) => (s.startsWith("call ") ? `C${s.slice(1)}` : s)
+
+const midLine = (s: string) => (s.startsWith("Call ") ? `c${s.slice(1)}` : s)
+
+/** A wait this short is not worth saying: a grant answered, nobody was
+ * asked. */
+const WAIT_WORTH_SAYING_MS = 100
+
+/** waitMarker: one wait on a person, from the park until the resume, in
+ * one line with what was decided: "Waited 3.0s · refund approved by
+ * you". `decisions` are the thread's decision markers the wait covers
+ * (a session whose ledger wait carries no approvals); a wait too short
+ * to notice reads as its decision alone, and is undefined when there is
+ * nothing to say about it. */
+export function waitMarker(
+  w: WaitDoc,
+  now: number,
+  ctx: MarkerContext = {},
+  decisions: readonly Marker[] = []
+): Marker | undefined {
   const approvals = w.approvals ?? []
-  const tools = unique(approvals.map((a) => a.tool))
-  const what =
-    approvals.length > 1 ? `${approvals.length} approvals` : "approval"
   const from = Date.parse(w.from)
-  const facts: Fact[] = []
-  const args = approvals.map((a) => ({ tool: a.tool, value: a.args }))
   if (w.to === null) {
+    const tools = unique([
+      ...approvals.map((a) => a.tool),
+      ...decisions.flatMap((d) => (d.tool ? [d.tool] : [])),
+    ])
+    const what =
+      approvals.length > 1 ? `${approvals.length} approvals` : "approval"
     return {
       key: `wait:${w.run}`,
       kind: "wait",
@@ -250,44 +282,78 @@ export function waitMarker(w: WaitDoc, now: number): Marker {
       pendingRun: w.run,
     }
   }
-  const outcomes = unique(approvals.map((a) => verb(a.outcome ?? a.status)))
-  const who = unique(
-    (w.decided_by ?? [])
-      .map(actorName)
-      .filter((x): x is string => x !== undefined)
-  )
-  const decided =
-    approvals.length === 0
-      ? "decided"
-      : approvals.length === 1
+  const ms = Date.parse(w.to) - from
+  const waited =
+    ms >= WAIT_WORTH_SAYING_MS ? `Waited ${shortDuration(ms)}` : undefined
+  const facts: Fact[] = []
+  let told: string | undefined
+  let tone: Marker["tone"]
+  let kind: MarkerKind = "wait"
+  if (approvals.length > 0) {
+    const outcomes = unique(approvals.map((a) => verb(a.outcome ?? a.status)))
+    const who = unique(
+      (w.decided_by ?? [])
+        .map((a) => actorText(a, ctx.me))
+        .filter((x): x is string => x !== undefined)
+    )
+    const reason = approvals.length === 1 ? approvals[0].reason : undefined
+    told =
+      (approvals.length === 1
         ? `${approvals[0].tool} ${outcomes[0]}`
         : outcomes.length === 1
-          ? `all ${outcomes[0]}`
+          ? `all ${approvals.length} calls ${outcomes[0]}`
           : approvals
               .map((a) => `${a.tool} ${verb(a.outcome ?? a.status)}`)
-              .join(", ")
-  for (const a of approvals) approvalFacts(a, approvals.length > 1, facts)
-  facts.push(
-    { label: "Asked", value: dateTime(w.from) },
-    { label: "Resumed", value: dateTime(w.to) }
-  )
+              .join(", ")) +
+      (who.length ? ` by ${who.join(", ")}` : "") +
+      (reason ? ` · ${reason}` : "")
+    if (approvals.some((a) => a.status === "denied")) tone = "danger"
+    for (const a of approvals)
+      approvalFacts(a, approvals.length > 1, facts, ctx)
+  } else if (decisions.length > 0) {
+    told = decisions.map((d) => midLine(d.text)).join(", ")
+    tone = decisions.find((d) => d.tone)?.tone
+    if (!waited) kind = decisions[0].kind
+    for (const d of decisions)
+      for (const f of d.facts)
+        if (!facts.some((x) => x.label === f.label && x.value === f.value))
+          facts.push(f)
+  }
+  if (!waited && !told) return undefined
+  if (waited)
+    facts.push(
+      { label: "Asked", value: dateTime(w.from) },
+      { label: "Resumed", value: dateTime(w.to) }
+    )
+  const args = [
+    ...approvals.map((a) => ({ tool: a.tool, value: a.args })),
+    ...decisions.flatMap((d) => d.args ?? []),
+  ]
   return {
     key: `wait:${w.run}`,
-    kind: "wait",
-    tone: approvals.some((a) => a.status === "denied") ? "danger" : undefined,
-    text: `Waited ${shortDuration(Date.parse(w.to) - from)} for ${what} · ${decided}${who.length ? ` by ${who.join(", ")}` : ""}`,
+    kind,
+    tone,
+    text:
+      waited && told
+        ? `${waited} · ${told}`
+        : (waited && `${waited} for approval`) || startLine(told ?? ""),
     at: w.from,
     facts,
-    args,
+    args: args.length ? args : undefined,
   }
 }
 
-function approvalFacts(a: Approval, named: boolean, out: Fact[]) {
+function approvalFacts(
+  a: Approval,
+  named: boolean,
+  out: Fact[],
+  ctx: MarkerContext
+) {
   const p = named ? `${a.tool}: ` : ""
   if (!named) out.push({ label: "Tool", value: a.tool, mono: true })
   out.push({ label: `${p}Decision`, value: verb(a.outcome ?? a.status) })
-  const who = actorName(a.actor)
-  if (who) out.push({ label: `${p}Decided by`, value: who, mono: true })
+  const who = actorText(a.actor, ctx.me)
+  if (who) out.push({ label: `${p}Decided by`, value: who })
   if (a.reason) out.push({ label: `${p}Reason`, value: a.reason })
   if (a.content)
     out.push({ label: `${p}Answer given to the agent`, value: a.content })
@@ -351,9 +417,12 @@ function valueText(v: unknown): string {
 
 /** markFacts: who, how, when first, then every other field the record
  * carries, so the expanded marker hides nothing. */
-export function markFacts(m: SessionEntry): Fact[] {
+function markFacts(m: SessionEntry, ctx: MarkerContext = {}): Fact[] {
   const facts: Fact[] = []
-  const who = str(m.content?.who) ?? m.actor
+  // A resume's deciders come as one list, kept as written.
+  const who = m.actor_of
+    ? m.actor
+    : actorText(str(m.content?.who) ?? m.actor, ctx.me)
   if (who)
     facts.push({
       label:
@@ -384,6 +453,10 @@ export function markFacts(m: SessionEntry): Fact[] {
   return facts
 }
 
+/** What a message that arrived during a turn did, by the receipt's
+ * `input`. A receipt of any other kind (a plain "send" that was
+ * accepted) is the thread's bookkeeping: the message is the next turn,
+ * and no line is drawn for it. */
 const RECEIPT: Record<string, string> = {
   steer: "Message steered into the turn",
   queue: "Message queued until the turn ended",
@@ -392,10 +465,23 @@ const RECEIPT: Record<string, string> = {
   rollback: "Message rolled the turn back",
 }
 
+/** receiptText: the line of a message's receipt, in its newest state. */
+function receiptText(input: string, state: string | undefined, text?: string) {
+  const base = RECEIPT[input]
+  return (
+    (state && state !== "delivered" ? `${base} (${state})` : base) +
+    (text ? `: “${text}”` : "")
+  )
+}
+
+const viaGrant = (m: SessionEntry) =>
+  m.fields.via === "grant" || str(m.fields.grant_id) !== undefined
+
 /** markText: the one line of a thread mark. */
-export function markText(
+function markText(
   m: SessionEntry,
-  request?: SessionEntry
+  request?: SessionEntry,
+  ctx: MarkerContext = {}
 ): { kind: MarkerKind; text: string; tone?: Marker["tone"]; session?: string } {
   const f = m.fields
   const tool = str(f.tool) ?? str(request?.fields.tool)
@@ -407,14 +493,26 @@ export function markText(
         text: `Approval requested${tool ? ` for ${tool}` : ""}`,
       }
     case "approval.decision": {
-      const who = str(m.content?.who) ?? (m.actor_of ? undefined : m.actor)
+      const who = actorText(
+        str(m.content?.who) ?? (m.actor_of ? undefined : m.actor),
+        ctx.me
+      )
       const reason = str(m.content?.reason)
       const outcome = str(f.outcome)
+      // A grant answered: nobody was asked this time. The reason is the
+      // grant's, and is told where the grant was given.
+      if (viaGrant(m) && outcome !== "deny") {
+        const granted = tool ?? ctx.grants?.get(str(f.grant_id) ?? "")
+        return {
+          kind: "grant",
+          text: `${granted ?? "call"} allowed by a grant${who ? ` from ${who}` : ""}`,
+        }
+      }
       return {
         kind: "approval",
         tone: outcome === "deny" ? "danger" : undefined,
         text:
-          `${tool ?? "Call"} ${verb(outcome)}` +
+          `${tool ?? "call"} ${verb(outcome)}` +
           (who ? ` by ${who}` : "") +
           (f.always === true ? ", and for every later call" : "") +
           (reason ? ` · ${reason}` : ""),
@@ -426,13 +524,19 @@ export function markText(
         tone: "danger",
         text: `A decision was refused${str(f.reason) ? `: ${str(f.reason)!.replace(/_/g, " ")}` : ""}`,
       }
-    case "grant.mint":
+    case "grant.mint": {
+      const reason = str(m.content?.reason)
       return {
         kind: "grant",
-        text: `Grant given: ${tool ?? "a tool"} may run without asking${f.scope === "session" ? ", for this session" : ""}`,
+        text:
+          `Grant given: ${tool ?? "a tool"} may run without asking${f.scope === "session" ? ", for this session" : ""}` +
+          (reason ? ` · ${reason}` : ""),
       }
-    case "grant.use":
-      return { kind: "grant", text: `Grant used${tool ? ` for ${tool}` : ""}` }
+    }
+    case "grant.use": {
+      const granted = tool ?? ctx.grants?.get(str(f.grant_id) ?? "")
+      return { kind: "grant", text: `${granted ?? "call"} allowed by a grant` }
+    }
     case "grant.revoke": {
       const uses = num(f.uses)
       return {
@@ -444,14 +548,15 @@ export function markText(
     }
     case "grant.expire":
       return { kind: "grant", text: `Grant expired${tool ? `: ${tool}` : ""}` }
-    case "receipt": {
-      const state = str(f.state)
-      const base = RECEIPT[str(f.input) ?? ""] ?? "Message received"
+    case "receipt":
       return {
         kind: "message",
-        text: state && state !== "delivered" ? `${base} (${state})` : base,
+        text: receiptText(
+          str(f.input) ?? "",
+          str(f.state),
+          str(m.content?.text)
+        ),
       }
-    }
     case "interrupt":
       return { kind: "message", text: "The turn was interrupted" }
     case "rewind":
@@ -515,129 +620,255 @@ export function markText(
 
 const markKey = (m: SessionEntry) => `mark:${m.entry ?? ""}:${m.kind}:${m.at}`
 
-function fromMark(m: SessionEntry, request?: SessionEntry): Marker {
+function fromMark(
+  m: SessionEntry,
+  request: SessionEntry | undefined,
+  ctx: MarkerContext
+): Marker {
   return {
     key: markKey(m),
-    ...markText(m, request),
+    ...markText(m, request, ctx),
     at: m.fact_at ?? m.at,
-    facts: markFacts(m),
+    facts: markFacts(m, ctx),
   }
 }
 
-/** markMarkers turns thread marks into markers. An approval's request
- * and its decision are one marker (the decision's); a request with no
- * decision stands alone; `skipCalls` are the calls a wait already tells
- * (the ledger's record), so they are not told twice; a grant used
- * several times is one line. */
+/** markMarkers turns thread marks into markers, each thing told once:
+ * an approval's request and its decision are one marker (the
+ * decision's), and so are a grant's use and the decision it gave; a
+ * request with no decision stands alone; `skipCalls` are the calls a
+ * wait already tells (the ledger's record); the same grant allowing the
+ * same tool several times is one line; a message's receipts (queued,
+ * then delivered) are one line in its newest state, and the receipt of
+ * a plain message is not a line at all. */
 export function markMarkers(
   marks: readonly SessionEntry[],
-  skipCalls: ReadonlySet<string> = new Set()
+  skipCalls: ReadonlySet<string> = new Set(),
+  ctx: MarkerContext = {}
 ): Marker[] {
   const requests = new Map<string, SessionEntry>()
+  const requestOfCall = new Map<string, SessionEntry>()
   const decided = new Set<string>()
+  const decidedCalls = new Set<string>()
   for (const m of marks) {
-    if (m.kind === "approval.request" && m.entry) requests.set(m.entry, m)
+    const call = str(m.fields.call_id)
+    if (m.kind === "approval.request") {
+      if (m.entry) requests.set(m.entry, m)
+      if (call) requestOfCall.set(call, m)
+    }
     if (m.kind === "approval.decision") {
       const r = str(m.fields.request_entry)
       if (r) decided.add(r)
+      if (call) decidedCalls.add(call)
     }
   }
   const out: Marker[] = []
-  const uses = new Map<string, Marker & { n: number }>()
+  const allowed = new Map<string, Marker & { n: number; line: string }>()
+  const receipts = new Map<string, { marker: Marker; text?: string }>()
   for (const m of marks) {
     const call = str(m.fields.call_id)
     if (m.kind.startsWith("approval.") && call && skipCalls.has(call)) continue
-    if (m.kind === "approval.request" && m.entry && decided.has(m.entry))
+    if (m.kind === "grant.use" && call && skipCalls.has(call)) continue
+    if (
+      m.kind === "approval.request" &&
+      ((m.entry && decided.has(m.entry)) || (call && decidedCalls.has(call)))
+    )
       continue
-    if (m.kind === "grant.use") {
-      const id = str(m.fields.grant_id) ?? ""
-      const seen = uses.get(id)
+    // The decision the grant gave says it.
+    if (m.kind === "grant.use" && call && decidedCalls.has(call)) continue
+
+    if (m.kind === "receipt") {
+      const input = str(m.fields.input) ?? ""
+      if (!(input in RECEIPT)) continue
+      const id = str(m.fields.receipt_id)
+      const seen = id ? receipts.get(id) : undefined
       if (seen) {
-        seen.n++
-        seen.text = seen.text.replace(
-          /^Grant used( \d+ times)?/,
-          `Grant used ${seen.n} times`
-        )
+        const state = str(m.fields.state)
+        seen.marker.text = receiptText(input, state, seen.text)
+        seen.marker.facts.push({
+          label: state ? `${state[0].toUpperCase()}${state.slice(1)}` : "Then",
+          value: dateTime(m.fact_at ?? m.at),
+        })
         continue
       }
-      const first = { ...fromMark(m), n: 1 }
-      uses.set(id, first)
-      out.push(first)
+      const marker = fromMark(m, undefined, ctx)
+      if (id) receipts.set(id, { marker, text: str(m.content?.text) })
+      out.push(marker)
       continue
     }
-    out.push(fromMark(m, requests.get(str(m.fields.request_entry) ?? "")))
+
+    const request =
+      requests.get(str(m.fields.request_entry) ?? "") ??
+      (call ? requestOfCall.get(call) : undefined)
+    const marker = fromMark(m, request, ctx)
+    marker.tool = str(m.fields.tool) ?? str(request?.fields.tool)
+    if (m.kind === "approval.request") marker.decides = "asked"
+    if (m.kind === "approval.decision" || m.kind === "grant.use") {
+      marker.decides = "decided"
+      if (marker.tool && request?.content?.args !== undefined)
+        marker.args = [{ tool: marker.tool, value: request.content.args }]
+      if (marker.kind === "grant") {
+        const seen = allowed.get(marker.text)
+        if (seen) {
+          seen.n++
+          seen.text = `${seen.line}, ${seen.n} times`
+          continue
+        }
+        const first = { ...marker, n: 1, line: marker.text }
+        allowed.set(marker.text, first)
+        out.push(first)
+        continue
+      }
+    }
+    out.push(marker)
   }
-  return out
+  return out.map((m) => ({ ...m, text: startLine(m.text) }))
+}
+
+/** A decision is told by the wait it ended when it falls inside it
+ * (the two clocks are the thread's and the ledger's). */
+const WAIT_SLACK_MS = 250
+
+/** saidByNote: marks that only repeat what the turn's closing sentence
+ * says (turnNote): that a newer message interrupted it or rolled it
+ * back. */
+function saidByNote(t: ConversationTurn, m: SessionEntry): boolean {
+  if (!t.ended_kind && !t.ended_by) return false
+  if (m.kind === "interrupt") return true
+  return (
+    m.kind === "rewind" &&
+    t.ended_kind === "rollback" &&
+    m.fields.reason === "rollback"
+  )
 }
 
 /** turnMarkers: everything that happened inside a turn besides the
- * model's work, in time order: its waits on a person and its marks. */
-export function turnMarkers(t: ConversationTurn, now: number): Marker[] {
+ * model's work, in time order: its waits on a person and its marks,
+ * a wait and the decision that ended it in one line. */
+export function turnMarkers(
+  t: ConversationTurn,
+  now: number,
+  ctx: MarkerContext = {}
+): Marker[] {
   const waits = t.waits ?? []
   const told = new Set(
     waits.flatMap((w) => (w.approvals ?? []).map((a) => a.call_id))
   )
-  return [
-    ...waits.map((w) => waitMarker(w, now)),
-    ...markMarkers(t.marks ?? [], told),
-  ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
+  let marks = markMarkers(
+    (t.marks ?? []).filter((m) => !saidByNote(t, m)),
+    told,
+    ctx
+  )
+  const out: Marker[] = []
+  for (const w of waits) {
+    const from = Date.parse(w.from) - WAIT_SLACK_MS
+    const to = (w.to === null ? Infinity : Date.parse(w.to)) + WAIT_SLACK_MS
+    const wants = w.to === null ? "asked" : "decided"
+    const mine =
+      (w.approvals ?? []).length > 0
+        ? []
+        : marks.filter((m) => {
+            const at = Date.parse(m.at)
+            return m.decides === wants && at >= from && at <= to
+          })
+    marks = marks.filter((m) => !mine.includes(m))
+    const marker = waitMarker(w, now, ctx, mine)
+    if (marker) out.push(marker)
+  }
+  return [...out, ...marks].sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
 }
 
 // ── The page's items ────────────────────────────────────────────────
 
 export type Item =
   | { type: "older"; key: string; count: number }
+  | {
+      /** The session is a fork: said once, above its first turn. */
+      type: "origin"
+      key: string
+      session: string
+      /** The origin's turn the fork was made after, by the thread's
+       * number (the page asks the origin for its position). */
+      turn?: number
+    }
   | { type: "gap"; key: string; text: string }
   | { type: "mark"; key: string; marker: Marker }
   | {
       type: "turn"
       key: string
       turn: ConversationTurn
-      /** Its position among the session's turns (1-based), for a
-       * session whose runs carry no turn number. */
-      ordinal: number
+      /** Its position among the session's turns as a person counts
+       * them (1-based): the number shown. */
+      position: number
       markers: Marker[]
       note: TurnNote | null
       offPath: boolean
+      /** The position of the turn whose message ended this one. */
+      endedBy?: number
     }
 
-/** turnNumber: the number a turn is known by. */
-export const turnNumber = (t: ConversationTurn, ordinal: number) =>
-  t.turn > 0 ? t.turn : ordinal
+/** turnPosition: where a turn stands in its session, counted as a
+ * person counts (1-based): the server's `index` when it sends one, else
+ * its place in the page (`ordinal`: the page's offset + its place + 1). */
+const turnPosition = (t: ConversationTurn, ordinal: number) =>
+  t.index ?? ordinal
 
-const range = (a: number, b: number) =>
-  a === b ? `Turn ${a} is` : `Turns ${a}–${b} are`
+/** turnParam: the number a turn is linked by (`?turn=`, `#turn-N`): the
+ * thread's own turn number, which the run carries too (the run page's
+ * breadcrumb links with it); its position when the runs carry none. */
+export const turnParam = (t: ConversationTurn, position: number) =>
+  t.turn > 0 ? t.turn : position
 
-/** gapText explains missing turn numbers between two turns (prev
- * undefined: before the first one). A resume that took a number of its
- * own is told as what it is. */
-export function gapText(
-  prev: ConversationTurn | undefined,
-  next: ConversationTurn,
-  /** The session is a fork: the turns before its first are the
-   * original session's. */
-  forked = false
-): string | undefined {
-  if (next.turn <= 0 || (prev && prev.turn <= 0)) return undefined
-  const from = (prev?.turn ?? 0) + 1
-  const to = next.turn - 1
-  if (to < from) return undefined
-  const missing = to - from + 1
-  if (!prev && forked)
-    return `${range(from, to)} in the session this one was forked from.`
-  if (prev && prev.runs.length - 1 >= missing)
-    return `${range(from, to)} turn ${prev.turn} continuing after its wait, shown above as one turn.`
-  return `${range(from, to)} not in this server's records (deleted, or never reported).`
+/** positionOfTurn: the position of the turn the thread numbers `raw`,
+ * among the turns a view has loaded. */
+export function positionOfTurn(
+  c: Pick<ConversationView, "turns" | "offset">,
+  raw: number
+): number | undefined {
+  const i = c.turns.findIndex((t) => t.turn === raw)
+  return i < 0 ? undefined : turnPosition(c.turns[i], c.offset + i + 1)
+}
+
+/** forkOrigin splits a fork's "<origin session>#<entry>". */
+export function forkOrigin(v: string): { session: string; entry?: string } {
+  const i = v.lastIndexOf("#")
+  return i < 0
+    ? { session: v }
+    : { session: v.slice(0, i), entry: v.slice(i + 1) }
 }
 
 /** buildItems lays the conversation out top to bottom: a "load older"
- * row when earlier turns are not loaded, each turn with its markers,
- * one muted line per gap in turn numbers, and the session's own marks
- * (filed under no turn) where they fall in time. */
-export function buildItems(c: ConversationView, now: number): Item[] {
+ * row when earlier turns are not loaded, where a fork came from, each
+ * turn with its markers, the session's own marks (filed under no turn)
+ * where they fall in time, and one line per turn number the server
+ * says was skipped and why. A jump in the thread's turn numbers with no
+ * reason given is not mentioned: turns are numbered by position. */
+export function buildItems(
+  c: ConversationView,
+  now: number,
+  me?: ActorLike
+): Item[] {
   const items: Item[] = []
   if (c.offset > 0) items.push({ type: "older", key: "older", count: c.offset })
-  const loose = markMarkers(c.sessionMarks)
+  const origin = c.session?.forked_from_session
+  if (origin && c.offset === 0) {
+    const first = c.turns.at(0)?.turn ?? 0
+    items.push({
+      type: "origin",
+      key: "origin",
+      session: forkOrigin(origin).session,
+      turn: first > 1 ? first - 1 : undefined,
+    })
+  }
+  const grants = new Map<string, string>()
+  for (const m of [...c.sessionMarks, ...c.turns.flatMap((t) => t.marks ?? [])])
+    if (m.kind === "grant.mint") {
+      const id = str(m.fields.grant_id)
+      const tool = str(m.fields.tool)
+      if (id && tool) grants.set(id, tool)
+    }
+  const ctx: MarkerContext = { me, grants }
+  const loose = markMarkers(c.sessionMarks, undefined, ctx)
     .map((marker) => ({ marker, t: Date.parse(marker.at) }))
     .sort((a, b) => a.t - b.t)
   // Marks older than the first loaded turn belong with the turns that
@@ -645,6 +876,13 @@ export function buildItems(c: ConversationView, now: number): Item[] {
   const first = c.turns[0] ? Date.parse(c.turns[0].started) : -Infinity
   let li = 0
   if (c.offset > 0) while (li < loose.length && loose[li].t < first) li++
+
+  const position = (i: number) => turnPosition(c.turns[i], c.offset + i + 1)
+  const positions = new Map<number, number>()
+  c.turns.forEach((t, i) => {
+    if (t.turn > 0) positions.set(t.turn, position(i))
+  })
+  const reasons = c.skipped.filter((s) => s.reason)
 
   c.turns.forEach((turn, i) => {
     const started = Date.parse(turn.started)
@@ -654,20 +892,25 @@ export function buildItems(c: ConversationView, now: number): Item[] {
         key: loose[li].marker.key,
         marker: loose[li].marker,
       })
-    const prev = i === 0 ? undefined : c.turns[i - 1]
-    const gap =
-      i === 0 && c.offset > 0
+    // The numbers skipped just before this turn (none is claimed before
+    // the first turn of a page that starts later).
+    const after = i === 0 ? (c.offset > 0 ? Infinity : 0) : c.turns[i - 1].turn
+    for (const s of reasons)
+      if (turn.turn > 0 && s.turn > after && s.turn < turn.turn)
+        items.push({ type: "gap", key: `skipped:${s.turn}`, text: s.reason! })
+    const endedBy =
+      turn.ended_by_turn === undefined
         ? undefined
-        : gapText(prev, turn, !!c.session?.forked_from_session)
-    if (gap) items.push({ type: "gap", key: `gap:${turn.run_id}`, text: gap })
+        : positions.get(turn.ended_by_turn)
     items.push({
       type: "turn",
       key: turn.run_id,
       turn,
-      ordinal: c.offset + i + 1,
-      markers: turnMarkers(turn, now),
-      note: turnNote(turn),
+      position: position(i),
+      markers: turnMarkers(turn, now, ctx),
+      note: turnNote(turn, endedBy),
       offPath: offPath(turn),
+      endedBy,
     })
   })
   for (; li < loose.length; li++)
@@ -690,7 +933,7 @@ export interface OutcomeStrip {
   title: string
 }
 
-export const STRIP_MAX = 12
+const STRIP_MAX = 12
 
 /** outcomeStrip reads a session row's `outcomes` (one word per run,
  * oldest first) as one dot per turn: a park that was decided ("resumed")

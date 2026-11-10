@@ -24,7 +24,7 @@ function gate(t: ToolRow): "all" | "some" | "none" {
   return all.every(Boolean) ? "all" : all.some(Boolean) ? "some" : "none"
 }
 
-export function toolColumns(range: Window): Column<ToolRow>[] {
+function toolColumns(range: Window): Column<ToolRow>[] {
   return [
     {
       key: "name",
@@ -160,11 +160,6 @@ export function ToolsTable({
       columns={toolColumns(range)}
       rows={tools}
       rowKey={(t) => t.name}
-      footer={
-        <span>
-          {count(tools.length)} {tools.length === 1 ? "tool" : "tools"}
-        </span>
-      }
     />
   )
 }

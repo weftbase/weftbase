@@ -138,6 +138,9 @@ export function LogsTab({
   const failed = rounds?.find((r) => r.failed)?.failed
   const filtered = shown.length !== rows.length
   const more = hasNextPage ? "+" : ""
+  // A park and its resumes are one run to the reader: only the runs it
+  // started are counted beside the lines.
+  const children = ids.length - chain.runs.length
 
   if (logs.error && !data)
     return <ErrorState error={logs.error} what="The logs" />
@@ -161,7 +164,8 @@ export function LogsTab({
           {filtered
             ? `${count(shown.length)} of ${count(rows.length)}${more} lines`
             : `${count(rows.length)}${more} ${rows.length === 1 && !more ? "line" : "lines"}`}
-          {ids.length > 1 && ` · ${count(ids.length)} runs`}
+          {children > 0 &&
+            ` · ${count(children)} child ${children === 1 ? "run" : "runs"}`}
         </span>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
@@ -188,7 +192,7 @@ export function LogsTab({
               return (
                 <li
                   key={`${l.run}:${l.index}`}
-                  className="flex items-baseline gap-3 border-b px-3 py-1 last:border-b-0 hover:bg-muted/60"
+                  className="group/line flex items-baseline gap-3 border-b px-3 py-1 last:border-b-0 hover:bg-muted/60"
                 >
                   <span
                     className="w-16 flex-none text-right text-subtle-foreground tabular-nums"
@@ -218,7 +222,7 @@ export function LogsTab({
                     <button
                       type="button"
                       onClick={() => onStep(l.span_id!)}
-                      className="flex-none rounded-sm font-sans text-muted-foreground outline-none hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+                      className="flex-none rounded-sm font-sans text-muted-foreground opacity-0 outline-none group-hover/line:opacity-100 hover:text-foreground hover:underline focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring"
                     >
                       Go to step
                     </button>
