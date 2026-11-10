@@ -5,6 +5,12 @@
 // agent-detail, tools, approvals.
 import { describe, expect, it } from "vitest"
 
+import {
+  agentCounts,
+  driftNote,
+  inventoryHeader,
+  labelVersions,
+} from "@/components/console/agent/inventory"
 import { niceMax, outcomeCounts } from "@/components/console/runs-chart"
 import { filterChips, parseFilter } from "@/components/console/runs-filter"
 import {
@@ -25,12 +31,16 @@ import type {
   StatsTotal,
   ToolsDoc,
 } from "@/lib/api/types"
-import { approvalState, argsSummary, decidedBy } from "@/lib/approval-view"
+import {
+  approvalState,
+  approvalVersion,
+  argsSummary,
+  decidedBy,
+} from "@/lib/approval-view"
 import { exactFirst, idCandidate, matches } from "@/lib/jump"
 import {
   costUnknown,
   isSearching,
-  keepShown,
   rowCause,
   rowChildren,
   rowCost,
@@ -165,24 +175,17 @@ describe("the runs list's filters", () => {
     expect(isSearching(s)).toBe(false)
     expect(toRunsQuery(s)).toMatchObject({
       display_status: "failed",
-      status: undefined,
       agent: "support",
     })
   })
 
-  it("falls back to the trace store's word in a search and filters the page", () => {
+  it("asks for the status as shown in a search too", () => {
     const s = validateRuns({ status: "failed", tool: "update_address" })
     expect(isSearching(s)).toBe(true)
     expect(toRunsQuery(s)).toMatchObject({
-      status: "failed",
-      display_status: undefined,
+      display_status: "failed",
       tool: "update_address",
     })
-    // The trace store's "failed" holds cancelled runs: they are dropped.
-    const kept = keepShown(rows, s)
-    expect(kept.length).toBeGreaterThan(0)
-    expect(kept.every((r) => rowStatus(r) === "failed")).toBe(true)
-    expect(keepShown(rows, validateRuns({ status: "failed" }))).toBe(rows)
   })
 
   it("maps the error kind, subagent runs and the tag", () => {
@@ -326,6 +329,71 @@ describe("the agent inventory", () => {
     )
   })
 
+  it("counts registered agents, and says how many are not", () => {
+    // The rows hold one agent no build registered; `totals.agents`
+    // counts the registered ones only. The header counts the rows.
+    expect(summary.agents.length).toBe(summary.totals.agents + 1)
+    expect(agentCounts(summary.agents)).toEqual({
+      registered: summary.totals.agents,
+      unregistered: 1,
+    })
+    expect(inventoryHeader(summary)).toBe(
+      "2 agents · 1 not registered · 12 tools · 2 placements"
+    )
+    expect(
+      inventoryHeader({
+        agents: summary.agents.filter((a) => a.registered).slice(0, 1),
+        totals: { agents: 1, tools: 1, placements: null },
+      })
+    ).toBe("1 agent · 1 tool · 0 placements")
+  })
+
+  it("reads where a label points from the server", () => {
+    expect(
+      labelVersions({
+        labels: { staging: "agv_b", prod: "agv_a", canary: "agv_c" },
+        label_versions: {
+          prod: { id: "agv_a", number: 7 },
+          staging: { id: "agv_b", number: 8 },
+        },
+      })
+    ).toEqual([
+      { label: "prod", version: "agv_a", number: 7 },
+      { label: "canary", version: "agv_c", number: undefined },
+      { label: "staging", version: "agv_b", number: 8 },
+    ])
+  })
+
+  it("says how many runs ran a different manifest", () => {
+    expect(driftNote(undefined)).toBeUndefined()
+    expect(
+      driftNote({ drift: false, runs_checked: 4, runs_drifted: 0 })
+    ).toBeUndefined()
+    expect(driftNote({ drift: true, runs_checked: 6, runs_drifted: 5 })).toBe(
+      "5 of 6 runs ran a different manifest than the one this version registered."
+    )
+    expect(
+      driftNote({
+        drift: true,
+        runs_checked: 1,
+        runs_drifted: 1,
+        since: "2026-11-10T12:49:24Z",
+      })
+    ).toMatch(/^1 of 1 run since .+ ran a different manifest/)
+  })
+
+  it("names an approval's version as the run page does", () => {
+    expect(
+      approvalVersion({ id: "agv_1", number: 2, labels: ["staging"] })
+    ).toEqual({ id: "agv_1", number: 2, labels: ["staging"] })
+    expect(approvalVersion({ id: "agv_1", number: 2, labels: null })).toEqual({
+      id: "agv_1",
+      number: 2,
+      labels: [],
+    })
+    expect(approvalVersion(undefined)).toBeUndefined()
+  })
+
   it("knows which agents are not registered", () => {
     expect(
       summary.agents.filter((a) => !a.registered).map((a) => a.name)
@@ -382,8 +450,8 @@ describe("the agent inventory", () => {
   })
 
   it("lists every limit the manifest sets and no other", () => {
-    const rows = limitRows(detail.newest!.manifest!.limits)
-    expect(rows).toEqual([
+    const limits = limitRows(detail.newest!.manifest!.limits)
+    expect(limits).toEqual([
       ["Max steps", "4"],
       ["Model retries", "3"],
       ["Parallel tool calls", "4"],

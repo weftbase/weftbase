@@ -16,7 +16,7 @@ import {
 } from "@/components/console/filter-bar"
 import { Page, PageHeader } from "@/components/console/page-header"
 import { RelativeTime } from "@/components/console/relative-time"
-import { exchanges, sessionTitle } from "@/components/console/session/model"
+import { sessionTitle } from "@/components/console/session/model"
 import { OutcomeStrip } from "@/components/console/session/outcome-strip"
 import { LivePill, StatusDot } from "@/components/console/status"
 import { Button } from "@/components/ui/button"
@@ -61,6 +61,7 @@ const COLUMNS: Column<SessionRow>[] = [
   },
   {
     key: "agent",
+    hideBelow: 560,
     header: "Agent",
     width: "minmax(96px, 160px)",
     muted: true,
@@ -85,11 +86,12 @@ const COLUMNS: Column<SessionRow>[] = [
   },
   {
     key: "turns",
+    hideBelow: 700,
     header: "Turns",
     width: "56px",
     align: "right",
     mono: true,
-    cell: (s) => count(exchanges(s)),
+    cell: (s) => count(s.turns),
   },
   {
     key: "last",
@@ -101,6 +103,7 @@ const COLUMNS: Column<SessionRow>[] = [
   },
   {
     key: "tokens",
+    hideBelow: 860,
     header: "Tokens",
     width: "72px",
     align: "right",

@@ -1,5 +1,6 @@
 // The streams wired into TanStack Query. A screen mounts one hook and its
-// queries stay current; nothing polls.
+// queries stay current; nothing polls. No hook opens a connection: they
+// all listen to the two streams hub.ts keeps for the whole app.
 //
 // Pattern (CONVENTIONS.md, "Queries and streams"):
 // - a `run` frame carries the whole row, so it is patched straight into
@@ -14,15 +15,9 @@ import { useQueryClient } from "@tanstack/react-query"
 import type { InfiniteData, QueryClient } from "@tanstack/react-query"
 import * as React from "react"
 
-import { streamEvents, streamRun, streamRuns, streamSession } from "./stream"
+import { subscribeApprovals, subscribeRuns } from "./hub"
 import type { StreamState } from "./stream"
-import type {
-  OutboxEvent,
-  RunDetail,
-  RunRow,
-  RunsList,
-  StreamFrame,
-} from "./types"
+import type { OutboxEvent, RunDetail, RunRow, RunsList } from "./types"
 
 type Key = readonly unknown[]
 
@@ -87,7 +82,7 @@ export function patchRun(qc: QueryClient, row: RunRow): boolean {
   return found
 }
 
-function useStream(
+function useHub(
   open: (onState: (s: StreamState) => void) => () => void,
   deps: React.DependencyList
 ): StreamState {
@@ -96,32 +91,26 @@ function useStream(
   return state
 }
 
-/** useRunsLive keeps every runs list, count and the stats current. Mount
- * it on a screen that lists runs (the shell mounts it for the nav count). */
+/** useRunsLive keeps every runs list, count and the stats current, and
+ * every cached run's row. Mounted once, by the shell (read its state
+ * with `useLiveState()`). */
 export function useRunsLive(): StreamState {
   const qc = useQueryClient()
-  return useStream(
+  return useHub(
     (onState) => {
       const t = throttled(qc)
-      const close = streamRuns(
-        {
-          onState,
-          onFrame(f) {
-            if (f.type !== "run") return
-            const row = f.data.run
-            const known = patchRun(qc, row)
-            // A new top-level run belongs at the top of some lists and in
-            // the counts; a known one may have changed status (it may now
-            // match, or stop matching, a filtered list).
-            if (!known && row.parent_run_id !== "") return
-            t.invalidate(["runs"], ["stats"], ["sessions"])
-          },
-          onReopen(resumed) {
-            if (!resumed) t.invalidate(["runs"], ["stats"], ["sessions"])
-          },
+      const close = subscribeRuns({
+        onState,
+        onData({ run: row }) {
+          const known = patchRun(qc, row)
+          // A new top-level run belongs at the top of some lists and in
+          // the counts; a known one may have changed status (it may now
+          // match, or stop matching, a filtered list).
+          if (!known && row.parent_run_id !== "") return
+          t.invalidate(["runs"], ["stats"], ["sessions"])
         },
-        { kinds: ["run"] }
-      )
+        onStale: () => t.invalidate(["runs"], ["stats"], ["sessions"]),
+      })
       return () => {
         t.stop()
         close()
@@ -131,109 +120,95 @@ export function useRunsLive(): StreamState {
   )
 }
 
-/** useRunLive keeps one run current: its row is patched, and its spans,
- * events, transcript, steps and logs refetch as records arrive. onFrame
- * gets every frame as well (the waterfall appends rows from it). */
+/** rootOf: the top-level run a (child) run id belongs to. A child's id
+ * is `<parent>/<step>/<call>`. */
+const rootOf = (id: string) => {
+  const i = id.indexOf("/")
+  return i < 0 ? id : id.slice(0, i)
+}
+
+/** useRunLive keeps one run current: whenever it, one of its child
+ * runs or the run that continues it moves, everything under
+ * `["run", key]` for each of `keys` refetches (at most once a second).
+ * `id` is the run to follow; `keys` default to it. */
 export function useRunLive(
   id: string,
-  opts: { enabled?: boolean; onFrame?: (f: StreamFrame) => void } = {}
+  opts: { enabled?: boolean; keys?: readonly string[] } = {}
 ): StreamState {
   const qc = useQueryClient()
   const enabled = opts.enabled ?? true
-  const onFrame = React.useRef(opts.onFrame)
-  onFrame.current = opts.onFrame
-  return useStream(
+  const keys = (opts.keys ?? [id]).join("\u0000")
+  return useHub(
     (onState) => {
       if (!enabled) return () => {}
       const t = throttled(qc)
-      const close = streamRun(id, {
+      const stale = () =>
+        t.invalidate(...keys.split("\u0000").map((k) => ["run", k]))
+      const close = subscribeRuns({
         onState,
-        onFrame(f) {
-          onFrame.current?.(f)
-          if (f.type === "run") {
-            const row = f.data.run
-            patchRun(qc, row)
-            // A child's row changes the parent's children and totals.
-            if (row.id !== id) t.invalidate(["run", id])
-            return
-          }
-          t.invalidate(["run", id])
+        onData({ run: row }) {
+          if (rootOf(row.id) === id || row.resumed_from === id) stale()
         },
-        onReopen(resumed) {
-          if (!resumed) t.invalidate(["run", id])
-        },
+        onStale: stale,
       })
       return () => {
         t.stop()
         close()
       }
     },
-    [qc, id, enabled]
+    [qc, id, enabled, keys]
   )
 }
 
-/** useSessionLive keeps one session current: its turns' rows are patched
- * and the session, its timeline and entries refetch as records arrive. */
-export function useSessionLive(
-  id: string,
-  opts: { enabled?: boolean; onFrame?: (f: StreamFrame) => void } = {}
-): StreamState {
+/** useSessionLive keeps one session current: `["session", id, …]`
+ * refetches (at most once a second) whenever one of its runs, or a
+ * child of one, moves. */
+export function useSessionLive(id: string): StreamState {
   const qc = useQueryClient()
-  const enabled = opts.enabled ?? true
-  const onFrame = React.useRef(opts.onFrame)
-  onFrame.current = opts.onFrame
-  return useStream(
+  return useHub(
     (onState) => {
-      if (!enabled) return () => {}
       const t = throttled(qc)
-      const close = streamSession(id, {
+      // A child run's row may not name the session: it is known by its
+      // parent's id.
+      const mine = new Set<string>()
+      const close = subscribeRuns({
         onState,
-        onFrame(f) {
-          onFrame.current?.(f)
-          if (f.type === "run") patchRun(qc, f.data.run)
+        onData({ run: row }) {
+          if (row.session_id === id) mine.add(rootOf(row.id))
+          else if (!mine.has(rootOf(row.id))) return
           t.invalidate(["session", id])
         },
-        onReopen(resumed) {
-          if (!resumed) t.invalidate(["session", id])
-        },
+        onStale: () => t.invalidate(["session", id]),
       })
       return () => {
         t.stop()
         close()
       }
     },
-    [qc, id, enabled]
+    [qc, id]
   )
 }
-
-const APPROVAL_EVENTS = ["approval.requested", "approval.decided"] as const
 
 /** useApprovalsLive keeps the approvals inbox and its count current from
  * the outbox stream. onRequested is called for an approval asked for
- * while this page is open (the stream first replays the stored events;
- * those are not news). Mounted once by the shell. */
+ * while this page is open (the stream starts at the tail). Mounted once
+ * by the shell. */
 export function useApprovalsLive(
   onRequested?: (event: OutboxEvent) => void
 ): StreamState {
   const qc = useQueryClient()
   const cb = React.useRef(onRequested)
   cb.current = onRequested
-  return useStream(
+  return useHub(
     (onState) => {
       const t = throttled(qc)
-      const opened = Date.now()
-      const close = streamEvents(APPROVAL_EVENTS, {
+      const close = subscribeApprovals({
         onState,
-        onEvent(e) {
-          const at = Date.parse(e.created_at)
-          // The replay of what is already stored changes nothing on screen.
-          if (!(at >= opened - 5000)) return
+        onData(e) {
           t.invalidate(["approvals"], ["runs"])
           if (e.type === "approval.requested") cb.current?.(e)
         },
-        onReopen(resumed) {
-          if (!resumed) t.invalidate(["approvals"])
-        },
+        onStale: () => t.invalidate(["approvals"]),
       })
       return () => {
         t.stop()

@@ -6,14 +6,13 @@ import { RelativeTime } from "@/components/console/relative-time"
 import { STATUS_LABEL, sessionStatus } from "@/lib/api/status"
 import type {
   ConversationTurn,
-  SessionDetail,
+  SessionFacts,
   SessionRow,
 } from "@/lib/api/types"
 import { cost, count, tokens } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 import { SessionLink } from "./marker"
-import { exchanges } from "./model"
 import { OutcomeStrip } from "./outcome-strip"
 
 function Group({
@@ -83,10 +82,14 @@ function statusWords(s: SessionRow): string {
  * went, the totals, when, the ids, and where the session came from. */
 export function SessionRail({
   session,
+  delegated,
   newest,
   className,
 }: {
-  session: SessionDetail
+  /** The session's row, as the conversation carries it. */
+  session: SessionFacts
+  /** The sessions this one handed work to. */
+  delegated: readonly SessionFacts[]
   /** The newest loaded turn: the version the session runs now. */
   newest: ConversationTurn | undefined
   className?: string
@@ -97,6 +100,12 @@ export function SessionRail({
     ? forkOrigin(s.forked_from_session)
     : undefined
   const words = statusWords(s)
+  // What the delegated sessions cost, when every one of them is priced.
+  const delegatedCost = delegated.every(
+    (d) => d.cost_known && d.cost_usd !== null
+  )
+    ? delegated.reduce((sum, d) => sum + (d.cost_usd ?? 0), 0)
+    : undefined
   return (
     <aside
       aria-label="Session facts"
@@ -158,12 +167,12 @@ export function SessionRail({
           label="Turns"
           mono
           title={
-            s.resumes
-              ? `${count(s.turns)} runs: ${count(s.resumes)} continued a turn after a wait`
+            s.runs !== undefined && s.runs > s.turns
+              ? `${count(s.runs)} runs: ${count(s.runs - s.turns)} continued a turn after a wait`
               : undefined
           }
         >
-          {count(exchanges(s))}
+          {count(s.turns)}
         </Row>
         <Row label="Tokens" mono>
           <span>
@@ -177,18 +186,14 @@ export function SessionRail({
         <Row label="Cost" mono title={s.cost_reason}>
           {cost(s)}
         </Row>
-        {s.delegated.length > 0 && (
+        {delegated.length > 0 && (
           <Row
             label="Delegated"
             mono
             title="The cost of the sessions this one handed work to; not part of Cost."
           >
-            {s.delegated_sessions_cost_known &&
-            s.delegated_sessions_cost_usd !== null
-              ? cost({
-                  cost_usd: s.delegated_sessions_cost_usd,
-                  cost_known: true,
-                })
+            {delegatedCost !== undefined
+              ? cost({ cost_usd: delegatedCost, cost_known: true })
               : "unknown"}
           </Row>
         )}
@@ -219,7 +224,7 @@ export function SessionRail({
         )}
       </Group>
 
-      {(fork || s.parent_session || s.delegated.length > 0) && (
+      {(fork || s.parent_session || delegated.length > 0) && (
         <Group title="Lineage">
           {fork && (
             <Row
@@ -252,7 +257,7 @@ export function SessionRail({
               </Link>
             </Row>
           )}
-          {s.delegated.map((d) => (
+          {delegated.map((d) => (
             <Row key={d.id} label="Handed to">
               <SessionLink id={d.id} />
             </Row>

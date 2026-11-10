@@ -57,9 +57,6 @@ export interface Hole {
 
 /** The four statuses a run row carries. */
 export type RunRowStatus = "running" | "succeeded" | "failed" | "interrupted"
-/** The words GET /v1/runs?status= takes: the four above plus two
- * read-time ones (parked = waiting on a person, cancelled). */
-export type RunStatusFilter = RunRowStatus | "parked" | "cancelled"
 
 export interface ModelInfo {
   provider: string
@@ -184,7 +181,8 @@ export interface Approval {
   run_id: string
   call_id: string
   agent: string
-  agent_version?: string
+  /** The version the run ran, labels as they are now. */
+  agent_version?: VersionRef
   tool: string
   args: unknown
   args_sha256: string
@@ -267,9 +265,7 @@ export interface SearchPage {
 
 /** What the Console asks GET /v1/runs for. */
 export interface RunsQuery {
-  /** The trace store's word. A search (below) takes only this one. */
-  status?: RunStatusFilter
-  /** The status as shown; a plain list only (a search ignores it). */
+  /** The status as shown. */
   display_status?: NonNullable<RunRow["display_status"]>
   agent?: string
   session?: string
@@ -636,6 +632,8 @@ export interface SessionRow extends CostFields {
   id: string
   public_id: string
   agent: string
+  /** Turns as a person counts them: a resume is part of the turn it
+   * continues. */
   turns: number
   first_seen: string
   last_seen: string
@@ -684,6 +682,8 @@ export interface SessionsQuery {
 /** sessionDoc: GET /v1/sessions/{id}. `runs` are its turns, oldest first. */
 export interface SessionDetail extends SessionRow {
   runs: RunRow[]
+  /** The raw count of runs is `runs.length` here; a row of the list and
+   * the conversation's `session` carry it as a number (SessionFacts). */
   delegated: SessionRow[]
   delegated_usage: Usage
   delegated_sessions_cost_usd: number | null
@@ -786,6 +786,8 @@ export interface ConversationTurn {
   marks: SessionEntry[] | null
   compactions?: number
   delegated_sessions?: number
+  /** The turn was rolled back: the conversation went on without it. */
+  off_path?: boolean
 }
 
 /** conversationDoc: GET /v1/sessions/{id}/conversation, paged by turn. */
@@ -803,6 +805,16 @@ export interface Conversation {
   /** Marks filed under no turn. */
   session_marks: SessionEntry[] | null
   marks_capped?: boolean
+  /** The whole session row: totals, cost, times, lineage. */
+  session?: SessionFacts
+  /** The sessions this one handed work to. */
+  delegated?: SessionFacts[] | null
+}
+
+/** sessionRow as GET /v1/sessions and the conversation send it: the
+ * row plus `runs`, the raw number of runs (resumes included). */
+export interface SessionFacts extends SessionRow {
+  runs?: number
 }
 
 /** entriesDoc: GET /v1/sessions/{id}/entries. */
@@ -911,6 +923,19 @@ export interface Agent {
   labels: Record<string, string>
   versions: number
   created_at: string
+  /** label → the version it points to, with its number. */
+  label_versions?: Record<string, { id: string; number: number }>
+}
+
+/** manifestDrift: whether the runs of a version reported the manifest
+ * the version registered. */
+export interface ManifestDrift {
+  drift: boolean
+  runs_checked: number
+  runs_drifted: number
+  since?: string
+  last_run_id?: string
+  manifest_hash?: string
 }
 
 /** registry.AgentVersion. */
@@ -952,6 +977,8 @@ export interface Meta {
   weft_version: string
   server_version: string
   capabilities: string[]
+  /** What this server cannot do, and why. */
+  capabilities_off?: { name: string; reason: string }[]
   principal: Principal
   ingest?: {
     /** Services that reported records lost on the way here. */
@@ -1133,6 +1160,7 @@ export interface VersionChanges {
 /** A version as GET /v1/agents/{name} returns it. */
 export interface VersionDetail extends AgentVersion {
   placement: string
+  manifest_drift?: ManifestDrift
   /** null when the registered manifest could not be read. */
   manifest: {
     model: ModelInfo
@@ -1233,4 +1261,70 @@ export interface OutboxEvent {
   actor?: Actor
   data?: Record<string, unknown>
   created_at: string
+}
+
+// ── Compare (GET /v1/diff) ──────────────────────────────────────────
+
+/** diffSide (diff.go): one run's step, reduced to the compared columns. */
+export interface DiffSide {
+  /** ok | parked | error | … (the step's own status). */
+  status: string
+  system_hash: string
+  system: string | null
+  /** args: canonical JSON (sorted keys). */
+  tool_calls: { name: string; args: unknown }[]
+  tool_results: {
+    call_id: string
+    name: string
+    content: string
+    is_error: boolean
+  }[]
+  /** null: no record of the step holds its assistant message. */
+  text: string | null
+  usage: Usage
+  /** subagent, parked, error, compaction, … */
+  marks: string[]
+  holes: Hole[]
+}
+
+/** The columns a diff row can name in changes / unknown / differs. */
+export type DiffColumn =
+  "system" | "tool_calls" | "tool_results" | "text" | "usage" | "missing"
+
+/** diffRow: one aligned step. a_step / b_step are each side's own
+ * ordinal (null when that side has no step here). */
+export interface DiffRow {
+  step: number
+  a_step: number | null
+  b_step: number | null
+  /** A source step the replaying side did not re-run: nothing compared. */
+  kept: boolean
+  kept_by?: "a" | "b"
+  changed: boolean
+  a: DiffSide | null
+  b: DiffSide | null
+  changes: DiffColumn[]
+  /** Columns that could not be compared (a side did not record them). */
+  unknown: DiffColumn[]
+  /** Columns that differ without counting as a change. */
+  differs: DiffColumn[]
+}
+
+/** diffDoc: GET /v1/diff?a=&b=. */
+export interface DiffDoc {
+  a: { run_id: string; steps: number; status: string }
+  b: { run_id: string; steps: number; status: string }
+  aligned: {
+    replay: "a" | "b" | "both"
+    source: string
+    a_from: number
+    b_from: number
+  } | null
+  steps: DiffRow[]
+  summary: {
+    changed_steps: number[]
+    first_changed: number | null
+    kept: number
+  }
+  holes: Hole[]
 }

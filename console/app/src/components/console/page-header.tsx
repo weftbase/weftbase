@@ -129,11 +129,18 @@ export function LinkTabs({
       className={cn("flex h-8 flex-none items-stretch gap-4 px-4", className)}
     >
       {tabs.map((t, i) => (
+        // `active` is the page's answer and the only one. The router has
+        // its own idea of an active link (it matches the search loosely,
+        // so the tab without a param matches every tab's URL, and it then
+        // sets aria-current itself, over ours): make its match exact, and
+        // style from `data-tab-active`, which only this component sets.
         <Link
           key={i}
           {...t.link}
+          activeOptions={{ exact: true, includeSearch: true }}
           aria-current={t.active ? "page" : undefined}
-          className="-mb-px inline-flex items-center gap-1.5 border-b-2 border-transparent text-sm font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:text-foreground focus-visible:underline aria-[current=page]:border-foreground aria-[current=page]:text-foreground"
+          data-tab-active={t.active || undefined}
+          className="-mb-px inline-flex items-center gap-1.5 border-b-2 border-transparent text-sm font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:text-foreground focus-visible:underline data-[tab-active]:border-foreground data-[tab-active]:text-foreground"
         >
           {t.label}
           {t.count !== undefined && (

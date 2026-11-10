@@ -33,7 +33,7 @@ import {
 } from "@/components/console/trace-waterfall"
 import type { TraceNode, TraceView } from "@/components/console/trace-waterfall"
 import { Button } from "@/components/ui/button"
-import { approvalsOf } from "@/lib/api/chain"
+import { approvalsOf, chainStep } from "@/lib/api/chain"
 import type { ChainView } from "@/lib/api/chain"
 import { q } from "@/lib/api/queries"
 import { STATUS_HINT } from "@/lib/api/status"
@@ -120,7 +120,7 @@ function Run({ runId }: { runId: string }) {
 
   const playheadStep = view.playback.atEnd
     ? undefined
-    : playheadStepOf(view, chain?.last.id)
+    : playheadStepOf(view, chain)
 
   return (
     <Page
@@ -240,19 +240,16 @@ function Run({ runId }: { runId: string }) {
   )
 }
 
-/** The step the playhead is in: the newest model call of the run that
- * had started by then. */
-function playheadStepOf(view: TraceView, runId: string | undefined) {
+/** The step the playhead is in: the newest model call of the chain's
+ * own runs that had started by then, counted through the chain. */
+function playheadStepOf(view: TraceView, chain: ChainView) {
   const at = view.scale.toReal(view.playback.at)
   let step: number | undefined
-  for (const n of view.model.nodes)
-    if (
-      n.base === "model" &&
-      n.step !== undefined &&
-      n.start <= at &&
-      (n.span?.run_id ?? n.runId) === runId
-    )
-      step = Math.max(step ?? 0, n.step)
+  for (const n of view.model.nodes) {
+    if (n.base !== "model" || n.start > at) continue
+    const s = chainStep(chain, n.span?.run_id ?? n.runId, n.step)
+    if (s !== undefined) step = Math.max(step ?? 0, s)
+  }
   return step
 }
 
@@ -399,7 +396,7 @@ function Header({
           <RunActions
             runId={run.id}
             running={status === "running"}
-            hasChildren={view.model.nodes.some((n) => n.handoff !== undefined)}
+            hasChildren={view.model.nodes.some((n) => n.handed)}
             pageUrl={pageUrl}
           />
         )
@@ -441,7 +438,8 @@ function stripOf(data: RunData, view: TraceView): Stat[] {
   const { chain } = data
   const s = view.stats
   const playing = !view.playback.atEnd
-  if (!chain)
+  // Nothing has happened yet in a run that waits for a worker.
+  if (!chain || data.queued)
     return [
       "Duration",
       "Cost",
@@ -584,7 +582,11 @@ function stripOf(data: RunData, view: TraceView): Stat[] {
 
 function sentence(chain: ChainView, node: TraceNode | undefined): string {
   const r = chain.last
-  const at = node && node.step !== undefined ? ` at step ${node.step}` : ""
+  // A step of the chain's own runs is counted through the chain.
+  const step =
+    node &&
+    (chainStep(chain, node.span?.run_id ?? node.runId, node.step) ?? node.step)
+  const at = step !== undefined ? ` at step ${step}` : ""
   switch (chain.status) {
     case "failed":
       if (r.error_type === "max_steps")

@@ -164,10 +164,12 @@
   --chart-grid: #EDEDF0;
   /* Runs by outcome, in stack order (bottom up): succeeded, cancelled,
      waiting, failed, then runs still going. Status hues, stepped so
-     neighbours in the stack stay apart for colour-blind readers. */
-  --chart-succeeded: #16A34A;
-  --chart-cancelled: #8B8B93;
-  --chart-waiting: #EDA100;
+     any two of them stay apart for colour-blind readers (an empty
+     segment is dropped, so any pair can touch) and each clears 3:1 on
+     the card. Cancelled is the neutral series: grey on purpose. */
+  --chart-succeeded: #3FA66B;
+  --chart-cancelled: #787880;
+  --chart-waiting: #C98212;
   --chart-open: #2A78D6;
   --radius: 0.5rem;
 }
@@ -294,11 +296,11 @@
   --span-slowest: var(--warning-foreground);
   --span-slowest-muted: var(--warning-muted);
   --chart-ok: #71717A;
-  --chart-failed: #E5484D;
+  --chart-failed: #CE343A;
   --chart-grid: #232327;
-  --chart-succeeded: #1F9E52;
-  --chart-cancelled: #8B8B93;
-  --chart-waiting: #C98F00;
+  --chart-succeeded: #41A86D;
+  --chart-cancelled: #797981;
+  --chart-waiting: #C67F09;
   --chart-open: #3987E5;
   color-scheme: dark;
 }

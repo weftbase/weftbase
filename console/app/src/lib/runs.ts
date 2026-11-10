@@ -5,7 +5,7 @@
 // row carries `chain`, and the chain's status, times, steps, usage and
 // cost are the row's.
 
-import { displayStatus, statusFilter } from "./api/status"
+import { displayStatus } from "./api/status"
 import type { DisplayStatus } from "./api/status"
 import type { RunRow, RunsQuery, Usage } from "./api/types"
 import { DASH, cost, count, usd } from "./format"
@@ -55,16 +55,6 @@ export function rowCause(r: RunRow): string | undefined {
     default:
       return undefined
   }
-}
-
-/** The tools a waiting row waits on a decision for. */
-export function pendingTools(r: RunRow): string[] {
-  const names = new Set<string>()
-  for (const w of r.chain?.waits ?? [])
-    if (w.to === null)
-      for (const a of w.approvals ?? [])
-        if (a.status === "pending") names.add(a.tool)
-  return [...names]
 }
 
 export interface RowTimes {
@@ -207,9 +197,9 @@ export function rowVersion(
   return { number: v.number, label: via }
 }
 
-/** The parameters that make GET /v1/runs a search. A search answers
- * neither `chains` nor `display_status`, so the list falls back to the
- * trace store's status word and filters the page by the status shown. */
+/** A search (any of these filters) is offset-paged by the server and
+ * its `total` counts rows before chains are folded: the list then
+ * counts what it loaded instead. */
 export function isSearching(s: RunsSearch): boolean {
   return Boolean(
     s.q ||
@@ -226,11 +216,9 @@ export function isSearching(s: RunsSearch): boolean {
  * since: the start of s.range (search.ts sinceOf), worked out by the
  * caller so the query key stays stable. */
 export function toRunsQuery(s: RunsSearch, since?: string): RunsQuery {
-  const searching = isSearching(s)
   return {
     q: s.q,
-    status: s.status && searching ? statusFilter(s.status) : undefined,
-    display_status: s.status && !searching ? s.status : undefined,
+    display_status: s.status,
     agent: s.agent,
     since: s.range ? since : undefined,
     tool: s.tool,
@@ -246,18 +234,12 @@ export function toRunsQuery(s: RunsSearch, since?: string): RunsQuery {
   }
 }
 
-/** keepShown drops the rows a search's coarser status filter let in
- * (the trace store's "failed" holds cancelled runs, its "succeeded"
- * waiting ones). A plain list is filtered by the server. */
-export function keepShown(rows: RunRow[], s: RunsSearch): RunRow[] {
-  if (!isSearching(s)) return rows
-  // A search does not fold chains either: a resume whose parked run is
-  // also on the page is that run's continuation, not another run. (One
-  // whose parked run did not match stays: it is the only hit.)
-  const ids = new Set(rows.map((r) => r.id))
-  return rows.filter(
-    (r) =>
-      !(r.resumed_from && ids.has(r.resumed_from)) &&
-      (!s.status || rowStatus(r) === s.status)
-  )
+/** The tools a waiting row waits on a decision for. */
+function pendingTools(r: RunRow): string[] {
+  const names = new Set<string>()
+  for (const w of r.chain?.waits ?? [])
+    if (w.to === null)
+      for (const a of w.approvals ?? [])
+        if (a.status === "pending") names.add(a.tool)
+  return [...names]
 }

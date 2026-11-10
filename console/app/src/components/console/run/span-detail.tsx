@@ -20,17 +20,26 @@ import type {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { actorLabel } from "@/lib/api/approvals"
-import { approvalsOf } from "@/lib/api/chain"
+import { approvalsOf, chainStep, chainSteps } from "@/lib/api/chain"
 import type { ChainView } from "@/lib/api/chain"
 import { q } from "@/lib/api/queries"
 import type {
   Catalog,
+  CostFields,
   Message,
   StepDoc,
   ToolEntry,
   Transcript,
 } from "@/lib/api/types"
-import { bytes, cost, count, dateTime, duration, tokens } from "@/lib/format"
+import {
+  bytes,
+  cost,
+  count,
+  dateTime,
+  duration,
+  offset,
+  tokens,
+} from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 import { Facts, Fold, Inline, Muted, Text } from "./fold"
@@ -68,23 +77,42 @@ function StateBadge({ node }: { node: TraceNode }) {
   return <Badge variant="succeeded">OK</Badge>
 }
 
-function Grid({ cells }: { cells: [string, React.ReactNode, string?][] }) {
+type Cell = [label: string, value: React.ReactNode, title?: string]
+
+// Twelve tracks, so a row of 2, 3 or 4 cells fills the width.
+const SPAN: Record<number, string> = {
+  1: "col-span-12",
+  2: "col-span-6",
+  3: "col-span-4",
+  4: "col-span-3",
+}
+
+/** The facts of a row, in one row up to four and in two rows above
+ * that (5: three over two, 7: four over three), every row full. */
+function Grid({ cells }: { cells: Cell[] }) {
+  if (cells.length === 0) return null
+  const top = cells.length <= 4 ? cells.length : Math.ceil(cells.length / 2)
   return (
-    <dl className="grid flex-none grid-cols-3 border-b">
-      {cells.map(([label, value, title], i) => (
-        <div
-          key={label}
-          title={title}
-          className={cn(
-            "flex min-w-0 flex-col px-3 py-1.5",
-            i % 3 > 0 && "border-l",
-            i >= 3 && "border-t"
-          )}
-        >
-          <dt className="truncate text-xs text-muted-foreground">{label}</dt>
-          <dd className="truncate font-mono text-sm tabular-nums">{value}</dd>
-        </div>
-      ))}
+    <dl className="grid flex-none grid-cols-12 border-b">
+      {cells.map(([label, value, title], i) => {
+        const second = i >= top
+        const inRow = second ? cells.length - top : top
+        return (
+          <div
+            key={label}
+            title={title}
+            className={cn(
+              "flex min-w-0 flex-col px-3 py-1.5",
+              SPAN[inRow],
+              i !== 0 && i !== top && "border-l",
+              second && "border-t"
+            )}
+          >
+            <dt className="truncate text-xs text-muted-foreground">{label}</dt>
+            <dd className="truncate font-mono text-sm tabular-nums">{value}</dd>
+          </div>
+        )
+      })}
     </dl>
   )
 }
@@ -336,7 +364,11 @@ function ModelCall({
       </Fold>
 
       {(node.failed || errors.length > 0) && (
-        <Fold id="detail.error" title="Error">
+        <Fold
+          id="detail.error"
+          title="Error"
+          hint={node.failed ? undefined : "of an attempt; the call went on"}
+        >
           <Text mono tone="danger">
             {errors.at(-1)?.error ||
               node.span?.status_message ||
@@ -600,6 +632,8 @@ function ToolCall({ node, chain }: { node: TraceNode; chain: ChainView }) {
 }
 
 function Handoff({ node, chain }: { node: TraceNode; chain: ChainView }) {
+  // A child in flight has no handoff span yet: its row names its parent,
+  // and the call's step is read once the call is over.
   const parentRun = node.handoff?.run_id
   const { stepQ, call } = useToolCall(node, parentRun)
   const childId = call?.child_run_id ?? node.span?.run_id ?? node.runId
@@ -630,7 +664,9 @@ function Handoff({ node, chain }: { node: TraceNode; chain: ChainView }) {
           <Muted>
             {node.running
               ? "The agent is still running."
-              : "No answer was recorded."}
+              : node.failed || call?.result?.is_error
+                ? "None: it failed (below)."
+                : "No answer was recorded."}
           </Muted>
         )}
       </Fold>
@@ -654,7 +690,6 @@ function Handoff({ node, chain }: { node: TraceNode; chain: ChainView }) {
                 ? `${child.model.provider} / ${child.model.name}`
                 : node.secondary,
             ],
-            ["Steps", child ? count(child.steps) : undefined],
             [
               "Cost note",
               child && !child.cost_known ? child.cost_reason : undefined,
@@ -729,12 +764,6 @@ function Waiting({ node, chain }: { node: TraceNode; chain: ChainView }) {
           rows={[
             ["Asked", dateTime(new Date(node.start).toISOString())],
             [
-              open ? "Waiting for" : "Waited",
-              node.end > node.start
-                ? duration(node.end - node.start)
-                : undefined,
-            ],
-            [
               "Call id",
               node.callId ? (
                 <span className="font-mono">{node.callId}</span>
@@ -807,13 +836,6 @@ function RootAgent({ chain }: { node: TraceNode; chain: ChainView }) {
                 ? dateTime(chain.totals.finished)
                 : undefined,
             ],
-            [
-              "Waited on a person",
-              chain.totals.waitingMs > 0
-                ? duration(chain.totals.waitingMs)
-                : undefined,
-            ],
-            ["Steps", count(chain.totals.steps)],
             ["Ended by", last.stopped_by],
           ]}
         />
@@ -853,12 +875,6 @@ function Other({ node }: { node: TraceNode }) {
   )
 }
 
-function descendants(n: TraceNode): number {
-  let c = 0
-  for (const k of n.children) c += 1 + descendants(k)
-  return c
-}
-
 export function SpanDetail({
   node,
   model,
@@ -875,11 +891,19 @@ export function SpanDetail({
 }) {
   const Icon = node.kind === "waiting" ? HourglassIcon : ICON[node.base]
   const isRoot = !!chain && node === model.roots.at(0) && node.base === "agent"
-  const isHandoff = !!chain && node.handoff !== undefined
-  const live = node.spans.length === 0 && node.kind !== "waiting"
+  const isHandoff = !!chain && node.handed
+  // A call in flight has no span to read yet (a child run in flight has
+  // its run row, and shows as the handoff it is).
+  const live =
+    node.spans.length === 0 && node.kind !== "waiting" && !node.handed
   const d = Math.max(0, node.end - node.start)
-  const tokensIn = isRoot ? chain.totals.usage.input_tokens : node.tokensIn
-  const tokensOut = isRoot ? chain.totals.usage.output_tokens : node.tokensOut
+  // The run row of a child agent: its own totals.
+  const childRow =
+    chain && node.base === "agent" && !isRoot
+      ? chain.runs
+          .flatMap((r) => r.children)
+          .find((c) => c.id === (node.span?.run_id ?? node.runId))
+      : undefined
   // A model call's cost is on its step (the same read its sections use).
   const isModel = !!chain && node.base === "model" && node.spans.length > 0
   const stepQ = useQuery({
@@ -894,7 +918,6 @@ export function SpanDetail({
           cost_reason: stepQ.data.cost_reason,
         }
       : undefined
-  const c = isRoot ? chain.totals : (stepCost ?? node.cost)
   const pickCall = (runId: string, step: number, callId: string) => {
     const hit =
       model.nodes.find(
@@ -909,6 +932,102 @@ export function SpanDetail({
       )
     if (hit) onSelect(hit.id)
   }
+  // The facts this kind of row has, and no others: a tool call has no
+  // tokens, a wait no cost, the run itself no offset from its start.
+  const started: Cell = [
+    "Started",
+    offset(node.start - model.t0),
+    dateTime(new Date(node.start).toISOString()),
+  ]
+  // A step of the chain's own runs is numbered through the chain.
+  const stepNo = chain
+    ? (chainStep(chain, node.span?.run_id ?? node.runId, node.step) ??
+      node.step)
+    : node.step
+  const step: Cell | undefined =
+    stepNo !== undefined ? ["Step", `#${stepNo}`] : undefined
+  const costCell = (
+    c:
+      | (Pick<CostFields, "cost_usd" | "cost_known" | "cost_partial"> & {
+          cost_reason?: string
+        })
+      | undefined
+  ): Cell | undefined => (c ? ["Cost", cost(c), c.cost_reason] : undefined)
+  const tokenCells = (i: number | undefined, o: number | undefined): Cell[] =>
+    i === undefined && o === undefined
+      ? []
+      : [
+          ["Tokens in", tokens(i ?? 0)],
+          ["Tokens out", tokens(o ?? 0)],
+        ]
+  const took: Cell =
+    node.running && node.kind !== "waiting"
+      ? ["Running for", duration(d)]
+      : ["Duration", duration(d)]
+  const attempts = stepQ.data?.attempts?.length ?? 0
+  const some = (list: (Cell | undefined)[]) =>
+    list.filter((c): c is Cell => c !== undefined)
+  const cells: Cell[] =
+    node.kind === "marker"
+      ? []
+      : node.kind === "waiting"
+        ? some([
+            [
+              node.wait?.to === null ? "Waiting for" : "Waited",
+              node.end > node.start ? duration(d) : "did not run",
+            ],
+            started,
+            step,
+          ])
+        : isRoot
+          ? some([
+              took,
+              [
+                "Started",
+                new Date(node.start).toLocaleTimeString("en-GB"),
+                dateTime(new Date(node.start).toISOString()),
+              ],
+              ["Steps", count(chainSteps(chain))],
+              chain.totals.waitingMs > 0
+                ? ["Waited", duration(chain.totals.waitingMs)]
+                : undefined,
+              costCell(chain.totals),
+              ...tokenCells(
+                chain.totals.usage.input_tokens,
+                chain.totals.usage.output_tokens
+              ),
+            ])
+          : node.base === "agent"
+            ? // A child run's totals arrive when it ends.
+              node.running
+              ? some([took, started, step])
+              : some([
+                  took,
+                  started,
+                  childRow
+                    ? ["Steps", count(childRow.steps)]
+                    : node.handed
+                      ? step
+                      : undefined,
+                  costCell(childRow ?? node.cost),
+                  ...tokenCells(
+                    childRow?.usage.input_tokens ?? node.tokensIn,
+                    childRow?.usage.output_tokens ?? node.tokensOut
+                  ),
+                ])
+            : isModel
+              ? some([
+                  took,
+                  started,
+                  step,
+                  attempts > 1 ? ["Attempts", count(attempts)] : undefined,
+                  stepCost
+                    ? costCell(stepCost)
+                    : ["Cost", stepQ.isLoading ? "…" : "unknown"],
+                  ...tokenCells(node.tokensIn ?? 0, node.tokensOut ?? 0),
+                ])
+              : some([took, started, step])
+
   const what = isHandoff
     ? "Handoff"
     : node.kind === "waiting"
@@ -963,35 +1082,7 @@ export function SpanDetail({
           </Button>
         </div>
       </div>
-      {node.kind !== "marker" && (
-        <Grid
-          cells={[
-            [
-              "Duration",
-              node.running && node.kind !== "waiting" ? "running" : duration(d),
-            ],
-            [
-              "Started",
-              `+${duration(Math.max(0, node.start - model.t0))}`,
-              dateTime(new Date(node.start).toISOString()),
-            ],
-            [
-              "Cost",
-              c ? cost(c) : "—",
-              c && "cost_reason" in c
-                ? (c as { cost_reason?: string }).cost_reason
-                : undefined,
-            ],
-            ["Tokens in", tokens(tokensIn)],
-            ["Tokens out", tokens(tokensOut)],
-            node.base === "agent"
-              ? ["Steps", count(descendants(node))]
-              : node.base === "model"
-                ? ["Step", node.step !== undefined ? `#${node.step}` : "—"]
-                : ["Step", node.step !== undefined ? `#${node.step}` : "—"],
-          ]}
-        />
-      )}
+      <Grid cells={cells} />
       <div className="min-h-0 flex-1 overflow-y-auto">
         {node.kind === "marker" ? (
           <div className="flex flex-col gap-2 p-3">

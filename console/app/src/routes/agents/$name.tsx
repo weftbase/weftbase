@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Link, createFileRoute } from "@tanstack/react-router"
 
 import { Capabilities } from "@/components/console/agent/capabilities"
+import { labelVersions } from "@/components/console/agent/inventory"
 import { LabelChip, Versions } from "@/components/console/agent/versions"
 import { DataTable } from "@/components/console/data-table"
 import {
@@ -9,7 +10,6 @@ import {
   ErrorState,
   LoadingRows,
 } from "@/components/console/empty-state"
-import { NewRun } from "@/components/console/new-run"
 import { Page, PageHeader, Section } from "@/components/console/page-header"
 import {
   RUN_COLUMNS,
@@ -18,7 +18,6 @@ import {
 import { isNotFound } from "@/lib/api/errors"
 import { q } from "@/lib/api/queries"
 import type { AgentDetail, RunRow } from "@/lib/api/types"
-import { labelPointers } from "@/lib/agents"
 import { count, percent } from "@/lib/format"
 import { validateAgent } from "@/lib/search"
 
@@ -72,7 +71,6 @@ function AgentPage() {
             </span>
           }
           meta={a ? <HeaderFacts agent={a} /> : undefined}
-          actions={a && <NewRun agent={name} variant="default" />}
         />
       }
       className="flex flex-col gap-4"
@@ -124,7 +122,7 @@ function AgentPage() {
               title="Versions"
               action={<span>{count(a.version_list.length)}, newest first</span>}
             >
-              <VersionsOf agent={a} shown={version?.id} />
+              <Versions agent={a} shown={version?.id} />
             </Section>
           )}
         </>
@@ -135,14 +133,13 @@ function AgentPage() {
 }
 
 function HeaderFacts({ agent }: { agent: AgentDetail }) {
-  const numbers = new Map(agent.version_list.map((v) => [v.id, v.number]))
   const s = agent.stats
   const finished = s.succeeded + s.failed
   return (
     <>
       <span className="truncate">{agent.model.name || "no model"}</span>
       {agent.placement && <span>{agent.placement}</span>}
-      {labelPointers(agent.labels, numbers).map((p) => (
+      {labelVersions(agent).map((p) => (
         <span key={p.label} className="flex flex-none items-center gap-1">
           <LabelChip label={p.label} />
           <span className="font-mono">{p.number ? `v${p.number}` : "?"}</span>
@@ -154,27 +151,6 @@ function HeaderFacts({ agent }: { agent: AgentDetail }) {
       </span>
     </>
   )
-}
-
-/** The runs behind the "differs" badge: a run whose manifest is not its
- * version's names the version that differs. */
-function VersionsOf({
-  agent,
-  shown,
-}: {
-  agent: AgentDetail
-  shown: string | undefined
-}) {
-  const runs = useQuery(q.runsPage({ agent: agent.name, limit: 50 }))
-  const differs = new Set<string>()
-  for (const r of runs.data?.runs ?? [])
-    if (
-      r.manifest_drift &&
-      r.agent_version &&
-      typeof r.agent_version !== "string"
-    )
-      differs.add(r.agent_version.id)
-  return <Versions agent={agent} shown={shown} differs={differs} />
 }
 
 function Activity({ name, all }: { name: string; all: boolean }) {

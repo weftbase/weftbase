@@ -23,7 +23,7 @@ reference implementations of everything below.
 |---|---|---|
 | A screen's frame | `Page` (`page-header.tsx`) | `header`, `bar`, children scroll. `flush` for a full-page table (the table is the page). |
 | The one-line header | `PageHeader` | `title`, `status` (a `StatusBadge`), `id` (a `CopyId`), `meta` (muted facts, `LivePill`), `actions` (right). 40px. No description. |
-| Views of one page | `LinkTabs` | Tabs whose selection is a URL. `tabs: {label, link, active, count?}[]`. |
+| Views of one page | `LinkTabs` | Tabs whose selection is a URL. `tabs: {label, link, active, count?}[]`. `active` is the page's answer and the only thing that marks a tab (the router's own loose match of a link is not used). |
 | A titled block on a padded page | `Section` | 11px uppercase label + `action`, then one bordered container. |
 | Filters of a list | `FilterBar`, `SearchInput`, `FilterSelect` (`filter-bar.tsx`) | One bar per list. `SearchInput` debounces 250 ms and owns `/`. `FilterSelect` reports `undefined` for "any"; `any={false}` for a select that always has a value. |
 | Any list | `DataTable` (`data-table.tsx`) | `columns: Column<T>[]` (`width` is a grid track), `rows`, `rowKey`, `rowLink` (a row is a real link), `bordered` inside a section, `footer`. ↑/↓, j/k, Home/End, Enter. |
@@ -42,7 +42,7 @@ reference implementations of everything below.
 | A switch between a few views | `Segmented` (`segmented.tsx`) | `options: {label, link, active}[]`; each option is a link (a time window, what a table groups by). |
 | Bars over time | `RunsChart` (`runs-chart.tsx`) | `series` of `OutcomeBucket` (stats `by=total`), stacked by outcome in a fixed order, 2px gaps, legend + hover readout + a table for screen readers. Colours: `--chart-succeeded/cancelled/waiting/failed/open`. |
 | A trend in a table cell | `Sparkline` (`sparkline.tsx`) | `points: {total, failed}[]`, `label`. Shape only; the row's cells carry the numbers. |
-| Top bar "New run" | `NewRun` (`new-run.tsx`) | The slot; renders nothing until built. `api.admit` is ready. |
+| Top bar "New run" | `NewRun` (`new-run.tsx`) | The one "New run": a button and its dialog (agent, version or label, input → `api.admit` → the run's page). `agent` presets the agent (the shell passes the agent whose page is open); `open` / `onOpenChange` control it (the command menu opens it that way), leave them out and it keeps its own state. |
 
 Formatters (`src/lib/format.ts`): `duration(ms)`, `between(start, end, now)`,
 `tokens(n)`, `count(n)`, `cost(costFields)`, `usd(n)`, `percent(ratio)`,
@@ -86,23 +86,46 @@ partly priced sum).
 - Live: mount a hook from `live.ts` and the queries stay current.
   `useRunsLive()` is mounted once by the shell (read its state with
   `useLiveState()` for a `LivePill`); a run page mounts
-  `useRunLive(id, { enabled: running, onFrame })`, a session page
-  `useSessionLive(id)`. A `run` frame is patched into every cached list
+  `useRunLive(id, { enabled, keys })`, a session page
+  `useSessionLive(id)`. A run's row is patched into every cached list
   and into `["run", id]`; everything else is invalidated at most once a
   second. Follow the key shapes at the top of `queries.ts` or the stream
   will not find your query: anything about one run lives under
   `["run", id, …]`, one session under `["session", id, …]`.
+- **Two streams for the whole app, never one per screen** (`hub.ts`).
+  A browser gives one host six HTTP/1.1 connections for all its tabs,
+  and Chrome keeps the pages it left in its back/forward cache with
+  their connections open; streams per component, per tab or per page
+  once left the Console unable to send any request. So: no hook opens
+  an `EventSource`; they subscribe to the hub (`subscribeRuns`,
+  `subscribeApprovals`), which keeps every run's row
+  (`/v1/runs/stream?all=1&kinds=run`) and the approval events
+  (`/v1/events`), in ONE tab (a Web Lock) that hands the frames to the
+  others (a BroadcastChannel); closes them on `pagehide` and reopens on
+  `pageshow`; and lets a hidden tab refetch once when it is shown.
+  A run row arrives each time a run moves (a step, a tool call, a child
+  run), which is what keeps a run or session page current: need
+  something live? Listen to the hub and invalidate. `onStale` means
+  frames may have been missed: refetch.
+- Requests end: `http.ts` fails any request unanswered for 20 s with a
+  sentence (`ApiError`, code `timeout`). A mutation button is disabled
+  only while `isPending`, and shows `error` when it comes back.
 - Streams resume by themselves: the browser's EventSource sends
   `Last-Event-ID` on reconnect and the server backfills. After an HTTP
   error or an `overflow` frame the hooks refetch. Records are
   de-duplicated on (run, kind, pos).
 
 The inventory and the inbox: `q.agentsSummary(since)`, `q.agent(name)`,
-`q.tools(since)`, `q.approvals(query)`, `q.statsTotal(since)`,
+`q.tools(since)`, `q.approvals(query)` (one short page, a count),
+`q.approvalsList(query)` (the inbox: `useInfiniteQuery`, 50 a page by
+`offset`, "Load more"), `q.statsTotal(since)`,
 `q.statsAll(by, since)` (model and tool breakdowns count subagent runs).
 `useApprovalsLive()` (mounted once by the shell) keeps `["approvals"]`
 current from the outbox stream (`streamEvents` in `stream.ts`,
-`GET /v1/events`) and raises the one toast.
+`GET /v1/events`) and raises the one toast: not for an approval that is
+already on screen (the inbox, or that run's page; `approvalOnScreen` in
+`app-shell.tsx`), up for 6 s, one at a time, and not again for 20 s
+after it went.
 
 Runs lists always ask for `chains=1` (`api.runs` adds it). The server's
 run search (any of `q`, `tool`, `model`, `since`, `sort`, `min_cost`,
@@ -216,14 +239,24 @@ returns them), `rootRunId` (absent for a raw trace: neutral rows, nothing
 folded), `chain` (the run ids that are one logical run, oldest first),
 `waits` (`{run?, from, to|null, decided?}` in epoch ms: each is drawn as
 a hatched row and, past 2 s, as a compressed gap on the axis), `live`
-(calls in flight that have no span yet), `compactions`, `costs` (by run
+(calls in flight that have no span yet), `liveRuns` (child runs known by
+their run row and not by an agent span yet: each gets its agent row, and
+its calls hang under it), `compactions`, `costs` (by run
 id: the label after an agent's bar), `root` (stands in until the root
 span arrives), `running`. `lib/api/chain.ts` (`chainQuery(id)`) returns a
-run's spans, chain and waits ready to map into it; `run/use-run.ts`
+run's spans, chain and waits ready to map into it (and counts a chain's
+steps through its runs: `chainStep`, `locateStep`; reads the child runs
+in flight: `inFlightQuery`; reads a tree's logs in rounds:
+`treeLogsQuery`); `run/use-run.ts`
 shows the mapping.
 
 What it does by itself: nests by `parent_span_id`; folds a handoff's tool
-call and child agent into one row with a connector; folds a chain into
+call and child agent into one row with a connector; folds a model call's
+attempt spans into the call's row (↻ in its bar); sizes the name column
+to its names until the divider is dragged (drag, ←/→, Home/End;
+double-click fits the names again; the width is remembered per `id`);
+puts a bar's label after it, before it, or over its end, wherever it
+stays inside the chart; folds a chain into
 one root; lanes and kinds as above; summary bars; sticky agent rows;
 rows deeper than two levels start folded; search (`/`, ⌘F; full mode);
 legend filter; zoom (ctrl+wheel or pinch, drag on the ruler,
@@ -236,8 +269,15 @@ parts (`model.ts`, `scale.ts`, `clock.ts`) are tested in
 
 A session is one conversation, read top to bottom
 (`src/routes/sessions/$sessionId.tsx`, `components/console/session/`).
-`q.conversation(id, from)` reads `GET /v1/sessions/{id}/conversation`
-from turn `from` to the newest (`"tail"`: the newest 20; `lib/api/sessions.ts`).
+`q.conversationWindow(id)` is the page's one query: the newest 20 turns
+(`GET /v1/sessions/{id}/conversation?tail=1`, which also carries the
+session's own row for the rail) and, in the same cached list, the
+earlier pages the person loaded. A refetch (every live tick) reads the
+tail only and `mergeTail` puts it at the end of what is loaded;
+"earlier turns" reads `loadEarlier` once and `mergeEarlier` puts it on
+top (`lib/api/sessions.ts`). A session row's `turns` are turns as a
+person counts them (a resume is not one); an off-path turn is the
+server's `off_path`.
 `session/model.ts` is the logic, without React and tested on captured
 documents (`src/test/session.test.ts`):
 

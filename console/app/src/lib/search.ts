@@ -232,3 +232,15 @@ export const validateApprovals = (s: Raw): ApprovalsSearch => ({
   tool: str(s.tool),
   run: str(s.run),
 })
+
+// ── Compare ─────────────────────────────────────────────────────────
+export interface CompareSearch {
+  /** The run compared with the one in the path. */
+  with?: string
+  /** Show the steps that are the same on both sides too. */
+  all?: true
+}
+export const validateCompare = (s: Raw): CompareSearch => ({
+  with: str(s.with),
+  all: s.all === true || s.all === "true" || s.all === 1 ? true : undefined,
+})

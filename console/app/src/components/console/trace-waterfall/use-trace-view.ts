@@ -71,6 +71,7 @@ export function useTraceView(input: TraceInput): TraceView {
       input.chain,
       input.waits,
       input.live,
+      input.liveRuns,
       input.compactions,
       input.costs,
       input.root?.label,
@@ -99,6 +100,9 @@ export function useTraceView(input: TraceInput): TraceView {
   const [speed, setSpeed] = React.useState<Speed>(1)
   const scaleRef = React.useRef(scale)
   scaleRef.current = scale
+  const posRef = React.useRef(pos)
+  posRef.current = pos
+  const jump = React.useRef<number | undefined>(undefined)
   const speedRef = React.useRef<number>(speed)
   speedRef.current = speed
 
@@ -113,21 +117,28 @@ export function useTraceView(input: TraceInput): TraceView {
     if (!playing) return
     let frame = 0
     let last = performance.now()
+    // The position is kept here, not read back from the state updater:
+    // React may run an updater later, and the end must be known now (or
+    // one more frame starts the playback over from 0).
+    let at = posRef.current ?? 0
+    jump.current = undefined
     const tick = (t: number) => {
       const dt = t - last
       last = t
-      let done = false
-      setPos((p) => {
-        const s = scaleRef.current
-        const next = advance(s, p ?? 0, dt, speedRef.current)
-        if (next >= s.length) {
-          done = true
-          return null
-        }
-        return next
-      })
-      if (done) setPlaying(false)
-      else frame = requestAnimationFrame(tick)
+      const s = scaleRef.current
+      // A restart or a seek while playing moves the playhead first.
+      if (jump.current !== undefined) {
+        at = jump.current
+        jump.current = undefined
+      }
+      at = advance(s, at, dt, speedRef.current)
+      if (at >= s.length) {
+        setPos(null)
+        setPlaying(false)
+        return
+      }
+      setPos(at)
+      frame = requestAnimationFrame(tick)
     }
     frame = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(frame)
@@ -153,6 +164,7 @@ export function useTraceView(input: TraceInput): TraceView {
         setPlaying((p) => !p)
       },
       restart: () => {
+        jump.current = 0
         setPos(0)
         setPlaying(true)
       },
@@ -166,6 +178,7 @@ export function useTraceView(input: TraceInput): TraceView {
       },
       seek: (d) => {
         const s = scaleRef.current
+        jump.current = Math.max(0, Math.min(d, s.length))
         setPos(d >= s.length ? null : Math.max(0, d))
       },
       setSpeed,

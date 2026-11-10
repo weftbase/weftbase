@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query"
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
 import { Link, createFileRoute } from "@tanstack/react-router"
 import { CircleCheckIcon, XIcon } from "lucide-react"
 import * as React from "react"
@@ -20,7 +20,12 @@ import { SplitPane } from "@/components/console/split-pane"
 import { Button } from "@/components/ui/button"
 import { q } from "@/lib/api/queries"
 import type { Approval } from "@/lib/api/types"
-import { approvalState, argsSummary, decidedBy } from "@/lib/approval-view"
+import {
+  approvalState,
+  approvalVersion,
+  argsSummary,
+  decidedBy,
+} from "@/lib/approval-view"
 import type { ApprovalTone } from "@/lib/approval-view"
 import { count, dateTime } from "@/lib/format"
 import {
@@ -99,6 +104,7 @@ const COLUMNS: Column<Approval>[] = [
   },
   {
     key: "who",
+    hideBelow: 700,
     header: "Decided by",
     width: "minmax(96px, 150px)",
     muted: true,
@@ -111,6 +117,7 @@ const COLUMNS: Column<Approval>[] = [
   },
   {
     key: "when",
+    hideBelow: 480,
     header: "When",
     width: "84px",
     align: "right",
@@ -122,15 +129,19 @@ const COLUMNS: Column<Approval>[] = [
 function ApprovalsPage() {
   const search = Route.useSearch()
   const set = useSetSearch<ApprovalsSearch>(Route.fullPath)
-  const list = useQuery(
-    q.approvals({
+  // Pages on demand, in the server's order (pending first, oldest first;
+  // then decided, newest first). The outbox stream refetches the loaded
+  // pages; an approval that moved between two of them meanwhile is shown
+  // once.
+  const list = useInfiniteQuery(
+    q.approvalsList({
       status: search.status,
       agent: search.agent,
       tool: search.tool,
       run: search.run,
-      limit: 200,
     })
   )
+  const head = list.data?.pages.at(0)
   const agents = useQuery(q.agentsSummary())
   const tools = useQuery(q.tools())
   const agentNames = (agents.data?.agents ?? []).map((a) => a.name)
@@ -149,7 +160,12 @@ function ApprovalsPage() {
   const filtered = Boolean(
     search.status || search.agent || search.tool || search.run
   )
-  const rows = list.data?.approvals ?? []
+  const rows = React.useMemo(() => {
+    const seen = new Set<string>()
+    return (list.data?.pages ?? [])
+      .flatMap((p) => p.approvals)
+      .filter((a) => !seen.has(a.id) && seen.add(a.id))
+  }, [list.data])
 
   // Esc closes the detail.
   const close = React.useEffectEvent(() => set({ id: undefined }))
@@ -172,11 +188,11 @@ function ApprovalsPage() {
         <PageHeader
           title="Approvals"
           meta={
-            list.data && (
+            head && (
               <span>
-                {list.data.pending === 0
+                {head.pending === 0
                   ? "nothing waiting"
-                  : `${count(list.data.pending)} waiting`}
+                  : `${count(head.pending)} waiting`}
               </span>
             )
           }
@@ -185,10 +201,10 @@ function ApprovalsPage() {
       bar={
         <FilterBar
           right={
-            list.data && (
+            head && (
               <span className="font-mono tabular-nums">
-                {count(list.data.total)}{" "}
-                {list.data.total === 1 ? "approval" : "approvals"}
+                {count(head.total)}{" "}
+                {head.total === 1 ? "approval" : "approvals"}
               </span>
             )
           }
@@ -246,7 +262,7 @@ function ApprovalsPage() {
       >
         {list.error ? (
           <ErrorState error={list.error} what="Approvals" />
-        ) : !list.data ? (
+        ) : !head ? (
           <LoadingRows />
         ) : rows.length === 0 ? (
           filtered ? (
@@ -291,12 +307,26 @@ function ApprovalsPage() {
               replace: true,
             })}
             footer={
-              list.data.next_offset !== null ? (
+              list.hasNextPage ? (
+                <>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={list.isFetchingNextPage}
+                    onClick={() => void list.fetchNextPage()}
+                  >
+                    {list.isFetchingNextPage ? "Loading…" : "Load more"}
+                  </Button>
+                  <span>
+                    {count(rows.length)} of {count(head.total)}
+                  </span>
+                </>
+              ) : (
                 <span>
-                  The first {count(rows.length)} of {count(list.data.total)};
-                  narrow the filters to see the rest.
+                  {count(rows.length)}{" "}
+                  {rows.length === 1 ? "approval" : "approvals"}, all shown
                 </span>
-              ) : undefined
+              )
             }
           />
         )}
@@ -317,6 +347,29 @@ function Row({
       <dt className="text-muted-foreground">{label}</dt>
       <dd className="min-w-0 break-words">{children}</dd>
     </>
+  )
+}
+
+/** The version the run ran, as the run page names it: "v2" and the
+ * labels on it. It opens that version on the agent's page. */
+function Version({ approval: a }: { approval: Approval }) {
+  const v = approvalVersion(a.agent_version)
+  if (!v) return null
+  return (
+    <Link
+      to="/agents/$name"
+      params={{ name: a.agent }}
+      search={{ v: v.number }}
+      title={`Version ${v.number} of ${a.agent} · ${v.id}`}
+      className="inline-flex h-5 items-center gap-1 rounded-sm border px-1.5 font-mono text-xs hover:bg-muted"
+    >
+      v{v.number}
+      {v.labels.length > 0 && (
+        <span className="font-sans text-subtle-foreground">
+          {v.labels.join(", ")}
+        </span>
+      )}
+    </Link>
   )
 }
 
@@ -384,7 +437,7 @@ function Detail({
             )}
           >
             <span className="font-medium">{approvalState(a).label}</span>
-            {who && <> by {who}</>}
+            {who && who !== "system" && <> by {who}</>}
             {a.decided_at && (
               <>
                 {" "}
@@ -416,13 +469,9 @@ function Detail({
               <CopyId id={a.resumed_by} label="run id" className="-ml-1" />
             </Row>
           )}
-          {a.agent_version && (
+          {approvalVersion(a.agent_version) && (
             <Row label="Version">
-              <CopyId
-                id={a.agent_version}
-                label="version id"
-                className="-ml-1"
-              />
+              <Version approval={a} />
             </Row>
           )}
           <Row label="Asked">

@@ -12,6 +12,7 @@ export {
 } from "./model"
 export type {
   LiveCall,
+  LiveRun,
   TraceInput,
   TraceModel,
   TraceNode,

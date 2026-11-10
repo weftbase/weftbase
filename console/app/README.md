@@ -40,7 +40,8 @@ waterfall's lane and kind maps.
   `RelativeTime`, `SplitPane`, the command menu).
 - `src/lib/api/`: the `/v1` layer on the real server. `types.ts` (wire
   types), `http.ts` (the client, the only file that calls `fetch`),
-  `stream.ts` (SSE, the only file that opens an `EventSource`),
+  `stream.ts` (SSE, the only file that opens an `EventSource`), `hub.ts`
+  (the app's two streams, shared by every screen and tab),
   `queries.ts` (TanStack Query options), `live.ts` (streams wired into
   the query cache), `status.ts` (the one status mapping), `auth.ts` (the
   sign-in link). There is no mock client: the Console shows what the
@@ -72,6 +73,20 @@ page (`src/routes/runs/$runId.tsx`, parts in
 (`src/components/console/trace-waterfall/`) with playback, the detail of
 a step, Transcript, Logs and Details; a run that parked and was resumed
 is one page (`src/lib/api/chain.ts`). A raw trace
-(`src/routes/traces/$traceId.tsx`) is the same waterfall. "New run" is
-`src/components/console/new-run.tsx`. Not built: comparing two runs
-(`/v1/diff`).
+(`src/routes/traces/$traceId.tsx`) is the same waterfall. A session
+(`src/routes/sessions/$sessionId.tsx`) is one conversation with a
+waterfall per turn. "New run" is `src/components/console/new-run.tsx`.
+"Compare with…" in a run's menu puts two runs side by side, step by step
+(`src/routes/runs/$runId_.compare.tsx`, `src/lib/compare.ts`, on
+`GET /v1/diff`).
+
+## Left out of v0.1.0 on purpose
+
+Variants, matrices and experiments of the old try-it page; re-executing
+a run (edit and run again, run again from a step, rerun a child); save
+as test; breakpoints; the runtimes page; the in-page embed; comparing
+more than two runs; the loop and agent graph views and the "order"
+scale; the critical-path flag; the live "peek" pane; per-browser pricing
+edits; the glossary; the Audit page (no backend yet). The server has no
+routes for most of these, and each made the debugging view harder to
+read.

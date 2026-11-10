@@ -13,7 +13,6 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   actorName,
   buildItems,
-  exchanges,
   gapText,
   markMarkers,
   offPath,
@@ -25,8 +24,13 @@ import {
   turnNote,
   waitMarker,
 } from "@/components/console/session/model"
+import { deleteError } from "@/components/console/session/session-menu"
+import { ApiError } from "@/lib/api/errors"
 import {
   loadConversation,
+  mergeEarlier,
+  mergeTail,
+  refreshConversation,
   loadSessions,
   mergeSessions,
   toSessionsQuery,
@@ -62,6 +66,8 @@ const view = (c: Conversation, over: Partial<ConversationView> = {}) =>
     agent: c.agent,
     status: c.status,
     offset: c.offset,
+    tailOffset: c.offset,
+    delegated: [],
     totalTurns: c.total_turns,
     turns: c.turns,
     sessionMarks: c.session_marks ?? [],
@@ -261,6 +267,7 @@ describe("a turn without a reply says why", () => {
       reply: null,
       ended_kind: "rollback",
       ended_by_turn: 5,
+      off_path: true,
     })
     expect(turnNote(rolled)?.text).toMatch(/^Rolled back by turn 5:/)
     expect(offPath(rolled)).toBe(true)
@@ -464,9 +471,12 @@ describe("the conversation's items", () => {
 
 describe("the list", () => {
   it("draws one dot per turn and folds a decided park", () => {
-    const s = demo.sessions.find((x) => x.resumes === 1)!
+    // The server counts turns: a resume is not one (`turns` 2, 3 runs).
+    const s = {
+      ...demo.sessions.find((x) => x.resumes === 1)!,
+      turns: 2,
+    }
     expect(s.outcomes).toEqual(["resumed", "succeeded", "succeeded"])
-    expect(exchanges(s)).toBe(2)
     const strip = outcomeStrip(s)
     expect(strip.dots).toEqual(["succeeded", "succeeded"])
     expect(strip.earlier).toBe(0)
@@ -588,32 +598,180 @@ describe("reading", () => {
     expect(v.totalTurns).toBe(2)
   })
 
-  it("a long one opens on its newest turns", async () => {
-    const page = (offset: number, n: number, total: number): Conversation => ({
-      ...refunds,
-      total_turns: total,
-      offset,
-      next_offset: offset + n < total ? offset + n : null,
-      turns: Array.from({ length: n }, (_, i) => ({
-        ...refunds.turns[1],
-        turn: offset + i + 1,
-        run_id: `run_${offset + i + 1}`,
-      })),
-    })
+  const page = (offset: number, n: number, total: number): Conversation => ({
+    ...refunds,
+    total_turns: total,
+    offset,
+    next_offset: offset + n < total ? offset + n : null,
+    turns: Array.from({ length: n }, (_, i) => ({
+      ...refunds.turns[1],
+      turn: offset + i + 1,
+      run_id: `run_${offset + i + 1}`,
+    })),
+  })
+  /** A session of `total` turns, as the server pages it. */
+  const session = (total: () => number) =>
     serve((u) => {
-      const offset = Number(u.searchParams.get("offset") ?? 0)
-      const limit = Number(u.searchParams.get("limit"))
-      return page(offset, Math.min(limit, 26 - offset), 26)
+      const n = total()
+      const limit = Number(u.searchParams.get("limit") ?? 20)
+      const offset = u.searchParams.has("tail")
+        ? Math.max(0, n - limit)
+        : Number(u.searchParams.get("offset") ?? 0)
+      return page(offset, Math.min(limit, n - offset), n)
     })
+  const numbers = (v: ConversationView) => v.turns.map((t) => t.turn)
+  const range = (from: number, to: number) =>
+    Array.from({ length: to - from + 1 }, (_, i) => from + i)
+
+  it("a long one opens on its newest turns, in one request", async () => {
+    session(() => 26)
     const v = await loadConversation("s", "tail")
-    expect(urls.length).toBe(2)
+    expect(urls.length).toBe(1)
+    expect(urls[0]).toContain("tail=true")
     expect(v.offset).toBe(6)
-    expect(v.turns.map((t) => t.turn)).toEqual(
-      Array.from({ length: 20 }, (_, i) => i + 7)
-    )
+    expect(v.tailOffset).toBe(6)
+    expect(numbers(v)).toEqual(range(7, 26))
     // Pinned to a turn, it reads from there to the newest.
     const pinned = await loadConversation("s", 0)
     expect(pinned.turns.length).toBe(26)
     expect(pinned.offset).toBe(0)
+  })
+})
+
+describe("the windowed conversation", () => {
+  const urls: string[] = []
+  const serve = (answer: (url: URL) => unknown) => {
+    urls.length = 0
+    vi.stubGlobal("fetch", (input: string) => {
+      urls.push(input)
+      return Promise.resolve(
+        new Response(JSON.stringify(answer(new URL(input))), { status: 200 })
+      )
+    })
+  }
+  const turnOf = (i: number, over: Partial<ConversationTurn> = {}) => ({
+    ...refunds.turns[1],
+    turn: i,
+    run_id: `run_${i}`,
+    ...over,
+  })
+  /** Turns [offset+1 … offset+n] of a session of `total`. */
+  const page = (
+    offset: number,
+    n: number,
+    total: number,
+    over: Partial<ConversationTurn> = {}
+  ): Conversation => ({
+    ...refunds,
+    total_turns: total,
+    offset,
+    next_offset: offset + n < total ? offset + n : null,
+    turns: Array.from({ length: n }, (_, i) => turnOf(offset + i + 1, over)),
+  })
+  const numbers = (v: ConversationView) => v.turns.map((t) => t.turn)
+  const range = (from: number, to: number) =>
+    Array.from({ length: to - from + 1 }, (_, i) => from + i)
+  const tailOf = (total: number) =>
+    page(Math.max(0, total - 20), Math.min(20, total), total)
+
+  it("a new tail replaces the window and keeps what is before it", () => {
+    // Loaded: turns 7..26 (the tail of 26), each still "running".
+    const before = mergeTail(undefined, [
+      page(6, 20, 26, { display_status: "running" }),
+    ])
+    // Two turns later the tail is 9..28, finished.
+    const after = mergeTail(before, [page(8, 20, 28)])
+    expect(after.offset).toBe(6)
+    expect(after.tailOffset).toBe(8)
+    expect(after.totalTurns).toBe(28)
+    expect(numbers(after)).toEqual(range(7, 28))
+    // Turns 7 and 8 left the window: kept exactly as they were read.
+    expect(after.turns[0]).toBe(before.turns[0])
+    expect(after.turns[1].display_status).toBe("running")
+    // The window's turns are the fresh ones.
+    expect(after.turns[2].display_status).toBe(refunds.turns[1].display_status)
+  })
+
+  it("a tail that does not join what is loaded stands alone", () => {
+    const before = mergeTail(undefined, [page(6, 20, 26)])
+    // 40 turns arrived while the page slept: 27..46 were never read.
+    const after = mergeTail(before, [page(46, 20, 66)])
+    expect(after.offset).toBe(46)
+    expect(numbers(after)).toEqual(range(47, 66))
+  })
+
+  it("earlier turns go on top, each once, and only without a hole", () => {
+    const loaded = mergeTail(undefined, [page(26, 20, 46)])
+    const more = mergeEarlier(loaded, [page(6, 20, 46)])
+    expect(more.offset).toBe(6)
+    expect(more.tailOffset).toBe(26)
+    expect(numbers(more)).toEqual(range(7, 46))
+    // A page that overlaps the view adds only what is before it.
+    const overlap = mergeEarlier(loaded, [page(16, 20, 46)])
+    expect(numbers(overlap)).toEqual(range(17, 46))
+    // Pages that stop short of the view's first turn would leave a hole.
+    expect(mergeEarlier(loaded, [page(0, 20, 46)])).toBe(loaded)
+    // Nothing earlier than what is loaded: nothing changes.
+    expect(mergeEarlier(more, [page(6, 20, 46)])).toBe(more)
+  })
+
+  it("a refetch reads the newest page only, whatever is loaded", async () => {
+    let total = 46
+    serve(() => tailOf(total))
+    let cached: ConversationView | undefined
+    cached = await refreshConversation("s", () => cached)
+    expect(urls.length).toBe(1)
+    expect(numbers(cached)).toEqual(range(27, 46))
+    // The person loads 40 earlier turns.
+    cached = mergeEarlier(cached, [page(6, 20, 46)])
+    cached = mergeEarlier(cached, [page(0, 6, 46)])
+    expect(numbers(cached)).toEqual(range(1, 46))
+    const early = cached.turns.slice(0, 26)
+    // A live tick, with a new turn: one request, for the tail.
+    total = 47
+    urls.length = 0
+    cached = await refreshConversation("s", () => cached)
+    expect(urls.length).toBe(1)
+    expect(urls[0]).toContain("tail=true")
+    expect(urls[0]).not.toContain("offset=")
+    expect(numbers(cached)).toEqual(range(1, 47))
+    expect(cached.offset).toBe(0)
+    expect(cached.tailOffset).toBe(27)
+    // The earlier turns are the same objects: not read again.
+    cached.turns.slice(0, 26).forEach((t, i) => expect(t).toBe(early[i]))
+  })
+
+  it("earlier turns loaded while a refetch is in flight are kept", async () => {
+    serve(() => tailOf(46))
+    let cached: ConversationView | undefined = mergeTail(undefined, [
+      tailOf(46),
+    ])
+    const flying = refreshConversation("s", () => cached)
+    cached = mergeEarlier(cached, [page(6, 20, 46)])
+    expect(numbers(await flying)).toEqual(range(7, 46))
+  })
+
+  it("a session that shrank is read afresh", async () => {
+    serve(() => tailOf(30))
+    const cached = mergeEarlier(mergeTail(undefined, [tailOf(46)]), [
+      page(6, 20, 46),
+    ])
+    const v = await refreshConversation("s", () => cached)
+    expect(numbers(v)).toEqual(range(11, 30))
+  })
+
+  it("an off-path turn is the server's word, folded", () => {
+    const t = turnOf(3, { off_path: true })
+    expect(offPath(t)).toBe(true)
+    expect(offPath(turnOf(3, { ended_kind: "rollback" }))).toBe(false)
+  })
+
+  it("a refused delete says what to do", () => {
+    expect(
+      deleteError(new ApiError(409, "run_active", "session has an active run"))
+    ).toBe(
+      "A run of this session is still going. Cancel it first, then delete."
+    )
+    expect(deleteError(new ApiError(500, "internal", "boom"))).toBe("boom")
   })
 })

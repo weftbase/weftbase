@@ -14,6 +14,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { afterDecision, decide, decisionError } from "@/lib/api/approvals"
 import type { DecisionInput } from "@/lib/api/approvals"
 import type { Approval } from "@/lib/api/types"
+import { approvalState } from "@/lib/approval-view"
 import { cn } from "@/lib/utils"
 
 // DecideForm: the one place a person decides a pending approval. The
@@ -57,7 +58,20 @@ export function DecideForm({
         void qc.invalidateQueries({ queryKey: key })
     },
   })
-  const busy = m.isPending || m.isSuccess
+  const busy = m.isPending
+  // Decided: say so at once. The lists that show this approval refetch
+  // and replace the form; until they do there is nothing left to press.
+  if (m.isSuccess)
+    return (
+      <p role="status" className={cn("text-sm", className)}>
+        <span className="font-medium">{approvalState(m.data).label}.</span>{" "}
+        <span className="text-muted-foreground">
+          {m.data.resumed_by
+            ? "The run continues."
+            : "The run continues once its other calls are decided."}
+        </span>
+      </p>
+    )
   return (
     <div className={cn("flex min-w-0 flex-col gap-2", className)}>
       {showArgs && (

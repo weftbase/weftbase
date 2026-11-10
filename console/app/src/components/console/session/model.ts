@@ -157,8 +157,8 @@ export function turnNote(t: ConversationTurn): TurnNote | null {
 }
 
 /** offPath: the turn was rolled back, so the conversation went on
- * without it. Drawn dimmed and folded. */
-export const offPath = (t: ConversationTurn) => t.ended_kind === "rollback"
+ * without it (the server's `off_path`). Drawn dimmed and folded. */
+export const offPath = (t: ConversationTurn) => t.off_path === true
 
 // ── Markers ─────────────────────────────────────────────────────────
 
@@ -613,13 +613,18 @@ const range = (a: number, b: number) =>
  * own is told as what it is. */
 export function gapText(
   prev: ConversationTurn | undefined,
-  next: ConversationTurn
+  next: ConversationTurn,
+  /** The session is a fork: the turns before its first are the
+   * original session's. */
+  forked = false
 ): string | undefined {
   if (next.turn <= 0 || (prev && prev.turn <= 0)) return undefined
   const from = (prev?.turn ?? 0) + 1
   const to = next.turn - 1
   if (to < from) return undefined
   const missing = to - from + 1
+  if (!prev && forked)
+    return `${range(from, to)} in the session this one was forked from.`
   if (prev && prev.runs.length - 1 >= missing)
     return `${range(from, to)} turn ${prev.turn} continuing after its wait, shown above as one turn.`
   return `${range(from, to)} not in this server's records (deleted, or never reported).`
@@ -650,7 +655,10 @@ export function buildItems(c: ConversationView, now: number): Item[] {
         marker: loose[li].marker,
       })
     const prev = i === 0 ? undefined : c.turns[i - 1]
-    const gap = i === 0 && c.offset > 0 ? undefined : gapText(prev, turn)
+    const gap =
+      i === 0 && c.offset > 0
+        ? undefined
+        : gapText(prev, turn, !!c.session?.forked_from_session)
     if (gap) items.push({ type: "gap", key: `gap:${turn.run_id}`, text: gap })
     items.push({
       type: "turn",
@@ -684,16 +692,11 @@ export interface OutcomeStrip {
 
 export const STRIP_MAX = 12
 
-/** exchanges: a session's turns as a person counts them (a resume is
- * part of the turn it continues). */
-export const exchanges = (s: Pick<SessionRow, "turns" | "resumes">) =>
-  Math.max(0, s.turns - (s.resumes ?? 0))
-
 /** outcomeStrip reads a session row's `outcomes` (one word per run,
  * oldest first) as one dot per turn: a park that was decided ("resumed")
  * is folded into the run that continued it. */
 export function outcomeStrip(
-  s: Pick<SessionRow, "turns" | "resumes" | "outcomes">,
+  s: Pick<SessionRow, "turns" | "outcomes">,
   max = STRIP_MAX
 ): OutcomeStrip {
   const words = s.outcomes ?? []
@@ -702,7 +705,8 @@ export function outcomeStrip(
   )
   const all = turns.map(outcomeStatus)
   const dots = all.slice(-max)
-  const total = exchanges(s)
+  // `turns` is the server's count of turns (a resume is not one).
+  const total = s.turns
   const counts = new Map<DisplayStatus, number>()
   for (const d of all) counts.set(d, (counts.get(d) ?? 0) + 1)
   const parts = [...counts].map(([k, n]) => `${n} ${k}`)

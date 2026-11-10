@@ -23,7 +23,7 @@ import type {
 } from "@/lib/api/types"
 import { cost } from "@/lib/format"
 import { assignLanes } from "@/lib/lanes"
-import { displayStatus, sessionStatus, statusFilter } from "@/lib/api/status"
+import { displayStatus, sessionStatus } from "@/lib/api/status"
 import { baseKind, spanKind, spanLabel } from "@/lib/span-kind"
 
 import meta from "./fixtures/meta.json"
@@ -81,7 +81,7 @@ describe("runs", () => {
   })
 
   it("reads a search page (offset-paged) in the same shape", async () => {
-    expect(isSearch({ status: "failed", agent: "a" })).toBe(false)
+    expect(isSearch({ display_status: "failed", agent: "a" })).toBe(false)
     expect(isSearch({ q: "refund" })).toBe(true)
     expect(isSearch({ since: "2020-01-01T00:00:00Z" })).toBe(true)
     answer(search)
@@ -100,7 +100,7 @@ describe("runs", () => {
     expect(cost(rows[1])).toBe("$0")
   })
 
-  it("derives the state the Console shows", () => {
+  it("reads the state the Console shows", () => {
     const rows = runs.runs as unknown as RunRow[]
     expect(rows.map(displayStatus)).toEqual([
       "interrupted",
@@ -108,17 +108,13 @@ describe("runs", () => {
       "failed",
       "succeeded",
     ])
-    const ok = rows[3]
-    // Parked: succeeded, with a call pending and nothing resumed it.
-    expect(displayStatus({ ...ok, pending: 1 })).toBe("waiting")
-    expect(displayStatus({ ...ok, pending: 1, resumed_by: "r_next" })).toBe(
-      "succeeded"
+    // The server's word wins over the trace status.
+    expect(displayStatus({ ...rows[3], display_status: "waiting" })).toBe(
+      "waiting"
     )
-    expect(displayStatus({ ...rows[2], error_type: "cancelled" })).toBe(
+    expect(displayStatus({ ...rows[2], display_status: "cancelled" })).toBe(
       "cancelled"
     )
-    expect(statusFilter("waiting")).toBe("parked")
-    expect(statusFilter("failed")).toBe("failed")
   })
 
   it("reads a run with its children, holes and compactions", () => {

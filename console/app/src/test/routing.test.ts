@@ -115,19 +115,14 @@ describe("routes", () => {
     expect(s.status).toBeUndefined()
     expect(s.agent).toBeUndefined()
     expect(toRunsQuery(s)).toMatchObject({ q: "refund", limit: 50 })
-    // A plain list filters on the status as shown.
-    expect(
-      toRunsQuery(validateRuns({ status: "waiting" })).display_status
-    ).toBe("waiting")
-    // A search (here: a time range) only takes the trace store's word.
+    // The status filter is the status as shown, in a search too.
     expect(
       toRunsQuery(
         validateRuns({ status: "waiting", range: "24h" }),
         "2020-01-01T00:00:00.000Z"
       )
     ).toMatchObject({
-      status: "parked",
-      display_status: undefined,
+      display_status: "waiting",
       since: "2020-01-01T00:00:00.000Z",
     })
   })

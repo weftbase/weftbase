@@ -48,6 +48,24 @@ export interface LiveCall {
   callId?: string
 }
 
+/** A child run that has no agent span yet: a run reports its root span
+ * when it ends, so a subagent in flight is known by its run row only. */
+export interface LiveRun {
+  runId: string
+  /** The run whose call started it. */
+  parentRunId: string
+  /** The call that started it, and that call's step. */
+  callId?: string
+  step?: number
+  /** The agent's name. */
+  label: string
+  model?: string
+  start: number
+  /** When it ended; absent while it is going. */
+  end?: number
+  failed?: boolean
+}
+
 export interface TraceInput {
   spans: readonly Span[]
   /** The run the trace belongs to. Absent for a raw trace: rows are
@@ -58,6 +76,8 @@ export interface TraceInput {
   chain?: readonly string[]
   waits?: readonly TraceWait[]
   live?: readonly LiveCall[]
+  /** Child runs known by their row and not by an agent span yet. */
+  liveRuns?: readonly LiveRun[]
   compactions?: readonly (RunCompaction & { run_id?: string })[]
   /** Cost by run id: the label after an agent row's bar. */
   costs?: ReadonlyMap<string, CostFields>
@@ -83,6 +103,9 @@ export interface TraceNode {
   spans: Span[]
   /** The tool call that started this agent, when the row is a handoff. */
   handoff?: Span
+  /** The row is an agent another agent's call started: a folded handoff,
+   * or a child run in flight (which has no `handoff` span yet). */
+  handed: boolean
   parent?: TraceNode
   children: TraceNode[]
   depth: number
@@ -99,6 +122,8 @@ export interface TraceNode {
   model?: string
   /** The run the row belongs to (as the server names it). */
   runId?: string
+  /** On a child run in flight: the run whose call started it. */
+  startedBy?: string
   lane: Lane
   /** Real milliseconds. */
   start: number
@@ -206,6 +231,7 @@ function nodeOf(s: Span, lane: Lane): TraceNode {
     aliases: [],
     span: s,
     spans: [s],
+    handed: false,
     children: [],
     depth: 0,
     kind: failed && base !== "agent" ? "failed" : base,
@@ -254,6 +280,7 @@ function synthetic(
     id,
     aliases: [],
     spans: [],
+    handed: false,
     children: [],
     depth: 0,
     kind,
@@ -285,14 +312,14 @@ function nameModelCalls(nodes: Iterable<TraceNode>) {
         c.step === n.step &&
         c.step !== undefined &&
         c.start >= n.end &&
-        (c.handoff?.run_id ?? c.span?.run_id ?? c.runId) ===
+        (c.handoff?.run_id ?? c.startedBy ?? c.span?.run_id ?? c.runId) ===
           (n.span?.run_id ?? n.runId) &&
-        (c.base === "tool" || c.base === "handoff" || c.handoff !== undefined)
+        (c.base === "tool" || c.base === "handoff" || c.handed)
     )
-    const handoffs = asked.filter((c) => c.handoff || c.base === "handoff")
+    const handoffs = asked.filter((c) => c.handed || c.base === "handoff")
     if (asked.length > 0 && handoffs.length === asked.length) {
       const names = handoffs.map((c) =>
-        c.handoff ? c.label : (c.tool ?? c.label)
+        c.handed ? c.label : (c.tool ?? c.label)
       )
       n.label = `Hand off to ${names.slice(0, 2).join(", ")}${names.length > 2 ? ` +${names.length - 2}` : ""}`
     } else if (asked.length > 0) {
@@ -309,6 +336,18 @@ function nameModelCalls(nodes: Iterable<TraceNode>) {
         n.label = "Reply"
     }
   }
+}
+
+/** liveIds: the ids the row had (or would have had) before its span
+ * arrived: `run:<id>` for a child run, `live:…` for a call. */
+function liveIds(n: TraceNode): string[] {
+  if (n.spans.length === 0 || n.runId === undefined) return []
+  if (n.base === "agent") return [`run:${n.runId}`]
+  const run = n.span?.run_id ?? n.runId
+  if (n.base === "model") return [`live:${run}:model:${n.step ?? ""}:`]
+  if (n.base === "tool" || n.base === "handoff")
+    return [`live:${run}:tool:${n.step ?? ""}:${n.callId ?? ""}`]
+  return []
 }
 
 /** compactionLabel: "Context compacted: 41k → 9k tokens". */
@@ -331,10 +370,24 @@ export function buildTrace(input: TraceInput): TraceModel {
   const spans = [...input.spans].sort(
     (a, b) => ms(a.start) - ms(b.start) || (a.span_id < b.span_id ? -1 : 1)
   )
+  // A child run in flight takes its lane when it starts, not when its
+  // first span arrives: it stands in the list as a span of its own.
+  const liveRuns = [...(input.liveRuns ?? [])].sort(
+    (a, b) => a.runId.length - b.runId.length || a.start - b.start
+  )
   const lanes =
     head !== undefined
       ? assignLanes(
-          spans.map((s) => ({ ...s, run_id: canon(s.run_id ?? head) })),
+          [
+            ...spans.map((s) => ({ ...s, run_id: canon(s.run_id ?? head) })),
+            ...liveRuns.map(
+              (r) =>
+                ({
+                  run_id: r.runId,
+                  start: new Date(r.start).toISOString(),
+                }) as Span
+            ),
+          ],
           head
         )
       : new Map<string, Lane>()
@@ -350,6 +403,27 @@ export function buildTrace(input: TraceInput): TraceModel {
     const p = s.parent_span_id ? bySpan.get(s.parent_span_id) : undefined
     if (p && p !== n) adopt(p, n)
     else top.push(n)
+  }
+
+  // 1b. A model call's attempts (a retry, a fallback to another model)
+  // are spans under it. They are part of the call, not rows: the call's
+  // bar carries ↻ and its detail lists them.
+  for (const n of [...bySpan.values()]) {
+    if (n.base !== "model") continue
+    const attempts = n.children.filter(
+      (c) =>
+        c.base === "other" &&
+        c.children.length === 0 &&
+        c.span?.attrs["weft.attempt.index"] !== undefined
+    )
+    if (attempts.length === 0) continue
+    n.children = n.children.filter((c) => !attempts.includes(c))
+    for (const c of attempts) {
+      n.aliases.push(c.id)
+      n.spans.push(...c.spans)
+      bySpan.set(c.id, n)
+    }
+    if (attempts.length > 1) n.retry = true
   }
 
   let roots = top
@@ -395,6 +469,35 @@ export function buildTrace(input: TraceInput): TraceModel {
       primary.aliases.push(`run:${head}`)
       primary.runId = head
       for (const id of chain) agentOfRun.set(id, primary)
+      // 2b. A child run with no agent span yet (it is in flight, or its
+      // root span is still on its way) gets a row from its run row, so
+      // its calls have their agent to hang under.
+      const standIns: [TraceNode, LiveRun][] = []
+      for (const r of liveRuns) {
+        if (agentOfRun.has(r.runId)) continue
+        const n = synthetic(
+          `run:${r.runId}`,
+          "agent",
+          "agent",
+          r.label,
+          laneOf(r.runId),
+          r.start,
+          Math.max(r.end ?? now, r.start)
+        )
+        n.secondary = shortModel(r.model)
+        n.model = r.model
+        n.runId = r.runId
+        n.startedBy = r.parentRunId
+        n.handed = true
+        n.callId = r.callId
+        n.step = r.step
+        n.running = r.end === undefined
+        n.failed = !!r.failed
+        agentOfRun.set(r.runId, n)
+        standIns.push([n, r])
+      }
+      for (const [n, r] of standIns)
+        adopt(agentOfRun.get(r.parentRunId) ?? primary, n)
       // 3. Spans whose parent has not arrived (a live run reports a span
       // when it ends, the root last) go under their run's agent.
       for (const n of top) {
@@ -416,6 +519,7 @@ export function buildTrace(input: TraceInput): TraceModel {
       if (child.base !== "agent") continue
       const parent = n.parent
       child.handoff = n.span
+      child.handed = true
       child.aliases.push(n.id)
       child.spans.push(...n.spans)
       child.callId = n.callId
@@ -480,6 +584,15 @@ export function buildTrace(input: TraceInput): TraceModel {
   // 6. Calls in flight.
   if (primary)
     for (const c of input.live ?? []) {
+      // A call that started a child run is that run's row, not a second one.
+      if (
+        c.kind === "tool" &&
+        (agentOfRun.has(`${c.runId}/${c.step ?? ""}/${c.callId ?? ""}`) ||
+          liveRuns.some(
+            (r) => r.parentRunId === c.runId && r.callId === c.callId
+          ))
+      )
+        continue
       const n = synthetic(
         `live:${c.runId}:${c.kind}:${c.step ?? ""}:${c.callId ?? ""}`,
         c.kind,
@@ -552,6 +665,7 @@ export function buildTrace(input: TraceInput): TraceModel {
     nodes.push(n)
     byId.set(n.id, n)
     for (const a of n.aliases) byId.set(a, n)
+    liveIds(n).forEach((a) => stood.push([a, n]))
     if (n !== primary && n.base === "agent" && n.runId) {
       const c = input.costs?.get(n.runId)
       if (c) n.cost = c
@@ -563,8 +677,12 @@ export function buildTrace(input: TraceInput): TraceModel {
     if (n.base === "agent" && n.children.length > 0)
       n.end = Math.max(n.end, ...n.children.map((c) => c.end))
   }
+  // A row chosen while its call was in flight stays chosen when the
+  // call's span arrives: the span answers to the id its stand-in had.
+  const stood: [string, TraceNode][] = []
   roots.sort(order)
   for (const r of roots) walk(r, 0)
+  for (const [a, n] of stood) if (!byId.has(a)) byId.set(a, n)
 
   let t0 = Infinity
   let t1 = -Infinity
@@ -616,7 +734,7 @@ export function isKind(n: TraceNode, kind: LegendKind): boolean {
     case "waiting":
       return n.kind === "waiting"
     case "handoff":
-      return n.handoff !== undefined || n.base === "handoff"
+      return n.handed || n.base === "handoff"
     default:
       return n.base === kind && n.kind !== "waiting"
   }
@@ -783,7 +901,7 @@ export function statsAt(model: TraceModel, at: number): TraceStats {
         s.tokensIn += n.tokensIn ?? 0
         s.tokensOut += n.tokensOut ?? 0
       }
-    } else if (n.kind !== "waiting" && (n.base === "tool" || n.handoff))
+    } else if (n.kind !== "waiting" && (n.base === "tool" || n.handed))
       s.toolCalls++
     else if (n.base === "handoff") s.toolCalls++
     if (ended && n.failed && n.base !== "agent") s.failed++
@@ -820,18 +938,17 @@ export function summarySegments(n: TraceNode): Segment[] {
 /** gist: the row in one line, for the hover tooltip. */
 export function gist(n: TraceNode): string {
   if (n.kind === "marker") return n.label
-  const what =
-    n.handoff !== undefined
-      ? "Handoff to"
-      : n.kind === "waiting"
-        ? "Waiting on"
-        : n.base === "agent"
-          ? "Agent"
-          : n.base === "model"
-            ? "Model call"
-            : n.base === "tool" || n.base === "handoff"
-              ? "Tool call"
-              : "Span"
+  const what = n.handed
+    ? "Handoff to"
+    : n.kind === "waiting"
+      ? "Waiting on"
+      : n.base === "agent"
+        ? "Agent"
+        : n.base === "model"
+          ? "Model call"
+          : n.base === "tool" || n.base === "handoff"
+            ? "Tool call"
+            : "Span"
   const tail = n.failed
     ? ` · failed${n.spans[0]?.attrs["error.type"] ? ` (${String(n.spans[0].attrs["error.type"])})` : ""}`
     : n.running && n.kind !== "waiting"

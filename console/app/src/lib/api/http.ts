@@ -21,6 +21,7 @@ import type {
   Approval,
   ApprovalsPage,
   Conversation,
+  DiffDoc,
   EventsPage,
   LedgerRun,
   LogsPage,
@@ -34,8 +35,6 @@ import type {
   RunsQuery,
   SearchPage,
   SessionDetail,
-  SessionEntries,
-  SessionTimeline,
   SessionsPage,
   SessionsQuery,
   SignInResponse,
@@ -74,6 +73,9 @@ export function buildUrl(path: string, query: Query = {}): string {
 
 type Method = "GET" | "POST" | "DELETE"
 
+/** How long a request may go unanswered (headers). */
+export const TIMEOUT_MS = 20_000
+
 async function request<T>(
   method: Method,
   path: string,
@@ -84,13 +86,38 @@ async function request<T>(
   const headers: Record<string, string> = { Accept: "application/json" }
   if (method !== "GET") headers["Weftbase-CSRF"] = "1"
   if (body !== undefined) headers["Content-Type"] = "application/json"
-  const res = await fetch(buildUrl(path, query), {
-    method,
-    headers,
-    credentials: "same-origin",
-    body: body === undefined ? undefined : JSON.stringify(body),
-    signal,
-  })
+  // No request waits for ever: a button that sent one must come back
+  // with an answer or with an error to show.
+  const ctl = new AbortController()
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    ctl.abort()
+  }, TIMEOUT_MS)
+  const cancel = () => ctl.abort()
+  signal?.addEventListener("abort", cancel)
+  let res: Response
+  try {
+    res = await fetch(buildUrl(path, query), {
+      method,
+      headers,
+      credentials: "same-origin",
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: ctl.signal,
+    })
+  } catch (e) {
+    if (!timedOut) throw e
+    throw new ApiError(
+      0,
+      "timeout",
+      method === "GET"
+        ? `The server did not answer within ${TIMEOUT_MS / 1000} s.`
+        : `The server did not answer within ${TIMEOUT_MS / 1000} s. The request may still have gone through: look before sending it again.`
+    )
+  } finally {
+    clearTimeout(timer)
+    signal?.removeEventListener("abort", cancel)
+  }
   if (!res.ok) {
     let code = "http_error"
     let message = res.statusText || `HTTP ${res.status}`
@@ -152,7 +179,9 @@ export const api = {
   /** One page of runs, newest first. The server pages a plain list by a
    * time cursor and a search by offset; both come back as a RunsList. */
   async runs(q: RunsQuery = {}, cursor?: RunsCursor): Promise<RunsList> {
-    // chains: a park and its resumes are one row (a search ignores it).
+    // chains: a park and its resumes are one row. A page may hold fewer
+    // rows than `limit`, and a search's `total` counts rows before the
+    // fold.
     const { tag, ...rest } = q
     const query: Query = { ...rest, chains: 1, ...cursor }
     const eq = tag?.indexOf("=") ?? -1
@@ -190,10 +219,6 @@ export const api = {
   /** Start a run; answers its ledger row (queued). */
   admit: (body: AdmitRequest) => post<LedgerRun>("/v1/runs", body),
   run: (id: string) => get<RunDetail>(run(id)),
-  runStatus: (id: string) => get<LedgerRun>(`${run(id)}/status`),
-  /** tree: every descendant run's spans too, each tagged with its run_id. */
-  spans: (id: string, tree = true) =>
-    get<SpansDoc>(`${run(id)}/spans`, { tree: tree ? 1 : undefined }),
   /** The timeline of a logical run: the spans of every run of its chain
    * (a park and its resumes) and their descendants, with the waits. */
   runTimeline: (id: string) =>
@@ -206,8 +231,12 @@ export const api = {
   step: (id: string, n: number) => get<StepDoc>(`${run(id)}/steps/${n}`),
   requests: (id: string, step?: number) =>
     get<RequestsPage>(`${run(id)}/requests`, { step }),
-  logs: (id: string, from?: number, limit?: number) =>
-    get<LogsPage>(`${run(id)}/logs`, { from, limit }),
+  /** One page of a run's logs from index `from` (a page's `next_from`
+   * feeds back in); `severity` keeps the lines at or above a level. */
+  logsFrom: (
+    id: string,
+    query: { from?: number; limit?: number; severity?: string }
+  ) => get<LogsPage>(`${run(id)}/logs`, query),
   /** The export is a download: give this URL to an <a download>. */
   exportUrl: (id: string, format: ExportFormat = "json", tree = false) =>
     buildUrl(`${run(id)}/export`, { format, tree: tree ? 1 : undefined }),
@@ -252,13 +281,13 @@ export const api = {
    * stands for. */
   publicSession: (publicId: string) =>
     get<{ session_id: string }>(`/v1/public/${seg(publicId)}`),
-  timeline: (id: string) => get<SessionTimeline>(`${session(id)}/timeline`),
-  entries: (id: string, offset?: number, limit?: number) =>
-    get<SessionEntries>(`${session(id)}/entries`, { offset, limit }),
   /** The session as a person reads it, one entry per turn, oldest
    * first; paged by turn (limit at most 100). */
-  conversation: (id: string, page: { offset?: number; limit?: number } = {}) =>
-    get<Conversation>(`${session(id)}/conversation`, { ...page }),
+  conversation: (
+    id: string,
+    /** tail: the newest page, in one request, whatever the offset. */
+    page: { offset?: number; limit?: number; tail?: boolean } = {}
+  ) => get<Conversation>(`${session(id)}/conversation`, { ...page }),
   sessionExportUrl: (id: string) =>
     buildUrl(`${session(id)}/export`, { format: "jsonl" }),
   /** Delete a session, its turns and what they recorded. Cannot be undone. */
@@ -305,4 +334,17 @@ export const api = {
     label: string,
     body: { version: string; expected: string; reason?: string }
   ) => post<AgentVersion>(`/v1/agents/${seg(name)}/labels/${seg(label)}`, body),
+
+  // Compare
+  /** Two runs' steps, aligned by step ordinal, with what differs. */
+  diff: (a: string, b: string) => get<DiffDoc>("/v1/diff", { a, b }),
+
+  // Sign-in
+  /** A fresh one-time sign-in link for the Console at `origin`. The
+   * link is a credential: show it once, never log or store it. */
+  signInLink: (origin: string) =>
+    post<{ link: string; token: string; expires_at: string }>(
+      "/v1/auth/links",
+      { origin }
+    ),
 }

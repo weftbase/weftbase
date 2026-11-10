@@ -29,20 +29,32 @@ import { q } from "@/lib/api/queries"
 // "New run" (CONSOLE-UX, New run): pick an agent and a version or label,
 // type the input, Start. It calls POST /v1/runs and opens the run's
 // page, which shows it queued and then live. No saved prompts, no model
-// overrides. The top bar renders <NewRun />; an agent's page renders
-// <NewRun agent="support" /> to preset the agent.
+// overrides. There is one, in the top bar: on an agent's page the shell
+// passes that agent as the preset. The command menu opens the same
+// dialog through `open` / `onOpenChange`.
 
 const DEFAULT = "default"
 
 export function NewRun({
   agent: preset,
   variant = "secondary",
+  open: controlled,
+  onOpenChange,
 }: {
-  /** Preselect this agent (an agent's page). */
+  /** Preselect this agent (the page is that agent's). */
   agent?: string
   variant?: "default" | "secondary"
+  /** Controlled: whether the dialog is open. Leave both out and the
+   * button keeps its own state. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }) {
-  const [open, setOpen] = React.useState(false)
+  const [own, setOwn] = React.useState(false)
+  const open = controlled ?? own
+  const setOpen = (o: boolean) => {
+    if (controlled === undefined) setOwn(o)
+    onOpenChange?.(o)
+  }
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -66,7 +78,13 @@ function Form({ preset, onDone }: { preset?: string; onDone: () => void }) {
   const [version, setVersion] = React.useState(DEFAULT)
   const [prompt, setPrompt] = React.useState("")
   const list = agents.data ?? []
-  const name = agent || (list.length === 1 ? list[0].name : "")
+  // A preset the registry does not have (an agent seen in runs only)
+  // cannot be started: the choice stays open.
+  const name = list.some((a) => a.name === agent)
+    ? agent
+    : list.length === 1
+      ? list[0].name
+      : ""
   const current = list.find((a) => a.name === name)
   const versions = useQuery({
     ...q.agentVersions(name),

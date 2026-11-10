@@ -17,7 +17,7 @@
 //   no last id, so the caller is told it is a fresh stream and refetches.
 // Auth is the same-origin session cookie; nothing goes in the URL.
 
-import { buildUrl, seg } from "./http"
+import { buildUrl } from "./http"
 import type { Query } from "./http"
 import type { OutboxEvent, StreamFrame } from "./types"
 
@@ -30,6 +30,8 @@ export interface StreamHandlers {
   /** The stream is open again after a break. resumed: the server
    * backfilled the gap; false: frames may have been missed, refetch. */
   onReopen?: (resumed: boolean) => void
+  /** The server's heartbeat (every 15 s): the stream is alive. */
+  onPing?: () => void
 }
 
 const FRAMES = ["run", "record", "attempt", "backfill_error"] as const
@@ -129,6 +131,7 @@ export function openStream(
     // backfills, but frames can be lost past the server's buffer: tell
     // the caller to refetch.
     es.addEventListener("overflow", () => handlers.onReopen?.(false))
+    es.addEventListener("ping", () => handlers.onPing?.())
   }
   connect(false)
 
@@ -141,7 +144,8 @@ export function openStream(
 
 const kinds = (k: FrameKind[] | undefined) => (k ? k.join(",") : undefined)
 
-/** Every run of the project. The lists only need `run` frames. */
+/** Every run of the project. `run` frames alone are a row each time a
+ * run moves, which is all the Console needs. Opened by hub.ts only. */
 export function streamRuns(
   handlers: StreamHandlers,
   opts: { agent?: string; kinds?: FrameKind[] } = {}
@@ -155,37 +159,11 @@ export function streamRuns(
   )
 }
 
-/** One run: its row, its records and its model-call attempts. */
-export function streamRun(
-  id: string,
-  handlers: StreamHandlers,
-  opts: { kinds?: FrameKind[] } = {}
-): () => void {
-  return openStream(
-    `/v1/runs/${seg(id)}/stream`,
-    { kinds: kinds(opts.kinds) },
-    handlers
-  )
-}
-
-/** One session: the frames of all its runs. */
-export function streamSession(
-  id: string,
-  handlers: StreamHandlers,
-  opts: { kinds?: FrameKind[] } = {}
-): () => void {
-  return openStream(
-    `/v1/sessions/${seg(id)}/stream`,
-    { kinds: kinds(opts.kinds) },
-    handlers
-  )
-}
-
 /** The control store's outbox (GET /v1/events), narrowed to `types`
- * ("approval.requested", …). Each frame is one event; its SSE event
- * name is the event's type. A stream opened without a last id starts
- * with every stored event, oldest first, then goes live: read
- * `created_at` to tell an old event from a new one. */
+ * ("approval.requested", …), from now on (`after=now`: what is stored
+ * is not replayed; the page has just read that state). Each frame is
+ * one event; its SSE event name is the event's type. A reconnect
+ * resumes after the last event it saw. Opened by hub.ts only. */
 export function streamEvents(
   types: readonly string[],
   handlers: Omit<StreamHandlers, "onFrame"> & {
@@ -194,7 +172,7 @@ export function streamEvents(
 ): () => void {
   return openStream(
     "/v1/events",
-    { type: types.join(",") },
+    { type: types.join(","), after: "now" },
     {
       ...handlers,
       onFrame: (f) => handlers.onEvent(f.data as unknown as OutboxEvent),

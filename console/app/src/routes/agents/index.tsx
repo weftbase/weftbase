@@ -1,6 +1,11 @@
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 
+import {
+  agentCounts,
+  inventoryHeader,
+  labelVersions,
+} from "@/components/console/agent/inventory"
 import { ToolsTable } from "@/components/console/agent/tools-table"
 import { DataTable } from "@/components/console/data-table"
 import type { Column } from "@/components/console/data-table"
@@ -14,7 +19,6 @@ import { RelativeTime } from "@/components/console/relative-time"
 import { Segmented } from "@/components/console/segmented"
 import { q } from "@/lib/api/queries"
 import type { AgentSummary } from "@/lib/api/types"
-import { inventoryLine, labelPointers, versionNumbers } from "@/lib/agents"
 import { count, percent, shortId } from "@/lib/format"
 import { RANGE_LABEL, WINDOWS, validateAgents } from "@/lib/search"
 import type { Window } from "@/lib/search"
@@ -28,10 +32,7 @@ export const Route = createFileRoute("/agents/")({
   component: AgentsPage,
 })
 
-function columns(
-  numbers: ReadonlyMap<string, number>,
-  range: Window
-): Column<AgentSummary>[] {
+function columns(range: Window): Column<AgentSummary>[] {
   return [
     {
       key: "name",
@@ -53,6 +54,7 @@ function columns(
     },
     {
       key: "model",
+      hideBelow: 780,
       header: "Model",
       width: "minmax(110px, 170px)",
       muted: true,
@@ -60,6 +62,7 @@ function columns(
     },
     {
       key: "placement",
+      hideBelow: 1000,
       header: "Placement",
       width: "88px",
       muted: true,
@@ -70,7 +73,7 @@ function columns(
       header: "Labels",
       width: "minmax(150px, 220px)",
       cell: (a) => {
-        const ps = labelPointers(a.labels, numbers)
+        const ps = labelVersions(a)
         if (ps.length === 0)
           return a.summary.number ? (
             <span className="font-mono text-xs text-muted-foreground">
@@ -100,6 +103,7 @@ function columns(
     },
     {
       key: "tools",
+      hideBelow: 620,
       header: "Tools",
       width: "56px",
       align: "right",
@@ -121,6 +125,7 @@ function columns(
     },
     {
       key: "subagents",
+      hideBelow: 900,
       header: "Subagents",
       width: "84px",
       align: "right",
@@ -157,6 +162,7 @@ function columns(
     },
     {
       key: "last",
+      hideBelow: 700,
       header: "Last run",
       width: "84px",
       align: "right",
@@ -172,7 +178,6 @@ function AgentsPage() {
   const onTools = search.tab === "tools"
   const agents = useQuery(q.agentsSummary(range))
   const tools = useQuery(q.tools(range))
-  const numbers = versionNumbers(agents.data?.agents ?? [], tools.data)
 
   return (
     <Page
@@ -182,9 +187,7 @@ function AgentsPage() {
           title="Agents"
           meta={
             agents.data && (
-              <span className="truncate">
-                {inventoryLine(agents.data.totals)}
-              </span>
+              <span className="truncate">{inventoryHeader(agents.data)}</span>
             )
           }
           actions={
@@ -210,7 +213,9 @@ function AgentsPage() {
               label: "Agents",
               link: { to: "/agents", search: { ...search, tab: undefined } },
               active: !onTools,
-              count: agents.data?.agents.length,
+              // The registered ones, as the header counts them; the
+              // header says how many more were only seen in runs.
+              count: agents.data && agentCounts(agents.data.agents).registered,
             },
             {
               label: "Tools",
@@ -246,7 +251,7 @@ function AgentsPage() {
       ) : (
         <DataTable
           label="Agents"
-          columns={columns(numbers, range)}
+          columns={columns(range)}
           rows={agents.data.agents}
           rowKey={(a) => a.name}
           rowLink={(a) => ({ to: "/agents/$name", params: { name: a.name } })}

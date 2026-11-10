@@ -36,6 +36,7 @@ export function toolColumns(range: Window): Column<ToolRow>[] {
     },
     {
       key: "description",
+      hideBelow: 1000,
       header: "Description",
       width: "minmax(180px, 1fr)",
       muted: true,
@@ -95,6 +96,7 @@ export function toolColumns(range: Window): Column<ToolRow>[] {
     },
     {
       key: "calls",
+      hideBelow: 700,
       header: "Calls",
       width: "64px",
       align: "right",
@@ -135,6 +137,7 @@ export function toolColumns(range: Window): Column<ToolRow>[] {
     },
     {
       key: "p50",
+      hideBelow: 860,
       header: "p50",
       width: "72px",
       align: "right",

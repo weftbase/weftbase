@@ -13,13 +13,16 @@
 //   ["stats", by, since]  ["stats", "total", since]
 //   ["approvals", "list", query]  ["approvals", "one", id]
 //   ["agents", "summary", since]  ["agent", name]  ["tools", since]
+//   ["diff", a, b]
+//   ["approvals", "pages", query]  infinite, pages of ApprovalsPage
+//   ["session", id, "conversation", "window"]  the windowed conversation
 
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query"
 
 import { api } from "./http"
-import { loadConversation, loadSessions } from "./sessions"
-import type { SessionsFilter } from "./sessions"
-import type { RunsCursor, RunsQuery, SessionsQuery, StatsBy } from "./types"
+import { loadSessions, refreshConversation } from "./sessions"
+import type { ConversationView, SessionsFilter } from "./sessions"
+import type { RunsCursor, RunsQuery, StatsBy } from "./types"
 
 export const q = {
   meta: () =>
@@ -52,11 +55,6 @@ export const q = {
     }),
   run: (id: string) =>
     queryOptions({ queryKey: ["run", id], queryFn: () => api.run(id) }),
-  spans: (id: string) =>
-    queryOptions({
-      queryKey: ["run", id, "spans"],
-      queryFn: () => api.spans(id, true),
-    }),
   events: (id: string) =>
     queryOptions({
       queryKey: ["run", id, "events"],
@@ -84,17 +82,6 @@ export const q = {
       staleTime: Infinity,
       retry: false,
     }),
-  logs: (id: string) =>
-    queryOptions({
-      queryKey: ["run", id, "logs"],
-      queryFn: () => api.logs(id),
-    }),
-
-  sessions: (query: SessionsQuery) =>
-    queryOptions({
-      queryKey: ["sessions", "list", query],
-      queryFn: () => api.sessions(query),
-    }),
   /** The Sessions list: pages on demand; its search also finds a
    * session by public id or by its own id. */
   sessionsList: (filter: SessionsFilter) =>
@@ -113,24 +100,6 @@ export const q = {
     }),
   session: (id: string) =>
     queryOptions({ queryKey: ["session", id], queryFn: () => api.session(id) }),
-  /** A session's turns from `from` to the newest ("tail": the newest
-   * page). */
-  conversation: (id: string, from: number | "tail") =>
-    queryOptions({
-      queryKey: ["session", id, "conversation", from],
-      queryFn: () => loadConversation(id, from),
-    }),
-  timeline: (id: string) =>
-    queryOptions({
-      queryKey: ["session", id, "timeline"],
-      queryFn: () => api.timeline(id),
-    }),
-  entries: (id: string) =>
-    queryOptions({
-      queryKey: ["session", id, "entries"],
-      queryFn: () => api.entries(id),
-    }),
-
   traces: (query: { notRun?: boolean; limit?: number } = {}) =>
     queryOptions({
       queryKey: ["traces", "list", query],
@@ -203,7 +172,45 @@ export const q = {
       queryKey: ["agent", name, "versions"],
       queryFn: () => api.agentVersions(name),
     }),
+  /** The step-aligned diff of two runs (the Compare page). */
+  diff: (a: string, b: string) =>
+    queryOptions({
+      queryKey: ["diff", a, b],
+      queryFn: () => api.diff(a, b),
+      retry: false,
+    }),
+  /** The Approvals inbox: pages on demand ("Load more"), by offset.
+   * Under ["approvals"], so the outbox stream keeps every loaded page
+   * current. */
+  approvalsList: (
+    query: { status?: string; agent?: string; tool?: string; run?: string } = {}
+  ) =>
+    infiniteQueryOptions({
+      queryKey: ["approvals", "pages", query],
+      queryFn: ({ pageParam }) =>
+        api.approvals({ ...query, limit: APPROVALS_PAGE, offset: pageParam }),
+      initialPageParam: 0,
+      getNextPageParam: (last) => last.next_offset ?? undefined,
+    }),
+  /** A session's conversation as one list: the newest turns, kept
+   * current, with the earlier pages the person loaded (see
+   * refreshConversation in sessions.ts). Every refetch reads the tail
+   * only. */
+  conversationWindow: (id: string) =>
+    queryOptions({
+      queryKey: conversationKey(id),
+      queryFn: ({ client }) =>
+        refreshConversation(id, () =>
+          client.getQueryData<ConversationView>(conversationKey(id))
+        ),
+    }),
 }
+
+/** Rows per page of the Approvals inbox. */
+export const APPROVALS_PAGE = 50
+/** The key of q.conversationWindow(id). */
+export const conversationKey = (id: string) =>
+  ["session", id, "conversation", "window"] as const
 
 /** Keys a write to a run makes stale (cancel, steer, resume). */
 export const afterRunWrite = (id: string) =>

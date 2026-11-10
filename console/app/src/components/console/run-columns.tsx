@@ -83,23 +83,53 @@ function Duration({ run }: { run: RunRow }) {
   )
 }
 
+/** Why a failed row failed: its error kind (`max_steps`, `tool_error`,
+ * `model_error`) and the message. undefined for a row that did not
+ * fail, or failed without saying why. */
+function rowError(run: RunRow): { kind: string; message: string } | undefined {
+  if (rowStatus(run) !== "failed") return undefined
+  const kind = (run.chain?.error_type ?? run.error_type) || ""
+  const message = (run.chain?.err || run.err) ?? ""
+  if (!kind && !message) return undefined
+  return { kind: kind || "error", message }
+}
+
+/** The error kind of a failed run as one quiet chip; the whole message
+ * is its tooltip. The status beside it is what says "failed": the chip
+ * is never red. Renders nothing for a run that did not fail. */
+export function ErrorKind({ run }: { run: RunRow }) {
+  const error = rowError(run)
+  if (!error) return null
+  const chip = (
+    <span
+      className="flex-none rounded-sm bg-muted px-1 font-mono text-[11px] leading-[18px] text-muted-foreground"
+      aria-label={
+        error.message
+          ? `Error: ${error.kind}. ${error.message}`
+          : `Error: ${error.kind}`
+      }
+    >
+      {error.kind}
+    </span>
+  )
+  if (!error.message) return chip
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{chip}</TooltipTrigger>
+      <TooltipContent className="max-w-sm text-pretty break-words">
+        {error.message}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
 function Title({ run }: { run: RunRow }) {
-  const status = rowStatus(run)
-  const err = status === "failed" ? run.chain?.err || run.err : ""
   const children = rowChildren(run)
   const issues = rowIssues(run)
   return (
     <span className="flex min-w-0 items-center gap-1.5">
-      <span className="min-w-0 truncate">
-        {run.prompt_preview}
-        {err && (
-          <span className="text-danger-foreground">
-            {run.prompt_preview ? " · " : ""}
-            {err}
-          </span>
-        )}
-        {!run.prompt_preview && !err && "—"}
-      </span>
+      <span className="min-w-0 truncate">{run.prompt_preview || "—"}</span>
+      <ErrorKind run={run} />
       {children && (
         <span
           className={cn(
@@ -231,7 +261,7 @@ export function runColumns(sort?: SortState): Column<RunRow>[] {
     {
       key: "agent",
       header: "Agent",
-      width: "minmax(110px, 200px)",
+      width: "minmax(128px, 200px)",
       cell: (r) => <Agent run={r} />,
     },
     {
@@ -243,6 +273,7 @@ export function runColumns(sort?: SortState): Column<RunRow>[] {
     },
     {
       key: "model",
+      hideBelow: 1000,
       header: "Model",
       width: "minmax(90px, 150px)",
       muted: true,
@@ -250,6 +281,7 @@ export function runColumns(sort?: SortState): Column<RunRow>[] {
     },
     {
       key: "steps",
+      hideBelow: 860,
       header: "Steps",
       width: "52px",
       align: "right",
@@ -266,6 +298,7 @@ export function runColumns(sort?: SortState): Column<RunRow>[] {
     },
     {
       key: "tokens",
+      hideBelow: 780,
       header: head("Tokens", "tokens"),
       width: "72px",
       align: "right",
@@ -282,6 +315,7 @@ export function runColumns(sort?: SortState): Column<RunRow>[] {
     },
     {
       key: "started",
+      hideBelow: 520,
       header: head("Started", undefined),
       width: "76px",
       align: "right",

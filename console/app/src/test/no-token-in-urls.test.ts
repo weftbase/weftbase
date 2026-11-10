@@ -15,7 +15,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { takeSignInToken, tokenFromPaste } from "@/lib/api/auth"
 import { api } from "@/lib/api/http"
-import { streamRun, streamRuns, streamSession } from "@/lib/api/stream"
+import { streamEvents, streamRuns } from "@/lib/api/stream"
 import { validateOverview, validateRun, validateRuns } from "@/lib/search"
 
 const SRC = resolve(__dirname, "..")
@@ -159,24 +159,19 @@ describe("no token in URLs: the /v1 client and the streams", () => {
       api.meta(),
       api.pricing(),
       api.manifest("sha256:abc"),
-      api.runs({ status: "failed", agent: "billing-refund" }),
+      api.runs({ display_status: "failed", agent: "billing-refund" }),
       api.runs({ q: "refund", since: "2020-01-01T00:00:00Z" }, { offset: 50 }),
       api.run(child),
-      api.runStatus(child),
-      api.spans(child),
       api.events(child, 10),
       api.transcript(child, 2),
       api.step(child, 1),
       api.requests(child, 1),
-      api.logs(child),
       api.cancel(child, "operator"),
       api.steer(child, "stop"),
       api.runTimeline(child),
       api.decideApproval("appr_1", { decision: "approve", args_sha256: "ab" }),
       api.sessions({ q: "order", awaiting: true }),
       api.session("s_1"),
-      api.timeline("s_1"),
-      api.entries("s_1", 0, 50),
       api.traces({ notRun: true }),
       api.trace("abc"),
       api.stats("agent", "24h"),
@@ -220,14 +215,14 @@ describe("no token in URLs: the /v1 client and the streams", () => {
     vi.stubGlobal("EventSource", FakeEventSource)
     const stops = [
       streamRuns({ onFrame() {} }, { kinds: ["run"] }),
-      streamRun("run_8f2a1c/2/call_1", { onFrame() {} }),
-      streamSession("s_1", { onFrame() {} }),
+      streamEvents(["approval.requested", "approval.decided"], {
+        onEvent() {},
+      }),
     ]
     stops.forEach((stop) => stop())
-    expect(urls).toHaveLength(3)
+    expect(urls).toHaveLength(2)
     urls.forEach(clean)
     expect(urls[0]).toContain("/v1/runs/stream?all=1&kinds=run")
-    expect(urls[1]).toContain("/v1/runs/run_8f2a1c%2F2%2Fcall_1/stream")
-    expect(urls[2]).toContain("/v1/sessions/s_1/stream")
+    expect(urls[1]).toContain("/v1/events?type=approval.requested")
   })
 })

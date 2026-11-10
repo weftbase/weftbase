@@ -108,10 +108,22 @@ function SignedOut({
       <div className="w-full max-w-sm rounded-card border bg-card p-4 shadow-card">
         <h1 className="text-sm font-semibold">You are signed out</h1>
         <p className="mt-1 text-xs text-muted-foreground">
-          Open the sign-in link your server printed when it started (
-          <code className="font-mono">weftbase dev</code> prints one), or paste
-          it here. A link works once and for 15 minutes.
+          Get a sign-in link and open it, or paste it here. A link works once
+          and for 15 minutes.
         </p>
+        <ul className="mt-2 flex flex-col gap-1 text-xs text-muted-foreground">
+          <li>
+            Next to <code className="font-mono">weftbase dev</code>: run{" "}
+            <code className="font-mono text-foreground">weftbase signin</code>
+          </li>
+          <li>
+            Another server:{" "}
+            <code className="font-mono text-foreground">
+              weftbase signin --url &lt;server&gt; --token &lt;secret key&gt;
+            </code>
+          </li>
+          <li>The demo: press Enter in its terminal.</li>
+        </ul>
         <form onSubmit={(e) => void submit(e)} className="mt-3 flex gap-2">
           <Input
             value={text}

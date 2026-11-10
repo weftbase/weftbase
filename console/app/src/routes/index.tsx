@@ -13,7 +13,7 @@ import {
 } from "@/components/console/empty-state"
 import { Page, PageHeader, Section } from "@/components/console/page-header"
 import { RelativeTime } from "@/components/console/relative-time"
-import { RUN_COLUMNS } from "@/components/console/run-columns"
+import { ErrorKind, RUN_COLUMNS } from "@/components/console/run-columns"
 import { RunsChart } from "@/components/console/runs-chart"
 import { Segmented } from "@/components/console/segmented"
 import { Sparkline } from "@/components/console/sparkline"
@@ -127,7 +127,7 @@ function Overview() {
             )}
           </div>
         </Section>
-        <Attention range={range} />
+        <Attention range={range} failedInWindow={total.data?.total.failed} />
       </div>
 
       <Section
@@ -161,16 +161,32 @@ type Item =
   | { kind: "approval"; at: string; approval: Approval }
   | { kind: "run"; at: string; run: RunRow }
 
+/** The rows the list shows; the rest is a count and a link. */
 const ATTENTION_ROWS = 6
 
 /** What a person should look at: calls waiting on a decision (oldest
- * first: they block a run), then the runs that failed in the window. */
-function Attention({ range }: { range: Window }) {
+ * first: they block a run), then the newest runs that failed in the
+ * window. A short list with the real totals: every waiting call is in
+ * the inbox, every failed run in the Runs list, and the header and the
+ * last line link there. */
+function Attention({
+  range,
+  failedInWindow,
+}: {
+  range: Window
+  /** Runs that failed in the window (the stats' count); undefined
+   * until it is known. */
+  failedInWindow: number | undefined
+}) {
   const since = React.useMemo(() => sinceOf(range), [range])
-  const pending = useQuery(q.approvals({ status: "pending", limit: 20 }))
+  const pending = useQuery(
+    q.approvals({ status: "pending", limit: ATTENTION_ROWS })
+  )
   // A plain list (not a search), so cancelled runs are not in it; the
   // window is applied here.
-  const failed = useQuery(q.runsPage({ display_status: "failed", limit: 50 }))
+  const failed = useQuery(
+    q.runsPage({ display_status: "failed", limit: ATTENTION_ROWS })
+  )
   const error = pending.error ?? failed.error
   const waiting: Item[] = (pending.data?.approvals ?? []).map((a) => ({
     kind: "approval",
@@ -180,33 +196,49 @@ function Attention({ range }: { range: Window }) {
   const failures: Item[] = (failed.data?.runs ?? [])
     .filter((r) => (rowTimes(r).started ?? "") >= since)
     .map((r) => ({ kind: "run", at: rowTimes(r).started ?? "", run: r }))
-  const items = [...waiting, ...failures]
-  const shown = items.slice(0, ATTENTION_ROWS)
-  const more = items.length - shown.length
+  // Each kind gets half of the rows when both have that many; what one
+  // leaves free the other takes.
+  const half = ATTENTION_ROWS / 2
+  const w = Math.min(
+    waiting.length,
+    Math.max(half, ATTENTION_ROWS - failures.length)
+  )
+  const shown = [
+    ...waiting.slice(0, w),
+    ...failures.slice(0, ATTENTION_ROWS - w),
+  ]
+  // The totals are the server's: every pending approval, and the
+  // window's failed runs as the figures above count them.
+  const waitingTotal = Math.max(pending.data?.pending ?? 0, waiting.length)
+  const failedTotal = Math.max(failedInWindow ?? 0, failures.length)
+  const moreWaiting = waitingTotal - Math.min(w, waiting.length)
+  const moreFailed = failedTotal - (shown.length - Math.min(w, waiting.length))
+  const inbox = (
+    n: number,
+    word: string // "waiting" | "more waiting"
+  ) => (
+    <Link to="/approvals" className="hover:text-foreground hover:underline">
+      {count(n)} {word}
+    </Link>
+  )
+  const failedRuns = (n: number, word: string) => (
+    <Link
+      to="/runs"
+      search={{ status: "failed", range }}
+      className="hover:text-foreground hover:underline"
+    >
+      {count(n)} {word}
+    </Link>
+  )
 
   return (
     <Section
       title="Needs attention"
       action={
-        items.length > 0 && (
+        (waitingTotal > 0 || failedTotal > 0) && (
           <span className="flex gap-3">
-            {waiting.length > 0 && (
-              <Link
-                to="/approvals"
-                className="hover:text-foreground hover:underline"
-              >
-                {count(pending.data?.pending ?? waiting.length)} waiting
-              </Link>
-            )}
-            {failures.length > 0 && (
-              <Link
-                to="/runs"
-                search={{ status: "failed", range }}
-                className="hover:text-foreground hover:underline"
-              >
-                {count(failures.length)} failed
-              </Link>
-            )}
+            {waitingTotal > 0 && inbox(waitingTotal, "waiting")}
+            {failedTotal > 0 && failedRuns(failedTotal, "failed")}
           </span>
         )
       }
@@ -219,7 +251,7 @@ function Attention({ range }: { range: Window }) {
         <div className="rounded-alert border">
           <LoadingRows rows={5} />
         </div>
-      ) : items.length === 0 ? (
+      ) : shown.length === 0 && failedTotal === 0 ? (
         <div className="rounded-alert border bg-card">
           <EmptyState icon={CircleCheckIcon} title="Nothing needs attention">
             No run failed in this window and none is waiting on a person.
@@ -251,32 +283,45 @@ function Attention({ range }: { range: Window }) {
                 <span className="truncate px-2 font-medium">
                   {it.kind === "approval" ? it.approval.agent : it.run.agent}
                 </span>
-                <span className="truncate px-2 text-muted-foreground">
-                  {it.kind === "approval" ? (
-                    <>
-                      <span className="font-mono text-xs text-foreground">
-                        {it.approval.tool}
-                      </span>{" "}
-                      {argsSummary(it.approval.args)}
-                    </>
-                  ) : (
-                    <>
-                      <span className="text-danger-foreground">
-                        {it.run.error_type || "error"}
-                      </span>{" "}
-                      {it.run.prompt_preview}
-                    </>
-                  )}
-                </span>
+                {it.kind === "approval" ? (
+                  <span className="truncate px-2 text-muted-foreground">
+                    <span className="font-mono text-xs text-foreground">
+                      {it.approval.tool}
+                    </span>{" "}
+                    {argsSummary(it.approval.args)}
+                  </span>
+                ) : (
+                  <span className="flex min-w-0 items-center gap-1.5 px-2 text-muted-foreground">
+                    <span className="min-w-0 truncate">
+                      {it.run.prompt_preview || "—"}
+                    </span>
+                    <ErrorKind run={it.run} />
+                  </span>
+                )}
                 <span className="px-2 text-right text-xs text-muted-foreground">
                   <RelativeTime time={it.at} />
                 </span>
               </Link>
             </li>
           ))}
-          {more > 0 && (
-            <li className="flex h-7 items-center justify-center text-xs text-muted-foreground">
-              and {count(more)} more
+          {(moreWaiting > 0 || moreFailed > 0) && (
+            <li className="flex h-7 items-center justify-center gap-1.5 text-xs text-muted-foreground">
+              <span>
+                {count(shown.length)} of {count(waitingTotal + failedTotal)}{" "}
+                shown
+              </span>
+              {moreWaiting > 0 && (
+                <>
+                  <span aria-hidden>·</span>
+                  {inbox(moreWaiting, "more waiting")}
+                </>
+              )}
+              {moreFailed > 0 && (
+                <>
+                  <span aria-hidden>·</span>
+                  {failedRuns(moreFailed, "more failed")}
+                </>
+              )}
             </li>
           )}
         </ul>

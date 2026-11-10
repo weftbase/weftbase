@@ -2,7 +2,7 @@
 // The rule: a value the server does not know reads "unknown" or "—",
 // never a made-up zero.
 
-import type { CostFields, Usage } from "./api/types"
+import type { CostFields } from "./api/types"
 
 export const DASH = "—"
 
@@ -19,11 +19,6 @@ export function tokens(n: number | null | undefined): string {
   if (n < 10_000) return nf.format(n)
   if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`
   return `${(n / 1_000_000).toFixed(1)}M`
-}
-
-/** totalTokens is input + output of a usage. */
-export function totalTokens(u: Usage | undefined): number | undefined {
-  return u ? u.input_tokens + u.output_tokens : undefined
 }
 
 /** duration renders milliseconds: "820ms", "4.2s", "2m 04s", "1h 12m".
@@ -118,4 +113,11 @@ export function bytes(n: number | null | undefined): string {
 /** shortId keeps the end of a long id, where ULIDs and hashes differ. */
 export function shortId(id: string, keep = 8): string {
   return id.length <= keep + 4 ? id : `…${id.slice(-keep)}`
+}
+
+/** offset is a time after a start: "+0ms", "+820ms", "+4.20s". Anything
+ * under a millisecond is the start itself. */
+export function offset(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined || Number.isNaN(ms)) return DASH
+  return ms < 1 ? "+0ms" : `+${duration(ms)}`
 }

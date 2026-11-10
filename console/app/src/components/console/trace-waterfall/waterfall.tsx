@@ -30,7 +30,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { cost as formatCost, count, duration, tokens } from "@/lib/format"
+import {
+  cost as formatCost,
+  count,
+  duration,
+  offset,
+  tokens,
+} from "@/lib/format"
 import { usePref } from "@/lib/prefs"
 import { SPAN_KINDS, SPAN_KIND_ORDER } from "@/lib/span-kind"
 import { cn } from "@/lib/utils"
@@ -60,6 +66,15 @@ const ROW = 26
 const INDENT = 14
 const PAD_L = 8
 const OVERSCAN = 6
+// The name column: sized to its names until a person drags the divider.
+const NAME_MIN = 160
+const NAME_MAX = 640
+const NAME_AUTO: Record<"full" | "compact", [number, number]> = {
+  full: [200, 440],
+  compact: [180, 340],
+}
+// The chart keeps at least this much when the divider is dragged.
+const CHART_MIN = 200
 
 export interface TraceWaterfallProps {
   /** The spans and what is known beside them. The component keeps its
@@ -124,10 +139,8 @@ function Waterfall({
   className,
 }: TraceWaterfallProps & { view: TraceView }) {
   const { model, scale, playback, live } = view
-  const [storedName, setStoredName] = usePref(
-    `wb.waterfall.${id}.name`,
-    compact ? "220" : "280"
-  )
+  // "": nobody has dragged the divider; the names decide.
+  const [storedName, setStoredName] = usePref(`wb.waterfall.${id}.name`, "")
   const [query, setQuery] = React.useState("")
   const [kinds, setKinds] = React.useState<ReadonlySet<LegendKind>>(new Set())
   const [collapsed, setCollapsed] = React.useState<ReadonlySet<string>>(
@@ -182,13 +195,26 @@ function Waterfall({
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
-  // The name column: as wide as the person made it; in compact mode as
-  // wide as its content needs, within bounds. In a narrow container the
-  // names give way first.
-  const wanted = compact
-    ? Math.min(340, Math.max(180, nameWidthOf(model.nodes)))
-    : Math.max(140, Number(storedName) || 280)
-  const nameW = Math.min(wanted, Math.max(140, size.w * 0.42))
+  // The name column: as wide as the person made it, else as wide as its
+  // names need, within bounds. In a narrow container the names give way
+  // first.
+  const [autoMin, autoMax] = NAME_AUTO[compact ? "compact" : "full"]
+  const fonts = useFontsReady()
+  const autoName = React.useMemo(
+    () => Math.min(autoMax, Math.max(autoMin, nameWidthOf(model.nodes))),
+    // Measured again when the page's fonts have loaded.
+    [model.nodes, autoMin, autoMax, fonts]
+  )
+  const chosenName = Number(storedName) || undefined
+  // The widest the divider goes here: the chart keeps its minimum.
+  const nameLimit = Math.max(
+    NAME_MIN,
+    Math.min(NAME_MAX, (size.w || Infinity) - CHART_MIN)
+  )
+  const nameW =
+    chosenName !== undefined
+      ? Math.min(nameLimit, Math.max(NAME_MIN, chosenName))
+      : Math.min(autoName, Math.max(NAME_MIN, size.w * 0.45 || autoName))
   const chartW = Math.max(0, size.w - nameW)
   // The plot leaves room for the label after the last bar: the widest
   // plot at which every bar's label still ends inside the chart.
@@ -546,183 +572,194 @@ function Waterfall({
 
       {strip && !compact && <Strip view={view} />}
 
-      {/* "Steps" over the names, the ruler over the chart. */}
       <div
-        className="flex h-7 flex-none border-b text-xs text-muted-foreground"
-        style={{ paddingRight: size.bar }}
+        className={cn("relative flex min-h-0 flex-col", !compact && "flex-1")}
       >
+        {/* "Steps" over the names, the ruler over the chart. */}
         <div
-          className="relative flex flex-none items-center gap-1.5 border-r pl-3"
-          style={{ width: nameW }}
+          className="flex h-7 flex-none border-b text-xs text-muted-foreground"
+          style={{ paddingRight: size.bar }}
         >
-          <ListTreeIcon className="size-3.5 text-subtle-foreground" />
-          <span className="font-medium">Steps</span>
-          <span className="font-mono text-subtle-foreground">
-            {filtering
-              ? `${count(rows.length)} of ${count(model.nodes.length)}`
-              : count(model.nodes.length)}
-          </span>
-          <NameResizer
-            width={nameW}
-            onWidth={(w) => setStoredName(String(Math.round(w)))}
-          />
-        </div>
-        <div
-          role="slider"
-          aria-label="Time"
-          aria-valuemin={0}
-          aria-valuemax={Math.round(scale.length)}
-          aria-valuenow={Math.round(playback.at)}
-          aria-valuetext={duration(scale.toReal(playback.at) - scale.t0)}
-          tabIndex={-1}
-          className="relative min-w-0 flex-1 cursor-crosshair touch-none overflow-hidden select-none"
-          onPointerDown={onRulerDown}
-          onPointerMove={onRulerMove}
-          onPointerUp={onRulerUp}
-          onPointerCancel={() => {
-            drag.current = null
-            setBand(null)
-          }}
-          onDoubleClick={() => {
-            setZoom(null)
-            // The two clicks of the double-click moved the playhead.
-            if (!playback.playing) playback.seek(scale.length)
-          }}
-          title="Click to move the playhead · drag to zoom · double-click to reset"
-        >
-          {tickList.map((t) => (
-            <span
-              key={t.d}
-              className="absolute top-0 flex h-full items-center border-l pl-1 font-mono text-[11px] whitespace-nowrap text-subtle-foreground"
-              style={{ left: xOf(t.d) }}
-            >
-              {labelled(t) ? t.label : ""}
+          <div
+            className="relative flex flex-none items-center gap-1.5 border-r pl-3"
+            style={{ width: nameW }}
+          >
+            <ListTreeIcon className="size-3.5 text-subtle-foreground" />
+            <span className="font-medium">Steps</span>
+            <span className="font-mono text-subtle-foreground">
+              {filtering
+                ? `${count(rows.length)} of ${count(model.nodes.length)}`
+                : count(model.nodes.length)}
             </span>
-          ))}
-          {gapBands.map(({ left, right, gap }) => (
-            <span
-              key={gap.from}
-              className="absolute inset-y-1.5 overflow-hidden rounded-sm bg-card px-1 text-center font-mono text-[11px] leading-4 whitespace-nowrap text-subtle-foreground"
-              style={{ left: left + 1, width: Math.max(0, right - left - 2) }}
-              title={`Waited ${duration(gap.to - gap.from)} on a person (drawn short)`}
-            >
-              {right - left > 64 ? `waited ${duration(gap.to - gap.from)}` : ""}
-            </span>
-          ))}
-          {band && (
-            <span
-              className="absolute inset-y-0 bg-foreground/10"
-              style={{
-                left: xOf(band[0]),
-                width: Math.max(0, xOf(band[1]) - xOf(band[0])),
-              }}
-            />
-          )}
-          {playing && headX >= 0 && headX <= chartW && (
-            <span
-              className="absolute bottom-0 size-2 -translate-x-1/2 translate-y-1/2 rounded-full bg-foreground"
-              style={{ left: headX }}
-            />
-          )}
-        </div>
-      </div>
-
-      <div
-        className={cn("relative min-h-0", !compact && "flex-1")}
-        style={compact ? { height: Math.max(viewH, ROW * 2) } : undefined}
-      >
-        {/* Behind the rows: gridlines and the hatched gaps. */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-y-0 overflow-hidden"
-          style={{ left: nameW, right: size.bar }}
-        >
-          {tickList.map((t) => (
-            <span
-              key={t.d}
-              className="absolute inset-y-0 border-l border-border/60"
-              style={{ left: xOf(t.d) }}
-            />
-          ))}
-          {gapBands.map(({ left, right, gap }) => (
-            <span
-              key={gap.from}
-              className="absolute inset-y-0 border-y-0 span-hatch opacity-25"
-              style={{ left, width: Math.max(0, right - left) }}
-            />
-          ))}
-        </div>
-
-        <div
-          ref={scroller}
-          role="tree"
-          aria-label="Trace steps"
-          tabIndex={0}
-          onKeyDown={onKeyDown}
-          onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
-          onMouseLeave={() => setTip(null)}
-          onDoubleClick={(e) => {
-            if ((e.target as HTMLElement).closest("[data-chart]")) setZoom(null)
-          }}
-          className="absolute inset-0 overflow-x-hidden overflow-y-auto outline-none"
-        >
-          {model.nodes.length === 0 ? (
-            <div className="flex h-full items-center justify-center px-4 text-center text-xs text-muted-foreground">
-              {empty ?? "No spans were recorded."}
-            </div>
-          ) : rows.length === 0 ? (
-            <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center">
-              <p className="text-sm font-medium">No matching steps</p>
-              <p className="text-xs text-muted-foreground">
-                Nothing in this trace matches
-                {query.trim() ? ` “${query.trim()}”` : " the filter"}.
-              </p>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => {
-                  setQuery("")
-                  setKinds(new Set())
-                }}
+          </div>
+          <div
+            role="slider"
+            aria-label="Time"
+            aria-valuemin={0}
+            aria-valuemax={Math.round(scale.length)}
+            aria-valuenow={Math.round(playback.at)}
+            aria-valuetext={duration(scale.toReal(playback.at) - scale.t0)}
+            tabIndex={-1}
+            className="relative min-w-0 flex-1 cursor-crosshair touch-none overflow-hidden select-none"
+            onPointerDown={onRulerDown}
+            onPointerMove={onRulerMove}
+            onPointerUp={onRulerUp}
+            onPointerCancel={() => {
+              drag.current = null
+              setBand(null)
+            }}
+            onDoubleClick={() => {
+              setZoom(null)
+              // The two clicks of the double-click moved the playhead.
+              if (!playback.playing) playback.seek(scale.length)
+            }}
+            title="Click to move the playhead · drag to zoom · double-click to reset"
+          >
+            {tickList.map((t) => (
+              <span
+                key={t.d}
+                className="absolute top-0 flex h-full items-center border-l pl-1 font-mono text-[11px] whitespace-nowrap text-subtle-foreground"
+                style={{ left: xOf(t.d) }}
               >
-                Clear
-              </Button>
-            </div>
-          ) : (
-            <div className="relative" style={{ height: rows.length * ROW }}>
-              {rows.slice(first, last).map((r, k) => (
-                <Row
-                  key={r.node.id}
-                  row={r}
-                  top={(first + k) * ROW}
-                  prev={rows.at(first + k - 1)?.node}
-                  {...rowProps}
-                />
+                {labelled(t) ? t.label : ""}
+              </span>
+            ))}
+            {gapBands.map(({ left, right, gap }) => (
+              <span
+                key={gap.from}
+                className="absolute inset-y-1.5 overflow-hidden rounded-sm bg-card px-1 text-center font-mono text-[11px] leading-4 whitespace-nowrap text-subtle-foreground"
+                style={{ left: left + 1, width: Math.max(0, right - left - 2) }}
+                title={`Waited ${duration(gap.to - gap.from)} on a person (drawn short)`}
+              >
+                {right - left > 64
+                  ? `waited ${duration(gap.to - gap.from)}`
+                  : ""}
+              </span>
+            ))}
+            {band && (
+              <span
+                className="absolute inset-y-0 bg-foreground/10"
+                style={{
+                  left: xOf(band[0]),
+                  width: Math.max(0, xOf(band[1]) - xOf(band[0])),
+                }}
+              />
+            )}
+            {playing && headX >= 0 && headX <= chartW && (
+              <span
+                className="absolute bottom-0 size-2 -translate-x-1/2 translate-y-1/2 rounded-full bg-foreground"
+                style={{ left: headX }}
+              />
+            )}
+          </div>
+        </div>
+
+        <div
+          className={cn("relative min-h-0", !compact && "flex-1")}
+          style={compact ? { height: Math.max(viewH, ROW * 2) } : undefined}
+        >
+          {/* Behind the rows: gridlines and the hatched gaps. */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 overflow-hidden"
+            style={{ left: nameW, right: size.bar }}
+          >
+            {tickList.map((t) => (
+              <span
+                key={t.d}
+                className="absolute inset-y-0 border-l border-border/60"
+                style={{ left: xOf(t.d) }}
+              />
+            ))}
+            {gapBands.map(({ left, right, gap }) => (
+              <span
+                key={gap.from}
+                className="absolute inset-y-0 border-y-0 span-hatch opacity-25"
+                style={{ left, width: Math.max(0, right - left) }}
+              />
+            ))}
+          </div>
+
+          <div
+            ref={scroller}
+            role="tree"
+            aria-label="Trace steps"
+            tabIndex={0}
+            onKeyDown={onKeyDown}
+            onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+            onMouseLeave={() => setTip(null)}
+            onDoubleClick={(e) => {
+              if ((e.target as HTMLElement).closest("[data-chart]"))
+                setZoom(null)
+            }}
+            className="absolute inset-0 overflow-x-hidden overflow-y-auto outline-none"
+          >
+            {model.nodes.length === 0 ? (
+              <div className="flex h-full items-center justify-center px-4 text-center text-xs text-muted-foreground">
+                {empty ?? "No spans were recorded."}
+              </div>
+            ) : rows.length === 0 ? (
+              <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center">
+                <p className="text-sm font-medium">No matching steps</p>
+                <p className="text-xs text-muted-foreground">
+                  Nothing in this trace matches
+                  {query.trim() ? ` “${query.trim()}”` : " the filter"}.
+                </p>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    setQuery("")
+                    setKinds(new Set())
+                  }}
+                >
+                  Clear
+                </Button>
+              </div>
+            ) : (
+              <div className="relative" style={{ height: rows.length * ROW }}>
+                {rows.slice(first, last).map((r, k) => (
+                  <Row
+                    key={r.node.id}
+                    row={r}
+                    top={(first + k) * ROW}
+                    prev={rows.at(first + k - 1)?.node}
+                    {...rowProps}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Agent rows stay while their children scroll under them. */}
+          {stuck.length > 0 && (
+            <div
+              className="absolute top-0 left-0 z-20 border-b bg-card"
+              style={{ right: size.bar, height: stuck.length * ROW }}
+            >
+              {stuck.map((r, k) => (
+                <Row key={r.node.id} row={r} top={k * ROW} {...rowProps} />
               ))}
             </div>
           )}
+
+          {/* Over the rows: the playhead. */}
+          {playing && headX >= 0 && headX <= chartW && (
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-y-0 z-30 w-px bg-foreground/70"
+              style={{ left: nameW + headX }}
+            />
+          )}
         </div>
-
-        {/* Agent rows stay while their children scroll under them. */}
-        {stuck.length > 0 && (
-          <div
-            className="absolute top-0 left-0 z-20 border-b bg-card"
-            style={{ right: size.bar, height: stuck.length * ROW }}
-          >
-            {stuck.map((r, k) => (
-              <Row key={r.node.id} row={r} top={k * ROW} {...rowProps} />
-            ))}
-          </div>
-        )}
-
-        {/* Over the rows: the playhead. */}
-        {playing && headX >= 0 && headX <= chartW && (
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-y-0 z-30 w-px bg-foreground/70"
-            style={{ left: nameW + headX }}
-          />
-        )}
+        <NameResizer
+          width={nameW}
+          min={NAME_MIN}
+          max={nameLimit}
+          onWidth={(w) =>
+            setStoredName(w === null ? null : String(Math.round(w)))
+          }
+        />
       </div>
 
       {!compact && (
@@ -739,6 +776,22 @@ function Waterfall({
       {tip && <Tip tip={tip} model={view.model} />}
     </div>
   )
+}
+
+/** useFontsReady turns true when the page's fonts have loaded: text
+ * measured before that was measured in the fallback font. */
+function useFontsReady(): boolean {
+  const [ready, setReady] = React.useState(false)
+  React.useEffect(() => {
+    let on = true
+    const fonts = typeof document === "undefined" ? undefined : document.fonts
+    if (!fonts) return
+    void fonts.ready.then(() => on && setReady(true))
+    return () => {
+      on = false
+    }
+  }, [])
+  return ready
 }
 
 /** stickyRows: the agent rows that stay at the top: the agent ancestors
@@ -770,36 +823,64 @@ function stickyRows(rows: TraceRow[], scrollTop: number): TraceRow[] {
   return stack.slice(0, 3)
 }
 
+/** The divider between the names and the chart, over the header and
+ * the rows: drag, ←/→ (16px), Home/End (the limits); a double-click or
+ * Delete gives the width back to the names. */
 function NameResizer({
   width,
+  min,
+  max,
   onWidth,
 }: {
   width: number
-  onWidth: (w: number) => void
+  min: number
+  max: number
+  /** null: forget the chosen width. */
+  onWidth: (w: number | null) => void
 }) {
   const from = React.useRef<{ x: number; w: number } | null>(null)
+  const [dragging, setDragging] = React.useState(false)
+  const clamp = (w: number) => Math.max(min, Math.min(max, w))
+  const stop = () => {
+    from.current = null
+    setDragging(false)
+  }
   return (
     <div
       role="separator"
       aria-orientation="vertical"
       aria-label="Resize the name column"
       aria-valuenow={Math.round(width)}
+      aria-valuemin={min}
+      aria-valuemax={Math.round(max)}
       tabIndex={0}
-      className="absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize outline-none hover:bg-ring/30 focus-visible:bg-ring/40"
+      title="Drag to resize · double-click to fit the names"
+      className={cn(
+        "absolute inset-y-0 z-30 w-2 -translate-x-1/2 cursor-col-resize touch-none outline-none after:absolute after:inset-y-0 after:left-1/2 after:w-0.5 after:-translate-x-1/2 hover:after:bg-ring focus-visible:after:bg-ring",
+        dragging && "after:bg-ring"
+      )}
+      style={{ left: width }}
       onPointerDown={(e) => {
+        if (e.button !== 0) return
         e.preventDefault()
         e.currentTarget.setPointerCapture(e.pointerId)
+        e.currentTarget.focus()
         from.current = { x: e.clientX, w: width }
+        setDragging(true)
       }}
       onPointerMove={(e) => {
         const f = from.current
-        if (f) onWidth(Math.max(160, Math.min(640, f.w + e.clientX - f.x)))
+        if (f) onWidth(clamp(f.w + e.clientX - f.x))
       }}
-      onPointerUp={() => (from.current = null)}
-      onPointerCancel={() => (from.current = null)}
+      onPointerUp={stop}
+      onPointerCancel={stop}
+      onDoubleClick={() => onWidth(null)}
       onKeyDown={(e) => {
-        if (e.key === "ArrowLeft") onWidth(Math.max(160, width - 16))
-        else if (e.key === "ArrowRight") onWidth(Math.min(640, width + 16))
+        if (e.key === "ArrowLeft") onWidth(clamp(width - 16))
+        else if (e.key === "ArrowRight") onWidth(clamp(width + 16))
+        else if (e.key === "Home") onWidth(min)
+        else if (e.key === "End") onWidth(max)
+        else if (e.key === "Delete" || e.key === "Backspace") onWidth(null)
         else return
         e.preventDefault()
         e.stopPropagation()
@@ -826,8 +907,26 @@ function labelWidth(n: TraceNode, slowest: boolean): number {
   return barLabel(n, Infinity).length * 7.3 + (slowest ? 58 : 0)
 }
 
-/** nameWidthOf estimates the name column a tree needs: indent, chevron,
- * icon, the name and its muted word. */
+// Text is measured on a canvas in the page's own font; where there is
+// no canvas (tests) a per-character estimate stands in.
+let ruler: CanvasRenderingContext2D | null | undefined
+function textWidth(text: string, px: number, weight: number): number {
+  if (ruler === undefined && typeof CanvasRenderingContext2D === "undefined")
+    ruler = null
+  if (ruler === undefined) {
+    try {
+      ruler = document.createElement("canvas").getContext("2d")
+    } catch {
+      ruler = null
+    }
+  }
+  if (!ruler) return text.length * px * 0.56
+  ruler.font = `${weight} ${px}px ${getComputedStyle(document.body).fontFamily}`
+  return ruler.measureText(text).width
+}
+
+/** nameWidthOf: the name column a tree needs: indent, chevron, icon, the
+ * name and its muted word, the marks after them. */
 function nameWidthOf(nodes: readonly TraceNode[]): number {
   let w = 0
   for (const n of nodes)
@@ -836,11 +935,14 @@ function nameWidthOf(nodes: readonly TraceNode[]): number {
       6 +
         n.depth * INDENT +
         16 +
+        6 +
         20 +
-        12 +
-        n.label.length * 7.2 +
-        (n.secondary ? 6 + n.secondary.length * 6.4 : 0) +
-        28
+        6 +
+        textWidth(n.label, 13, n.base === "agent" ? 600 : 500) +
+        (n.failed ? 18 : 0) +
+        (n.secondary ? 6 + textWidth(n.secondary, 12, 400) : 0) +
+        (n.glyph ? 18 : 0) +
+        12
     )
   return Math.ceil(w)
 }
@@ -1044,6 +1146,11 @@ function Bar({
   const slowest = model.slowestId === n.id && !cut
   const lw = label.length * 7.3 + (slowest ? 58 : 0)
   const pulse = n.running && n.kind !== "waiting" && "motion-safe:live-pulse"
+  // The label goes after the bar; before it when it would run out of
+  // the chart there (a narrow or zoomed chart); and when neither side
+  // has the room, over the bar's end on a chip.
+  const place =
+    x1 + 6 + lw <= chartW ? "after" : x0 - 6 - lw >= 0 ? "before" : "inside"
 
   let bar: React.ReactNode
   if (n.kind === "marker") {
@@ -1129,7 +1236,7 @@ function Bar({
 
   // The handoff connector: an elbow in the child's hue from the row
   // above down to where the child starts.
-  const connector = n.handoff && prev && (
+  const connector = n.handed && prev && (
     <span
       aria-hidden
       className={cn(
@@ -1145,13 +1252,16 @@ function Bar({
       {connector}
       {bar}
       <span
-        className="absolute top-1/2 flex -translate-y-1/2 items-center gap-1.5 font-mono text-xs whitespace-nowrap text-muted-foreground tabular-nums"
+        className={cn(
+          "absolute top-1/2 flex -translate-y-1/2 items-center gap-1.5 font-mono text-xs whitespace-nowrap text-muted-foreground tabular-nums",
+          place === "inside" && "rounded-sm bg-card/90 px-1"
+        )}
         style={
-          // After the bar; before it when there is no room after (a
-          // narrow chart, a zoomed one) and there is room before.
-          x1 + 6 + lw > chartW && x0 - 6 - lw > 0
-            ? { right: chartW - x0 + 6 }
-            : { left: x1 + 6 }
+          place === "after"
+            ? { left: x1 + 6 }
+            : place === "before"
+              ? { right: chartW - x0 + 6 }
+              : { right: Math.max(4, chartW - x1 + 4) }
         }
       >
         {label}
@@ -1190,7 +1300,7 @@ function Tip({
       <span className="truncate font-medium">{gist(n)}</span>
       {n.kind !== "marker" && (
         <span className="font-mono opacity-80">
-          +{duration(Math.max(0, n.start - model.t0))} ·{" "}
+          {offset(n.start - model.t0)} ·{" "}
           {n.running && n.kind !== "waiting"
             ? "running"
             : duration(Math.max(0, n.end - n.start))}

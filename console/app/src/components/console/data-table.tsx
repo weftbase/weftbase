@@ -14,6 +14,10 @@ export interface Column<T> {
   mono?: boolean
   /** Secondary text colour for the whole column. */
   muted?: boolean
+  /** Drop the column when the table is narrower than this many pixels
+   * (its own width, not the window's: a detail may be open beside it).
+   * Give it to the columns a narrow list can do without. */
+  hideBelow?: number
   cell: (row: T) => React.ReactNode
 }
 
@@ -27,7 +31,7 @@ export interface Column<T> {
 //     rowLink={(r) => ({ to: "/runs/$runId", params: { runId: r.id } })} />
 export function DataTable<T>({
   label,
-  columns,
+  columns: allColumns,
   rows,
   rowKey,
   rowLink,
@@ -52,8 +56,23 @@ export function DataTable<T>({
   footer?: React.ReactNode
   className?: string
 }) {
-  const template = columns.map((c) => c.width).join(" ")
   const body = React.useRef<HTMLDivElement>(null)
+  // The room the table has: its scroll container's width.
+  const table = React.useRef<HTMLDivElement>(null)
+  const [room, setRoom] = React.useState<number>()
+  React.useLayoutEffect(() => {
+    const el = table.current?.parentElement
+    if (!el || typeof ResizeObserver === "undefined") return
+    setRoom(el.clientWidth)
+    const ro = new ResizeObserver(() => setRoom(el.clientWidth))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  const columns =
+    room === undefined
+      ? allColumns
+      : allColumns.filter((c) => !c.hideBelow || room >= c.hideBelow)
+  const template = columns.map((c) => c.width).join(" ")
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return
@@ -98,6 +117,7 @@ export function DataTable<T>({
 
   return (
     <div
+      ref={table}
       role="table"
       aria-label={label}
       aria-rowcount={rows.length}

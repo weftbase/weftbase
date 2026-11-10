@@ -188,6 +188,24 @@ function General() {
                 </ul>
               ),
             ],
+            ...((m.capabilities_off ?? []).length > 0
+              ? ([
+                  [
+                    "Off",
+                    <ul key="off" className="flex flex-col gap-0.5">
+                      {(m.capabilities_off ?? []).map((c) => (
+                        <li key={c.name}>
+                          {c.name}
+                          <span className="font-sans text-muted-foreground">
+                            {" "}
+                            · {c.reason}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>,
+                  ],
+                ] satisfies [string, React.ReactNode][])
+              : []),
           ]}
         />
       </Section>

@@ -4,6 +4,7 @@ import {
   CheckIcon,
   DownloadIcon,
   ExternalLinkIcon,
+  GitCompareArrowsIcon,
   LinkIcon,
   MoreHorizontalIcon,
   SendIcon,
@@ -12,6 +13,7 @@ import {
 } from "lucide-react"
 import * as React from "react"
 
+import { CompareDialog } from "@/components/console/compare/dialog"
 import { useCopy } from "@/components/console/copy-id"
 import { Button } from "@/components/ui/button"
 import {
@@ -32,6 +34,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Textarea } from "@/components/ui/textarea"
+import { ApiError } from "@/lib/api/errors"
 import { api } from "@/lib/api/http"
 import type { ExportFormat } from "@/lib/api/http"
 import { afterRunWrite } from "@/lib/api/queries"
@@ -67,6 +70,7 @@ export function RunActions({
   const [tree, setTree] = React.useState(false)
   const [steering, setSteering] = React.useState(false)
   const [deleting, setDeleting] = React.useState(false)
+  const [comparing, setComparing] = React.useState(false)
   const [text, setText] = React.useState("")
   const refresh = () => {
     for (const key of afterRunWrite(runId))
@@ -165,6 +169,10 @@ export function RunActions({
               </a>
             </DropdownMenuItem>
           )}
+          <DropdownMenuItem onSelect={() => setComparing(true)}>
+            <GitCompareArrowsIcon />
+            Compare with…
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
             variant="destructive"
@@ -229,18 +237,27 @@ export function RunActions({
         </DialogContent>
       </Dialog>
 
+      <CompareDialog
+        runId={runId}
+        open={comparing}
+        onOpenChange={setComparing}
+      />
+
       <Dialog open={deleting} onOpenChange={setDeleting}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Delete this run?</DialogTitle>
             <DialogDescription>
-              Its spans, messages and logs are removed from this server. This
-              cannot be undone.
+              The whole run is removed from this server: every part of it (a
+              wait and what continued it), its spans, messages, logs and
+              approvals. This cannot be undone.
             </DialogDescription>
           </DialogHeader>
           {del.error && (
             <p role="alert" className="text-xs text-danger-foreground">
-              {message(del.error)}
+              {del.error instanceof ApiError && del.error.status === 409
+                ? "This run is still going (queued, running or waiting on a person). Cancel it first, then delete it."
+                : message(del.error)}
             </p>
           )}
           <DialogFooter>

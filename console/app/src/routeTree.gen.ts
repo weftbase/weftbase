@@ -23,6 +23,7 @@ import { Route as SettingsAppearanceRouteImport } from './routes/settings/appear
 import { Route as SettingsGeneralRouteImport } from './routes/settings/general'
 import { Route as SettingsPricingRouteImport } from './routes/settings/pricing'
 import { Route as TracesTraceIdRouteImport } from './routes/traces/$traceId'
+import { Route as RunsRunIdCompareRouteImport } from './routes/runs/$runId_.compare'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -94,6 +95,11 @@ const TracesTraceIdRoute = TracesTraceIdRouteImport.update({
   path: '/traces/$traceId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RunsRunIdCompareRoute = RunsRunIdCompareRouteImport.update({
+  id: '/runs/$runId_/compare',
+  path: '/runs/$runId/compare',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -110,6 +116,7 @@ export interface FileRoutesByFullPath {
   '/runs/': typeof RunsIndexRoute
   '/sessions/': typeof SessionsIndexRoute
   '/settings/': typeof SettingsIndexRoute
+  '/runs/$runId/compare': typeof RunsRunIdCompareRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -125,6 +132,7 @@ export interface FileRoutesByTo {
   '/runs': typeof RunsIndexRoute
   '/sessions': typeof SessionsIndexRoute
   '/settings': typeof SettingsIndexRoute
+  '/runs/$runId/compare': typeof RunsRunIdCompareRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -142,6 +150,7 @@ export interface FileRoutesById {
   '/runs/': typeof RunsIndexRoute
   '/sessions/': typeof SessionsIndexRoute
   '/settings/': typeof SettingsIndexRoute
+  '/runs/$runId_/compare': typeof RunsRunIdCompareRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -160,6 +169,7 @@ export interface FileRouteTypes {
     | '/runs/'
     | '/sessions/'
     | '/settings/'
+    | '/runs/$runId/compare'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -175,6 +185,7 @@ export interface FileRouteTypes {
     | '/runs'
     | '/sessions'
     | '/settings'
+    | '/runs/$runId/compare'
   id:
     | '__root__'
     | '/'
@@ -191,6 +202,7 @@ export interface FileRouteTypes {
     | '/runs/'
     | '/sessions/'
     | '/settings/'
+    | '/runs/$runId_/compare'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -204,6 +216,7 @@ export interface RootRouteChildren {
   ApprovalsIndexRoute: typeof ApprovalsIndexRoute
   RunsIndexRoute: typeof RunsIndexRoute
   SessionsIndexRoute: typeof SessionsIndexRoute
+  RunsRunIdCompareRoute: typeof RunsRunIdCompareRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -306,6 +319,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TracesTraceIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/runs/$runId_/compare': {
+      id: '/runs/$runId_/compare'
+      path: '/runs/$runId/compare'
+      fullPath: '/runs/$runId/compare'
+      preLoaderRoute: typeof RunsRunIdCompareRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -338,6 +358,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApprovalsIndexRoute: ApprovalsIndexRoute,
   RunsIndexRoute: RunsIndexRoute,
   SessionsIndexRoute: SessionsIndexRoute,
+  RunsRunIdCompareRoute: RunsRunIdCompareRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

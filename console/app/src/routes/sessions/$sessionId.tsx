@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, createFileRoute } from "@tanstack/react-router"
 import * as React from "react"
 
@@ -13,7 +13,6 @@ import { useNow } from "@/components/console/relative-time"
 import { MarkerLine } from "@/components/console/session/marker"
 import {
   buildItems,
-  exchanges,
   sessionTitle,
   turnNumber,
 } from "@/components/console/session/model"
@@ -23,8 +22,9 @@ import { TurnBlock } from "@/components/console/session/turn"
 import { LivePill, StatusBadge } from "@/components/console/status"
 import { Button } from "@/components/ui/button"
 import { useSessionLive } from "@/lib/api/live"
-import { q } from "@/lib/api/queries"
-import { TURNS_PAGE } from "@/lib/api/sessions"
+import { conversationKey, q } from "@/lib/api/queries"
+import { TURNS_PAGE, loadEarlier, mergeEarlier } from "@/lib/api/sessions"
+import type { ConversationView } from "@/lib/api/sessions"
 import { sessionStatus } from "@/lib/api/status"
 import { count } from "@/lib/format"
 import { useSetSearch, validateSession } from "@/lib/search"
@@ -55,21 +55,26 @@ function Session({ sessionId }: { sessionId: string }) {
   const stream = useSessionLive(sessionId)
   const now = useNow()
 
-  // The page opens on the newest turns ("tail"); once they are known the
-  // window is pinned to its first turn, so a new turn is appended and
-  // "earlier turns" only ever adds at the top.
-  const [from, setFrom] = React.useState<number | "tail">("tail")
-  const conversation = useQuery({
-    ...q.conversation(sessionId, from),
-    placeholderData: (prev) => prev,
-  })
-  const session = useQuery(q.session(sessionId))
+  // One list with a live window at its end: the page opens on the newest
+  // turns, and a live tick reads those again and nothing else. "Earlier
+  // turns" are read once and put at the top of the same cached list;
+  // they are finished turns, so no tick reads them again.
+  // The conversation carries the session's own row too (the rail's
+  // facts), so the page is one request, and one per tick.
+  const conversation = useQuery(q.conversationWindow(sessionId))
   const view = conversation.data
-  React.useEffect(() => {
-    if (from !== "tail" || !view) return
-    qc.setQueryData(q.conversation(sessionId, view.offset).queryKey, view)
-    setFrom(view.offset)
-  }, [from, view, qc, sessionId])
+  const earlier = useMutation({
+    mutationFn: ({ from, to }: { from: number; to: number }) =>
+      loadEarlier(sessionId, from, to),
+    onSuccess: (pages) =>
+      qc.setQueryData<ConversationView>(conversationKey(sessionId), (v) =>
+        v ? mergeEarlier(v, pages) : v
+      ),
+  })
+  const readBackTo = (from: number) => {
+    if (!view || earlier.isPending || from >= view.offset) return
+    earlier.mutate({ from: Math.max(0, from), to: view.offset })
+  }
 
   const items = React.useMemo(
     () => (view ? buildItems(view, Math.max(now, Date.now())) : []),
@@ -83,10 +88,14 @@ function Session({ sessionId }: { sessionId: string }) {
     items.some(
       (i) => i.type === "turn" && turnNumber(i.turn, i.ordinal) === wanted
     )
+  const reading = earlier.isPending
+  const stuck = earlier.isError
+  const offset = view?.offset
+  const readBack = React.useEffectEvent(readBackTo)
   React.useEffect(() => {
-    if (has || !view || view.offset === 0 || typeof from !== "number") return
-    setFrom(Math.max(0, Math.min(view.offset - TURNS_PAGE, (wanted ?? 1) - 1)))
-  }, [has, view, from, wanted])
+    if (has || offset === undefined || offset === 0 || reading || stuck) return
+    readBack(Math.min(offset - TURNS_PAGE, (wanted ?? 1) - 1))
+  }, [has, offset, reading, stuck, wanted])
 
   // Open at the newest turn (or the linked one), and stay at the end
   // while new turns arrive, unless the reader scrolled up.
@@ -112,15 +121,15 @@ function Session({ sessionId }: { sessionId: string }) {
     // Only when a turn arrives or the newest one changes state.
   }, [view === undefined, turnCount, lastStatus])
 
-  const s = session.data
+  const s = view?.session
   const title = sessionTitle(
     s ??
       (view
         ? { title: view.title, first_prompt: view.turns[0]?.input }
         : undefined)
   )
-  const total = view?.totalTurns ?? (s ? exchanges(s) : undefined)
-  const error = conversation.error ?? session.error
+  const total = view?.totalTurns
+  const error = conversation.error
 
   return (
     <Page
@@ -158,10 +167,7 @@ function Session({ sessionId }: { sessionId: string }) {
           <ErrorState
             error={error}
             what="The session"
-            onRetry={() => {
-              void conversation.refetch()
-              void session.refetch()
-            }}
+            onRetry={() => void conversation.refetch()}
           />
         </div>
       ) : !view ? (
@@ -196,6 +202,21 @@ function Session({ sessionId }: { sessionId: string }) {
             }}
             className="min-w-0 flex-1 overflow-auto"
           >
+            {/* Too narrow for the rail beside the conversation: its facts
+                are a block that opens above it. */}
+            {s && (
+              <details className="hidden border-b text-xs max-[900px]:block">
+                <summary className="flex h-8 cursor-pointer items-center px-4 font-medium text-muted-foreground select-none hover:text-foreground">
+                  Session facts
+                </summary>
+                <SessionRail
+                  session={s}
+                  delegated={view.delegated}
+                  newest={view.turns.at(-1)}
+                  className="border-t"
+                />
+              </details>
+            )}
             <div className="mx-auto flex w-full max-w-[840px] flex-col gap-4 px-4 pt-4 pb-10">
               {view.marksCapped && (
                 <p className="text-xs text-muted-foreground">
@@ -220,18 +241,17 @@ function Session({ sessionId }: { sessionId: string }) {
                         <Button
                           size="sm"
                           variant="secondary"
-                          disabled={conversation.isFetching}
-                          onClick={() =>
-                            setFrom(Math.max(0, view.offset - TURNS_PAGE))
-                          }
+                          disabled={earlier.isPending}
+                          onClick={() => readBackTo(view.offset - TURNS_PAGE)}
                         >
-                          {conversation.isPlaceholderData
+                          {earlier.isPending
                             ? "Loading…"
                             : `Show ${count(Math.min(TURNS_PAGE, item.count))} earlier ${Math.min(TURNS_PAGE, item.count) === 1 ? "turn" : "turns"}`}
                         </Button>
                         <span>
-                          {count(item.count)} of {count(view.totalTurns)} not
-                          shown
+                          {earlier.isError
+                            ? "The earlier turns could not be read."
+                            : `${count(item.count)} of ${count(view.totalTurns)} not shown`}
                         </span>
                       </div>
                     )
@@ -274,6 +294,7 @@ function Session({ sessionId }: { sessionId: string }) {
           {s && (
             <SessionRail
               session={s}
+              delegated={view.delegated}
               newest={view.turns.at(-1)}
               className="w-[272px] flex-none overflow-auto border-l max-[900px]:hidden"
             />

@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router"
 import { ArrowRightIcon } from "lucide-react"
 import * as React from "react"
 
+import { driftNote } from "@/components/console/agent/inventory"
 import { CopyId } from "@/components/console/copy-id"
 import { DataTable } from "@/components/console/data-table"
 import type { Column } from "@/components/console/data-table"
@@ -189,14 +190,10 @@ export function MoveLabel({
 export function Versions({
   agent,
   shown,
-  differs,
 }: {
   agent: AgentDetail
   /** The version whose capabilities are shown above. */
   shown: string | undefined
-  /** Version ids whose runs reported a manifest that is not the
-   * registered one. */
-  differs: ReadonlySet<string>
 }) {
   const [moving, setMoving] = React.useState<VersionDetail | null>(null)
   const columns: Column<VersionDetail>[] = [
@@ -239,15 +236,16 @@ export function Versions({
       muted: true,
       cell: (v) => {
         const lines = changeLines(v.changes)
+        const drift = driftNote(v.manifest_drift)
         return (
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="min-w-0 truncate" title={lines.join("; ")}>
               {lines.join("; ")}
             </span>
-            {differs.has(v.id) && (
+            {drift && (
               <span
                 className="flex-none rounded-sm bg-warning-muted px-1 text-[11px] leading-[18px] font-medium text-warning-foreground"
-                title="A run on this version reported a manifest that is not the one the version registered: the running build differs from it."
+                title={drift}
               >
                 differs
               </span>
@@ -258,6 +256,7 @@ export function Versions({
     },
     {
       key: "placement",
+      hideBelow: 760,
       header: "Placement",
       width: "88px",
       muted: true,
@@ -265,12 +264,14 @@ export function Versions({
     },
     {
       key: "id",
+      hideBelow: 680,
       header: "Id",
       width: "112px",
       cell: (v) => <CopyId id={v.id} label="version id" />,
     },
     {
       key: "created",
+      hideBelow: 560,
       header: "Registered",
       width: "88px",
       align: "right",

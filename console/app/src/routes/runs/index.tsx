@@ -26,7 +26,7 @@ import { q } from "@/lib/api/queries"
 import { FILTERABLE, STATUS_LABEL } from "@/lib/api/status"
 import type { TraceRow } from "@/lib/api/types"
 import { count, duration, shortId } from "@/lib/format"
-import { isSearching, keepShown, toRunsQuery, unpricedLine } from "@/lib/runs"
+import { isSearching, toRunsQuery, unpricedLine } from "@/lib/runs"
 import {
   RANGES,
   RANGE_LABEL,
@@ -128,15 +128,12 @@ function RunsFilters() {
   const models = useQuery(q.statsAll("model", "30d"))
   const tools = useQuery(q.statsAll("tool", "30d"))
   const errors = useQuery(q.stats("error_type", "30d"))
-  // A search is filtered again here (keepShown), so the server's total
-  // would overstate it: count the rows once they are all loaded.
+  // A search's total counts rows before chains are folded: count the
+  // rows once they are all loaded instead.
   const total = !isSearching(search)
     ? runs.data?.pages[0]?.total
     : runs.data && !runs.hasNextPage
-      ? keepShown(
-          runs.data.pages.flatMap((p) => p.runs),
-          search
-        ).length
+      ? runs.data.pages.reduce((n, p) => n + p.runs.length, 0)
       : undefined
 
   return (
@@ -209,10 +206,7 @@ function RunsTable() {
       />
     )
   if (!runs.data) return <LoadingRows rows={12} />
-  const rows = keepShown(
-    runs.data.pages.flatMap((p) => p.runs),
-    search
-  )
+  const rows = runs.data.pages.flatMap((p) => p.runs)
   if (rows.length === 0 && !runs.hasNextPage)
     return filtered ? (
       <EmptyState

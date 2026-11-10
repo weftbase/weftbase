@@ -26,8 +26,17 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { ApiError } from "@/lib/api/errors"
 import { api } from "@/lib/api/http"
 import { count } from "@/lib/format"
+
+/** Why a session was not deleted. The server refuses (409) while one
+ * of its runs is queued, running or waiting on a person. */
+export function deleteError(e: unknown): string {
+  if (e instanceof ApiError && e.status === 409 && e.code === "run_active")
+    return "A run of this session is still going. Cancel it first, then delete."
+  return e instanceof Error ? e.message : String(e)
+}
 
 /** SessionMenu: the session's "…" menu. Export (JSON lines: every turn's
  * run, then the session's state log), copy link, delete (confirmed). */
@@ -107,9 +116,7 @@ export function SessionMenu({
           </DialogHeader>
           {del.error && (
             <p role="alert" className="text-xs text-danger-foreground">
-              {del.error instanceof Error
-                ? del.error.message
-                : String(del.error)}
+              {deleteError(del.error)}
             </p>
           )}
           <DialogFooter>
