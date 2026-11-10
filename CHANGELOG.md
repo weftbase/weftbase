@@ -7,7 +7,7 @@ directory, and says so here. weftbase has its own version line,
 independent of weft's, and reports the weft version it was built with
 (`weftbase version`, `GET /v1/meta`).
 
-## v0.1.0 — Unreleased
+## v0.1.0 — 2026-11-10
 
 The first release. weftbase is the backend for agents built with
 [weft](https://github.com/weftbase/weft): it registers agents as
