@@ -5,6 +5,7 @@ import * as React from "react"
 import { ErrorState, LoadingRows } from "@/components/console/empty-state"
 import { useNow } from "@/components/console/relative-time"
 import { useRun } from "@/components/console/run/use-run"
+import { ApprovalOutcome } from "@/components/console/approval/outcome"
 import { StatusDot } from "@/components/console/status"
 import { TraceWaterfall } from "@/components/console/trace-waterfall"
 import { STATUS_LABEL } from "@/lib/api/status"
@@ -210,6 +211,7 @@ function SummaryLine({
             {STATUS_LABEL[status]}
           </span>
         )}
+        <ApprovalOutcome outcome={turn.approvals_outcome} />
         <span className="min-w-0 truncate font-mono text-xs text-muted-foreground tabular-nums">
           {summaryParts(turn, Math.max(now, Date.now())).join(" · ")}
         </span>

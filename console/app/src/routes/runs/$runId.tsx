@@ -23,6 +23,7 @@ import type { RunData } from "@/components/console/run/use-run"
 import { SplitPane } from "@/components/console/split-pane"
 import { StatStrip } from "@/components/console/stat-strip"
 import type { Stat } from "@/components/console/stat-strip"
+import { ApprovalOutcome } from "@/components/console/approval/outcome"
 import { StatusBadge } from "@/components/console/status"
 import {
   TraceWaterfall,
@@ -354,8 +355,18 @@ function Header({
       title={title}
       status={
         status && (
-          <span title={cause ? `${STATUS_HINT[status]} (${cause})` : undefined}>
-            <StatusBadge state={status} />
+          <span className="inline-flex items-center gap-1.5">
+            <span
+              title={cause ? `${STATUS_HINT[status]} (${cause})` : undefined}
+            >
+              <StatusBadge state={status} />
+            </span>
+            <ApprovalOutcome
+              outcome={
+                data.chain?.run.chain?.approvals_outcome ??
+                data.chain?.run.approvals_outcome
+              }
+            />
           </span>
         )
       }

@@ -1,6 +1,7 @@
 import { ArrowDownIcon, TriangleAlertIcon } from "lucide-react"
 import * as React from "react"
 
+import { ApprovalOutcome } from "@/components/console/approval/outcome"
 import type { Column } from "@/components/console/data-table"
 import { RelativeTime, useNow } from "@/components/console/relative-time"
 import { Status } from "@/components/console/status"
@@ -130,6 +131,9 @@ function Title({ run }: { run: RunRow }) {
     <span className="flex min-w-0 items-center gap-1.5">
       <span className="min-w-0 truncate">{run.prompt_preview || "—"}</span>
       <ErrorKind run={run} />
+      <ApprovalOutcome
+        outcome={run.approvals_outcome ?? run.chain?.approvals_outcome}
+      />
       {children && (
         <span
           className={cn(

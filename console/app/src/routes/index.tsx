@@ -4,6 +4,7 @@ import { CircleCheckIcon } from "lucide-react"
 import * as React from "react"
 
 import { useLiveState } from "@/components/console/app-shell"
+import { ApprovalOutcome } from "@/components/console/approval/outcome"
 import { DataTable } from "@/components/console/data-table"
 import type { Column } from "@/components/console/data-table"
 import {
@@ -23,7 +24,7 @@ import { q } from "@/lib/api/queries"
 import type { Approval, RunRow } from "@/lib/api/types"
 import { argsSummary } from "@/lib/approval-view"
 import { count, duration, percent, tokens } from "@/lib/format"
-import { rowCause, rowTimes } from "@/lib/runs"
+import { rowCause, rowStatus, rowTimes } from "@/lib/runs"
 import {
   BREAKDOWNS,
   RANGE_LABEL,
@@ -160,6 +161,7 @@ function Overview() {
 type Item =
   | { kind: "approval"; at: string; approval: Approval }
   | { kind: "run"; at: string; run: RunRow }
+  | { kind: "expired"; at: string; run: RunRow }
 
 /** The rows the list shows; the rest is a count and a link. */
 const ATTENTION_ROWS = 6
@@ -186,15 +188,29 @@ function Attention({
   // older server answers the newest of any time: the filter below
   // keeps the window's).
   const failed = useQuery(q.failedSince(since, ATTENTION_ROWS))
+  const expired = useQuery(q.expiredSince(since, ATTENTION_ROWS))
   const error = pending.error ?? failed.error
   const waiting: Item[] = (pending.data?.approvals ?? []).map((a) => ({
     kind: "approval",
     at: a.requested_at,
     approval: a,
   }))
-  const failures: Item[] = (failed.data?.runs ?? [])
-    .filter((r) => (rowTimes(r).started ?? "") >= since)
-    .map((r) => ({ kind: "run", at: rowTimes(r).started ?? "", run: r }))
+  // Failed runs, then runs that skipped a call because its approval
+  // expired (they end succeeded, so no failure count shows them).
+  const failures: Item[] = [
+    ...(failed.data?.runs ?? [])
+      .filter((r) => (rowTimes(r).started ?? "") >= since)
+      .map((r): Item => ({
+        kind: "run",
+        at: rowTimes(r).started ?? "",
+        run: r,
+      })),
+    ...(expired.data?.runs ?? []).map((r): Item => ({
+      kind: "expired",
+      at: rowTimes(r).started ?? "",
+      run: r,
+    })),
+  ]
   // Each kind gets half of the rows when both have that many; what one
   // leaves free the other takes.
   const half = ATTENTION_ROWS / 2
@@ -275,6 +291,11 @@ function Attention({
                       state="waiting"
                       cause={`${it.approval.tool} needs a decision`}
                     />
+                  ) : it.kind === "expired" ? (
+                    <Status
+                      state={rowStatus(it.run)}
+                      cause="an approval expired: the call was skipped"
+                    />
                   ) : (
                     <Status state="failed" cause={rowCause(it.run)} />
                   )}
@@ -294,7 +315,11 @@ function Attention({
                     <span className="min-w-0 truncate">
                       {it.run.prompt_preview || "—"}
                     </span>
-                    <ErrorKind run={it.run} />
+                    {it.kind === "expired" ? (
+                      <ApprovalOutcome outcome="expired" />
+                    ) : (
+                      <ErrorKind run={it.run} />
+                    )}
                   </span>
                 )}
                 <span className="px-2 text-right text-xs text-muted-foreground">

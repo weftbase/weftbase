@@ -95,6 +95,12 @@ export interface RunRow extends CostFields {
     | "failed"
     | "cancelled"
     | "interrupted"
+  /** What happened to the run's approvals, worst first (with chains=1
+   * and on run detail). A run whose approval expired still ends
+   * succeeded: the node resumes it with a deny and the model goes on. */
+  approvals_outcome?: ApprovalsOutcome
+  /** Usage and cost are what the run has spent so far (it is running). */
+  usage_partial?: boolean
   /** The registry version the run was admitted on (agv_…), how it was
    * resolved (label:<name> | latest | pin | migrate) and where it ran
    * (embedded | local). Present on newer servers, and only for runs the
@@ -217,7 +223,15 @@ export interface WaitDoc {
 }
 
 /** chainDoc (runview.go): one logical run across parks. */
+/** approvals_outcome: pending > expired > denied > approved. */
+export type ApprovalsOutcome = "pending" | "expired" | "denied" | "approved"
+
 export interface ChainDoc {
+  approvals_outcome?: ApprovalsOutcome
+  approvals_expired?: number
+  approvals_denied?: number
+  approvals_approved?: number
+  approvals_pending?: number
   runs: {
     id: string
     display_status: string
@@ -275,6 +289,8 @@ export interface RunsQuery {
   /** The app's public id: the runs that carry it. */
   public_id?: string
   error_type?: string
+  /** Runs whose approvals ended so (worst outcome of the chain). */
+  approvals?: ApprovalsOutcome
   // Any of these makes the request a search:
   q?: string
   model?: string
@@ -760,6 +776,8 @@ export interface ConversationTurn {
   /** The turn's position in the session as a person counts (1-based);
    * absent from a server that does not send it yet. */
   index?: number
+  /** What happened to the turn's approvals, worst first. */
+  approvals_outcome?: ApprovalsOutcome
   /** The turn's first run; `runs` every run of it, oldest first. */
   run_id: string
   runs: string[]

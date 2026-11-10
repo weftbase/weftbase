@@ -71,6 +71,13 @@ export const q = {
         }
       },
     }),
+  /** Runs that went on without a call because nobody decided in time,
+   * started since `since`. */
+  expiredSince: (since: string, limit: number) =>
+    queryOptions({
+      queryKey: ["runs", "expired", since, limit],
+      queryFn: () => api.runs({ approvals: "expired", since, limit }),
+    }),
   run: (id: string) =>
     queryOptions({ queryKey: ["run", id], queryFn: () => api.run(id) }),
   events: (id: string) =>

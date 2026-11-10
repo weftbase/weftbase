@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
 
+import { ApprovalOutcome } from "@/components/console/approval/outcome"
 import { DataTable } from "@/components/console/data-table"
 import { JsonView } from "@/components/console/json-view"
 import { RelativeTime } from "@/components/console/relative-time"
@@ -120,5 +121,22 @@ describe("RelativeTime", () => {
       />
     )
     expect(container.textContent).toBe("1m ago")
+  })
+})
+
+describe("ApprovalOutcome", () => {
+  it("marks a run that skipped a call, and nothing else", () => {
+    const { rerender, container } = render(
+      <ApprovalOutcome outcome="expired" />
+    )
+    expect(screen.getByText("approval expired")).toBeTruthy()
+    rerender(<ApprovalOutcome outcome="denied" />)
+    expect(screen.getByText("approval denied")).toBeTruthy()
+    rerender(<ApprovalOutcome outcome="approved" />)
+    expect(container.textContent).toBe("")
+    rerender(<ApprovalOutcome outcome="pending" />)
+    expect(container.textContent).toBe("")
+    rerender(<ApprovalOutcome outcome={undefined} />)
+    expect(container.textContent).toBe("")
   })
 })
