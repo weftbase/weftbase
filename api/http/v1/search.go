@@ -258,6 +258,7 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 	for _, rec := range page.Runs {
 		out.Runs = append(out.Runs, c.row(rec))
 	}
+	s.control(r).decorate(out.Runs)
 	if next := query.Offset + len(page.Runs); len(page.Runs) > 0 && next < page.Total {
 		out.NextOffset = &next
 	}
@@ -343,6 +344,7 @@ func (s *Server) serveCostSearch(w http.ResponseWriter, r *http.Request, srch ob
 	for i := offset; i < len(hits) && i < offset+limit; i++ {
 		out.Runs = append(out.Runs, c.row(hits[i].rec))
 	}
+	s.control(r).decorate(out.Runs)
 	if next := offset + len(out.Runs); len(out.Runs) > 0 && next < out.Total {
 		out.NextOffset = &next
 	}

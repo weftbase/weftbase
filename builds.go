@@ -13,8 +13,10 @@ import (
 
 	"github.com/weftbase/weftbase/client/wire"
 	buildworker "github.com/weftbase/weftbase/client/worker"
+	"github.com/weftbase/weftbase/events"
 	"github.com/weftbase/weftbase/registry"
 	"github.com/weftbase/weftbase/tenant"
+	"github.com/weftbase/weftbase/tenant/keys"
 	"github.com/weftbase/weftbase/worker/executor/local"
 )
 
@@ -102,7 +104,7 @@ func (a *App) Local(path string, opts ...LocalOption) ([]registry.Version, error
 		a.mu.Unlock()
 	}
 	ex, err := local.New(local.Config{Path: stored, Digest: digest, Args: c.args, Env: c.env, SocketDir: a.socketDir(),
-		Output: c.output, Logger: a.log})
+		Output: c.output, Logger: a.log, Telemetry: a.buildTelemetry})
 	if err != nil {
 		return nil, fmt.Errorf("weftbase: %w", err)
 	}
@@ -134,6 +136,41 @@ func (a *App) Local(path string, opts ...LocalOption) ([]registry.Version, error
 		}()
 	}
 	return versions, nil
+}
+
+// buildKeyName names the ingest key local builds report with.
+const buildKeyName = "local-builds"
+
+// buildTelemetry is where a local build's traces and logs go: this
+// node's URL (Serving) and a worker key, which may ingest and nothing
+// else of the API. The key is minted on first use and lives in memory
+// (the store keeps its hash only); the keys earlier starts of the node
+// minted are revoked then, so one is live at a time. A node that does
+// not ingest, or was never told its URL, hands out nothing: the build
+// runs, and reports wherever its own environment says.
+func (a *App) buildTelemetry() (url, key string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.url == "" || !a.roles.has(RoleIngest) || a.shutdown {
+		return "", ""
+	}
+	if a.buildKey == "" {
+		ctx, sc := context.Background(), tenant.Default()
+		if old, err := a.keys.List(ctx, sc); err == nil {
+			for _, k := range old {
+				if k.Name == buildKeyName && k.Kind == keys.Worker && k.RevokedAt == nil {
+					_ = a.keys.Revoke(ctx, sc, k.ID, events.System)
+				}
+			}
+		}
+		_, secret, err := a.keys.Mint(ctx, sc, keys.Worker, buildKeyName, events.System)
+		if err != nil {
+			a.log.Warn("weftbase: no ingest key for local builds; their traces are not collected", "err", err)
+			return "", ""
+		}
+		a.buildKey = secret
+	}
+	return a.url, a.buildKey
 }
 
 func overlaps(a, b []string) bool {
@@ -213,7 +250,7 @@ func (a *App) restoreBuilds() error {
 			names = append(names, ag.Name)
 		}
 		ex, err := local.New(local.Config{Path: filepath.Join(a.buildsDir(), e.Name()), Digest: digest, Known: &reg,
-			SocketDir: a.socketDir(), Logger: a.log})
+			SocketDir: a.socketDir(), Logger: a.log, Telemetry: a.buildTelemetry})
 		if err != nil {
 			a.log.Warn("weftbase: restoring a stored build", "digest", digest, "err", err)
 			continue

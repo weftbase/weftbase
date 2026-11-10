@@ -263,7 +263,7 @@ func startNode(cfg nodeConfig) (*node, error) {
 	// interface (--addr 0.0.0.0:7331) is reachable there.
 	dial := loopbackAddr(choice.Addr)
 	n := &node{addr: dial, url: "http://" + dial, key: cfg.key}
-	app.SetHolder(n.url)
+	app.Serving(n.url)
 	var buildNotes []string
 	for _, b := range cfg.res.builds {
 		vs, err := app.Local(b)

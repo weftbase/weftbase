@@ -1,10 +1,13 @@
 package v1
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -99,13 +102,19 @@ const statsBuckets = obsdb.StatsBuckets
 const statsDefaultWindow = 24 * time.Hour
 
 type statsBody struct {
-	By        string       `json:"by"`
-	Since     time.Time    `json:"since"`
-	Until     time.Time    `json:"until"`
-	Buckets   int          `json:"buckets"`
-	BucketMS  int64        `json:"bucket_ms"`
-	Groups    []statsGroup `json:"groups"`
-	GroupsCut int          `json:"groups_cut,omitempty"`
+	By       string    `json:"by"`
+	Since    time.Time `json:"since"`
+	Until    time.Time `json:"until"`
+	Buckets  int       `json:"buckets"`
+	BucketMS int64     `json:"bucket_ms"`
+	// BucketStarts is each bucket's start, in series order: bucket i
+	// covers [bucket_starts[i], bucket_starts[i] + bucket_ms).
+	BucketStarts []time.Time  `json:"bucket_starts"`
+	Groups       []statsGroup `json:"groups"`
+	// OutcomesCapped: the outcomes (by=agent) were read from the
+	// window's newest statsTotalRows runs only.
+	OutcomesCapped bool `json:"outcomes_capped,omitempty"`
+	GroupsCut      int  `json:"groups_cut,omitempty"`
 }
 
 type statsGroup struct {
@@ -124,6 +133,15 @@ type statsGroup struct {
 	RetryRate  *float64          `json:"retry_rate"`
 	Denials    int64             `json:"denials"`
 	Series     []statsBucket     `json:"series"`
+	// Outcomes and OutcomeSeries are by=agent's (absent with a status
+	// filter): the group's runs by display status — succeeded, failed
+	// (cancelled runs are not failures here, unlike failed above, which
+	// is the trace store's status), cancelled, waiting, running,
+	// interrupted — with failure_rate = failed / (succeeded + failed),
+	// cost and the runs' durations; over the window, and per bucket
+	// (series order). A parked run and its resume are one run.
+	Outcomes      *statsTotalBucket  `json:"outcomes,omitempty"`
+	OutcomeSeries []statsTotalBucket `json:"outcome_series,omitempty"`
 	// Delegated is by=agent's: what the agent's subagents spent for it
 	// (obsdb.StatsGroup.Delegated), beside its own figures above.
 	Delegated *statsDelegated `json:"delegated,omitempty"`
@@ -183,10 +201,31 @@ func (s *Server) serveStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
+	buckets := statsBuckets
+	if v := q.Get("buckets"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > obsdb.MaxStatsBuckets {
+			badRequest(w, r, "buckets is 1 to "+strconv.Itoa(obsdb.MaxStatsBuckets))
+			return
+		}
+		buckets = n
+	}
+	if q.Get("by") == "total" {
+		s.serveStatsTotal(w, r, buckets)
+		return
+	}
 	query := obsdb.StatsQuery{
 		RunQuery: obsdb.RunQuery{Agent: q.Get("agent"), PublicID: q.Get("public_id"), ParentRunID: "*", Meta: tagParams(q)},
 		By:       obsdb.StatsBy(q.Get("by")),
-		Buckets:  statsBuckets,
+		Buckets:  buckets,
+	}
+	// Runs are counted top-level by default where the groups are runs
+	// (agent, error_type): a subagent's child run is its parent's work.
+	// Where they are calls (model, tool, step) every run's calls count.
+	// parent=* (every run), parent=<id> or parent= (top-level) says
+	// otherwise.
+	if query.By.RunLevel() {
+		query.ParentRunID = ""
 	}
 	if _, set := q["parent"]; set {
 		query.ParentRunID = parentParam(q)
@@ -220,10 +259,25 @@ func (s *Server) serveStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := statsBody{By: string(page.By), Since: page.Since, Until: page.Until, Buckets: page.Buckets,
-		BucketMS: page.Bucket.Milliseconds(), Groups: make([]statsGroup, 0, len(page.Groups)), GroupsCut: page.GroupsCut}
+		BucketMS: page.Bucket.Milliseconds(), BucketStarts: bucketStarts(page.Since, page.Bucket, page.Buckets),
+		Groups: make([]statsGroup, 0, len(page.Groups)), GroupsCut: page.GroupsCut}
+	// by=agent: the runs by outcome (display status), for the group and
+	// each bucket, read from the run rows.
+	var pass outcomePass
+	if page.By == obsdb.StatsByAgent && query.Status == "" {
+		if pass, err = s.outcomes(r.Context(), query.RunQuery, page.Since, page.Until, page.Buckets, true); err != nil {
+			dbError(w, r, "stats", "", err)
+			return
+		}
+		out.OutcomesCapped = pass.capped
+	}
 	for _, g := range page.Groups {
 		sg := s.statsGroupOf(page.By, g)
 		sg.RunsQuery = runsQueryOf(q, query, page.By, g.Key)
+		if o := pass.byAgent[g.Key]; o != nil {
+			sg.Outcomes = &o.total
+			sg.OutcomeSeries = o.series
+		}
 		out.Groups = append(out.Groups, sg)
 	}
 	writeJSON(w, r, http.StatusOK, out)
@@ -380,4 +434,234 @@ func runsQueryOf(params url.Values, q obsdb.StatsQuery, by obsdb.StatsBy, key st
 	v.Set("since", q.Since.UTC().Format(time.RFC3339Nano))
 	v.Set("until", q.Until.UTC().Format(time.RFC3339Nano))
 	return v.Encode()
+}
+
+func bucketStarts(since time.Time, width time.Duration, n int) []time.Time {
+	out := make([]time.Time, n)
+	for i := range out {
+		out[i] = since.Add(time.Duration(i) * width)
+	}
+	return out
+}
+
+// statsTotal is GET /v1/stats?by=total: the window's top-level runs as
+// one series, no grouping — what a runs-over-time chart and the
+// overview's tiles read. It is computed from the run rows (newest
+// first, at most statsTotalRows of them: Capped says the window held
+// more and the oldest buckets are short), so a bucket also has what the
+// grouped form's has not: cost and the runs' own durations.
+//
+// A run is counted in the bucket it started in, under its
+// display_status as the trace store alone knows it (a queued run is not
+// here). Top-level runs only unless parent says otherwise, and a parked
+// run with its resume is one run, counted at the resume. Tokens and
+// cost are the whole run's, its subagents' included.
+type statsTotal struct {
+	By           string             `json:"by"`
+	Since        time.Time          `json:"since"`
+	Until        time.Time          `json:"until"`
+	Buckets      int                `json:"buckets"`
+	BucketMS     int64              `json:"bucket_ms"`
+	BucketStarts []time.Time        `json:"bucket_starts"`
+	Total        statsTotalBucket   `json:"total"`
+	Series       []statsTotalBucket `json:"series"`
+	Capped       bool               `json:"capped,omitempty"`
+}
+
+type statsTotalBucket struct {
+	// T is the bucket's start (the window's on total).
+	T           time.Time `json:"t"`
+	Runs        int64     `json:"runs"`
+	Succeeded   int64     `json:"succeeded"`
+	Failed      int64     `json:"failed"`
+	Cancelled   int64     `json:"cancelled"`
+	Waiting     int64     `json:"waiting"`
+	Running     int64     `json:"running"`
+	Interrupted int64     `json:"interrupted"`
+	// FailureRate is failed / (succeeded + failed): of the runs that
+	// ended on their own. A cancelled run is neither.
+	FailureRate  *float64 `json:"failure_rate"`
+	InputTokens  int64    `json:"input_tokens"`
+	OutputTokens int64    `json:"output_tokens"`
+	// CostUSD sums the runs' known costs; CostKnown is false when some
+	// run's cost is not known (an unpriced model).
+	CostUSD   float64 `json:"cost_usd"`
+	CostKnown bool    `json:"cost_known"`
+	// DurationMS is over the bucket's finished runs, start to end; null
+	// when none finished.
+	DurationMS *statsPercentiles `json:"duration_ms"`
+
+	durations []float64
+}
+
+func (b *statsTotalBucket) add(r runRow) {
+	// A parked run that was resumed is not a run of its own here: its
+	// chain is counted once, at the run that ended it (or still goes
+	// on). Its tokens and cost count where they were spent.
+	if r.ResumedBy == "" {
+		b.Runs++
+		switch r.DisplayStatus {
+		case displaySucceeded:
+			b.Succeeded++
+		case displayFailed:
+			b.Failed++
+		case displayCancelled:
+			b.Cancelled++
+		case displayWaiting:
+			b.Waiting++
+		case displayRunning:
+			b.Running++
+		case displayInterrupted:
+			b.Interrupted++
+		}
+	}
+	b.InputTokens += r.Usage.InputTokens
+	b.OutputTokens += r.Usage.OutputTokens
+	for _, c := range []struct {
+		usd   *float64
+		known bool
+	}{{r.CostUSD, r.CostKnown}, {r.DelegatedCostUSD, r.DelegatedCostKnown || r.DelegatedCostUSD == nil && r.ChildrenCount == 0}} {
+		if c.usd != nil {
+			b.CostUSD += *c.usd
+		}
+		if !c.known {
+			b.CostKnown = false
+		}
+	}
+	if r.Finished != nil && r.ResumedBy == "" && r.DisplayStatus != displayWaiting {
+		b.durations = append(b.durations, float64(r.Finished.Sub(r.Started).Microseconds())/1000)
+	}
+}
+
+func (b *statsTotalBucket) finish() {
+	b.CostUSD = round6(b.CostUSD)
+	b.FailureRate = ratio(b.Failed, b.Succeeded+b.Failed)
+	if n := len(b.durations); n > 0 {
+		sort.Float64s(b.durations)
+		rank := func(p float64) float64 { return b.durations[min(int(math.Ceil(p*float64(n)))-1, n-1)] }
+		b.DurationMS = &statsPercentiles{P50: round6(rank(0.50)), P95: round6(rank(0.95)), N: int64(n)}
+	}
+}
+
+// statsTotalRows bounds the rows one by=total answer reads.
+const statsTotalRows = 20000
+
+func (s *Server) serveStatsTotal(w http.ResponseWriter, r *http.Request, buckets int) {
+	q := r.URL.Query()
+	until := s.now().UTC()
+	if v := q.Get("until"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			badRequest(w, r, "until must be RFC 3339: "+err.Error())
+			return
+		}
+		until = t
+	}
+	since, err := windowSince(q.Get("since"), until)
+	if err != nil || !since.Before(until) {
+		badRequest(w, r, "since must be RFC 3339 or a positive duration (90m, 24h, 7d), before until")
+		return
+	}
+	width := until.Sub(since) / time.Duration(buckets)
+	if width <= 0 {
+		badRequest(w, r, "the window is too short for that many buckets")
+		return
+	}
+	query := obsdb.RunQuery{Agent: q.Get("agent"), Meta: tagParams(q)}
+	if _, set := q["parent"]; set {
+		query.ParentRunID = parentParam(q)
+	}
+	pass, err := s.outcomes(r.Context(), query, since, until, buckets, false)
+	if err != nil {
+		dbError(w, r, "stats", "", err)
+		return
+	}
+	out := statsTotal{By: "total", Since: since, Until: until, Buckets: buckets, BucketMS: width.Milliseconds(),
+		BucketStarts: bucketStarts(since, width, buckets), Total: pass.total.total, Series: pass.total.series, Capped: pass.capped}
+	writeJSON(w, r, http.StatusOK, out)
+}
+
+// outcomeSeries is one key's runs by outcome: over the window, and per
+// bucket.
+type outcomeSeries struct {
+	total  statsTotalBucket
+	series []statsTotalBucket
+}
+
+type outcomePass struct {
+	total   outcomeSeries
+	byAgent map[string]*outcomeSeries
+	capped  bool
+}
+
+// outcomes reads the window's run rows that query keeps (newest first,
+// at most statsTotalRows) and counts them by display status: the whole,
+// and per agent when byAgent.
+func (s *Server) outcomes(ctx context.Context, query obsdb.RunQuery, since, until time.Time, buckets int, byAgent bool) (outcomePass, error) {
+	width := until.Sub(since) / time.Duration(buckets)
+	starts := bucketStarts(since, width, buckets)
+	fresh := func() *outcomeSeries {
+		o := &outcomeSeries{total: statsTotalBucket{T: since, CostKnown: true}, series: make([]statsTotalBucket, buckets)}
+		for i := range o.series {
+			o.series[i] = statsTotalBucket{T: starts[i], CostKnown: true}
+		}
+		return o
+	}
+	pass := outcomePass{total: *fresh(), byAgent: map[string]*outcomeSeries{}}
+	query.Before, query.Limit = until, 500
+	c := s.coster(ctx)
+	read := 0
+pages:
+	for {
+		page, err := s.db.Runs(ctx, query)
+		if err != nil {
+			return pass, err
+		}
+		c.primeTrees(page.Runs)
+		for _, rec := range page.Runs {
+			if rec.Started.Before(since) {
+				break pages
+			}
+			if !rec.Started.Before(until) {
+				continue
+			}
+			row := c.row(rec)
+			i := min(int(rec.Started.Sub(since)/width), buckets-1)
+			pass.total.series[i].add(row)
+			pass.total.total.add(row)
+			if byAgent {
+				o := pass.byAgent[rec.Agent]
+				if o == nil {
+					o = fresh()
+					pass.byAgent[rec.Agent] = o
+				}
+				o.series[i].add(row)
+				o.total.add(row)
+			}
+			read++
+		}
+		if page.NextBefore == nil {
+			break
+		}
+		if read >= statsTotalRows {
+			pass.capped = true
+			break
+		}
+		query.Before, query.BeforeID = *page.NextBefore, page.NextBeforeID
+	}
+	for _, o := range append([]*outcomeSeries{&pass.total}, mapValues(pass.byAgent)...) {
+		for i := range o.series {
+			o.series[i].finish()
+		}
+		o.total.finish()
+	}
+	return pass, nil
+}
+
+func mapValues[K comparable, V any](m map[K]V) []V {
+	out := make([]V, 0, len(m))
+	for _, v := range m {
+		out = append(out, v)
+	}
+	return out
 }

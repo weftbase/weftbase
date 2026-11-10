@@ -16,6 +16,7 @@ import (
 	"github.com/weftbase/weft/version"
 	"github.com/weftbase/weftbase/internal/httpx"
 	"github.com/weftbase/weftbase/obsdb"
+	"github.com/weftbase/weftbase/sessions"
 )
 
 // The JSON API (S4.2/S4.3). Every response is application/json; errors
@@ -70,6 +71,7 @@ func dbError(w http.ResponseWriter, r *http.Request, noun, id string, err error)
 // runRow is every list and detail: the identity chain, timing, the
 // derived status, usage and the counts (S4.3's RunRow).
 type runRow struct {
+	controlFields
 	ID           string         `json:"id"`
 	ParentRunID  string         `json:"parent_run_id"`
 	ParentCallID string         `json:"parent_call_id"`
@@ -281,6 +283,9 @@ func row(rec obsdb.RunRow) runRow {
 		f := *rec.Finished
 		out.Finished = &f
 	}
+	// The trace's own word; a read that has the ledger overrides it
+	// (control.decorate).
+	out.DisplayStatus = displayStatus(&out, nil)
 	return out
 }
 
@@ -379,6 +384,10 @@ type runPage struct {
 	// step 0 (U13.2, decisions.go). Absent when the run is neither.
 	Decided *decisionDoc `json:"decided,omitempty"`
 	Resumes *decisionDoc `json:"resumes,omitempty"`
+	// Approvals are the ledger's approval records of the calls this
+	// run parked on (pending or decided, with who decided). Absent on
+	// a run that never parked, and on one the ledger does not hold.
+	Approvals []sessions.Approval `json:"approvals,omitempty"`
 	// Summarizer is what the summarizer calls filed under this run cost
 	// (UX-B-13, U15.1-fix): the compaction markers and SummarizeLeft
 	// branch records under it that name summarizer_usage, priced as the
@@ -879,6 +888,26 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	query.Status = st
+	display, dst, ok := displayParam(w, r, q)
+	if !ok {
+		return
+	}
+	if display != "" {
+		if st != "" {
+			badRequest(w, r, "give status or display_status, not both")
+			return
+		}
+		query.Status = dst
+	}
+	chains := false
+	if v := q.Get("chains"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			badRequest(w, r, "chains must be true or false (1 or 0)")
+			return
+		}
+		chains = b
+	}
 	if v := q.Get("all"); v != "" {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
@@ -931,10 +960,13 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 		query.Errs = sq.Errs
 	}
 
-	page, err := s.db.Runs(r.Context(), query)
-	if err != nil {
-		dbError(w, r, "runs", "", err)
-		return
+	var page obsdb.RunPage
+	if display != displayQueued {
+		var err error
+		if page, err = s.db.Runs(r.Context(), query); err != nil {
+			dbError(w, r, "runs", "", err)
+			return
+		}
 	}
 	out := runsPage{Total: page.Total, Runs: make([]runRow, 0, len(page.Runs))}
 	c := s.coster(r.Context())
@@ -942,6 +974,7 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 	for _, rec := range page.Runs {
 		out.Runs = append(out.Runs, c.row(rec))
 	}
+	out.Runs, out.Total = s.controlRows(r, c, query, out.Runs, out.Total, display, chains)
 	// The marks only on a page the request narrowed to a conversation.
 	if q.Get("public_id") != "" || q.Get("session") != "" {
 		out.TurnMarksCapped = s.turnMarks(r.Context(), out.Runs)
@@ -1189,6 +1222,10 @@ func limitParam(w http.ResponseWriter, r *http.Request, q map[string][]string) (
 func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 	det, err := s.db.Run(r.Context(), id)
 	if err != nil {
+		// A run the ledger admitted and no trace names yet (queued).
+		if s.serveLedgerRun(w, r, id) {
+			return
+		}
 		dbError(w, r, "run", id, err)
 		return
 	}
@@ -1196,6 +1233,12 @@ func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 	c.prime(det.ID, det.Children)
 	c.primeTrees(c.kids[det.ID])
 	doc := runDoc{runRow: c.row(det.RunRow), Children: s.childRows(r.Context(), c, c.kids[det.ID])}
+	ctl := s.control(r)
+	ctl.decorate(doc.Children)
+	one := []runRow{doc.runRow}
+	ctl.decorate(one)
+	doc.runRow = one[0]
+	doc.Chain = ctl.chain(c, doc.runRow)
 	doc.LogWarn, doc.LogError, doc.LogsCapped = s.logCounts(r.Context(), id)
 	holes, err := s.runHoles(r.Context(), det.RunRow)
 	if err != nil {
@@ -1212,6 +1255,7 @@ func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 		ManifestAvailable: s.manifestAvailable(r.Context(), det.ManifestHash)}
 	s.callerLinked(r.Context(), c, id, &page)
 	s.runDecisions(r, det.RunRow, &page)
+	ctl.approvals(&page)
 	page.Summarizer = s.runSummarizer(r, det.RunRow)
 	writeJSON(w, r, http.StatusOK, page)
 }
@@ -1700,10 +1744,29 @@ func (s *Server) serveRunSpans(w http.ResponseWriter, r *http.Request, id string
 		writeJSON(w, r, http.StatusOK, doc)
 		return
 	}
-	rt, err := tr.RunTreeSpans(r.Context(), obsdb.TreeQuery{RunID: id})
+	if v := r.URL.Query().Get("chain"); v != "" {
+		if b, err := strconv.ParseBool(v); err != nil {
+			badRequest(w, r, "chain must be true or false (1 or 0)")
+			return
+		} else if b {
+			s.serveChainSpans(w, r, tr, id)
+			return
+		}
+	}
+	doc, err := s.treeSpans(r.Context(), tr, id)
 	if err != nil {
 		dbError(w, r, "span tree of run", id, err)
 		return
+	}
+	writeJSON(w, r, http.StatusOK, doc)
+}
+
+// treeSpans reads one run's tree: its spans and its descendants', and
+// the tree's holes.
+func (s *Server) treeSpans(ctx context.Context, tr obsdb.TreeReader, id string) (treeSpansDoc, error) {
+	rt, err := tr.RunTreeSpans(ctx, obsdb.TreeQuery{RunID: id})
+	if err != nil {
+		return treeSpansDoc{}, err
 	}
 	list := rt.Spans
 	plain := make([]obsdb.Span, len(list))
@@ -1739,7 +1802,7 @@ func (s *Server) serveRunSpans(w http.ResponseWriter, r *http.Request, id string
 			Reason: missingRunsReason(rt.MissingCount, len(runs)), Fix: fix, Runs: runs, Count: rt.MissingCount,
 		})
 	}
-	writeJSON(w, r, http.StatusOK, doc)
+	return doc, nil
 }
 
 // treeSpansDoc is /v1/runs/{id}/spans?tree=1: the tree's spans and its
@@ -1752,6 +1815,13 @@ func (s *Server) serveRunSpans(w http.ResponseWriter, r *http.Request, id string
 type treeSpansDoc struct {
 	Spans []spanDTO  `json:"spans"`
 	Holes []treeHole `json:"holes"`
+	// Chain and Waits are set with chain=1: the runs whose trees the
+	// spans are (a parked run, its resume, …: each span's run_id says
+	// which), and the waits on a person between them. A client draws
+	// one timeline: the spans, and a waiting bar from each wait's from
+	// to its to (now while to is null).
+	Chain []string  `json:"chain,omitempty"`
+	Waits []waitDoc `json:"waits,omitempty"`
 }
 
 // treeHole is one hole of a run tree: the A3 table's badge and cause,
@@ -2016,6 +2086,7 @@ func (s *Server) serveSession(w http.ResponseWriter, r *http.Request, id string)
 	for _, rr := range det.Runs {
 		doc.Runs = append(doc.Runs, c.row(rr))
 	}
+	s.control(r).decorate(doc.Runs)
 	numberDerivedTurns(doc.Runs)
 	s.delegatedSessions(r.Context(), id, &doc)
 	writeJSON(w, r, http.StatusOK, doc)

@@ -576,3 +576,37 @@ func (r *Registry) BuildAgents(ctx context.Context, s tenant.Scope, digest strin
 	})
 	return kind, agents, err
 }
+
+// SetPlacement records the placement (embedded, local, …) that
+// registered a build: the hub calls it in the registration's
+// transaction.
+func (r *Registry) SetPlacement(tx store.Tx, s tenant.Scope, digest, placement string) error {
+	_, err := store.Exec(tx, `UPDATE builds SET placement = ? WHERE project_id = ? AND env = ? AND digest = ?`,
+		placement, s.Project(), s.Env(), digest)
+	return err
+}
+
+// Placements is every build's placement by build id ("" when the build
+// was registered before placements were recorded).
+func (r *Registry) Placements(ctx context.Context, s tenant.Scope) (map[string]string, error) {
+	if err := checkScope(s); err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	err := r.db.Read(ctx, func(tx store.Tx) error {
+		rows, err := store.Query(tx, `SELECT id, placement FROM builds WHERE project_id = ? AND env = ?`, s.Project(), s.Env())
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var id, p string
+			if err := rows.Scan(&id, &p); err != nil {
+				return err
+			}
+			out[id] = p
+		}
+		return rows.Err()
+	})
+	return out, err
+}

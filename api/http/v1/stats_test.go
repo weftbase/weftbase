@@ -193,15 +193,17 @@ func statsFixtureDB(t *testing.T) obsdb.DB {
 // director; the tools' p50 and failure rate.
 func TestStatsGoldens(t *testing.T) {
 	h := Handler(DB(statsFixtureDB(t)))
-	for _, by := range []string{"agent", "model", "tool", "error_type", "step"} {
-		code, _, body := get(t, h, "/weftbase/v1/stats?by="+by+"&"+statsWindow)
+	for _, by := range []string{"agent", "model", "tool", "error_type", "step", "total"} {
+		// parent=*: every run, a subagent's child included (by=agent
+		// and by=error_type count top-level runs by default).
+		code, _, body := get(t, h, "/weftbase/v1/stats?by="+by+"&parent=*&"+statsWindow)
 		if code != http.StatusOK {
 			t.Fatalf("stats?by=%s: %d %s", by, code, body)
 		}
 		golden(t, "stats-"+strings.ReplaceAll(by, "_", "-")+".golden.json", body)
 	}
 	// The numbers the Agents page reads, spot-checked.
-	_, _, body := get(t, h, "/weftbase/v1/stats?by=agent&"+statsWindow)
+	_, _, body := get(t, h, "/weftbase/v1/stats?by=agent&parent=*&"+statsWindow)
 	for _, want := range []string{
 		`"key":"researcher","runs":5,"failed":3,"failure_rate":0.6`,
 		`"unpriced_models":["zai/glm-5.3-flash"]`,
@@ -336,7 +338,7 @@ func TestStatsGoldensClickHouse(t *testing.T) {
 		}
 	}
 	h := Handler(DB(db))
-	for _, by := range []string{"agent", "model", "tool", "error_type", "step"} {
+	for _, by := range []string{"agent", "model", "tool", "error_type", "step", "total"} {
 		code, _, body := get(t, h, "/weftbase/v1/stats?by="+by+"&"+statsWindow)
 		if code != http.StatusOK {
 			t.Fatalf("stats?by=%s on ClickHouse: %d %s", by, code, body)

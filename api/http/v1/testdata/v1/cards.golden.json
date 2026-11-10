@@ -1,6 +1,39 @@
 {
   "appr.breakpoint-own": {
     "run": {
+      "display_status": "waiting",
+      "chain": {
+        "runs": [
+          {
+            "id": "r_bp_own",
+            "display_status": "waiting",
+            "started": "2026-10-01T09:00:00Z",
+            "finished": "2026-10-01T09:00:00Z"
+          }
+        ],
+        "display_status": "waiting",
+        "stopped_by": "parked",
+        "started": "2026-10-01T09:00:00Z",
+        "finished": null,
+        "duration_ms": 1,
+        "waiting_ms": 0,
+        "steps": 1,
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "cost_usd": 0,
+        "cost_known": true,
+        "waits": [
+          {
+            "run": "r_bp_own",
+            "from": "(time)",
+            "to": null,
+            "approvals": [],
+            "decided_by": []
+          }
+        ]
+      },
       "id": "r_bp_own",
       "parent_run_id": "",
       "parent_call_id": "",
@@ -494,6 +527,39 @@
   },
   "appr.breakpoint-replay": {
     "run": {
+      "display_status": "waiting",
+      "chain": {
+        "runs": [
+          {
+            "id": "r_bp_pg",
+            "display_status": "waiting",
+            "started": "2026-10-01T09:00:00Z",
+            "finished": "2026-10-01T09:00:00Z"
+          }
+        ],
+        "display_status": "waiting",
+        "stopped_by": "parked",
+        "started": "2026-10-01T09:00:00Z",
+        "finished": null,
+        "duration_ms": 1,
+        "waiting_ms": 0,
+        "steps": 1,
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "cost_usd": 0,
+        "cost_known": true,
+        "waits": [
+          {
+            "run": "r_bp_pg",
+            "from": "(time)",
+            "to": null,
+            "approvals": [],
+            "decided_by": []
+          }
+        ]
+      },
       "id": "r_bp_pg",
       "parent_run_id": "",
       "parent_call_id": "",
@@ -998,6 +1064,39 @@
   },
   "appr.park": {
     "run": {
+      "display_status": "waiting",
+      "chain": {
+        "runs": [
+          {
+            "id": "r_park",
+            "display_status": "waiting",
+            "started": "2026-10-01T09:00:00Z",
+            "finished": "2026-10-01T09:00:00Z"
+          }
+        ],
+        "display_status": "waiting",
+        "stopped_by": "parked",
+        "started": "2026-10-01T09:00:00Z",
+        "finished": null,
+        "duration_ms": 1,
+        "waiting_ms": 0,
+        "steps": 1,
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "cost_usd": 0,
+        "cost_known": true,
+        "waits": [
+          {
+            "run": "r_park",
+            "from": "(time)",
+            "to": null,
+            "approvals": [],
+            "decided_by": []
+          }
+        ]
+      },
       "id": "r_park",
       "parent_run_id": "",
       "parent_call_id": "",
@@ -1491,6 +1590,7 @@
   },
   "conc.parallelism": {
     "run": {
+      "display_status": "succeeded",
       "id": "r_par",
       "parent_run_id": "",
       "parent_call_id": "",
@@ -2790,6 +2890,7 @@
   },
   "loop.max-tokens-tools": {
     "run": {
+      "display_status": "succeeded",
       "id": "r_maxtok",
       "parent_run_id": "",
       "parent_call_id": "",
@@ -3923,6 +4024,7 @@
   },
   "msg.parts": {
     "run": {
+      "display_status": "succeeded",
       "id": "r_parts",
       "parent_run_id": "",
       "parent_call_id": "",
@@ -4292,6 +4394,7 @@
   },
   "mw.allow": {
     "run": {
+      "display_status": "succeeded",
       "id": "r_allow",
       "parent_run_id": "",
       "parent_call_id": "",
@@ -5345,6 +5448,7 @@
   },
   "mw.repairjson": {
     "run": {
+      "display_status": "succeeded",
       "id": "r_repair",
       "parent_run_id": "",
       "parent_call_id": "",
@@ -6189,6 +6293,7 @@
   },
   "mw.retry": {
     "run": {
+      "display_status": "succeeded",
       "id": "r_retry",
       "parent_run_id": "",
       "parent_call_id": "",
@@ -6721,6 +6826,7 @@
   },
   "mw.retry-giveup": {
     "run": {
+      "display_status": "failed",
       "id": "r_giveup",
       "parent_run_id": "",
       "parent_call_id": "",
@@ -7127,6 +7233,7 @@
   },
   "opt.prepare-step": {
     "run": {
+      "display_status": "succeeded",
       "id": "r_prepare",
       "parent_run_id": "",
       "parent_call_id": "",
@@ -7952,6 +8059,7 @@
   },
   "out.invalid-repaired": {
     "run": {
+      "display_status": "succeeded",
       "id": "r_output",
       "parent_run_id": "",
       "parent_call_id": "",
@@ -8936,6 +9044,7 @@
   },
   "out.no-output": {
     "run": {
+      "display_status": "succeeded",
       "id": "r_nooutput",
       "parent_run_id": "",
       "parent_call_id": "",
@@ -9401,6 +9510,7 @@
   },
   "runtimelab.option-lab": {
     "run": {
+      "display_status": "succeeded",
       "id": "r_lab",
       "parent_run_id": "",
       "parent_call_id": "",
@@ -9946,6 +10056,7 @@
   },
   "rw.mcp-mesh": {
     "run": {
+      "display_status": "succeeded",
       "id": "r_mesh",
       "parent_run_id": "",
       "parent_call_id": "",
@@ -11757,6 +11868,7 @@
   },
   "sub.failed": {
     "run": {
+      "display_status": "succeeded",
       "id": "r_subfail",
       "parent_run_id": "",
       "parent_call_id": "",
@@ -11816,6 +11928,7 @@
       },
       "children": [
         {
+          "display_status": "failed",
           "id": "r_subfail/0/w1",
           "parent_run_id": "r_subfail",
           "parent_call_id": "w1",
@@ -12673,6 +12786,7 @@
     ],
     "children": {
       "r_subfail/0/w1": {
+        "display_status": "failed",
         "id": "r_subfail/0/w1",
         "parent_run_id": "r_subfail",
         "parent_call_id": "w1",
@@ -12727,6 +12841,7 @@
   },
   "tools.timeout": {
     "run": {
+      "display_status": "succeeded",
       "id": "r_timeout",
       "parent_run_id": "",
       "parent_call_id": "",

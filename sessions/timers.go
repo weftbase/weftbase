@@ -76,13 +76,11 @@ func (l *Ledger) approvalExpiry(tx store.Tx, s tenant.Scope, runID string) error
 	if err != nil || !ok || parked.Status != StatusParked || parked.ResumedBy != "" {
 		return err
 	}
-	decisions := make([]wire.Decision, len(parked.Pending))
 	calls := make([]string, len(parked.Pending))
 	for i, p := range parked.Pending {
-		decisions[i] = wire.Decision{CallID: p.CallID, Decision: "deny", Reason: "approval expired"}
 		calls[i] = p.CallID
 	}
-	res, err := l.resume(tx, s, events.System, parked, decisions)
+	res, err := l.resumeDecided(tx, s, events.System, parked, nil, ApprovalExpired, "approval expired")
 	if err != nil {
 		return err
 	}

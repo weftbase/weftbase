@@ -341,7 +341,7 @@ const (
 )
 
 // Hello is a worker's register frame on a socket: the per-child token
-// its supervisor handed it (WEFTBASE_TOKEN) and its registration.
+// its supervisor handed it (WEFTBASE_WORKER_TOKEN) and its registration.
 type Hello struct {
 	Token        string       `json:"token,omitempty"`
 	Registration Registration `json:"registration"`

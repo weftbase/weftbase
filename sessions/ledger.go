@@ -413,7 +413,7 @@ func (l *Ledger) Resume(ctx context.Context, s tenant.Scope, actor events.Actor,
 		if err != nil {
 			return err
 		}
-		run, err = l.resume(tx, s, actor, parked, decisions)
+		run, err = l.resumeDecided(tx, s, actor, parked, decisions, ApprovalDenied, "no decision")
 		return err
 	})
 	return run, err
@@ -647,6 +647,15 @@ func (l *Ledger) end(tx store.Tx, s tenant.Scope, actor events.Actor, run *Run, 
 		if err := l.parkTimers(tx, s, run.ID); err != nil {
 			return err
 		}
+		if err := l.request(tx, s, *run, ack.Pending); err != nil {
+			return err
+		}
+	} else if run.Status == StatusParked {
+		// A parked run that ends (cancelled) takes its open approvals
+		// with it.
+		if err := l.cancelApprovals(tx, run.ID); err != nil {
+			return err
+		}
 	}
 	run.Status, run.Error, run.CancelCause, run.Pending, run.Usage = status, ack.Error, cause, ack.Pending, u
 	extra := map[string]any{}
@@ -664,4 +673,70 @@ func (l *Ledger) end(tx store.Tx, s tenant.Scope, actor events.Actor, run *Run, 
 		extra["pending"] = ids
 	}
 	return l.emit(tx, s, actor, typ, *run, extra)
+}
+
+// ByID reads the scope's runs among ids, by id: the ledger's side of a
+// page of runs the trace store listed. Ids it does not hold are absent.
+func (l *Ledger) ByID(ctx context.Context, s tenant.Scope, ids []string) (map[string]Run, error) {
+	out := map[string]Run{}
+	if s.IsZero() || len(ids) == 0 {
+		return out, nil
+	}
+	err := l.db.Read(ctx, func(tx store.Tx) error {
+		for len(ids) > 0 {
+			n := min(len(ids), 200)
+			args := []any{s.Project(), s.Env(), s.Tenant()}
+			for _, id := range ids[:n] {
+				args = append(args, id)
+			}
+			rows, err := store.Query(tx, selectRun+` WHERE project_id = ? AND env = ? AND tenant_id = ? AND id IN (?`+strings.Repeat(", ?", n-1)+`)`, args...)
+			if err != nil {
+				return err
+			}
+			for rows.Next() {
+				run, err := scanRun(rows)
+				if err != nil {
+					_ = rows.Close()
+					return err
+				}
+				out[run.ID] = run
+			}
+			if err := rows.Close(); err != nil {
+				return err
+			}
+			ids = ids[n:]
+		}
+		return nil
+	})
+	return out, err
+}
+
+// Queued lists the scope's runs still waiting for a worker, newest
+// first (at most limit; agent "" is every agent): the runs no trace
+// names yet.
+func (l *Ledger) Queued(ctx context.Context, s tenant.Scope, agent string, limit int) ([]Run, error) {
+	if s.IsZero() {
+		return nil, tenant.ErrZeroScope
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	var out []Run
+	err := l.db.Read(ctx, func(tx store.Tx) error {
+		rows, err := store.Query(tx, selectRun+` WHERE project_id = ? AND env = ? AND tenant_id = ? AND status = ? AND (? = '' OR agent = ?)
+			ORDER BY created_at DESC, id DESC LIMIT ?`, s.Project(), s.Env(), s.Tenant(), StatusQueued, agent, agent, limit)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			run, err := scanRun(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, run)
+		}
+		return rows.Err()
+	})
+	return out, err
 }

@@ -155,6 +155,16 @@ paths:
       operationId: listAgents
       summary: The project's agents with their labels
       x-weftbase-action: agents.read
+      description: >-
+        include=summary adds, per agent, registered (false on an agent
+        the window's runs name and no build registered) and summary
+        {version, number, model, placement, tools, subagents,
+        needs_approval, stats{since, until, runs, failed, failure_rate,
+        last_run_id, last_run_at}}, and totals{agents, tools,
+        placements[]} beside agents.
+      parameters:
+        - { name: include, in: query, schema: { type: string, enum: [summary] } }
+        - { name: since, in: query, description: The stats window (include=summary). RFC 3339, a Go duration or Nd back from now., schema: { type: string } }
       responses:
         "200":
           description: The agents, by name.
@@ -261,6 +271,24 @@ paths:
       parameters:
         - { name: agent, in: query, schema: { type: string } }
         - { name: status, in: query, schema: { $ref: "#/components/schemas/RunStatus" } }
+        - name: display_status
+          in: query
+          description: >-
+            The one word a row reads (its display_status), from the
+            trace store and the run ledger: queued rows come from the
+            ledger alone. Not with status. The trace store pages first,
+            so a page can hold fewer rows than limit.
+          schema: { type: string, enum: [queued, running, waiting, succeeded, failed, cancelled, interrupted] }
+        - name: chains
+          in: query
+          description: >-
+            1: one row per logical run. A resume is folded into the run
+            it continues, whose row carries chain {runs[], display_status,
+            stopped_by?, error_type?, cancel_cause?, err?, started,
+            finished, duration_ms, waiting_ms, steps, usage, cost_usd,
+            cost_known, waits[{run, resumed_by?, from, to, approvals[],
+            decided_by[]}]} and the chain's display_status.
+          schema: { type: string, enum: ["1"] }
         - { name: session, in: query, schema: { type: string } }
         - { name: public_id, in: query, schema: { type: string } }
         - name: parent
@@ -524,6 +552,14 @@ paths:
       parameters:
         - $ref: "#/components/parameters/RunID"
         - { name: tree, in: query, schema: { type: string, enum: ["1"] } }
+        - name: chain
+          in: query
+          description: >-
+            With tree=1: the trees of every run of the run's chain (a
+            parked run, its resume, …) in one list, with chain (the run
+            ids in order) and waits (each wait on a person: from, to or
+            null, its approvals and who decided).
+          schema: { type: string, enum: ["1"] }
       responses:
         "200": { $ref: "#/components/responses/Loose" }
         "404": { $ref: "#/components/responses/Error" }
@@ -761,13 +797,30 @@ paths:
     get:
       operationId: getStats
       summary: Aggregates over a window, grouped
+      description: >-
+        Every answer carries bucket_starts (each bucket's start).
+        by=total is one series with no grouping, read from the run
+        rows: total and series[] of {t, runs, succeeded, failed,
+        cancelled, waiting, running, interrupted, failure_rate,
+        input_tokens, output_tokens, cost_usd, cost_known,
+        duration_ms{p50, p95, n}|null}; a parked run and its resume are
+        one run; failure_rate is failed / (succeeded + failed).
+        by=agent groups carry the same as outcomes and outcome_series.
       x-weftbase-action: runs.read
       parameters:
         - name: by
           in: query
-          schema: { type: string, enum: [agent, model, tool, error_type, step] }
-        - { name: since, in: query, description: RFC 3339, a Go duration or Nd back from until., schema: { type: string } }
+          schema: { type: string, enum: [agent, model, tool, error_type, step, total] }
+        - { name: since, in: query, description: "RFC 3339, a Go duration or Nd back from until (1h, 24h, 7d). Default 24h.", schema: { type: string } }
         - { name: until, in: query, schema: { type: string, format: date-time } }
+        - { name: buckets, in: query, schema: { type: integer, minimum: 1, maximum: 366, default: 24 } }
+        - name: parent
+          in: query
+          description: >-
+            Which runs count: empty is top-level runs, * every run, an id
+            that run's children. Default: top-level for by=agent,
+            error_type and total; every run for model, tool and step.
+          schema: { type: string }
       responses:
         "200": { $ref: "#/components/responses/Loose" }
         "400": { $ref: "#/components/responses/Error" }
@@ -847,6 +900,166 @@ paths:
         "413": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
 
+  /v1/agents/{name}:
+    parameters:
+      - $ref: "#/components/parameters/AgentName"
+    get:
+      operationId: getAgent
+      summary: One agent with its versions, each with a manifest summary and what changed
+      description: >-
+        newest and by_label repeat entries of version_list (newest
+        first). A version's manifest is {model, instructions{present,
+        length}, tools[{name, description, needs_approval, subagent?,
+        timeout?}], subagents[], limits{...}}; changes compares it with
+        the version before it (the shape of the versions diff). stats
+        are the window's runs (since, default 24h).
+      x-weftbase-action: agents.read
+      parameters:
+        - { name: since, in: query, description: RFC 3339, a Go duration or Nd back from now., schema: { type: string } }
+      responses:
+        "200": { $ref: "#/components/responses/Loose" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/Error" }
+  /v1/agents/{name}/versions/{a}/diff/{b}:
+    parameters:
+      - $ref: "#/components/parameters/AgentName"
+      - { name: a, in: path, required: true, description: A version id (agv_…) or number., schema: { type: string } }
+      - { name: b, in: path, required: true, description: A version id (agv_…) or number., schema: { type: string } }
+    get:
+      operationId: diffAgentVersions
+      summary: What changed from version a to version b (their manifests)
+      x-weftbase-action: agents.read
+      responses:
+        "200":
+          description: The differences.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VersionDiff" }
+        "404": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/Error" }
+  /v1/tools:
+    get:
+      operationId: listTools
+      summary: Every tool once, with the agents and versions that offer it and its calls in the window
+      description: >-
+        tools[{name, description, needs_approval, subagent?,
+        agents[{agent, versions[{id, number, labels, needs_approval}]}],
+        stats{calls, failed_calls, failure_rate, duration_ms{p50, p95,
+        n}}|null}], since, until. stats is GET /v1/stats?by=tool's
+        group of the same key.
+      x-weftbase-action: agents.read
+      parameters:
+        - { name: since, in: query, description: RFC 3339, a Go duration or Nd back from now., schema: { type: string } }
+      responses:
+        "200": { $ref: "#/components/responses/Loose" }
+        "400": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/Error" }
+  /v1/approvals:
+    get:
+      operationId: listApprovals
+      summary: The calls runs parked on, pending first, then decided (newest decision first)
+      x-weftbase-action: approvals.read
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [pending, decided, approved, denied, resolved, expired, cancelled] }
+        - { name: agent, in: query, schema: { type: string } }
+        - { name: tool, in: query, schema: { type: string } }
+        - { name: run, in: query, description: The parked run's id., schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 0, maximum: 500, default: 100 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0 } }
+      responses:
+        "200":
+          description: One page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [approvals, total, pending, next_offset]
+                properties:
+                  approvals: { type: array, items: { $ref: "#/components/schemas/Approval" } }
+                  total: { type: integer, description: How many match the filter. }
+                  pending: { type: integer, description: How many of the scope's approvals wait, whatever the filter. }
+                  next_offset: { type: [integer, "null"] }
+        "400": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/Error" }
+  /v1/approvals/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getApproval
+      summary: One approval
+      x-weftbase-action: approvals.read
+      responses:
+        "200":
+          description: The approval.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Approval" }
+        "404": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/Error" }
+  /v1/approvals/{id}/decision:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: decideApproval
+      summary: Approve, deny or resolve a pending approval, bound to its arguments
+      description: >-
+        The run resumes (as a new run on its pinned version, resumed_by)
+        once every approval of it is decided; until then it stays
+        parked. 409 args_changed when args_sha256 is not the approval's;
+        409 not_pending when it was decided otherwise, expired or was
+        cancelled. The same decision again is a no-op (200). The decider
+        (the Console operator, or the API key's id) is recorded as actor.
+      x-weftbase-action: approvals.decide
+      parameters:
+        - $ref: "#/components/parameters/CSRF"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision, args_sha256]
+              properties:
+                decision: { type: string, enum: [approve, deny, resolve] }
+                reason: { type: string }
+                content: { type: string, description: "resolve only: the result the model reads in place of the tool's." }
+                args_sha256: { type: string, description: The approval's args_sha256 as the decider was shown it. }
+      responses:
+        "200":
+          description: The approval as decided.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Approval" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{id}/conversation:
+    get:
+      operationId: getSessionConversation
+      summary: A session as a conversation, one entry per turn, paged
+      description: >-
+        turns[{turn, run_id, runs[], input, input_known, reply|null,
+        display_status, stopped_by?, error_type?, cancel_cause?, err?,
+        ended_by?, ended_by_turn?, ended_kind?, started, finished|null,
+        duration_ms, waiting_ms, model_calls, tool_calls, usage,
+        cost_usd, cost_known, agent_version?, waits[], marks[],
+        compactions?, delegated_sessions?}], total_turns, offset,
+        next_offset, session_marks[]. A turn that parked and was
+        resumed is one turn: runs lists its chain, waits the waits on a
+        person with their approvals. marks are the timeline's.
+      x-weftbase-action: runs.content
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - { name: offset, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 0, maximum: 100, default: 20 } }
+      responses:
+        "200": { $ref: "#/components/responses/Loose" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     apiKey:
@@ -969,6 +1182,61 @@ components:
             messages: { type: array, items: { type: object, additionalProperties: true } }
         metadata: { type: object, additionalProperties: { type: string } }
         priority: { type: integer }
+    Approval:
+      type: object
+      description: One call a run parked on. One pending call is one approval.
+      required: [id, object, tenant_id, run_id, call_id, agent, agent_version, tool, args, args_sha256, status, requested_at]
+      properties:
+        id: { type: string, description: appr_… }
+        object: { type: string, const: approval }
+        tenant_id: { type: string }
+        run_id: { type: string, description: The parked run. }
+        call_id: { type: string }
+        agent: { type: string }
+        agent_version: { type: string }
+        tool: { type: string }
+        args: {}
+        args_sha256: { type: string, description: sha256 (hex) of the stored arguments; a decision echoes it. }
+        status: { type: string, enum: [pending, approved, denied, resolved, expired, cancelled] }
+        requested_at: { type: string, format: date-time }
+        outcome: { type: string, enum: [approve, deny, resolve], description: Set once decided (expired reads deny). }
+        reason: { type: string }
+        content: { type: string }
+        decided_at: { type: string, format: date-time }
+        actor:
+          type: object
+          description: Who decided (operator, a Console session; key, an API key's id; system, an expiry).
+          properties:
+            kind: { type: string }
+            id: { type: string }
+        resumed_by: { type: string, description: The run that continued the parked one. }
+    VersionDiff:
+      type: object
+      required: [from, to, same_manifest, build_changed, model_changed, instructions_changed, tools_added, tools_removed, tools_changed, limits_changed]
+      properties:
+        from: { type: string }
+        to: { type: string }
+        same_manifest: { type: boolean }
+        build_changed: { type: boolean }
+        model_changed: { type: [object, "null"] }
+        instructions_changed: { type: boolean }
+        tools_added: { type: array, items: { type: string } }
+        tools_removed: { type: array, items: { type: string } }
+        tools_changed:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              fields: { type: array, items: { type: string } }
+        limits_changed:
+          type: array
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              from: {}
+              to: {}
     LedgerRun:
       type: object
       required: [id, tenant_id, agent, agent_version, resolved_via, status, usage, created_at]

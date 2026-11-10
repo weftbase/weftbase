@@ -19,8 +19,9 @@
 // model is scripted (package shop): succeeded runs with parallel tool
 // calls, a delegation to a subagent, a run that fails on a tool and
 // one on the model, a cancelled run, conversations of several turns,
-// and refunds that wait for a person: one approved, one denied, one
-// left pending for you to decide.
+// and refunds that wait for a person (each parked call is an approval,
+// decided through /v1/approvals): some approved, one denied, one left
+// pending for you to decide.
 package main
 
 import (
@@ -127,6 +128,7 @@ func run(ctx context.Context, cfg config, ready func(url, key string)) error {
 		return fmt.Errorf("%w (is `weftbase dev` or another demo running?)", err)
 	}
 	base := "http://" + ln.Addr().String()
+	app.Serving(base)
 	srv := &http.Server{Handler: app.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = srv.Serve(ln) }()
 	nodeCtx, stopNode := context.WithCancel(context.Background())
@@ -167,7 +169,7 @@ func run(ctx context.Context, cfg config, ready func(url, key string)) error {
 	// Local placement: each refunds binary runs as a child process.
 	for _, bin := range builds {
 		vs, err := app.Local(bin,
-			weftbase.LocalEnv("DEMO_URL="+base, "DEMO_KEY="+key, "DEMO_SPEED="+strconv.FormatFloat(cfg.speed, 'f', -1, 64)),
+			weftbase.LocalEnv("DEMO_SPEED="+strconv.FormatFloat(cfg.speed, 'f', -1, 64)),
 			weftbase.LocalOutput(cfg.out))
 		if err != nil {
 			return err
@@ -261,6 +263,7 @@ func firstBatch() []scene {
 		{agent: "support", version: "label:staging", prompts: []string{shop.AskStock, shop.AskThanks}},
 		{agent: "refunds", prompts: []string{shop.AskRefund}, then: "approve"},
 		{agent: "refunds", prompts: []string{shop.AskRefund90}, then: "deny"},
+		{agent: "refunds", prompts: []string{shop.AskRefund, shop.AskThanks}, then: "approve"}, // a conversation that waits on a person
 		{agent: "refunds", version: "label:staging", prompts: []string{shop.AskRefund77}, then: "leave pending"},
 	}
 }
@@ -285,11 +288,8 @@ type client struct{ base, key string }
 // runStatus is the part of a run's status (GET /v1/runs/{id}/status)
 // the demo reads.
 type runStatus struct {
-	ID      string `json:"id"`
-	Status  string `json:"status"`
-	Pending []struct {
-		CallID string `json:"call_id"`
-	} `json:"pending"`
+	ID     string `json:"id"`
+	Status string `json:"status"`
 }
 
 func (c client) playAll(ctx context.Context, speed shop.Speed, scenes []scene) error {
@@ -333,21 +333,36 @@ func (c client) play(ctx context.Context, speed shop.Speed, s scene) error {
 			return err
 		}
 		if done.Status == "parked" {
-			// The run waits for a person. A decision resumes it as a
+			// The run waits for a person: each call it parked on is an
+			// approval. Deciding the last one resumes the run, as a
 			// new run on the same AgentVersion.
 			if s.then == "leave pending" {
 				return nil
 			}
 			pause(ctx, speed, 5*time.Second)
-			decision := map[string]any{"call_id": done.Pending[0].CallID, "decision": s.then}
-			if s.then == "deny" {
-				decision["reason"] = "outside the 30-day refund window"
+			var inbox struct {
+				Approvals []struct {
+					ID         string `json:"id"`
+					ArgsSHA256 string `json:"args_sha256"`
+				} `json:"approvals"`
 			}
-			var resumed runStatus
-			if err := c.post(ctx, "/v1/runs/"+run.ID+"/resume", map[string]any{"decisions": []any{decision}}, &resumed); err != nil {
+			if err := c.get(ctx, "/v1/approvals?status=pending&run="+run.ID, &inbox); err != nil {
 				return err
 			}
-			if _, err := c.wait(ctx, resumed.ID, "succeeded", "failed", "canceled"); err != nil {
+			var decided struct {
+				ResumedBy string `json:"resumed_by"`
+			}
+			for _, a := range inbox.Approvals {
+				// args_sha256 binds the decision to the arguments shown.
+				decision := map[string]any{"decision": s.then, "args_sha256": a.ArgsSHA256}
+				if s.then == "deny" {
+					decision["reason"] = "outside the 30-day refund window"
+				}
+				if err := c.post(ctx, "/v1/approvals/"+a.ID+"/decision", decision, &decided); err != nil {
+					return err
+				}
+			}
+			if _, err := c.wait(ctx, decided.ResumedBy, "succeeded", "failed", "canceled"); err != nil {
 				return err
 			}
 		}

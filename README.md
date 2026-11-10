@@ -77,9 +77,12 @@ weftbase serve --build ./bin/support   # the local placement: a supervised child
 ```
 
 The supervisor copies the build into `<data>/builds/<sha256>`, starts
-it with `WEFTBASE_SOCKET`, `WEFTBASE_TOKEN`, `WEFTBASE_BUILD_DIGEST` and
-`WEFTBASE_PLACEMENT=local`, and records the build and an AgentVersion
-per agent. A newer build of the same agents retires the older one;
+it with `WEFTBASE_SOCKET`, `WEFTBASE_WORKER_TOKEN` (the link's secret),
+`WEFTBASE_BUILD_DIGEST` and `WEFTBASE_PLACEMENT=local`, and records the
+build and an AgentVersion per agent. It also hands the child
+`WEFTBASE_URL` and `WEFTBASE_TOKEN` (the node's URL and an ingest key it
+mints), so a build that calls `exporter.Install()` sends its traces and
+logs to the node with no wiring. A newer build of the same agents retires the older one;
 runs parked on it still resume there (it is started again on demand).
 `./bin/support --manifest` prints the build's manifests. In-process
 agents use the embedded placement instead: `app.Agent(support)`.

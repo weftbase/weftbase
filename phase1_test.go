@@ -408,3 +408,105 @@ func TestRestartClaimsAgain(t *testing.T) {
 		t.Errorf("lost run events = %s", got)
 	}
 }
+
+// A run the ledger admitted and no worker took (no trace names it yet)
+// is still a row where runs are listed, with its true state; so is its
+// own document, and it leaves the list's queued word once cancelled.
+func TestQueuedRunIsListed(t *testing.T) {
+	// The first node registers the agent; the second serves the API
+	// only, so what it admits waits.
+	dir := t.TempDir()
+	app, _, stop := startApp(t, dir, BuildDigest(digestA))
+	if err := app.Agent(core.New(wefttest.Script(), core.Name("support"))); err != nil {
+		t.Fatal(err)
+	}
+	stop()
+	_, ts, _ := startApp(t, dir, Roles(RoleAPI))
+	code, run := postJSON(t, ts.URL+"/v1/runs", map[string]any{"agent": "support", "input": map[string]any{"prompt": "are you there?"}})
+	if code != 202 {
+		t.Fatalf("admit: %d %v", code, run)
+	}
+	id := run["id"].(string)
+	for _, path := range []string{"/v1/runs", "/v1/runs?display_status=queued", "/v1/runs?chains=1&agent=support"} {
+		code, page := getJSON(t, ts.URL+path)
+		rows, _ := page["runs"].([]any)
+		if code != 200 || len(rows) != 1 || page["total"].(float64) != 1 {
+			t.Fatalf("GET %s: %d %v", path, code, page)
+		}
+		row := rows[0].(map[string]any)
+		if row["id"] != id || row["display_status"] != "queued" || row["ledger_only"] != true || row["prompt_preview"] != "are you there?" ||
+			row["resolved_via"] != registry.ViaLatest || row["placement"] != wire.PlacementEmbedded ||
+			row["agent_version"].(map[string]any)["number"].(float64) != 1 {
+			t.Errorf("GET %s row = %v", path, row)
+		}
+	}
+	if code, page := getJSON(t, ts.URL+"/v1/runs?display_status=running"); code != 200 || len(page["runs"].([]any)) != 0 {
+		t.Errorf("display_status=running: %d %v", code, page)
+	}
+	if code, doc := getJSON(t, ts.URL+"/v1/runs/"+id); code != 200 || doc["display_status"] != "queued" || doc["children"] == nil {
+		t.Errorf("GET the queued run: %d %v", code, doc)
+	}
+	if code, _ := postJSON(t, ts.URL+"/v1/runs/"+id+"/cancel", map[string]any{}); code != 202 {
+		t.Fatalf("cancel: %d", code)
+	}
+	if code, page := getJSON(t, ts.URL+"/v1/runs?display_status=queued"); code != 200 || len(page["runs"].([]any)) != 0 {
+		t.Errorf("after the cancel, queued: %d %v", code, page)
+	}
+	if code, doc := getJSON(t, ts.URL+"/v1/runs/"+id); code != 200 || doc["display_status"] != "cancelled" {
+		t.Errorf("GET the cancelled run: %d %v", code, doc)
+	}
+	if code, page := getJSON(t, ts.URL+"/v1/runs?display_status=bogus"); code != 400 {
+		t.Errorf("a bogus display_status: %d %v", code, page)
+	}
+}
+
+// The approvals routes over HTTP: the codes a client branches on.
+func TestApprovalRoutes(t *testing.T) {
+	app, ts, _ := startApp(t, t.TempDir(), BuildDigest(digestA))
+	var refunded atomic.Int32
+	model := wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order":42}`}), wefttest.Say("refunded"))
+	if err := app.Agent(refunds(model, &refunded)); err != nil {
+		t.Fatal(err)
+	}
+	_, run := postJSON(t, ts.URL+"/v1/runs", map[string]any{"agent": "refunds", "input": map[string]any{"prompt": "refund 42"}})
+	waitRun(t, app, run["id"].(string), sessions.StatusParked)
+	code, inbox := getJSON(t, ts.URL+"/v1/approvals?status=pending&tool=refund")
+	items, _ := inbox["approvals"].([]any)
+	if code != 200 || len(items) != 1 || inbox["pending"].(float64) != 1 {
+		t.Fatalf("GET /v1/approvals: %d %v", code, inbox)
+	}
+	a := items[0].(map[string]any)
+	url := ts.URL + "/v1/approvals/" + a["id"].(string)
+	if a["run_id"] != run["id"] || a["object"] != "approval" || a["args"].(map[string]any)["order"].(float64) != 42 {
+		t.Errorf("approval = %v", a)
+	}
+	errCode := func(body map[string]any) any { e, _ := body["error"].(map[string]any); return e["code"] }
+	if code, body := postJSON(t, url+"/decision", map[string]any{"decision": "approve", "args_sha256": "abc"}); code != 409 || errCode(body) != "args_changed" {
+		t.Errorf("another hash: %d %v", code, body)
+	}
+	if code, body := postJSON(t, url+"/decision", map[string]any{"decision": "maybe", "args_sha256": a["args_sha256"]}); code != 400 {
+		t.Errorf("a bad decision: %d %v", code, body)
+	}
+	if code, _ := getJSON(t, ts.URL+"/v1/approvals/appr_nope"); code != 404 {
+		t.Errorf("an unknown approval: %d", code)
+	}
+	if code, _ := getJSON(t, ts.URL+"/v1/approvals?status=bogus"); code != 400 {
+		t.Errorf("a bogus status: %d", code)
+	}
+	code, decided := postJSON(t, url+"/decision", map[string]any{"decision": "approve", "reason": "ok", "args_sha256": a["args_sha256"]})
+	if code != 200 || decided["status"] != "approved" || decided["resumed_by"] == nil || decided["actor"].(map[string]any)["kind"] != "key" {
+		t.Fatalf("decide: %d %v", code, decided)
+	}
+	if code, again := postJSON(t, url+"/decision", map[string]any{"decision": "approve", "args_sha256": a["args_sha256"]}); code != 200 || again["decided_at"] != decided["decided_at"] {
+		t.Errorf("the same decision again: %d %v", code, again)
+	}
+	if code, body := postJSON(t, url+"/decision", map[string]any{"decision": "deny", "args_sha256": a["args_sha256"]}); code != 409 || errCode(body) != "not_pending" {
+		t.Errorf("another decision: %d %v", code, body)
+	}
+	if done := waitRun(t, app, decided["resumed_by"].(string), sessions.StatusSucceeded, sessions.StatusFailed); done.Status != sessions.StatusSucceeded || refunded.Load() != 1 {
+		t.Errorf("the resume = %+v, refunded %d", done, refunded.Load())
+	}
+	if got := runEvents(t, app, run["id"].(string)); !strings.Contains(strings.Join(got, ","), "run.parked") {
+		t.Errorf("events = %v", got)
+	}
+}

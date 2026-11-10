@@ -12,30 +12,32 @@ const (
 	Public Action = "public"
 	// AuthSession is any authenticated principal acting on its own
 	// session (sign-out).
-	AuthSession   Action = "auth.session"
-	MetaRead      Action = "meta.read"
-	RunsRead      Action = "runs.read"
-	RunsContent   Action = "runs.content" // prompts, tool arguments, transcripts
-	RunsDelete    Action = "runs.delete"
-	RunsCancel    Action = "runs.cancel"
-	RunsSteer     Action = "runs.steer"
-	RunsCreate    Action = "runs.create"
-	SessionsRead  Action = "sessions.read"
-	SessionsWrite Action = "sessions.write"
-	TracesRead    Action = "traces.read"
-	EventsRead    Action = "events.read"
-	AgentsRead    Action = "agents.read"
-	AgentsWrite   Action = "agents.write"
-	SettingsRead  Action = "settings.read"
-	KeysManage    Action = "keys.manage"
-	IngestWrite   Action = "ingest.write"
-	WorkerConnect Action = "worker.connect"
+	AuthSession     Action = "auth.session"
+	MetaRead        Action = "meta.read"
+	RunsRead        Action = "runs.read"
+	RunsContent     Action = "runs.content" // prompts, tool arguments, transcripts
+	RunsDelete      Action = "runs.delete"
+	RunsCancel      Action = "runs.cancel"
+	RunsSteer       Action = "runs.steer"
+	RunsCreate      Action = "runs.create"
+	SessionsRead    Action = "sessions.read"
+	SessionsWrite   Action = "sessions.write"
+	TracesRead      Action = "traces.read"
+	EventsRead      Action = "events.read"
+	ApprovalsRead   Action = "approvals.read"   // pending and decided calls, with their arguments
+	ApprovalsDecide Action = "approvals.decide" // approve or deny a pending call
+	AgentsRead      Action = "agents.read"
+	AgentsWrite     Action = "agents.write"
+	SettingsRead    Action = "settings.read"
+	KeysManage      Action = "keys.manage"
+	IngestWrite     Action = "ingest.write"
+	WorkerConnect   Action = "worker.connect"
 )
 
 // Actions lists every action, for the route-completeness test.
 var Actions = []Action{
 	Public, AuthSession, MetaRead, RunsRead, RunsContent, RunsDelete, RunsCancel, RunsSteer, RunsCreate,
-	SessionsRead, SessionsWrite, TracesRead, EventsRead, AgentsRead, AgentsWrite,
+	SessionsRead, SessionsWrite, TracesRead, EventsRead, ApprovalsRead, ApprovalsDecide, AgentsRead, AgentsWrite,
 	SettingsRead, KeysManage, IngestWrite, WorkerConnect,
 }
 

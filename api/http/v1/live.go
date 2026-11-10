@@ -486,7 +486,7 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 			if key, ok := liveDedupKey(f); ok && sent.seen(key) {
 				continue
 			}
-			writeFrame(sw, f, s.coster(ctx))
+			writeFrame(sw, f, s.coster(ctx), s.control(r))
 		}
 	}
 }
@@ -545,7 +545,7 @@ type removedRunDTO struct {
 //
 // A run frame's row carries its cost (plan A5) as every run row does:
 // c reads the run's children to tell its own usage from theirs.
-func writeFrame(sw *sseWriter, f obsdb.Frame, c *coster) {
+func writeFrame(sw *sseWriter, f obsdb.Frame, c *coster, ctl *control) {
 	switch f.Kind {
 	case obsdb.FrameRecord:
 		if f.Record == nil {
@@ -581,7 +581,10 @@ func writeFrame(sw *sseWriter, f obsdb.Frame, c *coster) {
 			sw.frame("id: %d\nevent: run\ndata: %s\n\n", f.Seq, data)
 			break
 		}
-		rowJSON, err := json.Marshal(c.row(*f.Run))
+		// The row as a list draws it: the ledger's fields too.
+		one := []runRow{c.row(*f.Run)}
+		ctl.decorate(one)
+		rowJSON, err := json.Marshal(one[0])
 		if err != nil {
 			return
 		}

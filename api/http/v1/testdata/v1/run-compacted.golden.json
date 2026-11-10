@@ -1,4 +1,37 @@
 {
+  "display_status": "waiting",
+  "chain": {
+    "runs": [
+      {
+        "id": "r_steps",
+        "display_status": "waiting",
+        "started": "(time)",
+        "finished": "(time)"
+      }
+    ],
+    "display_status": "waiting",
+    "stopped_by": "parked",
+    "started": "(time)",
+    "finished": null,
+    "duration_ms": 0,
+    "waiting_ms": 0,
+    "steps": 3,
+    "usage": {
+      "input_tokens": 40,
+      "output_tokens": 20
+    },
+    "cost_usd": 0,
+    "cost_known": true,
+    "waits": [
+      {
+        "run": "r_steps",
+        "from": "(time)",
+        "to": null,
+        "approvals": [],
+        "decided_by": []
+      }
+    ]
+  },
   "id": "r_steps",
   "parent_run_id": "",
   "parent_call_id": "",
@@ -59,6 +92,7 @@
   },
   "children": [
     {
+      "display_status": "succeeded",
       "id": "r_steps/1/c_sub",
       "parent_run_id": "r_steps",
       "parent_call_id": "c_sub",

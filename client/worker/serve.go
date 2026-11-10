@@ -47,16 +47,23 @@ import (
 const (
 	// EnvSocket is the Unix socket the build dials.
 	EnvSocket = "WEFTBASE_SOCKET"
-	// EnvToken is the per-child token the build registers with.
-	EnvToken = "WEFTBASE_TOKEN"
+	// EnvWorkerToken is the worker link's per-child secret: the build
+	// registers with it on the socket, and it opens nothing else. (It
+	// is not WEFTBASE_TOKEN: that one is an API key, below.)
+	EnvWorkerToken = "WEFTBASE_WORKER_TOKEN"
 	// EnvBuildDigest is the build's digest as the supervisor computed
 	// it (the build then need not hash itself).
 	EnvBuildDigest = "WEFTBASE_BUILD_DIGEST"
 	// EnvPlacement is the placement the build runs in (local).
 	EnvPlacement = "WEFTBASE_PLACEMENT"
-	// EnvURL is the Weftbase server's base URL (the remote worker link,
-	// v2; and where the build's OTel exporter sends).
-	EnvURL = "WEFTBASE_URL"
+	// EnvURL and EnvToken are where the build's telemetry goes: the
+	// node's base URL and an API key that may ingest (a worker key).
+	// client/exporter's Install reads them, so a build that calls
+	// exporter.Install() reports to the node that supervises it with no
+	// wiring. (The remote placement will dial the worker link with the
+	// same pair; the local placement dials the socket.)
+	EnvURL   = "WEFTBASE_URL"
+	EnvToken = "WEFTBASE_TOKEN"
 )
 
 // Link bounds (P§6.1).
@@ -103,13 +110,13 @@ type config struct {
 }
 
 // FromEnv reads the link from the environment a supervisor sets:
-// WEFTBASE_SOCKET, WEFTBASE_TOKEN, WEFTBASE_BUILD_DIGEST and
+// WEFTBASE_SOCKET, WEFTBASE_WORKER_TOKEN, WEFTBASE_BUILD_DIGEST and
 // WEFTBASE_PLACEMENT. Without WEFTBASE_SOCKET, Serve fails (the remote
 // worker link over WEFTBASE_URL lands with the remote placement).
 func FromEnv() Option {
 	return func(c *config) {
 		c.socket = os.Getenv(EnvSocket)
-		c.token = os.Getenv(EnvToken)
+		c.token = os.Getenv(EnvWorkerToken)
 		if d := os.Getenv(EnvBuildDigest); d != "" {
 			c.digest = d
 		}

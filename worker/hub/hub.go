@@ -146,6 +146,9 @@ func (h *Hub) Attach(ctx context.Context, s tenant.Scope, ex worker.Executor) (*
 		if versions, err = h.c.Registry.Register(tx, s, reg.Build.Digest, kind, specs); err != nil {
 			return err
 		}
+		if err := h.c.Registry.SetPlacement(tx, s, reg.Build.Digest, reg.Placement); err != nil {
+			return err
+		}
 		ids := make([]string, len(versions))
 		for i, v := range versions {
 			ids[i] = v.ID

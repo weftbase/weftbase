@@ -113,6 +113,15 @@ func (s *Server) serveAgents(w http.ResponseWriter, r *http.Request) {
 	if agents == nil {
 		agents = []registry.Agent{}
 	}
+	switch r.URL.Query().Get("include") {
+	case "":
+	case "summary":
+		s.serveAgentsSummary(w, r, agents)
+		return
+	default:
+		badRequest(w, r, "include is summary")
+		return
+	}
 	writeJSON(w, r, http.StatusOK, map[string]any{"agents": agents})
 }
 

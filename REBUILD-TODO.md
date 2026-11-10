@@ -141,6 +141,22 @@ diff, holes), `observe/export`, `sessions` (timeline, export, delete),
 - The weft integration points above, when weft's `weftbase-gaps` lands.
 - weft-arena is still unpinned (step 1).
 
+## v0.1.0 Console surface: done (ahead of Phase 2, first slices)
+
+What the Console needed from the server, built on the Phase 1 ledger
+(`docs/architecture.md`, "What the reads join"):
+
+| Item | Status | Notes |
+|---|---|---|
+| local builds report to their node | done | the supervisor hands the child `WEFTBASE_URL` + `WEFTBASE_TOKEN` (a worker key it mints); the link secret is `WEFTBASE_WORKER_TOKEN`; `App.Serving(url)` replaces `SetHolder` |
+| approvals as a resource | done (first slice of P§10) | `approvals` table (migration `0004`), one record per parked call; `GET /v1/approvals`, `GET /v1/approvals/{id}`, `POST /v1/approvals/{id}/decision` (bound by `args_sha256`, actor recorded, resume when all are decided); events `approval.requested`, `approval.decided`. Not built: `request_id` occurrence binding, quorum, policies, signed forward, the stream, batch decide, `Idempotency-Key` |
+| `display_status`, `agent_version`, `resolved_via`, `placement` on run rows; queued runs listed | done | `api/http/v1/runview.go`; `builds.placement` (migration `0004`) |
+| chains (a park and its resume are one run) | done | `?chains=1` on the list, `chain` on run detail, `spans?tree=1&chain=1`; the fold runs after the trace store pages (a page may be short; `total` is the trace store's) |
+| agent inventory | done | `GET /v1/agents?include=summary`, `/v1/agents/{name}`, `/versions/{a}/diff/{b}`, `/v1/tools` |
+| stats | done | `by=total` (from run rows: outcomes, cost, durations, bucket timestamps), `buckets=`, `outcomes` on `by=agent`; run-level groupings count top-level runs by default |
+| session conversation | done | `GET /v1/sessions/{id}/conversation` |
+| `store/storetest` group for approvals; code generation from the spec | todo | the approvals repository is tested in `sessions/approvals_test.go` and over HTTP in `phase1_test.go` |
+
 ## Commits
 
 | Commit | Step | Summary |

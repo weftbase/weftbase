@@ -85,7 +85,14 @@ func call(wait time.Duration, in, out int64, calls ...wefttest.Call) beat {
 	return beat{wait: wait, turn: wefttest.ToolCalls(calls...).WithUsage(core.Usage{InputTokens: in, OutputTokens: out})}
 }
 
-func tool(name, args string) wefttest.Call { return wefttest.Call{Name: name, Args: args} }
+// tool is one scripted tool call. Every call gets its own id, as a
+// provider's would have.
+func tool(name, args string) wefttest.Call {
+	calls++
+	return wefttest.Call{ID: fmt.Sprintf("call_%s_%02d", name, calls), Name: name, Args: args}
+}
+
+var calls int
 
 // model plays one script per user message: the n-th model call after
 // the last user message is the script's n-th beat. It is stateless, so
@@ -250,6 +257,7 @@ var refundsPlays = map[string][]beat{
 	AskRefund:   refundPlay("1042", "64.00", "arrived damaged", "Done: $64.00 was refunded for order #1042 and the customer was notified."),
 	AskRefund77: refundPlay("1077", "129.00", "duplicate charge", "Done: the duplicate $129.00 charge on order #1077 was refunded."),
 	AskRefund90: refundPlay("1090", "212.50", "changed mind", "Done: $212.50 was refunded for order #1090."),
+	AskThanks:   {say(500*time.Millisecond, 1040, 12, "You're welcome.")},
 }
 
 // ── Tools ────────────────────────────────────────────────────────────

@@ -1,9 +1,12 @@
 // Package local is the local placement (P§5.7, M§4.3), the default
 // for builds: a supervised child process per build, talking the worker
 // protocol over a Unix socket. The supervisor starts the build with
-// WEFTBASE_SOCKET, WEFTBASE_TOKEN (a per-child secret), WEFTBASE_BUILD_DIGEST
-// and WEFTBASE_PLACEMENT=local; the build (client/worker.Serve) dials
-// back and registers.
+// WEFTBASE_SOCKET, WEFTBASE_WORKER_TOKEN (a per-child secret for the
+// link), WEFTBASE_BUILD_DIGEST and WEFTBASE_PLACEMENT=local; the build
+// (client/worker.Serve) dials back and registers. Telemetry is the
+// node's to supply (Config.Telemetry): WEFTBASE_URL and WEFTBASE_TOKEN,
+// an ingest key, so the build's exporter.Install() reports to the node
+// that supervises it.
 //
 // One Executor is one build. It implements worker.Executor: the hub
 // dispatches to it like to any placement. The child is started on
@@ -72,6 +75,11 @@ type Config struct {
 	// Env are extra environment variables (KEY=VALUE) for the child,
 	// after the node's own and before the WEFTBASE_* ones.
 	Env []string
+	// Telemetry, when set, is asked at every start of the child for
+	// where its traces and logs go: the node's base URL and an API key
+	// that may ingest. Both non-empty: the child gets WEFTBASE_URL and
+	// WEFTBASE_TOKEN (over anything the node's own environment held).
+	Telemetry func() (url, key string)
 	// Digest is the build's digest; default sha256 of Path.
 	Digest string
 	// SocketDir is where the socket is made (default os.TempDir()). A
@@ -304,9 +312,14 @@ func (e *Executor) ensure(ctx context.Context) (*link, error) {
 func (e *Executor) startLocked() error {
 	cmd := exec.Command(e.c.Path, e.c.Args...)
 	cmd.Env = append(os.Environ(), e.c.Env...)
+	if e.c.Telemetry != nil {
+		if url, key := e.c.Telemetry(); url != "" && key != "" {
+			cmd.Env = append(cmd.Env, buildworker.EnvURL+"="+url, buildworker.EnvToken+"="+key)
+		}
+	}
 	cmd.Env = append(cmd.Env,
 		buildworker.EnvSocket+"="+e.sock,
-		buildworker.EnvToken+"="+e.token,
+		buildworker.EnvWorkerToken+"="+e.token,
 		buildworker.EnvBuildDigest+"="+e.c.Digest,
 		buildworker.EnvPlacement+"="+wire.PlacementLocal,
 	)

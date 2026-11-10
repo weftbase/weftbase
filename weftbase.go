@@ -78,6 +78,8 @@ type App struct {
 	locals   map[string]*localBuild // by digest
 
 	mu       sync.Mutex
+	url      string // where the node is served (Serving)
+	buildKey string // the ingest key local builds report with, minted on first use
 	cancel   context.CancelFunc
 	done     chan struct{}
 	shutdown bool
@@ -291,9 +293,15 @@ func (a *App) lock(path string) error {
 	return nil
 }
 
-// SetHolder records the serving URL in the store locks, so a second
-// start names who holds them (best effort).
-func (a *App) SetHolder(url string) {
+// Serving tells the node the base URL it is served at (no trailing
+// slash; under a prefix, with it). Call it once the listener is up,
+// before Local: local builds are handed that URL for their telemetry,
+// and the store locks record it, so a second start names who holds
+// them (best effort).
+func (a *App) Serving(url string) {
+	a.mu.Lock()
+	a.url = strings.TrimRight(url, "/")
+	a.mu.Unlock()
 	for _, l := range a.locks {
 		l.SetHolder(dblock.Holder{URL: url, PID: os.Getpid()})
 	}

@@ -106,6 +106,7 @@
 .run.children[].delegated_cost_known=bool
 .run.children[].delegated_cost_usd=float64
 .run.children[].delta_count=float64
+.run.children[].display_status=string
 .run.children[].err=string
 .run.children[].event_count=float64
 .run.children[].events_emitted=float64
@@ -155,6 +156,7 @@
 .run.delegated_usage.output_tokens=float64
 .run.delegated_usage{}
 .run.delta_count=float64
+.run.display_status=string
 .run.err=string
 .run.event_count=float64
 .run.events_emitted=float64

@@ -26,13 +26,10 @@ func main() {
 	rel, _ := strconv.Atoi(release)
 	speed, _ := strconv.ParseFloat(os.Getenv("DEMO_SPEED"), 64)
 
-	// The child's traces and logs go to the node over OTLP. (The
-	// supervisor's WEFTBASE_TOKEN is the worker link's secret, not an
-	// API key, so the demo passes its own pair.)
-	flush := exporter.Install(
-		exporter.Remote(os.Getenv("DEMO_URL"), os.Getenv("DEMO_KEY")),
-		otel.Service("refunds-build"), otel.Slog(), otel.NoEnv(),
-	)
+	// The build's traces and logs go to the node that supervises it:
+	// the supervisor sets WEFTBASE_URL and WEFTBASE_TOKEN, and Install
+	// reads them.
+	flush := exporter.Install(otel.Service("refunds-build"), otel.Slog())
 	err := worker.Serve(worker.FromEnv(), worker.Agent(shop.Refunds(rel, shop.Speed(speed))))
 	flush()
 	if err != nil {

@@ -156,6 +156,52 @@ generation from it lands later.
 `GET /v1/runs/{id}/status`, `POST /v1/runs/{id}/cancel`,
 `POST /v1/runs/{id}/steer`, `POST /v1/runs/{id}/resume`.
 
+## What the reads join (v0.1.0)
+
+A run is in two stores: the trace store has what it did, the ledger
+what the platform decided about it. The reads join them, so no client
+derives a run's state itself (`api/http/v1/runview.go`):
+
+- Every run row carries `display_status` (queued, running, waiting,
+  succeeded, failed, cancelled, interrupted) and, for a run the ledger
+  admitted, `agent_version` (id, number, labels now), `resolved_via`
+  and `placement`. `GET /v1/runs?display_status=` filters on the word;
+  a queued run, which no trace names yet, is a row from the ledger
+  alone (`ledger_only`).
+- A parked run and the run that resumed it are a chain: one logical
+  run. `GET /v1/runs?chains=1` lists one row per chain, run detail
+  carries `chain` (the runs, the totals, each wait with its approvals
+  and who decided), and `GET /v1/runs/{id}/spans?tree=1&chain=1`
+  returns the whole chain's spans with the waits between them.
+- Approvals are a resource of the ledger (`sessions/approvals.go`):
+  each call a run parks on is one record, written in the park's
+  transaction. `GET /v1/approvals` is the inbox,
+  `POST /v1/approvals/{id}/decision` decides one, bound to its
+  arguments by `args_sha256` (409 `args_changed`), and records who
+  decided. The run resumes when its last approval is decided: weft
+  denies a pending call a resume carries no decision for, so a resume
+  is never sent early. `POST /v1/runs/{id}/resume` still resumes at
+  once and records its decisions on the same records. Quorum, signed
+  forwarding, policies and expiry-by-policy are Phase 2.
+- The inventory reads the registered manifests
+  (`api/http/v1/agentview.go`): `GET /v1/agents?include=summary`,
+  `GET /v1/agents/{name}`, `GET /v1/agents/{name}/versions/{a}/diff/{b}`
+  and `GET /v1/tools`.
+- `GET /v1/stats?by=total` is one series by outcome with bucket
+  timestamps, cost and durations; `GET /v1/sessions/{id}/conversation`
+  is a session turn by turn (a park and its resume are one turn).
+
+## Telemetry of a local build
+
+The supervisor hands every child `WEFTBASE_URL` (what `App.Serving`
+was told) and `WEFTBASE_TOKEN`, a worker key the node mints for its
+builds (it may ingest and nothing else; the keys earlier starts minted
+are revoked). `client/exporter`'s `Install()` reads that pair, so a
+build reports to its node with no wiring. The worker link's own secret
+is `WEFTBASE_WORKER_TOKEN`. The remote placement will dial the link
+with the same `WEFTBASE_URL` and `WEFTBASE_TOKEN` (a worker key the
+operator mints).
+
 ## Known limits (Phase 1)
 
 Two gaps in the local placement are deliberate for now. Each one fails

@@ -444,8 +444,17 @@ func post(t *testing.T, h http.Handler, path, ctype, body string) (int, http.Hea
 // pretty re-indents a compact JSON body so goldens read like the API.
 func pretty(t *testing.T, body string) string {
 	t.Helper()
-	return weftVersionRe.ReplaceAllString(indent(t, body), `"weft_version": "(test)"`)
+	out := weftVersionRe.ReplaceAllString(indent(t, body), `"weft_version": "(test)"`)
+	// A chain's figures are measured on the wall clock (a wait lasts
+	// until now, a fixture's park is "just now"): pinned by shape.
+	out = chainMSRe.ReplaceAllString(out, `"duration_ms": 0,${1}"waiting_ms": 0`)
+	return waitTimeRe.ReplaceAllString(out, `"${1}": "(time)"`)
 }
+
+var (
+	chainMSRe  = regexp.MustCompile(`"duration_ms": \d+,(\s*)"waiting_ms": \d+`)
+	waitTimeRe = regexp.MustCompile(`"(from|to)": "\d{4}-[^"]*"`)
+)
 
 // indent re-indents a compact JSON body, normalizing nothing.
 func indent(t *testing.T, body string) string {
