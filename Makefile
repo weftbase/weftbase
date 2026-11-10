@@ -33,15 +33,11 @@ test:
 # allow-list and the vocabulary audit.
 check: build vet test layering client-deps vocab
 
-# The build a release makes, without the workspace: GOWORK=off, the
-# client module's placeholder requirement pointed at ./client the way
-# requiring the tagged client/vX.Y.Z will (the replace is dropped again
-# afterwards; go.mod never commits one). The client module must also be
-# tidy on its own.
+# The build a release makes, without the workspace (GOWORK=off): the
+# server against the tagged client it requires. The client module must
+# also be tidy on its own.
 gowork-off:
 	@set -e; \
-	$(GO) mod edit -replace github.com/weftbase/weftbase/client=./client; \
-	trap 'cd "$(CURDIR)" && $(GO) mod edit -dropreplace github.com/weftbase/weftbase/client' EXIT; \
 	GOWORK=off $(GO) build ./...; \
 	GOWORK=off $(GO) vet ./...; \
 	cd client && GOWORK=off $(GO) build ./... && GOWORK=off $(GO) mod tidy -diff
@@ -73,21 +69,11 @@ lint:
 	cd client && PATH="$$PATH:$$(go env GOPATH)/bin" golangci-lint run ./...
 
 # go mod tidy reads no go.work. Both modules require weft at its
-# published version, so the client module is a plain tidy. The server
-# still requires the client module at the placeholder pseudo-version
-# (it is not tagged yet): its tidy points that requirement at ./client,
-# tidies, drops the replace again (go.mod never commits one) and strips
-# the placeholder's lines from go.sum. Once client/vX is tagged (the
-# two-phase release: tag client/vX.Y.Z first, then the root), it is a
-# plain `GOWORK=off go mod tidy` there too.
+# published version and the server requires the client at its tag
+# (client/vX.Y.Z, tagged first in a release), so each is a plain tidy.
 tidy:
-	@set -e; \
-	(cd client && GOWORK=off $(GO) mod tidy); \
-	$(GO) mod edit -replace github.com/weftbase/weftbase/client=./client; \
-	GOWORK=off $(GO) mod tidy || status=$$?; \
-	$(GO) mod edit -dropreplace github.com/weftbase/weftbase/client; \
-	sed -i.bak '/github.com\/weftbase\/weftbase\/client /d' go.sum && rm -f go.sum.bak; \
-	exit $${status:-0}
+	(cd client && GOWORK=off $(GO) mod tidy)
+	GOWORK=off $(GO) mod tidy
 
 # The demo: a node on :7331 with scripted agents in both placements and
 # a steady trickle of runs (examples/demo; no model provider, no key).

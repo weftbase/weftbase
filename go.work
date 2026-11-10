@@ -1,20 +1,14 @@
 go 1.26.0
 
 // Development resolution: the server module and the client module.
-// Both go.mod files require weft at its published version (the module
-// proxy serves it), so a fresh clone builds with nothing beside it.
-// Until the client module is tagged, the server's go.mod requires it at
-// the placeholder pseudo-version; the replace line resolves that
-// version to ./client (go.mod files never commit a replace). The
-// release drops the replace (REBUILD-TODO.md, "Before the v0.1.0 tag").
+// Both go.mod files require weft at its published version, and the
+// server's requires the client at its published tag (the module proxy
+// serves them), so a fresh clone builds with nothing beside it; in the
+// workspace, ./client is used in place of the tagged client.
 //
 // To build against a weft checkout beside this repository instead, add
 // it locally (do not commit it): go work use ../weft ../weft/core
 use (
 	.
 	./client
-)
-
-replace (
-	github.com/weftbase/weftbase/client v0.0.0-00010101000000-000000000000 => ./client
 )

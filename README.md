@@ -10,9 +10,9 @@ ingest and the Console.
 **weft runs agents; weftbase stores, places and governs them.** weftbase
 imports weft; weft never imports weftbase.
 
-> **Status: v0.1.0, not tagged yet.** What is in it and what is not:
-> [`CHANGELOG.md`](CHANGELOG.md). What remains before the tag:
-> [`REBUILD-TODO.md`](REBUILD-TODO.md). Design:
+> **Status: v0.1.0, released 2026-11-10** (`go install
+> github.com/weftbase/weftbase/cmd/weftbase@v0.1.0`). What is in it and
+> what is not: [`CHANGELOG.md`](CHANGELOG.md). Design:
 > [`docs/architecture.md`](docs/architecture.md).
 
 ## Quick start: the demo
@@ -153,10 +153,9 @@ Both modules require weft at its published version (v0.24.2), which the
 module proxy serves. The committed `go.work` joins `.` and `./client`
 only; to build against a weft checkout beside this repository, add it
 locally and do not commit it (`go work use ../weft ../weft/core`). The
-client module builds without the workspace (`GOWORK=off`); the server
-requires the client module at a placeholder version until
-`client/v0.1.0` is tagged, which the workspace's `replace` resolves
-(`make gowork-off` builds as the release will).
+client module builds without the workspace (`GOWORK=off`), and the server
+requires it at its tag (`client/v0.1.0`); in the workspace `./client` is
+used instead. `make gowork-off` builds as a release does.
 
 ```sh
 make build vet test    # both modules, race tests
@@ -164,7 +163,7 @@ make check             # those plus the layering, client-deps and vocabulary che
 make api-check         # the OpenAPI contract against the route table
 make mcp-check         # `weftbase mcp` end to end against a real node
 make demo              # go run ./examples/demo
-make tidy              # never commit a replace
+make tidy              # both modules; never commit a replace
 ```
 
 Tests never call a model: `make offline` runs them under

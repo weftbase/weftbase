@@ -162,43 +162,16 @@ Commits `d8ff2e34`, `68cef3ee`, `76b4a861` and the one after them.
 | sign-in | done | `POST /v1/auth/links`, `weftbase signin`; the session cookie slides (12 h from last use, 30 days at most) |
 | streams | done | `/v1/events?after=now`; every stream opens at once; `weftbase_http_requests_in_flight` in `/metrics` |
 
-## Before the v0.1.0 tag
+## v0.1.0: released 2026-11-10
 
-Exact list, in order; each step waits for the one before. Nothing is
-pushed or tagged without the user's explicit OK.
-
-1. **CI green on this branch's pull request.** The workflow runs on
-   every pull request and on pushes to `main`; nothing of this branch
-   has run in CI yet. Jobs: `test` (both modules, two Go versions),
-   `layering` (+ `client-deps`, `vocab`), `lint`, `clickhouse` (`make
-   clickhouse`: every DSN-gated package, `obsdb/...`, `api/http/v1`,
-   `observe/ingest`; a gated skip fails it), `gowork-off`, `offline`,
-   `console` (`make console-check`: typecheck, lint, tests, vocabulary,
-   formatting, budget, dist freshness). `examples/demo`'s test builds
-   two binaries and starts child processes: CI has not run it yet. Also
-   run `make stress` once by hand.
-2. **Rebuild and commit `console/dist`** from the final `console/app`
-   (`make console-build`), then `make console-check` must pass.
-3. **Set the date** on the `v0.1.0` heading of `CHANGELOG.md`.
-4. **Tag the client module first** (two-phase release, as weft's):
-   `client/v0.1.0` on the commit that has the dated CHANGELOG.
-5. **Require it**: in the root `go.mod` require
-   `github.com/weftbase/weftbase/client v0.1.0`; drop the placeholder
-   `replace` from `go.work`; `make tidy` loses its placeholder logic
-   (it becomes a plain `GOWORK=off go mod tidy` in both modules) and
-   `make gowork-off` its `-replace` (a plain `GOWORK=off go build ./...
-   && go vet ./...`); `GOWORK=off go build ./... && go vet ./...` at
-   the root must pass with no replace anywhere. Update the README's
-   status line ("v0.1.0", no "not tagged yet") and its "Development"
-   paragraph (no placeholder). Commit.
-6. **Tag `v0.1.0`** on that commit.
-7. **Verify from outside**: in a clean directory (no `go.work`, empty
-   `GOFLAGS`), `go install github.com/weftbase/weftbase/cmd/weftbase@v0.1.0`
-   and `weftbase version`; and a fresh clone of the tag runs the README's
-   quick start (`go run ./examples/demo`; the committed `go.work`
-   names only `.` and `./client`, so nothing beside the clone is
-   needed; checked for this branch's tree on 2026-11-10 with the
-   placeholder still in place).
+Done, in order: CI green on the pull request (#1; it found and fixed a
+local-executor race, the welcome written after the link was published,
+and two test races); `make stress` by hand (exit 0); `console/dist`
+fresh (CI's console job checks it); the CHANGELOG dated; `client/v0.1.0`
+tagged; the root requires it, with no `replace` in `go.work` and plain
+`make tidy` / `make gowork-off`; `v0.1.0` tagged; `go install
+github.com/weftbase/weftbase/cmd/weftbase@v0.1.0` checked from a clean
+directory.
 
 weft: no v0.24.3 is needed. The `thread/pool` CI failures were three
 tests that assumed a scheduling order; the fix is tests and comments
