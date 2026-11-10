@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -158,5 +159,49 @@ func waitUntil(t *testing.T, cond func() bool) {
 			t.Fatal("condition not met within 15s")
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// TestWelcomeIsTheLinkFirstFrame: a link is published (and a waiting
+// dispatch may write to it) only after its welcome is written. It used
+// to be published first, so on a slow machine a run frame reached the
+// child ahead of the welcome; the child dropped the link ("expected a
+// welcome, got run") and the run was lost.
+func TestWelcomeIsTheLinkFirstFrame(t *testing.T) {
+	held := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	beforeWelcome = func(e *Executor) {
+		once.Do(func() {
+			e.mu.Lock()
+			published := e.link != nil
+			e.mu.Unlock()
+			if published {
+				t.Error("the link was published before its welcome")
+			}
+			close(held)
+			<-release
+		})
+	}
+	t.Cleanup(func() { beforeWelcome = nil })
+	e := newExec(t, Config{Path: binA})
+	registered := make(chan error, 1)
+	go func() {
+		_, err := e.Register(context.Background())
+		registered <- err
+	}()
+	select {
+	case <-held:
+	case <-time.After(15 * time.Second):
+		t.Fatal("the child never connected")
+	}
+	select {
+	case err := <-registered:
+		t.Fatalf("Register returned before the welcome was written: %v", err)
+	default:
+	}
+	close(release)
+	if err := <-registered; err != nil {
+		t.Fatal(err)
 	}
 }

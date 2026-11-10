@@ -557,7 +557,21 @@ func (e *Executor) serve(conn net.Conn) {
 		r := reg
 		e.reg = &r
 	}
+	e.mu.Unlock()
+	// The welcome is the link's first frame: it is written before the
+	// link is published, so no dispatch can put a run frame ahead of it
+	// (the child drops a link whose first frame is not the welcome).
 	l := &link{conn: conn, done: make(chan struct{})}
+	if beforeWelcome != nil {
+		beforeWelcome(e)
+	}
+	w, _ := wire.NewFrame(wire.EventWelcome, "", wire.Welcome{WorkerID: e.workerID, PingMS: e.c.Ping.Milliseconds()})
+	if err := l.write(w); err != nil {
+		close(l.done)
+		_ = conn.Close()
+		return
+	}
+	e.mu.Lock()
 	old := e.link
 	e.link = l
 	close(e.linkUp)
@@ -565,11 +579,6 @@ func (e *Executor) serve(conn net.Conn) {
 	e.mu.Unlock()
 	if old != nil {
 		_ = old.conn.Close()
-	}
-	w, _ := wire.NewFrame(wire.EventWelcome, "", wire.Welcome{WorkerID: e.workerID, PingMS: e.c.Ping.Milliseconds()})
-	if err := l.write(w); err != nil {
-		e.dropped(l, err)
-		return
 	}
 	go e.ping(l)
 	_ = conn.SetReadDeadline(time.Time{})
@@ -606,6 +615,10 @@ func (e *Executor) serve(conn net.Conn) {
 		}
 	}
 }
+
+// beforeWelcome, when set (tests only), runs just before a link's
+// welcome is written.
+var beforeWelcome func(*Executor)
 
 func sameAgents(a, b wire.Registration) bool {
 	if len(a.Agents) != len(b.Agents) {
