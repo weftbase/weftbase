@@ -133,7 +133,8 @@ func seedInvestigations(t *testing.T, ctx context.Context, base, token string) {
 	if res, err := t1.Wait(); err != nil || len(res.Pending) != 1 {
 		t.Fatalf("ops t1: %v %v, want one parked call", res, err)
 	}
-	d := thread.Deny("d1", "change freeze until Monday")
+	// A decision names the request it answers (weft 0.23: Decision.Bind).
+	d := thread.Deny("d1", "change freeze until Monday").Bind(s.Pending()[0])
 	d.Who = "alice"
 	t2, err := s.Decide(ctx, d)
 	if err != nil || t2 == nil {

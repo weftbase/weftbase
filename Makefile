@@ -11,7 +11,7 @@ GO ?= go
 MODULES := . client
 
 .PHONY: build vet test fmt lint tidy offline stress live vacuum check layering client-deps vocab \
-	mcp-check console-build console-check api-gen api-check tenancy
+	mcp-check console-build console-check api-gen api-check tenancy demo
 
 build:
 	$(GO) build ./...
@@ -42,28 +42,28 @@ lint:
 	PATH="$$PATH:$$(go env GOPATH)/bin" golangci-lint run ./...
 	cd client && PATH="$$PATH:$$(go env GOPATH)/bin" golangci-lint run ./...
 
-# go mod tidy reads no go.work. While the modules require weft (and the
-# server the client module) at the placeholder pseudo-version, the tidy
-# points those requirements at the sibling checkouts, tidies, drops
-# the replace lines again (go.mod never commits one) and strips the
-# placeholders' lines from go.sum. Once weft and client/vX are tagged
-# (the two-phase release: tag client/vX.Y.Z first, then the root), it
-# is a plain `GOWORK=off go mod tidy` in each module.
-WEFT_DIR ?= ../weft
-PLACEHOLDER := v0.0.0-00010101000000-000000000000
+# go mod tidy reads no go.work. Both modules require weft at its
+# published version, so the client module is a plain tidy. The server
+# still requires the client module at the placeholder pseudo-version
+# (it is not tagged yet): its tidy points that requirement at ./client,
+# tidies, drops the replace again (go.mod never commits one) and strips
+# the placeholder's lines from go.sum. Once client/vX is tagged (the
+# two-phase release: tag client/vX.Y.Z first, then the root), it is a
+# plain `GOWORK=off go mod tidy` there too.
 tidy:
 	@set -e; \
-	cd client; \
-	$(GO) mod edit -replace github.com/weftbase/weft=../$(WEFT_DIR) -replace github.com/weftbase/weft/core=../$(WEFT_DIR)/core; \
+	(cd client && GOWORK=off $(GO) mod tidy); \
+	$(GO) mod edit -replace github.com/weftbase/weftbase/client=./client; \
 	GOWORK=off $(GO) mod tidy || status=$$?; \
-	$(GO) mod edit -dropreplace github.com/weftbase/weft -dropreplace github.com/weftbase/weft/core; \
-	sed -i.bak '/github.com\/weftbase\/weft /d;/github.com\/weftbase\/weft\/core /d' go.sum && rm -f go.sum.bak; \
-	cd ..; \
-	$(GO) mod edit -replace github.com/weftbase/weft=$(WEFT_DIR) -replace github.com/weftbase/weft/core=$(WEFT_DIR)/core -replace github.com/weftbase/weftbase/client=./client; \
-	GOWORK=off $(GO) mod tidy || status=$$?; \
-	$(GO) mod edit -dropreplace github.com/weftbase/weft -dropreplace github.com/weftbase/weft/core -dropreplace github.com/weftbase/weftbase/client; \
-	sed -i.bak '/github.com\/weftbase\/weft /d;/github.com\/weftbase\/weft\/core /d;/github.com\/weftbase\/weftbase\/client /d' go.sum && rm -f go.sum.bak; \
+	$(GO) mod edit -dropreplace github.com/weftbase/weftbase/client; \
+	sed -i.bak '/github.com\/weftbase\/weftbase\/client /d' go.sum && rm -f go.sum.bak; \
 	exit $${status:-0}
+
+# The demo: a node on :7331 with scripted agents in both placements and
+# a steady trickle of runs (examples/demo; no model provider, no key).
+# Beside it, `cd console/app && bun run dev` serves the Console on :3000.
+demo:
+	$(GO) run ./examples/demo $(DEMO_ARGS)
 
 # The offline gate: every suite stays green under
 # WEFT_MODEL_REQUESTS=deny.

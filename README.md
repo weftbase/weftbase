@@ -33,6 +33,16 @@ weftbase dev                          # the server on http://127.0.0.1:7331, SQL
 weftbase dev -- go run ./cmd/app      # the server and your app, restarted on every .go save
 ```
 
+To see it with data and no model provider, run the demo: a node on
+`:7331`, two scripted agents (one embedded, one as a local build), two
+versions each, and a new run every few seconds.
+
+```sh
+go run ./examples/demo                # or: make demo; prints the API key and a Console sign-in link
+go run ./examples/demo -every 0       # the first batch only; -speed 0 removes the scripted latency
+cd console/app && bun run dev         # beside it: the Console dev server on :3000, proxying /v1 to :7331
+```
+
 Any OpenTelemetry app can send to it:
 `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:7331/otlp` (the SDK
 appends `/v1/traces` and `/v1/logs`).
@@ -101,9 +111,12 @@ scripts/layering  the layering, client-dependency and vocabulary checks
 
 ## Development
 
-weftbase builds against the weft checkout beside it: the committed
-`go.work` joins `.`, `./client`, `../weft` and `../weft/core` (weft is not
-tagged under its module path yet).
+Both modules require weft at its published version (v0.24.2). The
+committed `go.work` joins `.`, `./client`, `../weft` and `../weft/core`, so
+development builds against the weft checkout beside this repository; the
+client module also builds without the workspace (`GOWORK=off`). The
+server does not yet: it requires the client module at a placeholder
+version until `client/v0.1.0` is tagged.
 
 ```sh
 make build vet test    # both modules

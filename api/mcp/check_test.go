@@ -285,7 +285,7 @@ func TestMCPLiveCheck(t *testing.T) {
 	ex = explained(call(cs, "explain_failure", map[string]any{"id": chkChaos},
 		"run "+chkChaos+" (deal-lead): succeeded", "first error: step 0 review_ip → child ",
 		"SUBAGENT_FAILED", "provider maintenance window", // the IP reviewer's provider is down
-		"timed out",                                              // the tax reviewer ran past its Timeout
+		"did not answer within 150ms",                            // the tax reviewer ran past its Timeout (weft 0.23: OUTCOME_UNKNOWN)
 		"SUBAGENT_PENDING", "parked: 1 call awaiting a decision", // the NDA signer parked inside the delegation
 		"ocr engine: nil page")) // the litigation reviewer's tool panicked, the reviewer recovered
 	fmt.Printf("digest:\n  %s\n", strings.Join(ex.Digest, "\n  "))
