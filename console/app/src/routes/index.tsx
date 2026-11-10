@@ -283,7 +283,7 @@ function Attention({
                 {...(it.kind === "approval"
                   ? { to: "/approvals", search: { id: it.approval.id } }
                   : runLink(it.run))}
-                className="grid h-8 grid-cols-[84px_minmax(72px,120px)_minmax(0,1fr)_64px] items-center outline-none hover:bg-muted/60 focus-visible:bg-muted"
+                className="grid h-8 grid-cols-[100px_minmax(72px,120px)_minmax(0,1fr)_64px] items-center outline-none hover:bg-muted/60 focus-visible:bg-muted"
               >
                 <span className="px-2">
                   {it.kind === "approval" ? (
