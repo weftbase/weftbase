@@ -1,7 +1,6 @@
-// args_sha256 in the mock data is the real SHA-256 of the canonical args.
+// The canonical-JSON SHA-256 an approval's args_sha256 is checked with.
 import { describe, expect, it } from "vitest"
 import { argsSha256, canonicalJSON, sha256Hex } from "@/lib/api/args-hash"
-import { APPROVALS } from "@/lib/api/mock-data"
 
 describe("args-hash", () => {
   it("matches the SHA-256 test vectors", () => {
@@ -17,17 +16,6 @@ describe("args-hash", () => {
     expect(canonicalJSON({ b: 1, a: { d: [1, "x"], c: null } })).toBe(
       '{"a":{"c":null,"d":[1,"x"]},"b":1}'
     )
-  })
-
-  it("every mock approval's args_sha256 is the hash of its args", () => {
-    expect(APPROVALS.length).toBeGreaterThan(0)
-    for (const a of APPROVALS) expect(a.args_sha256).toBe(argsSha256(a.args))
-    const refund = APPROVALS.find(
-      (a) => a.tool === "issue_refund" && a.status === "pending"
-    )
-    expect(refund?.args).toMatchObject({ amount: 129, currency: "USD" })
-    expect(refund?.args_sha256).toBe(
-      "5556f7b7b36a557bedbf098588cfba35fe883c99b272dfaadff37c800fb3814e"
-    )
+    expect(argsSha256({ b: 1, a: 2 })).toBe(argsSha256({ a: 2, b: 1 }))
   })
 })

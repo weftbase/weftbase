@@ -1,265 +1,879 @@
-// Resource shapes of the public /v1 API (WEFTBASE-ARCHITECTURE §4.4).
+// The /v1 wire types, as the server returns them.
 //
-// Hand-written for now: the server and api/openapi/v1.yaml are not ready.
-// When they are, `bun run api:gen` writes src/lib/api/schema.d.ts with
-// openapi-typescript and these become aliases of the generated
-// components["schemas"] types. Keep the names and fields close to the
-// spec so that swap is mechanical.
-
-/** The environment a project runs in. The top bar switches between them. */
-export type Env = "test" | "live"
-
-export type RunStatus =
-  "queued" | "running" | "waiting" | "succeeded" | "failed" | "cancelled"
-
-/** A cost in US dollars. null means the price is unknown; the UI shows
- * "unknown", never "$0.00". */
-export type Cost = number | null
+// Hand-written, not generated: api/openapi/v1.yaml types most bodies as
+// "Loose" (an open object), so openapi-typescript would give `unknown`
+// for runs' details, sessions, traces, stats and every content route.
+// Each type here mirrors a Go struct's JSON tags in api/http/v1/*.go (the
+// struct is named beside it) and was checked against the goldens in
+// api/http/v1/testdata/v1 and a running server. Fields the Console does
+// not read yet are still listed, so a later screen finds them typed.
+//
+// Rules that hold everywhere:
+// - An absent optional field means "not applicable"; a null cost means
+//   "unknown". Never read either as zero.
+// - Times are RFC 3339 strings. Ids are opaque; a child run id contains
+//   "/" (<parent>/<step>/<call>).
 
 export interface Usage {
   input_tokens: number
   output_tokens: number
+  cached_input_tokens?: number
+  cache_write_tokens?: number
+  reasoning_tokens?: number
+  [k: string]: number | undefined
 }
 
-/** A row of GET /v1/runs. */
-export interface RunSummary {
-  id: string
-  agent: string
-  agent_version: string
-  status: RunStatus
-  model: string
-  tenant: string
-  session_id: string | null
-  started_at: string
-  /** Milliseconds; null while the run is still going. */
-  duration_ms: number | null
-  usage: Usage
-  /** This run's own model spend. */
-  cost: Cost
-  /** Spend of the child runs it delegated to. */
-  delegated_cost: Cost
-  error_class: string | null
-  tools: string[]
-  tags: string[]
+/** costFields (pricing.go). cost_usd is null when the price is unknown. */
+export interface CostFields {
+  cost_usd: number | null
+  cost_known: boolean
+  /** A word for the figure: "unknown", "unpriced", "scripted", … */
+  cost_badge?: string
+  cost_reason?: string
+  cache?: string
+  unpriced_models?: string[]
+  /** An unknown sum's known part: `priced` of `of` parts, summing to usd. */
+  cost_partial?: { usd: number; priced: number; of: number }
 }
 
-export type StepKind = "model" | "tool" | "subagent" | "approval"
+/** badgeFields (requests.go): a hole in the data, with its cause and fix. */
+export interface Badge {
+  badge?: string
+  reason?: string
+  fix?: string
+}
 
-/** One step of a run (GET /v1/runs/{id}, steps sub-resource). */
-export interface Step {
-  index: number
-  kind: StepKind
-  /** The tool, subagent or model name. */
+/** stepHole / treeHole: something that is missing, and why. */
+export interface Hole {
+  hole: string
+  cause?: string
+  reason: string
+  fix?: string
+  count?: number
+  runs?: string[]
+}
+
+// ── Runs ────────────────────────────────────────────────────────────
+
+/** The four statuses a run row carries. */
+export type RunRowStatus = "running" | "succeeded" | "failed" | "interrupted"
+/** The words GET /v1/runs?status= takes: the four above plus two
+ * read-time ones (parked = waiting on a person, cancelled). */
+export type RunStatusFilter = RunRowStatus | "parked" | "cancelled"
+
+export interface ModelInfo {
+  provider: string
   name: string
-  status: "ok" | "error" | "waiting" | "running"
-  /** Milliseconds from the run's start. */
-  offset_ms: number
-  duration_ms: number | null
-  summary: string
-  usage: Usage | null
-  cost: Cost
-  /** The raw request and response, as recorded. */
-  request: unknown
-  response: unknown
-  /** For a subagent step: the child run id. */
-  child_run_id?: string
-  /** For an approval step: the approval id. */
-  approval_id?: string
 }
 
-export interface TranscriptMessage {
-  role: "system" | "user" | "assistant" | "tool"
-  text: string
-}
-
-/** GET /v1/runs/{id} with its steps and transcript. */
-export interface Run extends RunSummary {
+/** runRow (api.go). */
+export interface RunRow extends CostFields {
+  id: string
+  /** "" for a top-level run. */
+  parent_run_id: string
+  parent_call_id: string
   trace_id: string
-  input: string
-  output: string | null
-  error: string | null
-  steps: Step[]
-  transcript: TranscriptMessage[]
-}
-
-export interface RunFilters {
-  status?: RunStatus
-  agent?: string
-  model?: string
-  tool?: string
-  error_class?: string
-  tenant?: string
-  session?: string
-  q?: string
-  limit?: number
-  cursor?: string
-}
-
-export interface Page<T> {
-  items: T[]
-  next_cursor: string | null
-  total: number
-}
-
-export type SessionState = "active" | "idle" | "waiting" | "closed"
-
-export interface SessionSummary {
-  id: string
   agent: string
-  tenant: string
-  state: SessionState
-  turns: number
-  started_at: string
-  last_activity_at: string
-  usage: Usage
-  cost: Cost
-}
-
-export interface SessionTurn {
-  index: number
-  run_id: string
-  status: RunStatus
-  at: string
-  input: string
-  output: string | null
-  agent_version: string
-}
-
-export interface SessionEntry {
-  at: string
-  kind: "turn" | "approval" | "compaction" | "fork"
-  text: string
-  run_id?: string
-}
-
-export interface Session extends SessionSummary {
-  turn_list: SessionTurn[]
-  timeline: SessionEntry[]
-}
-
-export interface SessionFilters {
-  state?: SessionState
-  agent?: string
-  q?: string
-}
-
-export interface TraceSummary {
-  id: string
-  root: string
-  service: string
-  /** "weft" for weft runs, "genai" for stock GenAI spans. */
-  source: "weft" | "genai"
-  span_count: number
-  started_at: string
-  duration_ms: number
-  error: boolean
-}
-
-export interface Span {
-  id: string
-  parent_id: string | null
-  name: string
-  kind: "run" | "step" | "model" | "tool" | "http" | "internal"
-  offset_ms: number
-  duration_ms: number
-  error: boolean
-  attributes: Record<string, string | number | boolean>
-}
-
-export interface Trace extends TraceSummary {
-  run_id: string | null
-  spans: Span[]
-}
-
-export type Label = "dev" | "staging" | "prod"
-
-export interface AgentVersion {
-  version: string
+  model: ModelInfo
   manifest_hash: string
-  created_at: string
-  labels: Label[]
-  model: string
-  note: string
+  weft_version: string
+  service: string
+  /** "" when the run belongs to no session. */
+  session_id: string
+  public_id: string
+  turn: number
+  forked_from: string
+  meta: Record<string, string>
+  started: string
+  finished: string | null
+  last_seen: string
+  status: RunRowStatus
+  /** The status to show, when the server sends it (newer servers).
+   * Read it through displayStatus (status.ts), never directly. */
+  display_status?:
+    | "queued"
+    | "running"
+    | "waiting"
+    | "succeeded"
+    | "failed"
+    | "cancelled"
+    | "interrupted"
+  /** The registry version the run was admitted on (agv_…), how it was
+   * resolved (label:<name> | latest | pin | migrate) and where it ran
+   * (embedded | local). Present on newer servers, and only for runs the
+   * server admitted. */
+  agent_version?: string
+  resolved_via?: string
+  placement?: string
+  settling?: boolean
+  err: string
+  steps: number
+  /** Tool calls waiting on a person. With status "succeeded" and no
+   * resumed_by, the run is parked (displayStatus in status.ts). */
+  pending: number
+  stop_reason: string
+  stopped_by?: string
+  cancel_cause?: string
+  error_type?: string
+  resumed_from?: string
+  resumed_by?: string
+  ended_by?: string
+  ended_kind?: string
+  caller_run_id?: string
+  caller_call_id?: string
+  usage: Usage
+  own_usage?: Usage
+  delegated_usage?: Usage
+  delegated_cost_usd: number | null
+  delegated_cost_known: boolean
+  delegated_cost_reason?: string
+  delegated_unpriced_models?: string[]
+  event_count: number
+  message_count: number
+  delta_count: number
+  events_emitted?: number
+  messages_emitted?: number
+  instructions_hash: string
+  catalog_hash: string
+  request_count: number
+  requests_badge?: string
+  derived?: boolean
+  prompt_preview?: string
+  children_count?: number
+  children_failed?: number
+  children_unknown?: boolean
+  attempts_retried?: number
+  fallbacks?: number
+  tool_errors?: number
+  denied?: number
+  truncated?: number
+  repaired?: number
+  log_warn?: number
+  log_error?: number
+  session_compactions?: number
+  delegated_sessions?: number
 }
 
-export interface Agent {
-  name: string
-  description: string
-  model: string
-  tools: string[]
-  /** Tools that pause for a person before they run. */
-  approval_tools: string[]
-  middleware: string[]
-  budget: { max_tokens: number; max_cost: number } | null
-  labels: Partial<Record<Label, string>>
-  versions: AgentVersion[]
-  stats: {
-    runs_24h: number
-    failed_24h: number
-    p50_ms: number
-    cost_24h: Cost
+/** runsPage: GET /v1/runs without a search parameter (cursor-paged). */
+export interface RunsPage {
+  total: number
+  runs: RunRow[]
+  next_before: string | null
+  next_before_id: string | null
+  turn_marks_capped?: Hole
+}
+
+/** searchPage: GET /v1/runs with q, tool, model, error, since, until,
+ * min_tokens, min_cost, sort or offset (offset-paged). */
+export interface SearchPage {
+  total: number
+  runs: RunRow[]
+  sort: "started" | "duration" | "tokens" | "cost"
+  next_offset: number | null
+  cost_sort_cap?: number
+  facets?: {
+    error_class: { class: string; count: number }[]
+    error_class_capped?: boolean
   }
 }
 
-export type ApprovalStatus = "pending" | "approved" | "denied" | "expired"
-
-export interface Approval {
-  id: string
-  run_id: string
-  agent: string
-  tool: string
-  tenant: string
-  status: ApprovalStatus
-  requested_at: string
-  /** One sentence the agent wrote for the person deciding. */
-  summary: string
-  /** The raw tool arguments, exactly as the model produced them. */
-  args: Record<string, unknown>
-  /** sha256 of the canonical args; a decision binds to it. */
-  args_sha256: string
-  decided_at: string | null
-  decided_by: string | null
-  reason: string | null
-}
-
-export interface ApprovalFilters {
-  status?: "pending" | "decided"
+/** What the Console asks GET /v1/runs for. */
+export interface RunsQuery {
+  status?: RunStatusFilter
   agent?: string
+  session?: string
+  /** A run id: its children. "*": every run. Absent: top-level runs. */
+  parent?: string
+  id_prefix?: string
+  error_type?: string
+  // Any of these makes the request a search:
+  q?: string
+  model?: string
   tool?: string
+  since?: string
+  until?: string
+  sort?: SearchPage["sort"]
+  limit?: number
 }
 
-export interface Decision {
-  approve: boolean
+/** One page of runs, cursor- or offset-paged, in one shape. `next` is
+ * what to pass back to api.runs for the following page; null on the last. */
+export interface RunsList {
+  total: number
+  runs: RunRow[]
+  next: RunsCursor | null
+  facets?: SearchPage["facets"]
+}
+export type RunsCursor =
+  { before: string; before_id?: string } | { offset: number }
+
+/** decisionDoc (decisions.go): who decided a parked run's calls. */
+export interface DecisionDoc {
+  run: string
+  at: string
+  actor?: string
+  source: string
+  calls: {
+    call_id: string
+    name?: string
+    outcome: string
+    via?: string
+    who?: string
+    reason?: string
+    result?: string
+    at?: string
+    [k: string]: unknown
+  }[]
+  more?: number
+  hole?: string
+  notes?: string[]
+  error?: string
+}
+
+export interface RunCompaction {
+  scope: string
+  index?: number
+  step?: number
+  from_seq?: number
+  to_seq?: number
+  hash: string
+  replaced: number
+  entries: number
+  tokens_before?: number
+  tokens_after?: number
   reason?: string
-  args_sha256: string
 }
 
+/** runPage: GET /v1/runs/{id}. */
+export interface RunDetail extends RunRow {
+  children: RunRow[]
+  holes: Hole[]
+  compactions: RunCompaction[]
+  manifest_available?: boolean
+  caller_linked?: RunRow[]
+  decided?: DecisionDoc
+  resumes?: DecisionDoc
+  summarizer?: { usage: Usage } & CostFields
+}
+
+/** LedgerRun (sessions/ledger.go): what admit, cancel, resume and
+ * GET /v1/runs/{id}/status answer. Its status words differ from a run
+ * row's: queued, parked and "canceled" (one l) exist only here. */
+export interface LedgerRun {
+  id: string
+  tenant_id: string
+  agent: string
+  agent_version: string
+  resolved_via: string
+  status: "queued" | "running" | "parked" | "succeeded" | "failed" | "canceled"
+  metadata?: Record<string, string>
+  resume_of?: string
+  resumed_by?: string
+  pending?: { call_id: string; tool: string; args?: unknown }[]
+  error?: string
+  cancel_cause?: string
+  cancel_requested?: boolean
+  usage: { input_tokens?: number; output_tokens?: number }
+  created_at: string
+  started_at?: string
+  parked_at?: string
+  finished_at?: string
+}
+
+/** AdmitRequest: POST /v1/runs. version is "label:<name>", an agv_… id,
+ * or absent (the prod label, else the newest version). */
+export interface AdmitRequest {
+  agent: string
+  version?: string
+  input: { prompt?: string; messages?: Message[] }
+  metadata?: Record<string, string>
+}
+
+/** One decision of POST /v1/runs/{id}/resume. */
+export interface ResumeDecision {
+  call_id: string
+  decision: "approve" | "deny" | "resolve"
+  reason?: string
+  content?: string
+}
+
+// ── Run content ─────────────────────────────────────────────────────
+
+/** A weft record body. `type` is run_start, step_start, tool_start,
+ * tool_finish, step_finish, run_finish, …; the rest depends on it. */
+export interface WeftEvent {
+  type: string
+  [k: string]: unknown
+}
+
+/** posEvent. */
+export interface PosEvent {
+  pos: number
+  time: string
+  event: WeftEvent
+  attrs?: Record<string, unknown>
+}
+
+/** eventsPage: GET /v1/runs/{id}/events. */
+export interface EventsPage extends Badge {
+  events: PosEvent[]
+  next_after: number | null
+  done: boolean
+  gaps: number[]
+}
+
+export type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "tool_call"; id: string; name: string; args: unknown }
+  | {
+      type: "tool_result"
+      call_id: string
+      name: string
+      content: string
+      is_error: boolean
+    }
+  | { type: string; [k: string]: unknown }
+
+export interface Message {
+  role: "system" | "user" | "assistant" | "tool" | (string & {})
+  content: ContentPart[]
+}
+
+export interface TranscriptBatch {
+  index: number
+  step: number
+  /** true: the run's input; false: what the run produced. */
+  input: boolean
+  badge?: string
+  messages: Message[] | null
+}
+
+/** transcript / transcriptAsOf: GET /v1/runs/{id}/transcript. With
+ * step=, `messages` is the conversation as the model saw it at that step. */
+export interface Transcript extends Badge {
+  batches: TranscriptBatch[]
+  step?: number
+  messages?: Message[]
+  compacted_at?: {
+    index: number
+    step: number
+    from_seq: number
+    to_seq: number
+    hash: string
+    replaced: number
+    entries: number
+  } | null
+}
+
+/** spanDTO: one OTel span. Kind is the OTel span kind (internal, client,
+ * …); what the span *is* comes from attrs (see lib/span-kind.ts). */
+export interface Span {
+  trace_id: string
+  span_id: string
+  /** "" for a root span. */
+  parent_span_id: string
+  name: string
+  kind: string
+  start: string
+  end: string
+  status: "ok" | "error" | "unset" | (string & {})
+  status_message: string
+  service: string
+  attrs: Record<string, unknown>
+  events: { time: string; name: string; attrs: Record<string, unknown> }[]
+  /** Set by tree=1: the run each span belongs to. */
+  run_id?: string
+  parent_run_id?: string | null
+}
+
+/** spansDoc / treeSpansDoc: GET /v1/runs/{id}/spans (tree=1 adds every
+ * descendant run's spans and `holes`). */
+export interface SpansDoc {
+  spans: Span[]
+  holes?: Hole[]
+}
+
+export interface ToolEntry {
+  name: string
+  description: string
+  schema: unknown
+  approval: boolean
+  source: string
+  [k: string]: unknown
+}
+
+export interface Catalog {
+  hash: string
+  tools: ToolEntry[]
+  content: string
+  truncated_bytes: number
+}
+
+/** requestRow + requestWire: one model-call attempt. */
+export interface ModelRequest {
+  index: number
+  step: number
+  attempt: number
+  time: string
+  system_hash: string
+  catalog_hash: string
+  content: string
+  truncated_bytes: number
+  body: {
+    step: number
+    attempt: number
+    messages_ref?: { index: number; count: number }
+    tools?: { catalog_hash: string; names: string[] }
+    params?: Record<string, unknown>
+    model?: ModelInfo
+    stream?: boolean
+    [k: string]: unknown
+  }
+  prompt?: { hash: string; text: string; content: string } | Badge
+  tools?: Catalog | Badge
+  messages?: Message[] | null
+  raw: unknown
+  raw_badge?: string
+  raw_reason?: string
+  raw_fix?: string
+}
+
+/** requestsPage: GET /v1/runs/{id}/requests. */
+export interface RequestsPage {
+  requests: ModelRequest[]
+  next_from?: number
+}
+
+/** stepDoc: GET /v1/runs/{id}/steps/{n}, one step assembled. */
+export interface StepDoc {
+  run_id: string
+  step: number
+  status: string
+  reason?: string
+  started?: string
+  finished?: string
+  latency_ms?: number
+  ttft_ms?: number
+  model: { provider?: string; requested: string; answered?: string }
+  request?: ModelRequest
+  attempts: {
+    attempt: number
+    model: string
+    provider?: string
+    outcome?: string
+    error_type?: string
+    error?: string
+    http_status?: number
+    wait_ms?: number
+    started?: string
+    finished?: string
+    span_id?: string
+    request_index?: number
+    badge?: string
+  }[]
+  attempts_badge?: Badge
+  messages_in: { index?: number; count: number }
+  events: PosEvent[]
+  tool_calls: {
+    call_id: string
+    name: string
+    seq?: number
+    args: unknown
+    result?: {
+      content: string
+      is_error: boolean
+      bytes: number
+      truncated?: boolean
+    }
+    span?: { id: string; started: string; finished: string; status: string }
+    child_run_id?: string
+    pending?: boolean
+    badge?: string
+  }[]
+  children: {
+    id: string
+    call_id: string
+    agent: string
+    status: string
+    usage: Usage
+  }[]
+  usage: Usage
+  holes: Hole[]
+}
+
+export interface LogRow {
+  index: number
+  time: string
+  severity: string
+  severity_number: number
+  event_name?: string
+  body: string
+  attrs: Record<string, unknown>
+  span_id?: string
+}
+
+/** logsPage: GET /v1/runs/{id}/logs. */
+export interface LogsPage extends Badge {
+  logs: LogRow[]
+  next_from?: number
+  partial?: boolean
+  partial_reason?: string
+  holes: Hole[]
+}
+
+// ── Sessions ────────────────────────────────────────────────────────
+
+/** A session's status is its newest turn's: a run status, or "parked". */
+export type SessionStatus = RunRowStatus | "parked" | "cancelled"
+
+/** sessionRow. */
+export interface SessionRow extends CostFields {
+  id: string
+  public_id: string
+  agent: string
+  turns: number
+  first_seen: string
+  last_seen: string
+  status: SessionStatus
+  usage: Usage
+  title?: string
+  first_prompt?: string
+  content_off?: boolean
+  pending?: number
+  failed_turns?: number
+  ended_turns?: number
+  cancelled_turns?: number
+  resumes?: number
+  outcomes?: string[]
+  forked_from_session?: string
+  parent_session?: string
+  parent_turn?: number
+  parent_run?: string
+  derived?: boolean
+}
+
+export interface SessionsPage {
+  total: number
+  sessions: SessionRow[]
+  next_before: string | null
+  next_before_id: string | null
+}
+
+export interface SessionsQuery {
+  q?: string
+  agent?: string
+  /** running | succeeded | failed | interrupted (the newest turn). */
+  status?: RunRowStatus
+  /** true: sessions with a turn waiting on a person. */
+  awaiting?: boolean
+  failed?: boolean
+  since?: string
+  id_prefix?: string
+  before?: string
+  before_id?: string
+  limit?: number
+}
+
+/** sessionDoc: GET /v1/sessions/{id}. `runs` are its turns, oldest first. */
+export interface SessionDetail extends SessionRow {
+  runs: RunRow[]
+  delegated: SessionRow[]
+  delegated_usage: Usage
+  delegated_sessions_cost_usd: number | null
+  delegated_sessions_cost_known: boolean
+}
+
+/** sessionEntry: one state-log mark (approval, compaction, fork, …). */
+export interface SessionEntry {
+  at: string
+  fact_at?: string
+  record: string
+  /** approval.request, approval.decision, compaction, receipt, … */
+  kind: string
+  event: string
+  lane: string
+  run_id: string | null
+  turn: number | null
+  entry?: string
+  content_mark: string
+  fields: Record<string, unknown>
+  content?: Record<string, unknown>
+  actor?: string
+}
+
+export interface TimelineTurn {
+  run_id: string
+  turn: number
+  agent: string
+  status: RunRowStatus
+  started: string
+  finished: string | null
+  last_seen: string
+  steps: number
+  pending?: number
+  prompt_preview?: string
+  resumed_from?: string
+  resumed_by?: string
+  stopped_by?: string
+  error_type?: string
+  usage: Usage
+  marks: number
+}
+
+/** timelineDoc: GET /v1/sessions/{id}/timeline. */
+export interface SessionTimeline {
+  session_id: string
+  public_id?: string
+  agent: string
+  status: SessionStatus
+  turns: TimelineTurn[]
+  marks: SessionEntry[]
+  lanes: { lane: string; marks: number }[]
+  marks_total: number
+  holes: Hole[]
+  forks?: {
+    session_id: string
+    entry?: string
+    run_id: string | null
+    turns: number
+    status?: string
+  }[]
+}
+
+/** entriesDoc: GET /v1/sessions/{id}/entries. */
+export interface SessionEntries {
+  session_id: string
+  entries: SessionEntry[]
+  total: number
+  offset: number
+  next_offset: number | null
+  holes: Hole[]
+}
+
+// ── Traces ──────────────────────────────────────────────────────────
+
+/** traceRow. */
+export interface TraceRow extends Badge {
+  trace_id: string
+  root: { span_id: string; name: string } | null
+  service: string
+  start: string
+  end: string
+  duration_ms: number
+  span_count: number
+  error: boolean
+  run_ids: string[]
+  root_run?: {
+    id: string
+    agent?: string
+    prompt_preview?: string
+    status: string
+  }
+  failed_runs?: number
+}
+
+export interface TracesPage {
+  total: number
+  traces: TraceRow[]
+  next_before: string | null
+  next_before_id: string | null
+}
+
+/** traceDoc: GET /v1/traces/{id}. */
+export interface TraceDetail {
+  spans: Span[]
+  run_ids: string[]
+  not_run?: { reason: string; fix: string }
+}
+
+// ── Stats ───────────────────────────────────────────────────────────
+
+export type StatsBy = "agent" | "model" | "tool" | "error_type" | "step"
+
+export interface StatsBucket {
+  runs: number
+  failed: number
+  calls: number
+  failed_calls: number
+  input_tokens: number
+  output_tokens: number
+}
+
+export interface StatsGroup extends CostFields {
+  key: string
+  runs: number
+  failed: number
+  failure_rate: number | null
+  calls: number
+  failed_calls: number
+  input_tokens: number
+  output_tokens: number
+  duration_ms: { p50: number; p95: number; n: number } | null
+  ttft_ms: { p50: number; p95: number; n: number } | null
+  retried: number
+  retry_rate: number | null
+  denials: number
+  /** One bucket per `bucket_ms` from `since`, oldest first. */
+  series: StatsBucket[]
+  runs_query?: string
+}
+
+/** statsBody: GET /v1/stats. `by` is required by the server; there is no
+ * ungrouped total, so the Console sums the groups (lib/stats.ts). */
 export interface Stats {
-  window: "24h"
-  runs_by_status: Record<RunStatus, number>
-  failures_by_error_class: { error_class: string; count: number }[]
-  cost_today: Cost
-  tokens_today: number
-  pending_approvals: number
+  by: StatsBy
+  since: string
+  until: string
+  buckets: number
+  bucket_ms: number
+  groups: StatsGroup[]
+  groups_cut?: number
 }
 
+// ── Agents ──────────────────────────────────────────────────────────
+
+/** registry.Agent. */
+export interface Agent {
+  id: string
+  name: string
+  /** label → agv_… */
+  labels: Record<string, string>
+  versions: number
+  created_at: string
+}
+
+/** registry.AgentVersion. */
+export interface AgentVersion {
+  id: string
+  agent: string
+  number: number
+  build: string
+  build_digest: string
+  manifest_hash: string
+  content_hash: string
+  labels: string[] | null
+  created_at: string
+}
+
+export interface StoredManifest {
+  manifest_hash: string
+  agent: string
+  source: string
+  first_seen: string
+  current_manifest_hash: string
+  manifest: Record<string, unknown>
+}
+
+// ── Meta, pricing, auth ─────────────────────────────────────────────
+
+export interface Principal {
+  /** operator: a Console session. key: an API key. local: `weftbase dev`
+   * answering its own machine without a credential. */
+  kind: "key" | "operator" | "local"
+  id: string
+  key_kind?: "sk" | "rk" | "pk" | "wk"
+  scope: { project: string; env: "test" | "live"; tenant: string }
+  all_tenants: boolean
+}
+
+/** metaDoc: GET /v1/meta. */
 export interface Meta {
-  version: string
-  commit: string
-  workspace: string
-  hosting: "self-hosted"
-  env: Env
-  data_dir: string
-  database: string
-  retention_days: number
-  content_policy: "full" | "redacted" | "metadata"
-  started_at: string
+  weft_version: string
+  server_version: string
+  capabilities: string[]
+  principal: Principal
+  ingest?: {
+    dropped: unknown[]
+    accepted: number
+    refused: number
+    last_error?: string
+    last_at?: string
+  }
+  pricing: {
+    source: "default" | "file" | "option"
+    path?: string
+    dated: string
+    models: number
+  }
+  db: { kind: string; path?: string; size?: number }
+  interrupted_after_ms: number
+  content: {
+    ingest: string
+    latest: { run_id: string; mark: string; note: string } | null
+    error?: string
+  }
+  /** A Go duration ("720h"), or null: everything is kept. */
+  retention: string | null
+  manifest_check: {
+    source: string
+    agents: number
+    checked: number
+    stale: string[]
+    error?: string
+  } | null
+  pid?: number
 }
 
-export interface Price {
-  provider: string
-  model: string
-  input_per_mtok: number
-  output_per_mtok: number
-  source: "built-in" | "override"
+/** PricingTable: GET /v1/settings/pricing. USD per 1M tokens. */
+export interface PricingTable {
+  source: string
+  path?: string
+  dated: string
+  note?: string
+  models: {
+    provider?: string
+    model_glob: string
+    input: number
+    output: number
+    cached_input?: number
+    cache_write?: number
+    reasoning?: number
+  }[]
 }
+
+export interface SignInResponse {
+  operator: string
+  expires_at: string
+}
+
+// ── Live stream frames (SSE) ────────────────────────────────────────
+
+/** `event: run`: a run row changed. */
+export interface RunFrame {
+  run: RunRow
+}
+
+/** `event: record`: one weft record as ingested. */
+export interface RecordFrame {
+  run_id: string
+  session_id: string
+  public_id: string
+  kind: "event" | "delta" | "messages"
+  pos: number
+  time: string
+  trace_id: string
+  span_id: string
+  event: WeftEvent
+  attrs?: Record<string, unknown>
+}
+
+/** `event: attempt`: one try inside a model call. */
+export interface AttemptFrame {
+  run_id: string
+  session_id?: string
+  step: number
+  attempt: number
+  status: "ok" | "error"
+  error_type?: string
+  provider?: string
+  model?: string
+  start: string
+  end: string
+  wait_ms?: number
+}
+
+export type StreamFrame =
+  | { type: "run"; id: string; data: RunFrame }
+  | { type: "record"; id: string; data: RecordFrame }
+  | { type: "attempt"; id: string; data: AttemptFrame }
+  | { type: "backfill_error"; id: string; data: Record<string, unknown> }

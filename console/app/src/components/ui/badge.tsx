@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
 // Run states: succeeded, running, waiting, failed. Marketing labels: success,
 // neutral, warning (maturity tags) and size="sm" for "Coming soon".
 const badgeVariants = cva(
-  "inline-flex w-fit shrink-0 items-center gap-1.5 rounded-full font-medium whitespace-nowrap [&>svg]:pointer-events-none [&>svg]:size-3",
+  "inline-flex w-fit shrink-0 items-center gap-1 rounded-sm font-medium whitespace-nowrap [&>svg]:pointer-events-none [&>svg]:size-3",
   {
     variants: {
       variant: {
@@ -25,9 +25,9 @@ const badgeVariants = cva(
         warning: "bg-warning-muted text-warning-foreground",
       },
       size: {
-        default: "h-6 px-2.5 text-[13px]",
-        tag: "h-6 px-2.5 text-xs",
-        sm: "h-[22px] px-[9px] text-xs",
+        default: "h-5 px-1.5 text-xs",
+        tag: "h-5 px-1.5 text-xs",
+        sm: "h-[18px] px-1.5 text-[11px]",
       },
     },
     defaultVariants: {

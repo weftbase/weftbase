@@ -2,7 +2,11 @@
    From the Weftbase design system (project/shadcn/globals.css). The one
    change: Geist and Geist Mono are self-hosted from the design system's
    font files in public/fonts (served from dist/fonts), so an offline
-   install never calls a font CDN. Colour literals live in this file only. */
+   install never calls a font CDN. Colour literals live in this file only.
+
+   Compact theme (CONSOLE-UX, Density): 13px base text, 28px controls,
+   32px table rows, radii one step under the brand canvas. Density comes
+   from the tokens here and from src/components/ui, not from screens. */
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
@@ -115,10 +119,10 @@
   --pattern-4: #C2C2C8;
   --pattern-line: #D4D4D8;
   --pattern-cut: var(--background);
-  --elev-keycap-primary: inset 0 1px 0 rgba(255,255,255,0.14), 0 2px 0 #C4C4CA, 0 5px 12px -5px rgba(0,0,0,0.15);
-  --elev-keycap-secondary: inset 0 1px 0 #FFFFFF, 0 2px 0 #E4E4E7;
-  --elev-keycap-destructive: inset 0 1px 0 rgba(255,255,255,0.16), 0 2px 0 #E8B4AF;
-  --elev-card: 0 1px 0 #E4E4E7, 0 8px 20px -14px rgba(0,0,0,0.12);
+  --elev-keycap-primary: inset 0 1px 0 rgba(255,255,255,0.14), 0 1px 0 #C4C4CA;
+  --elev-keycap-secondary: inset 0 1px 0 #FFFFFF, 0 1px 0 #E4E4E7;
+  --elev-keycap-destructive: inset 0 1px 0 rgba(255,255,255,0.16), 0 1px 0 #E8B4AF;
+  --elev-card: 0 1px 0 #E4E4E7, 0 6px 16px -12px rgba(0,0,0,0.12);
   --elev-tile: inset 0 1px 0 rgba(255,255,255,0.14), 0 3px 0 #C4C4CA, 0 10px 18px -8px rgba(0,0,0,0.18);
   --elev-code: 0 2px 0 #C4C4CA, 0 16px 32px -18px rgba(0,0,0,0.35);
   --elev-frame: 0 3px 0 #C4C4CA, 0 40px 80px -40px rgba(0,0,0,0.25);
@@ -131,7 +135,34 @@
   --elev-tab-active: 0 1px 0 #E4E4E7, 0 1px 3px rgba(0,0,0,0.08);
   --elev-switch: inset 0 1px 2px rgba(0,0,0,0.2);
   --elev-thumb: 0 1px 2px rgba(0,0,0,0.3);
-  --radius: 0.625rem;
+  /* Trace waterfall: colour is the AGENT (lane), never the span kind.
+     lane-0 is the root agent (neutral); lanes 1-6 go to subagents in the
+     order they first appear and never cycle (a 7th agent reuses lane-0
+     and its name carries it). Each lane has a solid step (model calls)
+     and a dim step (tool calls, summary bars). The order blue, orange,
+     aqua, violet, green, magenta passes the dataviz validator's adjacent
+     checks on both surfaces (CVD dE >= 9.2, normal dE >= 24); the first
+     three also pass all-pairs. Kind is carried by bar style and icon. */
+  --lane-0: #71717A;
+  --lane-1: #2A78D6;
+  --lane-2: #EB6834;
+  --lane-3: #1BAF7A;
+  --lane-4: #6250D6;
+  --lane-5: #008300;
+  --lane-6: #E87BA4;
+  --lane-dim: 30%;
+  /* States laid over a lane: waiting = diagonal hatch on neutral,
+     failed = danger, slowest = warning. */
+  --span-waiting: #A1A1AA;
+  --span-failed: var(--danger);
+  --span-failed-foreground: #FFFFFF;
+  --span-slowest: var(--warning-foreground);
+  --span-slowest-muted: var(--warning-muted);
+  /* Runs-over-time chart: outcome series. */
+  --chart-ok: #8B8B93;
+  --chart-failed: #DC2626;
+  --chart-grid: #EDEDF0;
+  --radius: 0.5rem;
 }
 
 .dark,
@@ -226,9 +257,9 @@
   --pattern-4: #1B1B1F;
   --pattern-line: #33333A;
   --pattern-cut: var(--background);
-  --elev-keycap-primary: inset 0 1px 0 #FFFFFF, 0 2px 0 #71717A, 0 5px 12px -5px rgba(0,0,0,0.5);
-  --elev-keycap-secondary: inset 0 1px 0 rgba(255,255,255,0.08), 0 2px 0 #52525B, 0 5px 12px -5px rgba(0,0,0,0.35);
-  --elev-keycap-destructive: inset 0 1px 0 rgba(255,255,255,0.16), 0 2px 0 #7F1D1D;
+  --elev-keycap-primary: inset 0 1px 0 #FFFFFF, 0 1px 0 #71717A;
+  --elev-keycap-secondary: inset 0 1px 0 rgba(255,255,255,0.08), 0 1px 0 #52525B;
+  --elev-keycap-destructive: inset 0 1px 0 rgba(255,255,255,0.16), 0 1px 0 #7F1D1D;
   --elev-card: inset 0 1px 0 rgba(255,255,255,0.04), 0 2px 0 #0B0B0D, 0 10px 24px -14px rgba(0,0,0,0.6);
   --elev-tile: inset 0 1px 0 rgba(255,255,255,0.10), 0 3px 0 #000000, 0 10px 18px -8px rgba(0,0,0,0.5);
   --elev-code: 0 2px 0 #000000, 0 16px 32px -18px rgba(0,0,0,0.35);
@@ -242,6 +273,22 @@
   --elev-tab-active: 0 1px 0 #2A2A2F, 0 1px 3px rgba(0,0,0,0.08);
   --elev-switch: inset 0 1px 2px rgba(0,0,0,0.2);
   --elev-thumb: 0 1px 2px rgba(0,0,0,0.3);
+  --lane-0: #8B8B93;
+  --lane-1: #3987E5;
+  --lane-2: #D95926;
+  --lane-3: #199E70;
+  --lane-4: #9085E9;
+  --lane-5: #008300;
+  --lane-6: #D55181;
+  --lane-dim: 34%;
+  --span-waiting: #71717A;
+  --span-failed: var(--danger);
+  --span-failed-foreground: #18181B;
+  --span-slowest: var(--warning-foreground);
+  --span-slowest-muted: var(--warning-muted);
+  --chart-ok: #71717A;
+  --chart-failed: #F87171;
+  --chart-grid: #232327;
   color-scheme: dark;
 }
 
@@ -340,6 +387,28 @@
   --color-pattern-4: var(--pattern-4);
   --color-pattern-line: var(--pattern-line);
   --color-pattern-cut: var(--pattern-cut);
+  --color-lane-0: var(--lane-0);
+  --color-lane-0-dim: color-mix(in oklab, var(--lane-0) var(--lane-dim), var(--background));
+  --color-lane-1: var(--lane-1);
+  --color-lane-1-dim: color-mix(in oklab, var(--lane-1) var(--lane-dim), var(--background));
+  --color-lane-2: var(--lane-2);
+  --color-lane-2-dim: color-mix(in oklab, var(--lane-2) var(--lane-dim), var(--background));
+  --color-lane-3: var(--lane-3);
+  --color-lane-3-dim: color-mix(in oklab, var(--lane-3) var(--lane-dim), var(--background));
+  --color-lane-4: var(--lane-4);
+  --color-lane-4-dim: color-mix(in oklab, var(--lane-4) var(--lane-dim), var(--background));
+  --color-lane-5: var(--lane-5);
+  --color-lane-5-dim: color-mix(in oklab, var(--lane-5) var(--lane-dim), var(--background));
+  --color-lane-6: var(--lane-6);
+  --color-lane-6-dim: color-mix(in oklab, var(--lane-6) var(--lane-dim), var(--background));
+  --color-span-waiting: var(--span-waiting);
+  --color-span-failed: var(--span-failed);
+  --color-span-failed-foreground: var(--span-failed-foreground);
+  --color-span-slowest: var(--span-slowest);
+  --color-span-slowest-muted: var(--span-slowest-muted);
+  --color-chart-ok: var(--chart-ok);
+  --color-chart-failed: var(--chart-failed);
+  --color-chart-grid: var(--chart-grid);
 
   --radius-sm: calc(var(--radius) * 0.6);   /* 6px  kbd, count badge   */
   --radius-md: calc(var(--radius) * 0.8);   /* 8px  nav, menu item     */
@@ -369,14 +438,24 @@
 
 /* The exact Weftbase corners as utilities: rounded-input, rounded-alert, rounded-card … */
 @theme {
-  --radius-check: 5px;
-  --radius-kbd-sm: 5px;
-  --radius-tab: 7px;
-  --radius-input: 9px;
-  --radius-icon: 11px;
-  --radius-alert: 12px;
-  --radius-code: 14px;
-  --radius-card: 16px;
+  /* Compact theme: every corner one step smaller than the brand canvas. */
+  --radius-check: 4px;
+  --radius-kbd-sm: 4px;
+  --radius-tab: 4px;
+  --radius-input: 6px;
+  --radius-icon: 8px;
+  --radius-alert: 8px;
+  --radius-code: 8px;
+  --radius-card: 10px;
+
+  /* Compact type scale: text-sm is the 13px UI base, text-xs the 12px
+     secondary size. Screens use these two and nothing else for UI text. */
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-sm: 13px;
+  --text-sm--line-height: 18px;
+  --text-base: 14px;
+  --text-base--line-height: 20px;
   --radius-tile: 18px;
   --radius-frame: 20px;
   --radius-band: 24px;
@@ -392,7 +471,7 @@
     @apply font-sans;
   }
   body {
-    @apply bg-background text-foreground antialiased;
+    @apply bg-background text-sm text-foreground antialiased;
   }
   button:not(:disabled),
   [role="button"]:not(:disabled) {
@@ -405,20 +484,17 @@
   background-image: linear-gradient(180deg, var(--primary-top) 0%, var(--primary) 100%);
   color: var(--primary-foreground);
   box-shadow: var(--elev-keycap-primary);
-  margin-bottom: 2px;
 }
 @utility keycap-secondary {
   background-image: linear-gradient(180deg, var(--secondary-top) 0%, var(--secondary) 100%);
   color: var(--secondary-foreground);
   border: 1px solid var(--secondary-border);
   box-shadow: var(--elev-keycap-secondary);
-  margin-bottom: 2px;
 }
 @utility keycap-destructive {
   background-image: linear-gradient(180deg, var(--destructive) 0%, var(--destructive-end) 100%);
   color: var(--destructive-foreground);
   box-shadow: var(--elev-keycap-destructive);
-  margin-bottom: 2px;
 }
 @utility tile {
   background-image: linear-gradient(180deg, var(--tile-top) 0%, var(--tile) 100%);
@@ -441,9 +517,9 @@
   color: var(--subtle-foreground);
 }
 @utility table-head {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--table-head-foreground);
 }
@@ -462,21 +538,38 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
   border-radius: var(--radius-sm);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   background: var(--warning-muted);
   color: var(--warning-foreground);
 }
 @utility stat {
-  font-size: 30px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  line-height: 1.1;
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 24px;
   font-variant-numeric: tabular-nums;
+}
+@utility span-hatch {
+  /* The "waiting on a person" bar: a diagonal hatch outline on neutral,
+     so the state is never colour alone. */
+  border: 1px solid var(--span-waiting);
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--span-waiting) 0 1.5px,
+    transparent 1.5px 6px
+  );
+}
+@utility live-pulse {
+  animation: live-pulse 1.6s ease-in-out infinite;
+}
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
 }
 
 @layer base {
@@ -485,7 +578,7 @@
   }
   :focus-visible {
     outline: 2px solid var(--ring);
-    outline-offset: 2px;
+    outline-offset: 1px;
   }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {

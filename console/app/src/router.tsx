@@ -1,7 +1,8 @@
-import { QueryClient } from "@tanstack/react-query"
+import { QueryCache, QueryClient } from "@tanstack/react-query"
 import { createRouter as createTanStackRouter } from "@tanstack/react-router"
 import type { LocationRewrite } from "@tanstack/react-router"
 
+import { ApiError, isUnauthorized } from "./lib/api/errors"
 import { routeTree } from "./routeTree.gen"
 
 export interface RouterContext {
@@ -34,8 +35,23 @@ export function mountRewrite(
 }
 
 export function getRouter() {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { staleTime: 10_000, retry: 1 } },
+  const queryClient: QueryClient = new QueryClient({
+    // A 401 on any request means the session ended: ask the server who
+    // we are again, and the auth gate shows the signed-out screen.
+    queryCache: new QueryCache({
+      onError: (err, query) => {
+        if (isUnauthorized(err) && query.queryKey[0] !== "meta")
+          void queryClient.invalidateQueries({ queryKey: ["meta"] })
+      },
+    }),
+    defaultOptions: {
+      queries: {
+        staleTime: 10_000,
+        // A client error will not get better by asking again.
+        retry: (n, err) =>
+          !(err instanceof ApiError && err.status < 500) && n < 1,
+      },
+    },
   })
   return createTanStackRouter({
     routeTree,

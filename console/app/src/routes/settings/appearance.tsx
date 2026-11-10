@@ -1,85 +1,67 @@
 import { createFileRoute } from "@tanstack/react-router"
 
-import { Card } from "@/components/ui/card"
+import { Section } from "@/components/console/page-header"
 import { Kbd } from "@/components/ui/kbd"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { setTheme, useTheme } from "@/lib/theme"
 import type { ThemePref } from "@/lib/theme"
 
+// Settings, Appearance: the theme (kept in this browser) and the keys.
+// Density is compact; there is no other setting.
 export const Route = createFileRoute("/settings/appearance")({
   component: Appearance,
 })
 
-const OPTIONS: { value: ThemePref; label: string; hint: string }[] = [
-  { value: "system", label: "System", hint: "Follow your operating system." },
-  { value: "light", label: "Light", hint: "Graphite on white." },
-  {
-    value: "dark",
-    label: "Dark",
-    hint: "A full dark theme. Code blocks stay dark in both.",
-  },
+const OPTIONS: { value: ThemePref; label: string }[] = [
+  { value: "system", label: "System" },
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
 ]
 
 const KEYS: [string, string][] = [
-  ["⌘K", "Open the command menu"],
-  ["Ctrl K", "Open the command menu on Linux and Windows"],
-  ["Esc", "Close a menu or dialog"],
+  ["⌘K", "Open the command menu (Ctrl K on Linux and Windows)"],
+  ["⌘B", "Collapse or expand the sidebar"],
+  ["/", "Focus the search box of a list"],
+  ["↑ ↓", "Move between rows; Enter opens the row"],
+  ["Esc", "Clear the search, or close a menu or detail"],
 ]
 
 function Appearance() {
   const { pref } = useTheme()
   return (
-    <section className="flex flex-col gap-6">
-      <div>
-        <h2 className="text-lg">Appearance</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Saved in this browser only.
-        </p>
-      </div>
-      <Card className="gap-4 p-5">
-        <h3 className="text-sm">Theme</h3>
+    <>
+      <Section title="Theme">
         <RadioGroup
           value={pref}
           onValueChange={(v) => setTheme(v as ThemePref)}
-          aria-label="Theme"
+          className="flex gap-4 rounded-alert border bg-card px-3 py-2"
         >
           {OPTIONS.map((o) => (
-            <div key={o.value} className="flex items-start gap-2.5">
-              <RadioGroupItem
-                value={o.value}
-                id={`theme-${o.value}`}
-                className="mt-px"
-              />
-              <Label
-                htmlFor={`theme-${o.value}`}
-                className="flex-col items-start gap-1 text-sm"
-              >
+            <div key={o.value} className="flex items-center gap-2">
+              <RadioGroupItem value={o.value} id={`theme-${o.value}`} />
+              <Label htmlFor={`theme-${o.value}`} className="text-sm">
                 {o.label}
-                <span className="text-xs font-normal text-subtle-foreground">
-                  {o.hint}
-                </span>
               </Label>
             </div>
           ))}
         </RadioGroup>
-      </Card>
-      <Card className="gap-4 p-5">
-        <h3 className="text-sm">Keyboard</h3>
-        <dl className="flex flex-col gap-3">
-          {KEYS.map(([k, v]) => (
+      </Section>
+      <Section title="Keyboard">
+        <dl className="overflow-hidden rounded-alert border bg-card">
+          {KEYS.map(([key, what]) => (
             <div
-              key={k}
-              className="flex items-center justify-between gap-4 text-sm"
+              key={key}
+              className="flex h-8 items-center gap-4 border-b px-3 last:border-b-0"
             >
-              <dt className="text-muted-foreground">{v}</dt>
-              <dd>
-                <Kbd>{k}</Kbd>
-              </dd>
+              <dt className="w-16 flex-none">
+                <Kbd size="sm">{key}</Kbd>
+              </dt>
+              <dd className="text-sm text-muted-foreground">{what}</dd>
             </div>
           ))}
         </dl>
-      </Card>
-    </section>
+      </Section>
+    </>
   )
 }

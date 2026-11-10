@@ -1,69 +1,28 @@
 // TanStack Query options per resource. Screens use these, never the
-// client directly, so caching and keys stay in one place.
+// client directly, so keys and caching stay in one place. live.ts patches
+// and invalidates the same keys from the SSE streams.
+//
+// Key shapes (live.ts depends on them):
+//   ["meta"]  ["pricing"]  ["agents"]  ["agent", name, "versions"]
+//   ["runs", "list", query]      infinite, pages of RunsList
+//   ["runs", "page", query]      one RunsList (overview, counts)
+//   ["run", id]  ["run", id, "spans" | "events" | "transcript" | …]
+//   ["sessions", "list", query]  ["session", id]  ["session", id, …]
+//   ["traces", "list", query]    ["trace", id]
+//   ["stats", by, since]
 
-import { queryOptions } from "@tanstack/react-query"
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query"
 
-import { api } from "./client"
-import type { ApprovalFilters, Env, RunFilters, SessionFilters } from "./types"
+import { api } from "./http"
+import type { RunsCursor, RunsQuery, SessionsQuery, StatsBy } from "./types"
 
 export const q = {
   meta: () =>
     queryOptions({
       queryKey: ["meta"],
-      queryFn: () => api.meta(),
+      queryFn: ({ signal }) => api.meta(signal),
       staleTime: 60_000,
-    }),
-  stats: (env: Env) =>
-    queryOptions({ queryKey: ["stats", env], queryFn: () => api.stats(env) }),
-  runs: (env: Env, f: RunFilters) =>
-    queryOptions({
-      queryKey: ["runs", env, f],
-      queryFn: () => api.listRuns(env, f),
-    }),
-  run: (env: Env, id: string) =>
-    queryOptions({
-      queryKey: ["run", env, id],
-      queryFn: () => api.getRun(env, id),
-    }),
-  sessions: (env: Env, f: SessionFilters) =>
-    queryOptions({
-      queryKey: ["sessions", env, f],
-      queryFn: () => api.listSessions(env, f),
-    }),
-  session: (env: Env, id: string) =>
-    queryOptions({
-      queryKey: ["session", env, id],
-      queryFn: () => api.getSession(env, id),
-    }),
-  traces: (env: Env, search?: string) =>
-    queryOptions({
-      queryKey: ["traces", env, search ?? ""],
-      queryFn: () => api.listTraces(env, search),
-    }),
-  trace: (env: Env, id: string) =>
-    queryOptions({
-      queryKey: ["trace", env, id],
-      queryFn: () => api.getTrace(env, id),
-    }),
-  agents: (env: Env) =>
-    queryOptions({
-      queryKey: ["agents", env],
-      queryFn: () => api.listAgents(env),
-    }),
-  agent: (env: Env, name: string) =>
-    queryOptions({
-      queryKey: ["agent", env, name],
-      queryFn: () => api.getAgent(env, name),
-    }),
-  approvals: (env: Env, f: ApprovalFilters) =>
-    queryOptions({
-      queryKey: ["approvals", env, f],
-      queryFn: () => api.listApprovals(env, f),
-    }),
-  approval: (env: Env, id: string) =>
-    queryOptions({
-      queryKey: ["approval", env, id],
-      queryFn: () => api.getApproval(env, id),
+      retry: false,
     }),
   pricing: () =>
     queryOptions({
@@ -71,13 +30,97 @@ export const q = {
       queryFn: () => api.pricing(),
       staleTime: 300_000,
     }),
+
+  /** The Runs list: pages on demand ("Load more"). */
+  runs: (query: RunsQuery) =>
+    infiniteQueryOptions({
+      queryKey: ["runs", "list", query],
+      queryFn: ({ pageParam }) => api.runs(query, pageParam),
+      initialPageParam: undefined as RunsCursor | undefined,
+      getNextPageParam: (last) => last.next ?? undefined,
+    }),
+  /** One short page of runs: a "latest" list, a count (limit 1 + total). */
+  runsPage: (query: RunsQuery) =>
+    queryOptions({
+      queryKey: ["runs", "page", query],
+      queryFn: () => api.runs(query),
+    }),
+  run: (id: string) =>
+    queryOptions({ queryKey: ["run", id], queryFn: () => api.run(id) }),
+  spans: (id: string) =>
+    queryOptions({
+      queryKey: ["run", id, "spans"],
+      queryFn: () => api.spans(id, true),
+    }),
+  events: (id: string) =>
+    queryOptions({
+      queryKey: ["run", id, "events"],
+      queryFn: () => api.events(id),
+    }),
+  transcript: (id: string, step?: number) =>
+    queryOptions({
+      queryKey: ["run", id, "transcript", step ?? "all"],
+      queryFn: () => api.transcript(id, step),
+    }),
+  step: (id: string, n: number) =>
+    queryOptions({
+      queryKey: ["run", id, "step", n],
+      queryFn: () => api.step(id, n),
+    }),
+  requests: (id: string, step?: number) =>
+    queryOptions({
+      queryKey: ["run", id, "requests", step ?? "all"],
+      queryFn: () => api.requests(id, step),
+    }),
+  logs: (id: string) =>
+    queryOptions({
+      queryKey: ["run", id, "logs"],
+      queryFn: () => api.logs(id),
+    }),
+
+  sessions: (query: SessionsQuery) =>
+    queryOptions({
+      queryKey: ["sessions", "list", query],
+      queryFn: () => api.sessions(query),
+    }),
+  session: (id: string) =>
+    queryOptions({ queryKey: ["session", id], queryFn: () => api.session(id) }),
+  timeline: (id: string) =>
+    queryOptions({
+      queryKey: ["session", id, "timeline"],
+      queryFn: () => api.timeline(id),
+    }),
+  entries: (id: string) =>
+    queryOptions({
+      queryKey: ["session", id, "entries"],
+      queryFn: () => api.entries(id),
+    }),
+
+  traces: (query: { notRun?: boolean; limit?: number } = {}) =>
+    queryOptions({
+      queryKey: ["traces", "list", query],
+      queryFn: () => api.traces(query),
+    }),
+  trace: (id: string) =>
+    queryOptions({ queryKey: ["trace", id], queryFn: () => api.trace(id) }),
+
+  /** since: "1h", "24h", "7d", … back from now. */
+  stats: (by: StatsBy, since: string) =>
+    queryOptions({
+      queryKey: ["stats", by, since],
+      queryFn: () => api.stats(by, since),
+      staleTime: 15_000,
+    }),
+
+  agents: () =>
+    queryOptions({ queryKey: ["agents"], queryFn: () => api.agents() }),
+  agentVersions: (name: string) =>
+    queryOptions({
+      queryKey: ["agent", name, "versions"],
+      queryFn: () => api.agentVersions(name),
+    }),
 }
 
-/** Keys a decision makes stale: the inbox, the run and the overview. */
-export const afterDecisionKeys = [
-  ["approvals"],
-  ["approval"],
-  ["run"],
-  ["runs"],
-  ["stats"],
-] as const
+/** Keys a write to a run makes stale (cancel, steer, resume). */
+export const afterRunWrite = (id: string) =>
+  [["run", id], ["runs"], ["stats"], ["sessions"], ["session"]] as const

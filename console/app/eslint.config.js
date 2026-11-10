@@ -66,8 +66,9 @@ export default [
     },
   },
   {
-    // The transport is the one place allowed to call fetch.
-    files: ["src/lib/api/http.ts"],
+    // The transport (fetch) and the SSE helper (EventSource) are the
+    // only places allowed to open a connection.
+    files: ["src/lib/api/http.ts", "src/lib/api/stream.ts"],
     rules: { "no-restricted-globals": "off" },
   },
   {

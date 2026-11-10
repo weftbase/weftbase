@@ -5,8 +5,7 @@
   "script-src": [
     "'self'",
     "'sha256-Ng1EraLad94Be5lFrtI+9K03sMUx0kKDEMv2LizIlBo='",
-    "'sha256-zFML+AEdb/HsbX66VlYzBOqJKNNHs5/WNGYP8JiblyY='",
-    "'sha256-AwfDu5QgJT8/spFA3ewEmOpkue7fiV+h2oSkV43hu4I='",
+    "'sha256-rzHRoahhgnkb8/03vTyi5PXY8LvQcA3r5p9S8TtCDow='",
     "'sha256-REkTQ3mZNdOnZ0xWxlKdqBEAWdIVpJdIT6tm57gvq8Y='"
   ],
   "style-src": [

@@ -3,15 +3,15 @@ import { cn } from "cn"
 import { Tabs as TabsPrimitive } from "radix-ui"
 
 // Weftbase segmented tabs (Tabs README): a tab-list ground with a 1px
-// border, 3px padding and radius 10; each tab 30px, radius 7, 13px
+// border, 2px padding; the list is 28px high, each tab 22px, 13px
 // medium; the selected tab takes the page background and elev-tab-active.
 // The classes are exported so link tabs (a view held in the URL) look
 // the same as Radix tabs.
 const tabsListClass =
-  "inline-flex h-auto w-fit items-center rounded-lg border border-tab-list-border bg-tab-list p-[3px] text-tab-foreground"
+  "inline-flex h-auto w-fit items-center h-7 rounded-input border border-tab-list-border bg-tab-list p-0.5 text-tab-foreground"
 
 const tabTriggerClass =
-  "inline-flex h-[30px] flex-none items-center justify-center gap-1.5 rounded-tab px-3 text-[13px] font-medium whitespace-nowrap text-tab-foreground transition-colors outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-tab-active data-[state=active]:text-tab-active-foreground data-[state=active]:shadow-tab-active aria-[current=page]:bg-tab-active aria-[current=page]:text-tab-active-foreground aria-[current=page]:shadow-tab-active [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
+  "inline-flex h-[22px] flex-none items-center justify-center gap-1.5 rounded-tab px-2 text-sm font-medium whitespace-nowrap text-tab-foreground transition-colors outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-tab-active data-[state=active]:text-tab-active-foreground data-[state=active]:shadow-tab-active aria-[current=page]:bg-tab-active aria-[current=page]:text-tab-active-foreground aria-[current=page]:shadow-tab-active [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5"
 
 function Tabs({
   className,
@@ -20,7 +20,7 @@ function Tabs({
   return (
     <TabsPrimitive.Root
       data-slot="tabs"
-      className={cn("flex flex-col gap-4", className)}
+      className={cn("flex flex-col gap-3", className)}
       {...props}
     />
   )

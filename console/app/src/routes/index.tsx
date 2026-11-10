@@ -1,172 +1,226 @@
-import { useSuspenseQuery } from "@tanstack/react-query"
+import { useQuery } from "@tanstack/react-query"
 import { Link, createFileRoute } from "@tanstack/react-router"
-import { ArrowRightIcon, ShieldCheckIcon } from "lucide-react"
+import { CircleCheckIcon } from "lucide-react"
+import * as React from "react"
 
-import { PageHeader } from "@/components/console/page-header"
-import { RunsTable } from "@/components/console/runs-table"
-import { StatCard } from "@/components/console/stat-card"
-import { RunStatusBadge } from "@/components/console/status"
-import { Card } from "@/components/ui/card"
+import { useLiveState } from "@/components/console/app-shell"
+import { DataTable } from "@/components/console/data-table"
+import {
+  EmptyState,
+  ErrorState,
+  LoadingRows,
+} from "@/components/console/empty-state"
+import { FilterSelect } from "@/components/console/filter-bar"
+import { Page, PageHeader, Section } from "@/components/console/page-header"
+import {
+  RUN_COLUMNS,
+  RUN_COLUMNS_SHORT,
+} from "@/components/console/run-columns"
+import { RunsChart } from "@/components/console/runs-chart"
+import { StatStrip } from "@/components/console/stat-strip"
+import { LivePill } from "@/components/console/status"
 import { q } from "@/lib/api/queries"
-import type { RunStatus } from "@/lib/api/types"
-import { cost, tokens } from "@/lib/format"
-import { useEnv } from "@/lib/search"
+import { displayStatus } from "@/lib/api/status"
+import type { RunRow } from "@/lib/api/types"
+import { cost, count, percent, tokens } from "@/lib/format"
+import {
+  RANGES,
+  RANGE_LABEL,
+  sinceOf,
+  useSetSearch,
+  validateOverview,
+} from "@/lib/search"
+import type { OverviewSearch, Range } from "@/lib/search"
+import { totalOf } from "@/lib/stats"
 
+// Overview: is anything wrong right now? Four figures over the window,
+// runs over time by outcome, what needs attention, and the latest runs.
 export const Route = createFileRoute("/")({
-  loaderDeps: ({ search }) => ({ env: search.env ?? "live" }),
-  loader: ({ context: { queryClient }, deps: { env } }) =>
-    Promise.all([
-      queryClient.ensureQueryData(q.stats(env)),
-      queryClient.ensureQueryData(q.runs(env, { limit: 6 })),
-      queryClient.ensureQueryData(q.approvals(env, { status: "pending" })),
-    ]),
+  validateSearch: validateOverview,
   head: () => ({ meta: [{ title: "Overview · weftbase" }] }),
   component: Overview,
 })
 
-const ORDER: RunStatus[] = [
-  "succeeded",
-  "running",
-  "waiting",
-  "failed",
-  "queued",
-  "cancelled",
-]
+const runLink = (r: RunRow) =>
+  ({ to: "/runs/$runId", params: { runId: r.id } }) as const
 
 function Overview() {
-  const env = useEnv()
-  const { data: stats } = useSuspenseQuery(q.stats(env))
-  const { data: recent } = useSuspenseQuery(q.runs(env, { limit: 6 }))
-  const { data: pending } = useSuspenseQuery(
-    q.approvals(env, { status: "pending" })
-  )
-  const total = ORDER.reduce((a, s) => a + stats.runs_by_status[s], 0)
-  const failed = stats.runs_by_status.failed
+  const search = Route.useSearch()
+  const set = useSetSearch<OverviewSearch>(Route.fullPath)
+  const range: Range = search.range ?? "24h"
+  const live = useLiveState()
+  const since = React.useMemo(() => sinceOf(range), [range])
+
+  const stats = useQuery(q.stats("agent", range))
+  const failed = useQuery(q.runsPage({ status: "failed", since, limit: 6 }))
+  const waiting = useQuery(q.runsPage({ status: "parked", limit: 6 }))
+  const latest = useQuery(q.runsPage({ limit: 10 }))
+
+  const total = stats.data ? totalOf(stats.data) : undefined
+  // The server's "failed" includes cancelled runs; someone chose those.
+  const attention = [
+    ...(waiting.data?.runs ?? []),
+    ...(failed.data?.runs ?? []),
+  ]
+    .filter((r) => displayStatus(r) !== "cancelled")
+    .sort((a, b) => (a.started < b.started ? 1 : -1))
+    .slice(0, 8)
+  const attentionTotal = (waiting.data?.total ?? 0) + (failed.data?.total ?? 0)
 
   return (
-    <div className="mx-auto flex max-w-[1200px] flex-col gap-11">
-      <section className="flex flex-col gap-4">
+    <Page
+      header={
         <PageHeader
           title="Overview"
-          description="What your agents did in the last 24 hours."
+          meta={<LivePill state={live} />}
+          actions={
+            <FilterSelect
+              label="Window"
+              value={range}
+              options={RANGES.map((r) => ({ value: r, label: RANGE_LABEL[r] }))}
+              onChange={(r) => set({ range: r === "24h" ? undefined : r })}
+              any={false}
+            />
+          }
         />
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
-          <StatCard
-            label="Runs"
-            value={tokens(total)}
-            meta={`${stats.runs_by_status.running} running now`}
-          />
-          <StatCard
-            label="Failed"
-            value={tokens(failed)}
-            meta={
-              total
-                ? `${((failed / total) * 100).toFixed(1)}% of runs`
-                : "No runs yet"
-            }
-          />
-          <StatCard
-            label="Cost today"
-            value={cost(stats.cost_today)}
-            meta={`${tokens(stats.tokens_today)} tokens`}
-          />
-          <StatCard
-            label="Waiting for approval"
-            value={tokens(stats.pending_approvals)}
-            meta={
-              stats.pending_approvals
-                ? "A person needs to act"
-                : "Nothing waiting"
-            }
-          />
+      }
+      className="flex flex-col gap-4"
+    >
+      {stats.error ? (
+        <div className="rounded-alert border">
+          <ErrorState error={stats.error} what="The figures" />
         </div>
-      </section>
+      ) : (
+        <StatStrip
+          stats={[
+            { label: "Runs", value: total ? count(total.runs) : "—" },
+            {
+              label: "Failure rate",
+              value: total ? percent(total.failureRate) : "—",
+              hint:
+                total && total.failed > 0
+                  ? `${count(total.failed)} failed`
+                  : undefined,
+              tone: total && total.failed > 0 ? "danger" : "default",
+            },
+            {
+              label: "Cost",
+              value: total ? cost(total.cost) : "—",
+              title:
+                total && !total.cost.cost_known
+                  ? "Some runs used a model with no price in the pricing table."
+                  : undefined,
+            },
+            {
+              label: "Tokens",
+              value: total
+                ? tokens(total.inputTokens + total.outputTokens)
+                : "—",
+              hint: total
+                ? `${tokens(total.inputTokens)} in · ${tokens(total.outputTokens)} out`
+                : undefined,
+            },
+          ]}
+        />
+      )}
 
-      <div className="flex flex-wrap gap-5">
-        <section className="flex min-w-0 flex-[1_1_640px] flex-col gap-4">
-          <div className="flex items-end justify-between gap-4">
-            <h2 className="text-lg">Recent runs</h2>
-            <Link
-              to="/runs"
-              className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-            >
-              All runs
-              <ArrowRightIcon className="size-4" />
-            </Link>
-          </div>
-          <Card className="overflow-x-auto py-0">
-            <RunsTable runs={recent.items} />
-          </Card>
-        </section>
-
-        <div className="flex min-w-[300px] flex-[0_1_360px] flex-col gap-5">
-          {pending.items.length > 0 && (
-            <div className="flex gap-3 rounded-alert bg-warning-muted px-4 py-3.5 text-sm">
-              <ShieldCheckIcon className="mt-px size-[18px] flex-none text-warning-foreground" />
-              <div>
-                <span className="font-semibold">
-                  {pending.items.length}{" "}
-                  {pending.items.length === 1 ? "action is" : "actions are"}{" "}
-                  waiting for a person.
-                </span>{" "}
-                <Link
-                  to="/approvals"
-                  className="font-medium text-warning-foreground underline underline-offset-4"
-                >
-                  Review now
-                </Link>
-              </div>
-            </div>
-          )}
-          <Card className="gap-4 px-5 py-5">
-            <h2 className="text-base">Runs by status</h2>
-            <ul className="flex flex-col gap-2.5">
-              {ORDER.filter((s) => stats.runs_by_status[s] > 0).map((s) => (
-                <li key={s} className="flex items-center justify-between gap-3">
-                  <Link
-                    to="/runs"
-                    search={{ status: s }}
-                    className="rounded-full"
-                  >
-                    <RunStatusBadge status={s} short />
-                  </Link>
-                  <span className="font-mono text-[13px] text-muted-foreground">
-                    {stats.runs_by_status[s]}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </Card>
-          <Card className="gap-4 px-5 py-5">
-            <h2 className="text-base">Failures by error class</h2>
-            {stats.failures_by_error_class.length === 0 ? (
-              <p className="text-[13px] text-muted-foreground">
-                No failures in the last 24 hours.
-              </p>
+      <div className="grid grid-cols-2 gap-4 max-[1100px]:grid-cols-1">
+        <Section title="Runs over time">
+          <div className="rounded-alert border bg-card p-3">
+            {stats.data && total ? (
+              <RunsChart
+                series={total.series}
+                since={stats.data.since}
+                bucketMs={stats.data.bucket_ms}
+              />
             ) : (
-              <ul className="flex flex-col gap-2.5">
-                {stats.failures_by_error_class.map((f) => (
-                  <li
-                    key={f.error_class}
-                    className="flex items-center justify-between gap-3"
-                  >
-                    <Link
-                      to="/runs"
-                      search={{ status: "failed", error: f.error_class }}
-                      className="truncate font-mono text-[13px] hover:underline"
-                    >
-                      {f.error_class}
-                    </Link>
-                    <span className="font-mono text-[13px] text-muted-foreground">
-                      {f.count}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              <div className="h-[172px]" />
             )}
-          </Card>
-        </div>
+          </div>
+        </Section>
+
+        <Section
+          title="Needs attention"
+          action={
+            attentionTotal > attention.length && (
+              <Link
+                to="/runs"
+                search={{ status: "failed", range }}
+                className="hover:text-foreground hover:underline"
+              >
+                All failed runs
+              </Link>
+            )
+          }
+        >
+          {failed.error || waiting.error ? (
+            <div className="rounded-alert border">
+              <ErrorState
+                error={failed.error ?? waiting.error}
+                what="This list"
+              />
+            </div>
+          ) : !failed.data || !waiting.data ? (
+            <div className="rounded-alert border">
+              <LoadingRows rows={5} />
+            </div>
+          ) : attention.length === 0 ? (
+            <div className="rounded-alert border bg-card">
+              <EmptyState
+                icon={CircleCheckIcon}
+                title="Nothing needs attention"
+              >
+                No run failed in this window and none is waiting on a person.
+              </EmptyState>
+            </div>
+          ) : (
+            <DataTable
+              label="Runs that need attention"
+              bordered
+              stickyHeader={false}
+              columns={RUN_COLUMNS_SHORT}
+              rows={attention}
+              rowKey={(r) => r.id}
+              rowLink={runLink}
+            />
+          )}
+        </Section>
       </div>
-    </div>
+
+      <Section
+        title="Latest runs"
+        action={
+          <Link to="/runs" className="hover:text-foreground hover:underline">
+            All runs
+          </Link>
+        }
+      >
+        {latest.error ? (
+          <div className="rounded-alert border">
+            <ErrorState error={latest.error} what="The latest runs" />
+          </div>
+        ) : !latest.data ? (
+          <div className="rounded-alert border">
+            <LoadingRows />
+          </div>
+        ) : latest.data.runs.length === 0 ? (
+          <div className="rounded-alert border bg-card">
+            <EmptyState title="No runs yet">
+              Runs appear here as soon as an agent reports to this server.
+            </EmptyState>
+          </div>
+        ) : (
+          <DataTable
+            label="Latest runs"
+            bordered
+            stickyHeader={false}
+            columns={RUN_COLUMNS}
+            rows={latest.data.runs}
+            rowKey={(r) => r.id}
+            rowLink={runLink}
+          />
+        )}
+      </Section>
+    </Page>
   )
 }

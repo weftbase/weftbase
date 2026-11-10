@@ -57,18 +57,25 @@ function WeftbaseLogo({
   )
 }
 
-// The mark beside the live wordmark, as in the console sidebar (mark 33px, 20px text).
-function WeftbaseBrand({ className, ...props }: React.ComponentProps<"span">) {
+// The mark beside the live wordmark, as in the console sidebar (flat mark
+// 18px, 14px text: the compact shell's 40px header).
+function WeftbaseBrand({
+  className,
+  markOnly = false,
+  ...props
+}: React.ComponentProps<"span"> & { markOnly?: boolean }) {
   return (
     <span
       data-slot="weftbase-brand"
-      className={cn("inline-flex items-center gap-2.5", className)}
+      className={cn("inline-flex items-center gap-2", className)}
       {...props}
     >
-      <WeftbaseLogo variant="mark" className="h-[33px]" alt="" />
-      <span className="text-xl leading-none font-semibold tracking-[-0.045em] text-foreground">
-        weftbase
-      </span>
+      <WeftbaseLogo variant="mark-flat" className="h-[18px]" alt="" />
+      {!markOnly && (
+        <span className="text-base leading-none font-semibold tracking-[-0.03em] text-foreground">
+          weftbase
+        </span>
+      )}
     </span>
   )
 }
