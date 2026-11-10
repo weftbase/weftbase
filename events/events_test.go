@@ -72,6 +72,30 @@ func TestEmitRollsBackWithTheChange(t *testing.T) {
 	}
 }
 
+// TestHubStartsBehindAnEarlySubscriber: a subscription that finished its
+// replay before the hub's Run read the head still gets the rows
+// committed in between (Run used to start at the head and skip them).
+func TestHubStartsBehindAnEarlySubscriber(t *testing.T) {
+	l, db := newLog(t)
+	def := tenant.Default()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sub, err := l.Hub().Subscribe(ctx, ForScope(def, true), 0, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close()
+	emit(t, l, db, def, RunStarted, "r1") // before Run exists
+	go func() { _ = l.Hub().Run(ctx) }()
+	if e := recv(t, sub); e.Seq != 1 || e.ResourceID != "r1" {
+		t.Fatalf("got %+v, want seq 1", e)
+	}
+	emit(t, l, db, def, RunFinished, "r1")
+	if e := recv(t, sub); e.Seq != 2 {
+		t.Fatalf("got %+v, want seq 2", e)
+	}
+}
+
 // TestHubReplayThenLive: a subscription replays the stored events after
 // its cursor, then delivers new ones once each, in seq order, matching
 // its scope only.

@@ -99,6 +99,13 @@ func (h *Hub) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// A subscription opened before Run finished its replay at some seq;
+	// rows committed after that and before the Head read above would
+	// reach it neither by replay nor live. Start at the lowest such
+	// cursor: a subscriber drops what it already has (sendLocked).
+	if low := h.lowestCursor(); low < cur {
+		cur = low
+	}
 	t := time.NewTicker(PollInterval)
 	defer t.Stop()
 	for {
@@ -120,6 +127,24 @@ func (h *Hub) Run(ctx context.Context) error {
 		case <-t.C:
 		}
 	}
+}
+
+// lowestCursor is the smallest last-sent seq among open subscriptions,
+// or a very large value when there are none.
+func (h *Hub) lowestCursor() int64 {
+	h.mu.Lock()
+	subs := make([]*Sub, 0, len(h.subs))
+	for s := range h.subs {
+		subs = append(subs, s)
+	}
+	h.mu.Unlock()
+	low := int64(1<<63 - 1)
+	for _, s := range subs {
+		if l := s.lastSeen(); l < low {
+			low = l
+		}
+	}
+	return low
 }
 
 func (h *Hub) deliver(e Event) {
