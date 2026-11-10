@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import * as React from "react"
+import { toast } from "sonner"
 
 import { AppShell } from "@/components/console/app-shell"
 import { ErrorState } from "@/components/console/empty-state"
@@ -52,10 +53,23 @@ export function AuthGate() {
 
   const meta = useQuery({ ...q.meta(), enabled: !linking })
 
+  // Signed in already, a link that failed (used, expired) is said once,
+  // as a toast: the session in use goes on.
+  const signedIn = !!meta.data
+  React.useEffect(() => {
+    if (!signedIn || linkError === null || linkError === undefined) return
+    toast.error("The sign-in link did not work", {
+      id: "signin-link",
+      description: errorText(linkError),
+    })
+    setLinkError(null)
+  }, [signedIn, linkError])
+
   if (meta.error && isUnauthorized(meta.error))
     return (
       <SignedOut
         linkError={linkError}
+        clearLinkError={() => setLinkError(null)}
         onSignedIn={() => {
           setLinkError(null)
           void qc.invalidateQueries({ queryKey: ["meta"] })
@@ -91,29 +105,37 @@ function Centered({ children }: { children: React.ReactNode }) {
   )
 }
 
+const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
 function SignedOut({
   linkError,
+  clearLinkError,
   onSignedIn,
 }: {
+  /** Why the last link opened in this tab did not sign in. Read on every
+   * render: a link can be opened while this screen is up. */
   linkError: unknown
+  clearLinkError: () => void
   onSignedIn: () => void
 }) {
   const [text, setText] = React.useState("")
   const [busy, setBusy] = React.useState(false)
-  const [error, setError] = React.useState<unknown>(linkError)
+  const [formError, setFormError] = React.useState<unknown>(null)
+  const error = formError ?? linkError
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     const token = tokenFromPaste(text)
     if (!token) return
     setBusy(true)
-    setError(null)
+    setFormError(null)
+    clearLinkError()
     try {
       await api.signIn(token)
       setText("")
       onSignedIn()
     } catch (err) {
-      setError(err)
+      setFormError(err)
     } finally {
       setBusy(false)
     }
@@ -157,7 +179,7 @@ function SignedOut({
         </form>
         {error !== null && error !== undefined && (
           <p role="alert" className="mt-2 text-xs text-danger-foreground">
-            {error instanceof Error ? error.message : String(error)}
+            {errorText(error)}
           </p>
         )}
       </div>

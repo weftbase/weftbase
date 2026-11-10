@@ -48,6 +48,7 @@ import {
   ancestorIds,
   defaultCollapsed,
   gist,
+  repairedText,
   summarySegments,
   visibleRows,
 } from "./model"
@@ -573,6 +574,14 @@ function Waterfall({
       )}
 
       {strip && !compact && <Strip view={view} />}
+      {model.repaired && (
+        <p
+          role="note"
+          className="flex-none border-b px-3 py-1 text-xs text-warning-foreground"
+        >
+          {repairedText(model.repaired)}
+        </p>
+      )}
 
       <div
         className={cn("relative flex min-h-0 flex-col", !compact && "flex-1")}

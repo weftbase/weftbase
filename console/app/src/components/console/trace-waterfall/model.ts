@@ -160,6 +160,41 @@ export interface TraceModel {
   /** The slowest call (a leaf), when there is more than one. */
   slowestId?: string
   running: boolean
+  /** Spans the tree could not place as recorded: parent links that
+   * loop (those rows are drawn as roots), times that do not parse
+   * (those spans are left out). Absent when there are none. */
+  repaired?: { cycles: number; unreadable: number }
+}
+
+/** repairedText says how the spans were not drawn as recorded. */
+export function repairedText(r: NonNullable<TraceModel["repaired"]>): string {
+  const parts: string[] = []
+  if (r.cycles > 0)
+    parts.push(
+      `${r.cycles} ${r.cycles === 1 ? "span names" : "spans name"} a parent that loops back to ${r.cycles === 1 ? "it" : "them"}: drawn at the top level`
+    )
+  if (r.unreadable > 0)
+    parts.push(
+      `${r.unreadable} ${r.unreadable === 1 ? "span has" : "spans have"} a start time that cannot be read: not drawn`
+    )
+  return `${parts.join("; ")}.`
+}
+
+/** A row whose end is "now" (a call in flight, an open wait, a running
+ * root): its end is max(floor, now) at each tick. */
+interface OpenEnd {
+  node: TraceNode
+  floor: number
+}
+
+/** TraceStructure: the tree, built from the data alone. withNow lays
+ * the clock over it; a live view rebuilds the structure only when the
+ * data changes and applies `now` every tick. */
+export interface TraceStructure extends Omit<TraceModel, "t0" | "t1"> {
+  open: OpenEnd[]
+  /** An agent's end before its children stretch it. */
+  own: Map<TraceNode, number>
+  rootStarted?: number
 }
 
 const ms = (t: string) => Date.parse(t)
@@ -253,7 +288,8 @@ function nodeOf(s: Span, lane: Lane): TraceNode {
     runId: s.run_id,
     lane,
     start: ms(s.start),
-    end: Math.max(ms(s.end), ms(s.start)),
+    // An end that does not parse, or before the start: a point.
+    end: Math.max(ms(s.end) || ms(s.start), ms(s.start)),
     running: false,
     failed,
     step: num(s.attrs["weft.step.index"]),
@@ -304,13 +340,28 @@ function adopt(parent: TraceNode, child: TraceNode) {
  * asked for (the tool rows of its step that started after it), a
  * handoff, or the reply. "Model call" stays when that is not known. */
 function nameModelCalls(nodes: Iterable<TraceNode>) {
+  // A parent's children by step, built once per parent: a run with
+  // thousands of calls would otherwise scan its children for each one.
+  const index = new Map<TraceNode, Map<number, TraceNode[]>>()
+  const ofStep = (parent: TraceNode, step: number) => {
+    let byStep = index.get(parent)
+    if (!byStep) {
+      byStep = new Map()
+      for (const c of parent.children) {
+        if (c.step === undefined) continue
+        const list = byStep.get(c.step)
+        if (list) list.push(c)
+        else byStep.set(c.step, [c])
+      }
+      index.set(parent, byStep)
+    }
+    return byStep.get(step) ?? []
+  }
   for (const n of nodes) {
     if (n.base !== "model" || !n.parent || n.failed) continue
-    const asked = n.parent.children.filter(
+    const asked = (n.step === undefined ? [] : ofStep(n.parent, n.step)).filter(
       (c) =>
         c !== n &&
-        c.step === n.step &&
-        c.step !== undefined &&
         c.start >= n.end &&
         (c.handoff?.run_id ?? c.startedBy ?? c.span?.run_id ?? c.runId) ===
           (n.span?.run_id ?? n.runId) &&
@@ -358,16 +409,61 @@ export function compactionLabel(c: RunCompaction): string {
 }
 
 /** buildTrace turns spans (and what the run page knows beside them)
- * into the tree the waterfall draws. */
+ * into the tree the waterfall draws, at `input.now`. */
 export function buildTrace(input: TraceInput): TraceModel {
+  return withNow(buildStructure(input), input.now ?? Date.now())
+}
+
+/** withNow ends every open row at `now` (never before its floor),
+ * stretches the agents over their children again and sets the axis.
+ * O(rows): a live view calls it every tick on one structure. */
+export function withNow(st: TraceStructure, now: number): TraceModel {
+  const { open, own, rootStarted, ...model } = st
+  for (const [n, end] of own) n.end = end
+  for (const o of open) o.node.end = Math.max(o.floor, now)
+  const { nodes } = model
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const n = nodes[i]
+    if (n.base !== "agent" || n.children.length === 0) continue
+    let end = n.end
+    for (const c of n.children) if (c.end > end) end = c.end
+    n.end = end
+  }
+  let t0 = Infinity
+  let t1 = -Infinity
+  for (const n of nodes) {
+    if (n.start < t0) t0 = n.start
+    if (n.end > t1) t1 = n.end
+  }
+  if (!Number.isFinite(t0)) {
+    t0 = rootStarted ?? now
+    t1 = t0
+  }
+  if (model.running) t1 = Math.max(t1, now)
+  return { ...model, t0, t1: Math.max(t1, t0) }
+}
+
+/** buildStructure: buildTrace without the clock. */
+export function buildStructure(input: TraceInput): TraceStructure {
   const { rootRunId } = input
-  const now = input.now ?? Date.now()
+  const open: OpenEnd[] = []
+  /** The row ends at max(floor, now); until withNow, at its floor (or
+   * its start, for a row that ends at now exactly). */
+  const atNow = (n: TraceNode, floor = -Infinity) => {
+    open.push({ node: n, floor })
+    n.end = Number.isFinite(floor) ? floor : n.start
+  }
+  const own = new Map<TraceNode, number>()
   const chain = input.chain?.length ? input.chain : rootRunId ? [rootRunId] : []
   const head = chain.at(0)
   const canon = (run: string | undefined) =>
     run !== undefined && chain.includes(run) ? head : run
 
-  const spans = [...input.spans].sort(
+  // A span whose start does not parse has no place on the axis (it
+  // would make the whole axis NaN): left out, and said.
+  const readable = input.spans.filter((s) => Number.isFinite(ms(s.start)))
+  const unreadable = input.spans.length - readable.length
+  const spans = readable.sort(
     (a, b) => ms(a.start) - ms(b.start) || (a.span_id < b.span_id ? -1 : 1)
   )
   // A child run in flight takes its lane when it starts, not when its
@@ -403,6 +499,31 @@ export function buildTrace(input: TraceInput): TraceModel {
     const p = s.parent_span_id ? bySpan.get(s.parent_span_id) : undefined
     if (p && p !== n) adopt(p, n)
     else top.push(n)
+  }
+  // 1a. Parent links that loop (a → b → a) leave rows no root reaches:
+  // each loop is cut at its earliest row, which becomes a root.
+  let cycles = 0
+  {
+    const reached = new Set<TraceNode>()
+    const mark = (n: TraceNode) => {
+      const stack = [n]
+      while (stack.length) {
+        const x = stack.pop()!
+        if (reached.has(x)) continue
+        reached.add(x)
+        stack.push(...x.children)
+      }
+    }
+    for (const n of top) mark(n)
+    for (const n of bySpan.values()) {
+      if (reached.has(n)) continue
+      cycles++
+      const p = n.parent
+      if (p) p.children = p.children.filter((c) => c !== n)
+      n.parent = undefined
+      top.push(n)
+      mark(n)
+    }
   }
 
   // 1b. A model call's attempts (a retry, a fallback to another model)
@@ -459,8 +580,9 @@ export function buildTrace(input: TraceInput): TraceModel {
         input.root.label,
         laneOf(head),
         input.root.started,
-        now
+        input.root.started
       )
+      atNow(primary)
       primary.secondary = shortModel(input.root.secondary)
       primary.model = input.root.secondary
       primary.runId = head
@@ -482,8 +604,9 @@ export function buildTrace(input: TraceInput): TraceModel {
           r.label,
           laneOf(r.runId),
           r.start,
-          Math.max(r.end ?? now, r.start)
+          Math.max(r.end ?? r.start, r.start)
         )
+        if (r.end === undefined) atNow(n, r.start)
         n.secondary = shortModel(r.model)
         n.model = r.model
         n.runId = r.runId
@@ -553,7 +676,8 @@ export function buildTrace(input: TraceInput): TraceModel {
     if (wait) {
       drawn.add(wait)
       n.wait = wait
-      n.end = wait.to ?? now
+      if (wait.to === null) atNow(n)
+      else n.end = wait.to
       n.running = wait.to === null
       n.note =
         wait.decided ?? (wait.to === null ? "Waiting on a person" : undefined)
@@ -572,8 +696,9 @@ export function buildTrace(input: TraceInput): TraceModel {
         "Waiting for approval",
         LANES[0],
         w.from,
-        w.to ?? now
+        w.to ?? w.from
       )
+      if (w.to === null) atNow(n)
       n.wait = w
       n.running = w.to === null
       n.note = w.decided
@@ -600,8 +725,9 @@ export function buildTrace(input: TraceInput): TraceModel {
         c.label,
         laneOf(c.runId),
         c.start,
-        Math.max(now, c.start)
+        c.start
       )
+      atNow(n, c.start)
       if (c.kind === "model") {
         n.label = "Model call"
         n.secondary = shortModel(c.label)
@@ -643,7 +769,7 @@ export function buildTrace(input: TraceInput): TraceModel {
 
   if (primary && input.running) {
     primary.running = true
-    primary.end = Math.max(primary.end, now)
+    atNow(primary, primary.end)
   }
   if (primary && head !== undefined) {
     const c = input.costs?.get(head)
@@ -674,8 +800,8 @@ export function buildTrace(input: TraceInput): TraceModel {
     // An agent spans its calls: a child that outlasts its parent (clock
     // skew, a wait drawn on a pending call) stretches it.
     for (const c of n.children) walk(c, depth + 1)
-    if (n.base === "agent" && n.children.length > 0)
-      n.end = Math.max(n.end, ...n.children.map((c) => c.end))
+    // Stretched over its children in withNow (they may end at now).
+    if (n.base === "agent" && n.children.length > 0) own.set(n, n.end)
   }
   // A row chosen while its call was in flight stays chosen when the
   // call's span arrives: the span answers to the id its stand-in had.
@@ -683,18 +809,6 @@ export function buildTrace(input: TraceInput): TraceModel {
   roots.sort(order)
   for (const r of roots) walk(r, 0)
   for (const [a, n] of stood) if (!byId.has(a)) byId.set(a, n)
-
-  let t0 = Infinity
-  let t1 = -Infinity
-  for (const n of nodes) {
-    if (n.start < t0) t0 = n.start
-    if (n.end > t1) t1 = n.end
-  }
-  if (!Number.isFinite(t0)) {
-    t0 = input.root?.started ?? now
-    t1 = t0
-  }
-  if (input.running) t1 = Math.max(t1, now)
 
   let slowest: TraceNode | undefined
   let leaves = 0
@@ -710,8 +824,10 @@ export function buildTrace(input: TraceInput): TraceModel {
     roots,
     nodes,
     byId,
-    t0,
-    t1: Math.max(t1, t0),
+    open,
+    own,
+    rootStarted: input.root?.started,
+    repaired: cycles > 0 || unreadable > 0 ? { cycles, unreadable } : undefined,
     waits,
     slowestId:
       leaves > 1 && slowest && slowest.end > slowest.start

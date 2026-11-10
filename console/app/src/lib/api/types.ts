@@ -175,8 +175,12 @@ export interface VersionRef {
 /** events.Actor: who did something (an operator of the Console, or an
  * API key). */
 export interface Actor {
-  kind: "operator" | "key" | (string & {})
-  id: string
+  kind: "operator" | "key" | "worker" | "system" | (string & {})
+  /** Absent for the server's own work (kind system: timers, sweeps). */
+  id?: string
+  /** The key id or session id it acted with. */
+  credential?: string
+  assurance?: string
   /** A display name, when the server has one. */
   name?: string
 }
@@ -256,7 +260,11 @@ export interface ChainDoc {
 
 /** runsPage: GET /v1/runs without a search parameter (cursor-paged). */
 export interface RunsPage {
+  /** With a status, approvals or chain fold the match is folded after
+   * it is counted: total is then an upper bound, exact only where
+   * total_exact says so. */
   total: number
+  total_exact: boolean
   runs: RunRow[]
   next_before: string | null
   next_before_id: string | null
@@ -266,7 +274,9 @@ export interface RunsPage {
 /** searchPage: GET /v1/runs with q, tool, model, error, since, until,
  * min_tokens, min_cost, sort or offset (offset-paged). */
 export interface SearchPage {
+  /** As on RunsPage: exact only where total_exact says so. */
   total: number
+  total_exact: boolean
   runs: RunRow[]
   sort: "started" | "duration" | "tokens" | "cost"
   next_offset: number | null
@@ -308,7 +318,9 @@ export interface RunsQuery {
 /** One page of runs, cursor- or offset-paged, in one shape. `next` is
  * what to pass back to api.runs for the following page; null on the last. */
 export interface RunsList {
+  /** An upper bound unless total_exact. */
   total: number
+  total_exact: boolean
   runs: RunRow[]
   next: RunsCursor | null
   facets?: SearchPage["facets"]
@@ -357,7 +369,12 @@ export interface RunCompaction {
 
 /** runPage: GET /v1/runs/{id}. */
 export interface RunDetail extends RunRow {
+  /** Subagent children, one level deep. */
   children: RunRow[]
+  /** Every run under this one, at any depth; a floor when
+   * children_total_truncated. */
+  children_total: number
+  children_total_truncated?: boolean
   holes: Hole[]
   compactions: RunCompaction[]
   manifest_available?: boolean
@@ -369,16 +386,16 @@ export interface RunDetail extends RunRow {
   summarizer?: { usage: Usage } & CostFields
 }
 
-/** LedgerRun (sessions/ledger.go): what admit, cancel, resume and
+/** LedgerRun (sessions/ledger.go): what admit, cancel and
  * GET /v1/runs/{id}/status answer. Its status words differ from a run
- * row's: queued, parked and "canceled" (one l) exist only here. */
+ * row's: queued and parked exist only here. */
 export interface LedgerRun {
   id: string
   tenant_id: string
   agent: string
-  agent_version: string
+  agent_version: VersionRef
   resolved_via: string
-  status: "queued" | "running" | "parked" | "succeeded" | "failed" | "canceled"
+  status: "queued" | "running" | "parked" | "succeeded" | "failed" | "cancelled"
   metadata?: Record<string, string>
   input?: { prompt?: string; messages?: Message[] }
   resume_of?: string
@@ -568,7 +585,10 @@ export interface StepDoc {
   latency_ms?: number
   ttft_ms?: number
   model: { provider?: string; requested: string; answered?: string }
-  request?: ModelRequest
+  /** Attempt 1's request record; a badge when there is none (a derived
+   * run, a request hole, a model call whose record was never stored).
+   * Read it through stepRequest (lib/api/steps.ts). */
+  request?: ModelRequest | Badge
   attempts: {
     attempt: number
     model: string
@@ -656,7 +676,15 @@ export interface SessionRow extends CostFields {
   first_seen: string
   last_seen: string
   status: SessionStatus
+  /** The one word a list draws (a run's display_status words): the
+   * ledger's where it holds the newest turn. Read it through
+   * sessionStatus (status.ts). */
+  display_status?: NonNullable<RunRow["display_status"]>
   usage: Usage
+  /** What the thread's summarizer model calls cost the session: apart
+   * from usage, never folded into it nor priced. Absent when it
+   * summarized nothing. */
+  summarizer_usage?: Usage
   title?: string
   first_prompt?: string
   content_off?: boolean
@@ -973,7 +1001,8 @@ export interface ManifestDrift {
   drift: boolean
   runs_checked: number
   runs_drifted: number
-  since?: string
+  /** The oldest drifted run read; null when none drifted. */
+  since: string | null
   last_run_id?: string
   manifest_hash?: string
 }
@@ -1271,6 +1300,10 @@ export interface OutcomeBucket {
   failure_rate: number | null
   input_tokens: number
   output_tokens: number
+  /** Approvals that lapsed with nobody deciding, and that a person
+   * refused, by when that happened (by=total; 0 elsewhere). */
+  approvals_expired: number
+  approvals_denied: number
   cost_usd: number
   cost_known: boolean
   duration_ms: { p50: number; p95: number; n: number } | null

@@ -10,6 +10,7 @@ import {
 import * as React from "react"
 
 import { useCopy } from "@/components/console/copy-id"
+import { useReturnFocus } from "@/components/console/return-focus"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -28,6 +29,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { ApiError } from "@/lib/api/errors"
 import { api } from "@/lib/api/http"
+import { forget } from "@/lib/api/queries"
 import { count } from "@/lib/format"
 
 /** Why a session was not deleted. The server refuses (409) while one
@@ -53,12 +55,11 @@ export function SessionMenu({
   const router = useRouter()
   const [copied, copy] = useCopy()
   const [deleting, setDeleting] = React.useState(false)
+  const menu = useReturnFocus()
   const del = useMutation({
     mutationFn: () => api.deleteSession(sessionId),
     onSuccess: () => {
-      qc.removeQueries({ queryKey: ["session", sessionId] })
-      for (const key of [["sessions"], ["runs"], ["stats"], ["approvals"]])
-        void qc.invalidateQueries({ queryKey: key })
+      forget(qc, { session: sessionId })
       void navigate({ to: "/sessions" })
     },
   })
@@ -66,7 +67,12 @@ export function SessionMenu({
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button size="icon-sm" variant="ghost" aria-label="More actions">
+          <Button
+            ref={menu.ref}
+            size="icon-sm"
+            variant="ghost"
+            aria-label="More actions"
+          >
             <MoreHorizontalIcon />
           </Button>
         </DropdownMenuTrigger>
@@ -103,7 +109,10 @@ export function SessionMenu({
       </DropdownMenu>
 
       <Dialog open={deleting} onOpenChange={setDeleting}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent
+          className="sm:max-w-md"
+          onCloseAutoFocus={menu.onCloseAutoFocus}
+        >
           <DialogHeader>
             <DialogTitle>Delete this session?</DialogTitle>
             <DialogDescription>

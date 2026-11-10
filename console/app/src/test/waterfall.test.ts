@@ -13,6 +13,7 @@ import {
 } from "@/components/console/trace-waterfall/clock"
 import {
   ancestorIds,
+  buildStructure,
   buildTrace,
   defaultCollapsed,
   failingNode,
@@ -20,6 +21,7 @@ import {
   statsAt,
   summarySegments,
   visibleRows,
+  withNow,
 } from "@/components/console/trace-waterfall/model"
 import {
   makeScale,
@@ -750,5 +752,106 @@ describe("liveCalls", () => {
       expect(afterTool).toHaveLength(1)
       expect(afterTool[0].kind).toBe("tool")
     }
+  })
+})
+
+describe("the clock over a live tree", () => {
+  const live = () => {
+    const root = span("invoke_agent", "support", 0, 1000, { run: "r" })
+    const call = span("chat", "gpt", 0, 400, {
+      run: "r",
+      parent_span_id: root.span_id,
+      attrs: { "weft.step.index": 0 },
+    })
+    return {
+      spans: [root, call],
+      rootRunId: "r",
+      running: true,
+      live: [
+        {
+          kind: "tool" as const,
+          runId: "r",
+          label: "lookup",
+          start: T0 + 500,
+          step: 0,
+          callId: "c1",
+        },
+      ],
+      waits: [{ run: "r", from: T0 + 600, to: null }],
+    }
+  }
+
+  it("draws the same tree as a full build, at any now", () => {
+    const input = live()
+    const st = buildStructure(input)
+    for (const now of [T0 + 700, T0 + 5000, T0 + 9000]) {
+      const a = withNow(st, now)
+      const b = buildTrace({ ...input, now })
+      expect([a.t0, a.t1]).toEqual([b.t0, b.t1])
+      expect(a.nodes.map((n) => [n.id, n.start, n.end])).toEqual(
+        b.nodes.map((n) => [n.id, n.start, n.end])
+      )
+    }
+  })
+
+  it("moves only the clock: the rows stay the same objects", () => {
+    const st = buildStructure(live())
+    const a = withNow(st, T0 + 2000)
+    const ends = a.nodes.map((n) => n.end)
+    const b = withNow(st, T0 + 3000)
+    expect(b.nodes).toBe(a.nodes)
+    expect(b.t1).toBe(T0 + 3000)
+    // The root, the call in flight and the open wait follow now.
+    expect(
+      b.nodes.map((n) => n.end).filter((e, i) => e !== ends[i]).length
+    ).toBe(3)
+    // Back in time (clock skew) gives the same answer as before.
+    expect(withNow(st, T0 + 2000).nodes.map((n) => n.end)).toEqual(ends)
+  })
+})
+
+describe("spans that cannot be drawn as recorded", () => {
+  it("draws a parent loop's rows at the top level and says so", () => {
+    const a = span("invoke_agent", "a", 0, 1000, { run: "r", span_id: "a" })
+    const b = span("chat", "m", 100, 200, {
+      run: "r",
+      span_id: "b",
+      parent_span_id: "c",
+    })
+    const c = span("execute_tool", "t", 300, 400, {
+      run: "r",
+      span_id: "c",
+      parent_span_id: "b",
+    })
+    for (const input of [
+      { spans: [a, b, c], rootRunId: "r" },
+      { spans: [b, c] }, // a raw trace
+    ]) {
+      const m = buildTrace(input)
+      expect(visibleRows(m, { collapsed: new Set() }).length).toBe(
+        input.spans.length
+      )
+      expect(m.repaired).toEqual({ cycles: 1, unreadable: 0 })
+    }
+  })
+
+  it("leaves out a span whose start does not parse; the axis stands", () => {
+    const a = span("invoke_agent", "a", 0, 1000, { run: "r", span_id: "a" })
+    const bad = {
+      ...span("chat", "m", 0, 0, { run: "r", parent_span_id: "a" }),
+      start: "garbage",
+      end: "",
+    }
+    const m = buildTrace({ spans: [a, bad], rootRunId: "r" })
+    expect(Number.isFinite(m.t0) && Number.isFinite(m.t1)).toBe(true)
+    expect(m.t1 - m.t0).toBe(1000)
+    expect(m.repaired).toEqual({ cycles: 0, unreadable: 1 })
+    expect(buildTrace({ spans: [a], rootRunId: "r" }).repaired).toBeUndefined()
+  })
+
+  it("reads an end that does not parse as the start", () => {
+    const a = { ...span("chat", "m", 100, 200, { run: "r" }), end: "nope" }
+    const m = buildTrace({ spans: [a] })
+    expect(m.nodes[0].end).toBe(m.nodes[0].start)
   })
 })

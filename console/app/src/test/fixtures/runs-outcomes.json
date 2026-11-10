@@ -1,0 +1,560 @@
+{
+  "total": 4,
+  "total_exact": true,
+  "runs": [
+    {
+      "display_status": "succeeded",
+      "agent_version": {
+        "id": "agv_01M738YAWJVKH4X8H07J66RN3S",
+        "number": 1,
+        "labels": []
+      },
+      "resolved_via": "latest",
+      "placement": "embedded",
+      "manifest_drift": true,
+      "chain": {
+        "runs": [
+          {
+            "id": "run_01M739FX4M2S6GNH0AHP6H0HSW",
+            "display_status": "succeeded",
+            "started": "2026-11-10T17:53:29.749230277Z",
+            "finished": "2026-11-10T17:53:30.449711993Z"
+          },
+          {
+            "id": "run_01M739G3QT4MEFCY9SPGYJHFFE",
+            "display_status": "succeeded",
+            "started": "2026-11-10T17:53:36.507711084Z",
+            "finished": "2026-11-10T17:53:37.308002543Z"
+          }
+        ],
+        "display_status": "succeeded",
+        "approvals_outcome": "expired",
+        "approvals_expired": 1,
+        "approvals_denied": 0,
+        "approvals_approved": 0,
+        "approvals_pending": 0,
+        "stopped_by": "final_answer",
+        "started": "2026-11-10T17:53:29.749230277Z",
+        "finished": "2026-11-10T17:53:37.308002543Z",
+        "duration_ms": 7558,
+        "waiting_ms": 6057,
+        "steps": 2,
+        "usage": {
+          "input_tokens": 730,
+          "output_tokens": 65
+        },
+        "cost_usd": 0.001055,
+        "cost_known": true,
+        "waits": [
+          {
+            "run": "run_01M739FX4M2S6GNH0AHP6H0HSW",
+            "resumed_by": "run_01M739G3QT4MEFCY9SPGYJHFFE",
+            "from": "2026-11-10T17:53:30.449711993Z",
+            "to": "2026-11-10T17:53:36.507711084Z",
+            "approvals": [
+              {
+                "id": "appr_01M739FXTHN7TCAWXNFRAVJS9V",
+                "object": "approval",
+                "tenant_id": "ten_project",
+                "run_id": "run_01M739FX4M2S6GNH0AHP6H0HSW",
+                "call_id": "call_send_payout_32",
+                "agent": "payouts",
+                "tool": "send_payout",
+                "args": {
+                  "supplier": "Kiln & Co.",
+                  "amount_usd": 1250.0
+                },
+                "args_sha256": "9dc7506bf3eb7885a4bf62b5ebfcf33cd94a2aebb0f9c4eb0fa4985a9c404b39",
+                "status": "expired",
+                "requested_at": "2026-11-10T17:53:30.449897344Z",
+                "outcome": "deny",
+                "reason": "approval expired",
+                "decided_at": "2026-11-10T17:53:36.506953467Z",
+                "actor": {
+                  "kind": "system"
+                },
+                "resumed_by": "run_01M739G3QT4MEFCY9SPGYJHFFE",
+                "agent_version": {
+                  "id": "agv_01M738YAWJVKH4X8H07J66RN3S",
+                  "number": 1,
+                  "labels": []
+                }
+              }
+            ],
+            "decided_by": [
+              {
+                "kind": "system"
+              }
+            ]
+          }
+        ]
+      },
+      "approvals_outcome": "expired",
+      "id": "run_01M739FX4M2S6GNH0AHP6H0HSW",
+      "parent_run_id": "",
+      "parent_call_id": "",
+      "trace_id": "777a506098bd0016568852b21fc6fa04",
+      "agent": "payouts",
+      "model": {
+        "provider": "anthropic",
+        "name": "claude-haiku-4-5"
+      },
+      "manifest_hash": "94857f0305ba2ee946f7f28b0b18a5ca59cdb8e51d6561fed5cc7d3ae4de151d",
+      "weft_version": "v0.24.2",
+      "service": "weftbase-demo",
+      "session_id": "",
+      "public_id": "",
+      "turn": 0,
+      "forked_from": "",
+      "resumed_by": "run_01M739G3QT4MEFCY9SPGYJHFFE",
+      "meta": {
+        "weftbase.agent_version": "agv_01M738YAWJVKH4X8H07J66RN3S",
+        "weftbase.build_digest": "sha256:7cc5d19e1c96c40b66fd8e1bc359b4ffc53fe4c79da52719aa217681475035c7",
+        "weftbase.tenant_id": "ten_project"
+      },
+      "started": "2026-11-10T17:53:29.749230277Z",
+      "finished": "2026-11-10T17:53:30.449711993Z",
+      "last_seen": "2026-11-10T17:53:30.449711993Z",
+      "status": "succeeded",
+      "err": "",
+      "steps": 1,
+      "pending": 1,
+      "stop_reason": "tool_calls",
+      "stopped_by": "parked",
+      "events_emitted": 5,
+      "messages_emitted": 2,
+      "usage": {
+        "input_tokens": 310,
+        "output_tokens": 41
+      },
+      "cost_usd": 0.000515,
+      "cost_known": true,
+      "cost_reason": "no cache split reported; a cached prompt may be overstated",
+      "cache": "not_reported",
+      "delegated_cost_usd": 0,
+      "delegated_cost_known": true,
+      "event_count": 5,
+      "message_count": 2,
+      "delta_count": 0,
+      "instructions_hash": "0ed7c65aa029f2f2e47b7f4196222e286fd67ce79c404bf7cb54f34819912365",
+      "catalog_hash": "35364733c4a7e0c7ab41fc786349d6cf0060c23e904c3c070ff927391aa7c532",
+      "request_count": 1,
+      "prompt_preview": "Pay out $1,250.00 to supplier Kiln & Co."
+    },
+    {
+      "display_status": "succeeded",
+      "agent_version": {
+        "id": "agv_01M738YAWGVAJ0RK3A3TCXGP7S",
+        "number": 2,
+        "labels": [
+          "staging"
+        ]
+      },
+      "resolved_via": "label:staging",
+      "placement": "local",
+      "chain": {
+        "runs": [
+          {
+            "id": "run_01M739GRFMB2SB9PTZY8KC54J5",
+            "display_status": "succeeded",
+            "started": "2026-11-10T17:53:57.749661299Z",
+            "finished": "2026-11-10T17:54:00.101629002Z"
+          },
+          {
+            "id": "run_01M739GZPJPB8FC3H1BZQJ43R1",
+            "display_status": "succeeded",
+            "started": "2026-11-10T17:54:05.139640761Z",
+            "finished": "2026-11-10T17:54:05.940718401Z"
+          }
+        ],
+        "display_status": "succeeded",
+        "approvals_outcome": "denied",
+        "approvals_expired": 0,
+        "approvals_denied": 1,
+        "approvals_approved": 0,
+        "approvals_pending": 0,
+        "stopped_by": "final_answer",
+        "started": "2026-11-10T17:53:57.749661299Z",
+        "finished": "2026-11-10T17:54:05.940718401Z",
+        "duration_ms": 8191,
+        "waiting_ms": 5038,
+        "steps": 3,
+        "usage": {
+          "input_tokens": 1455,
+          "output_tokens": 116
+        },
+        "cost_usd": 0.006105,
+        "cost_known": true,
+        "waits": [
+          {
+            "run": "run_01M739GRFMB2SB9PTZY8KC54J5",
+            "resumed_by": "run_01M739GZPJPB8FC3H1BZQJ43R1",
+            "from": "2026-11-10T17:54:00.101629002Z",
+            "to": "2026-11-10T17:54:05.139640761Z",
+            "approvals": [
+              {
+                "id": "appr_01M739GTS59RBN2G5V0Q7X1DK7",
+                "object": "approval",
+                "tenant_id": "ten_project",
+                "run_id": "run_01M739GRFMB2SB9PTZY8KC54J5",
+                "call_id": "call_issue_refund_19",
+                "agent": "refunds",
+                "tool": "issue_refund",
+                "args": {
+                  "order_id": "1077",
+                  "amount_usd": 129.0,
+                  "reason": "duplicate charge"
+                },
+                "args_sha256": "a56cc5a703f0aba24f21a6167064efe53f69f8d35ff795baa7a86a6bfb76c60f",
+                "status": "denied",
+                "requested_at": "2026-11-10T17:54:00.101919664Z",
+                "outcome": "deny",
+                "reason": "outside the 30-day refund window",
+                "decided_at": "2026-11-10T17:54:05.138400298Z",
+                "actor": {
+                  "kind": "key",
+                  "id": "key_01M738YASH41TCQPRERX4920QT"
+                },
+                "resumed_by": "run_01M739GZPJPB8FC3H1BZQJ43R1",
+                "agent_version": {
+                  "id": "agv_01M738YAWGVAJ0RK3A3TCXGP7S",
+                  "number": 2,
+                  "labels": [
+                    "staging"
+                  ]
+                }
+              }
+            ],
+            "decided_by": [
+              {
+                "kind": "key",
+                "id": "key_01M738YASH41TCQPRERX4920QT"
+              }
+            ]
+          }
+        ]
+      },
+      "approvals_outcome": "denied",
+      "id": "run_01M739GRFMB2SB9PTZY8KC54J5",
+      "parent_run_id": "",
+      "parent_call_id": "",
+      "trace_id": "edbe55b3588c0015b0e5874ea1879160",
+      "agent": "refunds",
+      "model": {
+        "provider": "anthropic",
+        "name": "claude-sonnet-4-6"
+      },
+      "manifest_hash": "a42db7fc892a17dce231722058ebba9416f9c095d5bb2ad46fccf489e7781d12",
+      "weft_version": "v0.24.2",
+      "service": "refunds-build",
+      "session_id": "",
+      "public_id": "",
+      "turn": 0,
+      "forked_from": "",
+      "resumed_by": "run_01M739GZPJPB8FC3H1BZQJ43R1",
+      "meta": {
+        "weftbase.agent_version": "agv_01M738YAWGVAJ0RK3A3TCXGP7S",
+        "weftbase.build_digest": "sha256:3552c404f040113e8bf2a7172c06496000eb97499d73d0b8d223c23365cc86db",
+        "weftbase.tenant_id": "ten_project"
+      },
+      "started": "2026-11-10T17:53:57.749661299Z",
+      "finished": "2026-11-10T17:54:00.101629002Z",
+      "last_seen": "2026-11-10T17:54:00.101629002Z",
+      "status": "succeeded",
+      "err": "",
+      "steps": 2,
+      "pending": 1,
+      "stop_reason": "tool_calls",
+      "stopped_by": "parked",
+      "events_emitted": 9,
+      "messages_emitted": 4,
+      "usage": {
+        "input_tokens": 1035,
+        "output_tokens": 92
+      },
+      "cost_usd": 0.004485,
+      "cost_known": true,
+      "cost_reason": "no cache split reported; a cached prompt may be overstated",
+      "cache": "not_reported",
+      "delegated_cost_usd": 0,
+      "delegated_cost_known": true,
+      "event_count": 9,
+      "message_count": 4,
+      "delta_count": 0,
+      "instructions_hash": "78464387c0a8edc1bf78752d154cef4256cd3a342696c9a3ee44254650fd4cdc",
+      "catalog_hash": "5613997d3d822323e2a873d7d77eec078e9c8a0cf5963ab6484b8a20e8456317",
+      "request_count": 2,
+      "prompt_preview": "Refund the duplicate charge on order #1077."
+    },
+    {
+      "display_status": "succeeded",
+      "agent_version": {
+        "id": "agv_01M738YAV5WSAZTGYB3DMDQ3NC",
+        "number": 1,
+        "labels": [
+          "prod"
+        ]
+      },
+      "resolved_via": "label:prod",
+      "placement": "local",
+      "chain": {
+        "runs": [
+          {
+            "id": "run_01M739G4YMTXKNJQJFWVVW93MD",
+            "display_status": "succeeded",
+            "started": "2026-11-10T17:53:37.749889291Z",
+            "finished": "2026-11-10T17:53:40.102320654Z"
+          },
+          {
+            "id": "run_01M739GC5PX2QH6YT3BXEM0THY",
+            "display_status": "succeeded",
+            "started": "2026-11-10T17:53:45.143214038Z",
+            "finished": "2026-11-10T17:53:48.245988992Z"
+          }
+        ],
+        "display_status": "succeeded",
+        "approvals_outcome": "approved",
+        "approvals_expired": 0,
+        "approvals_denied": 0,
+        "approvals_approved": 1,
+        "approvals_pending": 0,
+        "stopped_by": "final_answer",
+        "started": "2026-11-10T17:53:37.749889291Z",
+        "finished": "2026-11-10T17:53:48.245988992Z",
+        "duration_ms": 10496,
+        "waiting_ms": 5040,
+        "steps": 4,
+        "usage": {
+          "input_tokens": 2730,
+          "output_tokens": 192
+        },
+        "cost_usd": 0.01107,
+        "cost_known": true,
+        "waits": [
+          {
+            "run": "run_01M739G4YMTXKNJQJFWVVW93MD",
+            "resumed_by": "run_01M739GC5PX2QH6YT3BXEM0THY",
+            "from": "2026-11-10T17:53:40.102320654Z",
+            "to": "2026-11-10T17:53:45.143214038Z",
+            "approvals": [
+              {
+                "id": "appr_01M739G7867WMZ5991NBH101M4",
+                "object": "approval",
+                "tenant_id": "ten_project",
+                "run_id": "run_01M739G4YMTXKNJQJFWVVW93MD",
+                "call_id": "call_issue_refund_16",
+                "agent": "refunds",
+                "tool": "issue_refund",
+                "args": {
+                  "order_id": "1042",
+                  "amount_usd": 64.0,
+                  "reason": "arrived damaged"
+                },
+                "args_sha256": "c6ea2fe011043b7f283f18e6e6b8fe0f12f04afdcd60262569b6f5a2aa6a0c9b",
+                "status": "approved",
+                "requested_at": "2026-11-10T17:53:40.102578403Z",
+                "outcome": "approve",
+                "decided_at": "2026-11-10T17:53:45.141902711Z",
+                "actor": {
+                  "kind": "key",
+                  "id": "key_01M738YASH41TCQPRERX4920QT"
+                },
+                "resumed_by": "run_01M739GC5PX2QH6YT3BXEM0THY",
+                "agent_version": {
+                  "id": "agv_01M738YAV5WSAZTGYB3DMDQ3NC",
+                  "number": 1,
+                  "labels": [
+                    "prod"
+                  ]
+                }
+              }
+            ],
+            "decided_by": [
+              {
+                "kind": "key",
+                "id": "key_01M738YASH41TCQPRERX4920QT"
+              }
+            ]
+          }
+        ]
+      },
+      "approvals_outcome": "approved",
+      "id": "run_01M739G4YMTXKNJQJFWVVW93MD",
+      "parent_run_id": "",
+      "parent_call_id": "",
+      "trace_id": "96ba72b565b635a316a6c5bedf7138f4",
+      "agent": "refunds",
+      "model": {
+        "provider": "anthropic",
+        "name": "claude-sonnet-4-6"
+      },
+      "manifest_hash": "8481062f5808b2c1e47b93ed1c530a39ed9568bf46318936d59f9d783a33f075",
+      "weft_version": "v0.24.2",
+      "service": "refunds-build",
+      "session_id": "",
+      "public_id": "",
+      "turn": 0,
+      "forked_from": "",
+      "resumed_by": "run_01M739GC5PX2QH6YT3BXEM0THY",
+      "meta": {
+        "weftbase.agent_version": "agv_01M738YAV5WSAZTGYB3DMDQ3NC",
+        "weftbase.build_digest": "sha256:d7a09a3ace63e8ca57f69ff290066a2cf726f2891a9e54f23eb62caed6d26df5",
+        "weftbase.tenant_id": "ten_project"
+      },
+      "started": "2026-11-10T17:53:37.749889291Z",
+      "finished": "2026-11-10T17:53:40.102320654Z",
+      "last_seen": "2026-11-10T17:53:40.102320654Z",
+      "status": "succeeded",
+      "err": "",
+      "steps": 2,
+      "pending": 1,
+      "stop_reason": "tool_calls",
+      "stopped_by": "parked",
+      "events_emitted": 9,
+      "messages_emitted": 4,
+      "usage": {
+        "input_tokens": 1035,
+        "output_tokens": 92
+      },
+      "cost_usd": 0.004485,
+      "cost_known": true,
+      "cost_reason": "no cache split reported; a cached prompt may be overstated",
+      "cache": "not_reported",
+      "delegated_cost_usd": 0,
+      "delegated_cost_known": true,
+      "event_count": 9,
+      "message_count": 4,
+      "delta_count": 0,
+      "instructions_hash": "78464387c0a8edc1bf78752d154cef4256cd3a342696c9a3ee44254650fd4cdc",
+      "catalog_hash": "4644ab7ecdc92bf206e39dd378c265d5c073f82b26cf0db4b4fa67f824660b45",
+      "request_count": 2,
+      "prompt_preview": "Refund order #1042, the kettle arrived cracked."
+    },
+    {
+      "display_status": "waiting",
+      "agent_version": {
+        "id": "agv_01M738YAV5WSAZTGYB3DMDQ3NC",
+        "number": 1,
+        "labels": [
+          "prod"
+        ]
+      },
+      "resolved_via": "label:prod",
+      "placement": "local",
+      "chain": {
+        "runs": [
+          {
+            "id": "run_01M739H83MGHKSK4NG9WQE2JE9",
+            "display_status": "waiting",
+            "started": "2026-11-10T17:54:13.749717633Z",
+            "finished": "2026-11-10T17:54:16.002041969Z"
+          }
+        ],
+        "display_status": "waiting",
+        "approvals_outcome": "pending",
+        "approvals_expired": 0,
+        "approvals_denied": 0,
+        "approvals_approved": 0,
+        "approvals_pending": 1,
+        "stopped_by": "parked",
+        "started": "2026-11-10T17:54:13.749717633Z",
+        "finished": null,
+        "duration_ms": 10460,
+        "waiting_ms": 8208,
+        "steps": 2,
+        "usage": {
+          "input_tokens": 1052,
+          "output_tokens": 94
+        },
+        "cost_usd": 0.004566,
+        "cost_known": true,
+        "waits": [
+          {
+            "run": "run_01M739H83MGHKSK4NG9WQE2JE9",
+            "from": "2026-11-10T17:54:16.002041969Z",
+            "to": null,
+            "approvals": [
+              {
+                "id": "appr_01M739HAA2T6ZGRARR76F3K3ZW",
+                "object": "approval",
+                "tenant_id": "ten_project",
+                "run_id": "run_01M739H83MGHKSK4NG9WQE2JE9",
+                "call_id": "call_issue_refund_26",
+                "agent": "refunds",
+                "tool": "issue_refund",
+                "args": {
+                  "order_id": "1077",
+                  "amount_usd": 129.0,
+                  "reason": "account closure"
+                },
+                "args_sha256": "ce975d44f32166e5439083bba29f85a07902479d088130581c3ed48fae9abdf5",
+                "status": "pending",
+                "requested_at": "2026-11-10T17:54:16.002295189Z",
+                "agent_version": {
+                  "id": "agv_01M738YAV5WSAZTGYB3DMDQ3NC",
+                  "number": 1,
+                  "labels": [
+                    "prod"
+                  ]
+                }
+              }
+            ],
+            "decided_by": []
+          }
+        ]
+      },
+      "approvals_outcome": "pending",
+      "id": "run_01M739H83MGHKSK4NG9WQE2JE9",
+      "parent_run_id": "",
+      "parent_call_id": "",
+      "trace_id": "816e4d185a28a109fe06b2141f482304",
+      "agent": "refunds",
+      "model": {
+        "provider": "anthropic",
+        "name": "claude-sonnet-4-6"
+      },
+      "manifest_hash": "8481062f5808b2c1e47b93ed1c530a39ed9568bf46318936d59f9d783a33f075",
+      "weft_version": "v0.24.2",
+      "service": "refunds-build",
+      "session_id": "",
+      "public_id": "",
+      "turn": 0,
+      "forked_from": "",
+      "meta": {
+        "weftbase.agent_version": "agv_01M738YAV5WSAZTGYB3DMDQ3NC",
+        "weftbase.build_digest": "sha256:d7a09a3ace63e8ca57f69ff290066a2cf726f2891a9e54f23eb62caed6d26df5",
+        "weftbase.tenant_id": "ten_project"
+      },
+      "started": "2026-11-10T17:54:13.749717633Z",
+      "finished": "2026-11-10T17:54:16.002041969Z",
+      "last_seen": "2026-11-10T17:54:16.002041969Z",
+      "status": "succeeded",
+      "err": "",
+      "steps": 2,
+      "pending": 1,
+      "stop_reason": "tool_calls",
+      "stopped_by": "parked",
+      "events_emitted": 9,
+      "messages_emitted": 4,
+      "usage": {
+        "input_tokens": 1052,
+        "output_tokens": 94
+      },
+      "cost_usd": 0.004566,
+      "cost_known": true,
+      "cost_reason": "no cache split reported; a cached prompt may be overstated",
+      "cache": "not_reported",
+      "delegated_cost_usd": 0,
+      "delegated_cost_known": true,
+      "event_count": 9,
+      "message_count": 4,
+      "delta_count": 0,
+      "instructions_hash": "78464387c0a8edc1bf78752d154cef4256cd3a342696c9a3ee44254650fd4cdc",
+      "catalog_hash": "4644ab7ecdc92bf206e39dd378c265d5c073f82b26cf0db4b4fa67f824660b45",
+      "request_count": 2,
+      "prompt_preview": "Refund order #1077 and close my account."
+    }
+  ],
+  "next_before": null,
+  "next_before_id": null
+}

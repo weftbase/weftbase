@@ -12,6 +12,7 @@
 //   ["sessions", "pages", filter]  infinite, pages of SessionsPage
 //   ["traces", "list", query]    ["trace", id]
 //   ["stats", by, since]  ["stats", "total", since]
+//   ["options", by]              what a filter's select offers (not live)
 //   ["approvals", "list", query]  ["approvals", "one", id]
 //   ["agents", "summary", since]  ["agent", name]  ["tools", since]
 //   ["diff", a, b]
@@ -19,6 +20,7 @@
 //   ["session", id, "conversation", "window"]  the windowed conversation
 
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query"
+import type { QueryClient } from "@tanstack/react-query"
 
 import { ApiError } from "./errors"
 import { api, isSearch } from "./http"
@@ -148,6 +150,17 @@ export const q = {
       queryFn: () => api.stats(by, since, { all: true }),
       staleTime: 15_000,
     }),
+  /** What a filter's select offers: the keys seen over the last 30
+   * days (by=model and by=tool count subagent runs too). Not under
+   * ["stats"]: the live stream leaves it alone; it changes rarely. */
+  options: (by: "agent" | "model" | "tool" | "error_type") =>
+    queryOptions({
+      queryKey: ["options", by],
+      queryFn: () =>
+        api.stats(by, "30d", { all: by === "model" || by === "tool" }),
+      staleTime: 300_000,
+      refetchOnWindowFocus: false,
+    }),
   statsTotal: (since: string) =>
     queryOptions({
       queryKey: ["stats", "total", since],
@@ -268,3 +281,40 @@ export const conversationKey = (id: string) =>
 /** Keys a write to a run makes stale (cancel, steer, resume). */
 export const afterRunWrite = (id: string) =>
   [["run", id], ["runs"], ["stats"], ["sessions"], ["session"]] as const
+
+/** forget drops what the Console holds of what was just deleted (the
+ * runs of a chain, or a whole session) and refreshes every view that
+ * listed or counted it: runs lists, stats, sessions and the session the
+ * runs were turns of, the approvals, traces, the inventory, and the
+ * command menu's id lookups. */
+export function forget(
+  qc: QueryClient,
+  what:
+    | { runs: readonly string[]; session?: string }
+    | { session: string; runs?: undefined }
+) {
+  for (const id of what.runs ?? []) qc.removeQueries({ queryKey: ["run", id] })
+  if (!what.runs) {
+    // A whole session: its page and every turn's run.
+    qc.removeQueries({ queryKey: ["session", what.session] })
+    qc.removeQueries({
+      predicate: (query) =>
+        query.queryKey[0] === "run" &&
+        (query.state.data as { session_id?: string } | undefined)
+          ?.session_id === what.session,
+    })
+  }
+  qc.removeQueries({ queryKey: ["jump"] })
+  const stale: (readonly unknown[])[] = [
+    ["runs"],
+    ["stats"],
+    ["sessions"],
+    ["approvals"],
+    ["traces"],
+    ["agents"],
+    ["agent"],
+    ["tools"],
+  ]
+  if (what.runs && what.session) stale.push(["session", what.session])
+  for (const key of stale) void qc.invalidateQueries({ queryKey: key })
+}

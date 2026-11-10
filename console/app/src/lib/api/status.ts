@@ -38,9 +38,12 @@ export function displayStatus(
   return isDisplay(r.status) ? r.status : "interrupted"
 }
 
-/** sessionStatus: a session's status is its newest turn's outcome, in
- * the server's words for a turn (outcomeStatus). */
-export function sessionStatus(s: Pick<SessionRow, "status">): DisplayStatus {
+/** sessionStatus: a session's status is its newest turn's: the
+ * server's display_status, else its outcome word (outcomeStatus). */
+export function sessionStatus(
+  s: Pick<SessionRow, "status"> & Partial<Pick<SessionRow, "display_status">>
+): DisplayStatus {
+  if (isDisplay(s.display_status)) return s.display_status
   return outcomeStatus(s.status)
 }
 

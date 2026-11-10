@@ -3,7 +3,7 @@
 // (a run row from the goldens).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { openStream } from "@/lib/api/stream"
+import { openStream, streamEvents } from "@/lib/api/stream"
 import type { StreamFrame } from "@/lib/api/types"
 
 import runs from "./fixtures/runs.json"
@@ -92,12 +92,43 @@ describe("openStream", () => {
       }
     )
     last().open()
+    last().emit("run", JSON.stringify({ run: runs.runs[0] }), "41")
     last().drop()
     last().open()
     expect(FakeEventSource.instances).toHaveLength(1)
     expect(states).toEqual(["connecting", "live", "reconnecting", "live"])
     // Last-Event-ID went with the retry: nothing was missed.
     expect(reopened).toEqual([true])
+  })
+
+  it("asks for a refetch when a stream that had no event id reconnects", () => {
+    // Without an id the browser sends no Last-Event-ID: /v1/events reads
+    // after=now from the URL again and the run stream starts at its
+    // tail, so whatever happened during the gap is lost.
+    const onReopen = vi.fn()
+    streamEvents(["approval.requested"], { onEvent: () => {}, onReopen })
+    expect(last().url).toContain("after=now")
+    last().open() // live; no approval event arrives
+    last().drop() // server restart, proxy timeout, Wi-Fi
+    last().open() // the browser reconnects by itself, with no Last-Event-ID
+    expect(onReopen).toHaveBeenCalledWith(false)
+  })
+
+  it("resumes a replacement stream's own reconnect once it has an id", () => {
+    const reopened: boolean[] = []
+    openStream(
+      "/v1/runs/stream",
+      { all: 1 },
+      { onFrame() {}, onReopen: (r) => reopened.push(r) }
+    )
+    last().open()
+    last().fail()
+    vi.advanceTimersByTime(1000)
+    last().open() // fresh: no last id
+    last().emit("run", JSON.stringify({ run: runs.runs[0] }), "7")
+    last().drop()
+    last().open() // the browser's retry carries Last-Event-ID: 7
+    expect(reopened).toEqual([false, true])
   })
 
   it("reconnects with backoff after an HTTP error and asks for a refetch", () => {

@@ -12,6 +12,7 @@ import {
 import type { LucideIcon } from "lucide-react"
 import * as React from "react"
 
+import { DetailBoundary } from "@/components/console/detail-boundary"
 import { JsonView } from "@/components/console/json-view"
 import type {
   TraceModel,
@@ -24,6 +25,7 @@ import type { ActorLike } from "@/lib/actor"
 import { approvalsOf, chainStep, chainSteps } from "@/lib/api/chain"
 import type { ChainView } from "@/lib/api/chain"
 import { q } from "@/lib/api/queries"
+import { stepRequest, stepRequestBadge } from "@/lib/api/steps"
 import type {
   Catalog,
   CostFields,
@@ -147,7 +149,7 @@ function toolEntry(
   step: StepDoc | undefined,
   name: string
 ): ToolEntry | undefined {
-  const t = step?.request?.tools
+  const t = stepRequest(step)?.tools
   return isCatalog(t) ? t.tools.find((x) => x.name === name) : undefined
 }
 
@@ -244,10 +246,10 @@ function ChangedChip({
   const before = useQuery({ ...q.step(runId, step - 1), enabled: open })
   const pick = (d: StepDoc | undefined): unknown => {
     if (what === "system") {
-      const p = d?.request?.prompt
+      const p = stepRequest(d)?.prompt
       return p && "text" in p ? p.text : undefined
     }
-    const t = d?.request?.tools
+    const t = stepRequest(d)?.tools
     return isCatalog(t) ? t.tools.map((x) => x.name) : undefined
   }
   return (
@@ -301,14 +303,17 @@ function ModelCall({
   const s = stepQ.data
   const messages = seenQ.data?.messages ?? []
   const reply = replyOf(fullQ.data, step)
-  const prompt = s?.request?.prompt
+  // A step without a request record carries a badge in its place.
+  const req = stepRequest(s)
+  const missing = stepRequestBadge(s)
+  const prompt = req?.prompt
   const system = prompt && "text" in prompt ? prompt.text : undefined
-  const catalog = isCatalog(s?.request?.tools) ? s.request.tools : undefined
+  const catalog = isCatalog(req?.tools) ? req.tools : undefined
 
   const hashes = (n: number) =>
     reqsQ.data?.requests.find((r) => r.step === n && r.attempt === 1)
   const prev = hashes(step - 1)
-  const cur = s?.request
+  const cur = req
   const systemChanged =
     !!prev &&
     !!cur &&
@@ -326,8 +331,8 @@ function ModelCall({
   const troubled = attempts.length > 1
   const errors = attempts.filter((a) => a.error)
   const u = s?.usage
-  const params = s?.request?.body.params
-  const raw = s?.request
+  const params = req?.body.params
+  const raw = req
 
   return (
     <>
@@ -345,6 +350,12 @@ function ModelCall({
         )}
         {s && toolsChanged && (
           <ChangedChip runId={runId} step={step} what="tools" now={s} />
+        )}
+        {missing && (
+          <Muted>
+            The request was not recorded
+            {missing.reason ? `: ${missing.reason}` : ""}.
+          </Muted>
         )}
         {system !== undefined && (
           <Inline label="System prompt">
@@ -885,20 +896,32 @@ function Other({ node }: { node: TraceNode }) {
   )
 }
 
-export function SpanDetail({
-  node,
-  model,
-  chain,
-  onSelect,
-  onClose,
-}: {
+type SpanDetailProps = {
   node: TraceNode
   model: TraceModel
   /** Absent on a raw trace: every row shows as a plain span. */
   chain?: ChainView
   onSelect: (id: string) => void
   onClose: () => void
-}) {
+}
+
+/** SpanDetail: the detail of one row. A row whose data the detail cannot
+ * draw says so in the detail; it never takes the page down with it. */
+export function SpanDetail(props: SpanDetailProps) {
+  return (
+    <DetailBoundary key={props.node.id} onClose={props.onClose}>
+      <SpanDetailBody {...props} />
+    </DetailBoundary>
+  )
+}
+
+function SpanDetailBody({
+  node,
+  model,
+  chain,
+  onSelect,
+  onClose,
+}: SpanDetailProps) {
   const Icon = node.kind === "waiting" ? HourglassIcon : ICON[node.base]
   const isRoot = !!chain && node === model.roots.at(0) && node.base === "agent"
   const isHandoff = !!chain && node.handed

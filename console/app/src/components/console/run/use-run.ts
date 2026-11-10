@@ -163,13 +163,13 @@ export function useRun(id: string): RunData {
   const chainQ = useQuery({
     ...chainQuery(id),
     retry: (n, e) => !isNotFound(e) && n < 2,
-    // A queued run is in the ledger only: look again until it starts.
-    // A waiting run has no stream to follow (the parked run is over and
-    // its resume does not exist yet): look for the decision now and then.
+    // A queued run is in the ledger only: look again until its trace
+    // arrives. A waiting run needs no timer: the decision's resume is a
+    // ledger event of this chain (run.queued, resume_of), which
+    // useRunLive hears on the outbox stream.
     refetchInterval: (query) => {
       const d = query.state.data
-      if (d && (isQueued(d) || d.last.settling)) return 1000
-      return d?.status === "waiting" ? 5000 : false
+      return d && (isQueued(d) || d.last.settling) ? 1000 : false
     },
   })
   const chain = chainQ.data

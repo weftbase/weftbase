@@ -9,7 +9,10 @@
 // EventSource cannot set request headers, and does not need to: on its
 // automatic reconnect the browser itself sends Last-Event-ID (the last
 // `id:` it received), which is the header the server reads. So:
-// - a dropped connection resumes with no gap ("resumed");
+// - a dropped connection resumes with no gap ("resumed"), but only when
+//   the stream had received an `id:`: without one the browser sends no
+//   Last-Event-ID and the server starts at its tail, so the caller is
+//   told to refetch;
 // - an `overflow` frame is followed by the same resume, and the caller is
 //   also told to refetch, since the gap may exceed what can be backfilled;
 // - an HTTP error (401 after the session ended, 5xx at a restart) closes
@@ -85,15 +88,19 @@ export function openStream(
     handlers.onState?.(opened ? "reconnecting" : "connecting")
     const es = new EventSource(buildUrl(path, query))
     source = es
-    // fresh: this EventSource replaces one the browser gave up on, so it
-    // carries no last id and its first open is not a resume.
-    let resumes = !fresh
+    // The last `id:` this EventSource received: what the browser sends
+    // as Last-Event-ID when it reconnects by itself. Without one the
+    // server starts at its tail and what happened in between is lost.
+    // fresh: this EventSource replaces one the browser gave up on, so
+    // it carries no last id and its first open is not a resume.
+    let lastId = ""
+    let first = true
     es.onopen = () => {
       failures = 0
       handlers.onState?.("live")
-      if (opened) handlers.onReopen?.(resumes)
+      if (opened) handlers.onReopen?.(!(first && fresh) && lastId !== "")
       opened = true
-      resumes = true
+      first = false
     }
     es.onerror = () => {
       if (closed) return
@@ -112,6 +119,7 @@ export function openStream(
     for (const type of frames) {
       es.addEventListener(type, (e) => {
         const msg = e as MessageEvent<string>
+        if (msg.lastEventId) lastId = msg.lastEventId
         let frame: StreamFrame
         try {
           frame = {

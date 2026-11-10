@@ -128,7 +128,7 @@ function SessionsPage() {
     q.sessionsList({ q: search.q, state: search.state, agent: search.agent })
   )
   // Agent names: every agent that ran in the last 30 days.
-  const agents = useQuery(q.stats("agent", "30d"))
+  const agents = useQuery(q.options("agent"))
   const names = (agents.data?.groups.map((g) => g.key) ?? []).filter(Boolean)
   if (search.agent && !names.includes(search.agent)) names.push(search.agent)
 

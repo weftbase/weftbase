@@ -12,7 +12,7 @@ import { CopyId } from "@/components/console/copy-id"
 import { ErrorState } from "@/components/console/empty-state"
 import { LinkTabs, Page, PageHeader } from "@/components/console/page-header"
 import { useNow } from "@/components/console/relative-time"
-import { RunActions } from "@/components/console/run/actions"
+import { RunActions, appUrl } from "@/components/console/run/actions"
 import { ApprovalCallout } from "@/components/console/run/approval"
 import { DetailsTab } from "@/components/console/run/details-tab"
 import { LogsTab } from "@/components/console/run/logs-tab"
@@ -110,10 +110,8 @@ function Run({ runId }: { runId: string }) {
   if (!chain) return <Page header={<PageHeader title="Run" />}>{null}</Page>
 
   const rootSpan = view.model.roots.at(0)?.span
-  const pageUrl =
-    typeof rootSpan?.attrs["weft.page_url"] === "string"
-      ? rootSpan.attrs["weft.page_url"]
-      : undefined
+  // Only a web address is a link (appUrl): the attribute is the app's.
+  const pageUrl = appUrl(rootSpan?.attrs["weft.page_url"])
   const outputType =
     typeof rootSpan?.attrs["weft.output.type"] === "string"
       ? rootSpan.attrs["weft.output.type"]
@@ -402,9 +400,11 @@ function Header({
         run && (
           <RunActions
             runId={run.id}
-            running={status === "running"}
+            status={status ?? chain.status}
             hasChildren={view.model.nodes.some((n) => n.handed)}
             pageUrl={pageUrl}
+            chainIds={chain.runs.map((r) => r.id)}
+            sessionId={sessionId}
           />
         )
       }

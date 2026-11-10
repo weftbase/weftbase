@@ -39,10 +39,13 @@ export function CompareDialog({
   runId,
   open,
   onOpenChange,
+  onCloseAutoFocus,
 }: {
   runId: string
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Where the focus goes on close (useReturnFocus). */
+  onCloseAutoFocus?: (e: Event) => void
 }) {
   const navigate = useNavigate()
   const [text, setText] = React.useState("")
@@ -66,7 +69,10 @@ export function CompareDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent
+        className="sm:max-w-xl"
+        onCloseAutoFocus={onCloseAutoFocus}
+      >
         <DialogHeader>
           <DialogTitle>Compare with…</DialogTitle>
           <DialogDescription className="sr-only">

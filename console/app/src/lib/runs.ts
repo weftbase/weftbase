@@ -7,7 +7,7 @@
 
 import { displayStatus } from "./api/status"
 import type { DisplayStatus } from "./api/status"
-import type { RunRow, RunsQuery, Usage } from "./api/types"
+import type { RunRow, RunsList, RunsQuery, Usage } from "./api/types"
 import { DASH, cost, count, usd } from "./format"
 import type { RunsSearch } from "./search"
 
@@ -190,26 +190,53 @@ export function rowVersion(
   r: RunRow
 ): { number: number; label?: string } | undefined {
   const v = r.agent_version
-  if (!v || typeof v === "string" || !v.number) return undefined
+  if (!v?.number) return undefined
   const via = r.resolved_via?.startsWith("label:")
     ? r.resolved_via.slice("label:".length)
     : undefined
   return { number: v.number, label: via }
 }
 
-/** A search (any of these filters) is offset-paged by the server and
- * its `total` counts rows before chains are folded: the list then
- * counts what it loaded instead. */
-export function isSearching(s: RunsSearch): boolean {
-  return Boolean(
-    s.q ||
-    s.range ||
-    s.tool ||
-    s.model ||
-    s.sort ||
-    s.min_cost !== undefined ||
-    s.min_tokens !== undefined
-  )
+/** runsRows: the rows of the loaded pages, each run once. A search is
+ * offset-paged, so a run that moved between two page reads (new runs
+ * came in on top) can come back on the next page. */
+export function runsRows(pages: readonly Pick<RunsList, "runs">[]): RunRow[] {
+  const seen = new Set<string>()
+  const out: RunRow[] = []
+  for (const p of pages)
+    for (const r of p.runs) {
+      if (seen.has(r.id)) continue
+      seen.add(r.id)
+      out.push(r)
+    }
+  return out
+}
+
+/** runsCount: what a list of runs says about its size. The server's
+ * total is exact only when it says so (total_exact); otherwise it is an
+ * upper bound (counted before a park and its resumes fold into one row),
+ * and the list says what it knows: every row once all are loaded, else
+ * "at least" the rows it has. */
+export function runsCount(
+  pages:
+    readonly Pick<RunsList, "total" | "total_exact" | "runs">[] | undefined,
+  more: boolean
+): { n: number; text: string; title?: string } | undefined {
+  const first = pages?.[0]
+  if (!pages || !first) return undefined
+  const word = (n: number) => (n === 1 ? "run" : "runs")
+  if (first.total_exact)
+    return {
+      n: first.total,
+      text: `${count(first.total)} ${word(first.total)}`,
+    }
+  const loaded = runsRows(pages).length
+  if (!more) return { n: loaded, text: `${count(loaded)} ${word(loaded)}` }
+  return {
+    n: loaded,
+    text: `${count(loaded)}+ runs`,
+    title: `At most ${count(first.total)}: the server counts before a wait and what continued it are folded into one run.`,
+  }
 }
 
 /** toRunsQuery maps the URL's filters onto GET /v1/runs parameters.

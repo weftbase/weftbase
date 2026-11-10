@@ -72,7 +72,9 @@ partly priced sum).
 - `types.ts`: the wire types, hand-written from the Go structs and the
   goldens (the OpenAPI spec types most bodies as open objects). Extend
   them there when the server grows; fixtures in `src/test/fixtures/` are
-  copies of `api/http/v1/testdata/v1/*.golden.json` (`cp`, never edit).
+  copies of `api/http/v1/testdata/v1/*.golden.json` (`cp`, never edit)
+  or declared captures from the demo; `src/test/fixtures.test.ts` fails
+  when a copy drifts from its golden.
 - `http.ts`: `api.*`, one function per endpoint. Screens do not call it
   for reads; they use `q.*` from `queries.ts` with `useQuery` /
   `useInfiniteQuery`. Mutations call `api.*` in a `useMutation` and then
@@ -89,8 +91,14 @@ partly priced sum).
   `useLiveState()` for a `LivePill`); a run page mounts
   `useRunLive(id, { enabled, keys })`, a session page
   `useSessionLive(id)`. A run's row is patched into every cached list
-  and into `["run", id]`; everything else is invalidated at most once a
-  second. Follow the key shapes at the top of `queries.ts` or the stream
+  and into `["run", id]`. A step of a listed run is that patch, never a
+  refetch: lists refetch only when a run appears or changes status and
+  the list could gain or lose it (`takesNew`, `reshuffles`), at most
+  every `LIST_MS` (5 s); the stats at most every `STATS_MS` (30 s) and
+  on focus; a run or session page's own data at most once a second.
+  Filter options (`q.options(by)`, `["options", by]`) are not live.
+  An idle page on a busy project stays well under one request a second.
+  Follow the key shapes at the top of `queries.ts` or the stream
   will not find your query: anything about one run lives under
   `["run", id, …]`, one session under `["session", id, …]`.
 - **Two streams for the whole app, never one per screen** (`hub.ts`).
@@ -99,9 +107,11 @@ partly priced sum).
   their connections open; streams per component, per tab or per page
   once left the Console unable to send any request. So: no hook opens
   an `EventSource`; they subscribe to the hub (`subscribeRuns`,
-  `subscribeApprovals`), which keeps every run's row
-  (`/v1/runs/stream?all=1&kinds=run`) and the approval events
-  (`/v1/events`), in ONE tab (a Web Lock) that hands the frames to the
+  `subscribeApprovals`, `subscribeRunEvents`), which keeps every run's
+  row (`/v1/runs/stream?all=1&kinds=run`) and the outbox's approval and
+  run events (`/v1/events`: the ledger's transitions, which the trace
+  store never sees for a run queued and then cancelled, or admitted
+  by another client), in ONE tab (a Web Lock) that hands the frames to the
   others (a BroadcastChannel); closes them on `pagehide` and reopens on
   `pageshow`; and lets a hidden tab refetch once when it is shown.
   A run row arrives each time a run moves (a step, a tool call, a child
@@ -113,14 +123,16 @@ partly priced sum).
   only while `isPending`, and shows `error` when it comes back.
 - Streams resume by themselves: the browser's EventSource sends
   `Last-Event-ID` on reconnect and the server backfills. After an HTTP
-  error or an `overflow` frame the hooks refetch. Records are
+  error, an `overflow` frame, or a reconnect of a stream that had not
+  received an `id:` yet (no Last-Event-ID to send) the hooks refetch. Records are
   de-duplicated on (run, kind, pos).
 
 The inventory and the inbox: `q.agentsSummary(since)`, `q.agent(name)`,
 `q.tools(since)`, `q.approvals(query)` (one short page, a count),
 `q.approvalsList(query)` (the inbox: `useInfiniteQuery`, 50 a page by
 `offset`, "Load more"), `q.statsTotal(since)`,
-`q.statsAll(by, since)` (model and tool breakdowns count subagent runs).
+`q.statsAll(by, since)` (model and tool breakdowns count subagent runs),
+`q.options(by)` (what a filter's select offers: 30 days, not live).
 `useApprovalsLive()` (mounted once by the shell) keeps `["approvals"]`
 current from the outbox stream (`streamEvents` in `stream.ts`,
 `GET /v1/events`) and raises the one toast: not for an approval that is
@@ -133,8 +145,17 @@ Runs lists always ask for `chains=1` (`api.runs` adds it) and filter on
 the status as shown (`display_status`), in a search too: build the query
 with `toRunsQuery(search, since)` (`lib/runs.ts`). A search (any of `q`,
 `tool`, `model`, `since`, `sort`, `min_cost`, `min_tokens`) is
-offset-paged and its `total` counts rows before chains are folded
-(`isSearching`): count the rows loaded instead.
+offset-paged. A list's `total` is exact only with `total_exact`;
+otherwise it is an upper bound: say the size with `runsCount(pages,
+hasNextPage)` ("50+ runs" until every page is loaded) and read rows
+with `runsRows(pages)` (each run once: offset pages can overlap).
+
+Actions: a dialog opened from a "…" menu gives the focus back to the
+menu's trigger (`useReturnFocus`). After a delete, `forget(qc, …)`
+(`queries.ts`) drops the run's or session's caches and refreshes every
+view that counted it. A detail that throws stays in its own container
+(`DetailBoundary`). A step's `request` is a record or a badge: read it
+with `stepRequest` / `stepRequestBadge` (`lib/api/steps.ts`).
 
 ## URL state (`src/lib/search.ts`)
 

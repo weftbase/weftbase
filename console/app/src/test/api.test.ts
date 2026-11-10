@@ -235,7 +235,12 @@ describe("spans", () => {
 
 describe("live patches", () => {
   const rows = runs.runs as unknown as RunRow[]
-  const list = (): RunsList => ({ total: 4, runs: rows, next: null })
+  const list = (): RunsList => ({
+    total: 4,
+    total_exact: true,
+    runs: rows,
+    next: null,
+  })
 
   it("patches a run frame into every cached list and the run itself", () => {
     const qc = new QueryClient()

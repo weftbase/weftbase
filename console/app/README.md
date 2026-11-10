@@ -48,7 +48,8 @@ waterfall's lane and kind maps.
   server returns.
 - `src/lib/search.ts`: URL search schemas; every view and selection is a URL.
 - `src/test/fixtures/`: copies of the server's goldens
-  (`api/http/v1/testdata/v1`), the only data tests use.
+  (`api/http/v1/testdata/v1`; `fixtures.test.ts` fails when one drifts)
+  and a few declared captures from the demo, the only data tests use.
 - Fonts (Geist, Geist Mono) are self-hosted from `public/fonts`.
 
 ## Running against a server

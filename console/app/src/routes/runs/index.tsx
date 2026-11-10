@@ -26,7 +26,7 @@ import { q } from "@/lib/api/queries"
 import { FILTERABLE, STATUS_LABEL } from "@/lib/api/status"
 import type { TraceRow } from "@/lib/api/types"
 import { count, duration, shortId } from "@/lib/format"
-import { isSearching, toRunsQuery, unpricedLine } from "@/lib/runs"
+import { runsCount, runsRows, toRunsQuery, unpricedLine } from "@/lib/runs"
 import {
   RANGES,
   RANGE_LABEL,
@@ -124,24 +124,18 @@ function RunsFilters() {
   const set = useSetSearch<RunsSearch>(Route.fullPath)
   const runs = useRunsQuery()
   // What the selects offer: what ran in the last 30 days.
-  const agents = useQuery(q.stats("agent", "30d"))
-  const models = useQuery(q.statsAll("model", "30d"))
-  const tools = useQuery(q.statsAll("tool", "30d"))
-  const errors = useQuery(q.stats("error_type", "30d"))
-  // A search's total counts rows before chains are folded: count the
-  // rows once they are all loaded instead.
-  const total = !isSearching(search)
-    ? runs.data?.pages[0]?.total
-    : runs.data && !runs.hasNextPage
-      ? runs.data.pages.reduce((n, p) => n + p.runs.length, 0)
-      : undefined
+  const agents = useQuery(q.options("agent"))
+  const models = useQuery(q.options("model"))
+  const tools = useQuery(q.options("tool"))
+  const errors = useQuery(q.options("error_type"))
+  const total = runsCount(runs.data?.pages, runs.hasNextPage)
 
   return (
     <FilterBar
       right={
-        total !== undefined && (
-          <span className="font-mono tabular-nums">
-            {count(total)} {total === 1 ? "run" : "runs"}
+        total && (
+          <span className="font-mono tabular-nums" title={total.title}>
+            {total.text}
           </span>
         )
       }
@@ -206,7 +200,7 @@ function RunsTable() {
       />
     )
   if (!runs.data) return <LoadingRows rows={12} />
-  const rows = runs.data.pages.flatMap((p) => p.runs)
+  const rows = runsRows(runs.data.pages)
   if (rows.length === 0 && !runs.hasNextPage)
     return filtered ? (
       <EmptyState

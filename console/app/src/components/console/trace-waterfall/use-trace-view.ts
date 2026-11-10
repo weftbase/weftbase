@@ -7,7 +7,7 @@ import * as React from "react"
 
 import { SPEEDS, advance, stepFrom, stepTargets } from "./clock"
 import type { Speed } from "./clock"
-import { buildTrace, statsAt } from "./model"
+import { buildStructure, statsAt, withNow } from "./model"
 import type { TraceInput, TraceModel, TraceStats } from "./model"
 import { makeScale } from "./scale"
 import type { TimeScale } from "./scale"
@@ -61,8 +61,10 @@ export function useTraceView(input: TraceInput): TraceView {
   const live = !!input.running
   const ticking = useNowWhile(live, input.now)
   const now = live ? ticking : input.now
-  const model = React.useMemo(
-    () => buildTrace({ ...input, now }),
+  // The tree from the data alone; the clock is laid over it each tick
+  // (withNow, linear in the rows).
+  const structure = React.useMemo(
+    () => buildStructure(input),
     // The input's fields are the dependencies: callers build the object
     // inline.
     [
@@ -78,8 +80,11 @@ export function useTraceView(input: TraceInput): TraceView {
       input.root?.secondary,
       input.root?.started,
       input.running,
-      now,
     ]
+  )
+  const model = React.useMemo(
+    () => withNow(structure, now ?? Date.now()),
+    [structure, now]
   )
   const scale = React.useMemo(
     () => makeScale(model.t0, model.t1, model.waits),

@@ -33,7 +33,6 @@ import {
 import { exactFirst, idCandidate, matches } from "@/lib/jump"
 import {
   costUnknown,
-  isSearching,
   rowCause,
   rowChildren,
   rowCost,
@@ -43,6 +42,8 @@ import {
   rowTimes,
   rowTokens,
   rowVersion,
+  runsCount,
+  runsRows,
   toRunsQuery,
   unpricedLine,
 } from "@/lib/runs"
@@ -165,7 +166,6 @@ describe("the runs list's filters", () => {
 
   it("asks the server for chains' statuses on a plain list", () => {
     const s = validateRuns({ status: "failed", agent: "support" })
-    expect(isSearching(s)).toBe(false)
     expect(toRunsQuery(s)).toMatchObject({
       display_status: "failed",
       agent: "support",
@@ -174,11 +174,54 @@ describe("the runs list's filters", () => {
 
   it("asks for the status as shown in a search too", () => {
     const s = validateRuns({ status: "failed", tool: "update_address" })
-    expect(isSearching(s)).toBe(true)
     expect(toRunsQuery(s)).toMatchObject({
       display_status: "failed",
       tool: "update_address",
     })
+  })
+
+  it("counts runs exactly only where the server says so", () => {
+    const r = (id: string) => ({ id }) as RunRow
+    const page = (ids: string[], total: number, total_exact: boolean) => ({
+      total,
+      total_exact,
+      runs: ids.map(r),
+    })
+    // The fold's upper bound is never printed as exact.
+    expect(runsCount([page(["a", "b"], 207, false)], true)).toMatchObject({
+      n: 2,
+      text: "2+ runs",
+    })
+    expect(runsCount([page(["a", "b"], 207, false)], true)?.title).toMatch(
+      /At most 207/
+    )
+    // Everything loaded: the rows are the count.
+    expect(
+      runsCount([page(["a", "b"], 207, false), page(["c"], 207, false)], false)
+    ).toMatchObject({ n: 3, text: "3 runs" })
+    expect(runsCount([page(["a"], 159, true)], true)).toMatchObject({
+      n: 159,
+      text: "159 runs",
+    })
+    expect(runsCount(undefined, false)).toBeUndefined()
+  })
+
+  it("shows a run once when offset pages overlap", () => {
+    const r = (id: string) => ({ id }) as RunRow
+    expect(
+      runsRows([{ runs: [r("a"), r("b")] }, { runs: [r("b"), r("c")] }]).map(
+        (x) => x.id
+      )
+    ).toEqual(["a", "b", "c"])
+    expect(
+      runsCount(
+        [
+          { total: 9, total_exact: false, runs: [r("a"), r("b")] },
+          { total: 9, total_exact: false, runs: [r("b")] },
+        ],
+        false
+      )?.n
+    ).toBe(2)
   })
 
   it("maps the error kind, subagent runs and the tag", () => {
@@ -353,9 +396,11 @@ describe("the agent inventory", () => {
   it("says how many runs ran a different manifest", () => {
     expect(driftNote(undefined)).toBeUndefined()
     expect(
-      driftNote({ drift: false, runs_checked: 4, runs_drifted: 0 })
+      driftNote({ drift: false, runs_checked: 4, runs_drifted: 0, since: null })
     ).toBeUndefined()
-    expect(driftNote({ drift: true, runs_checked: 6, runs_drifted: 5 })).toBe(
+    expect(
+      driftNote({ drift: true, runs_checked: 6, runs_drifted: 5, since: null })
+    ).toBe(
       "5 of 6 runs ran a different manifest than the one this version registered."
     )
     expect(

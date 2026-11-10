@@ -11,8 +11,11 @@
 // - two streams for the whole app, never one per component: every run's
 //   row (`/v1/runs/stream?all=1&kinds=run`; the server sends a row each
 //   time a run moves, which is enough to keep a run or session page
-//   current) and the approval events (`/v1/events`). The server has no
-//   route that carries both, so two is the floor today;
+//   current) and the control store's outbox (`/v1/events`): approvals
+//   asked for and decided, and the ledger's run transitions, which the
+//   trace store never sees for a run that never started (queued, then
+//   cancelled or failed by its queue TTL; a run another client admitted).
+//   The server has no route that carries both, so two is the floor today;
 // - one tab holds them (a Web Lock picks it) and hands every frame to
 //   the others over a BroadcastChannel, so ten tabs still use two
 //   connections. Without those APIs (an insecure origin) each tab opens
@@ -31,9 +34,20 @@ import { streamEvents, streamRuns } from "./stream"
 import type { StreamState } from "./stream"
 import type { OutboxEvent, RunFrame } from "./types"
 
-export const APPROVAL_EVENTS = [
+/** The outbox events the Console follows (GET /v1/events?type=…: the
+ * server matches types exactly). */
+export const OUTBOX_EVENTS = [
   "approval.requested",
   "approval.decided",
+  "approval.expired",
+  "run.queued",
+  "run.started",
+  "run.parked",
+  "run.finished",
+  "run.failed",
+  "run.canceled",
+  "run.cancelled",
+  "run.deleted",
 ] as const
 
 type Topic = "runs" | "events"
@@ -137,7 +151,7 @@ function lead() {
     },
     { kinds: ["run"] }
   )
-  const stopEvents = streamEvents(APPROVAL_EVENTS, {
+  const stopEvents = streamEvents(OUTBOX_EVENTS, {
     ...handlers("events"),
     onEvent: (e) => emit({ k: "data", topic: "events", data: e }),
   })
@@ -269,6 +283,24 @@ function subscribe<T>(topic: Topic, h: HubHandlers<T>): () => void {
  * end). Child runs too: their ids start with the parent's. */
 export const subscribeRuns = (h: HubHandlers<RunFrame>) => subscribe("runs", h)
 
+/** The outbox events of one kind ("approval." or "run."): the topic
+ * carries both, each subscriber sees its own. */
+const ofKind = (
+  prefix: string,
+  h: HubHandlers<OutboxEvent>
+): HubHandlers<OutboxEvent> => ({
+  ...h,
+  onData: (e) => {
+    if (e.type.startsWith(prefix)) h.onData(e)
+  },
+})
+
 /** Approvals asked for and decided, as they happen. */
 export const subscribeApprovals = (h: HubHandlers<OutboxEvent>) =>
-  subscribe("events", h)
+  subscribe("events", ofKind("approval.", h))
+
+/** The ledger's run transitions (run.queued, run.started, …, run.deleted)
+ * as they happen: `data.run_id`, `data.chain_run_id` (the chain's first
+ * run) and `data.status` name the run and where it is now. */
+export const subscribeRunEvents = (h: HubHandlers<OutboxEvent>) =>
+  subscribe("events", ofKind("run.", h))

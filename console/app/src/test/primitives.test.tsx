@@ -4,14 +4,17 @@ import { afterEach, describe, expect, it } from "vitest"
 
 import { ApprovalOutcome } from "@/components/console/approval/outcome"
 import { DataTable } from "@/components/console/data-table"
+import { RUN_COLUMNS } from "@/components/console/run-columns"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { JsonView } from "@/components/console/json-view"
 import { RelativeTime } from "@/components/console/relative-time"
 import { StatStrip } from "@/components/console/stat-strip"
 import { StatusBadge } from "@/components/console/status"
-import type { RunRow } from "@/lib/api/types"
+import type { RunRow, RunsPage } from "@/lib/api/types"
 import { displayStatus } from "@/lib/api/status"
 
 import runs from "./fixtures/runs.json"
+import runsOutcomes from "./fixtures/runs-outcomes.json"
 
 const rows = runs.runs as unknown as RunRow[]
 
@@ -138,5 +141,35 @@ describe("ApprovalOutcome", () => {
     expect(container.textContent).toBe("")
     rerender(<ApprovalOutcome outcome={undefined} />)
     expect(container.textContent).toBe("")
+  })
+})
+
+describe("approvals_outcome on a runs row", () => {
+  // Captured from the demo: one logical run per worst outcome.
+  const outcomes = (runsOutcomes as unknown as RunsPage).runs
+  const input = RUN_COLUMNS.find((c) => c.key === "input")!
+  const shown = (o: string) => {
+    const row = outcomes.find((r) => r.approvals_outcome === o)!
+    const { container, unmount } = render(
+      <TooltipProvider>{input.cell(row)}</TooltipProvider>
+    )
+    const text = container.textContent
+    unmount()
+    return text
+  }
+  it("says an expiry and a denial, and is quiet otherwise", () => {
+    expect(shown("expired")).toMatch(/approval expired/)
+    expect(shown("denied")).toMatch(/approval denied/)
+    expect(shown("approved")).not.toMatch(/approval/)
+    expect(shown("pending")).not.toMatch(/approval/)
+  })
+  it("reads the chain's outcome when the row has none of its own", () => {
+    const row = outcomes.find((r) => r.approvals_outcome === "expired")!
+    const { container } = render(
+      <TooltipProvider>
+        {input.cell({ ...row, approvals_outcome: undefined })}
+      </TooltipProvider>
+    )
+    expect(container.textContent).toMatch(/approval expired/)
   })
 })

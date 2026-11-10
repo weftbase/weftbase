@@ -190,6 +190,7 @@ export const api = {
       const p = await get<SearchPage>("/v1/runs", query)
       return {
         total: p.total,
+        total_exact: p.total_exact,
         runs: p.runs,
         next: p.next_offset === null ? null : { offset: p.next_offset },
         facets: p.facets,
@@ -198,6 +199,7 @@ export const api = {
     const p = await get<RunsPage>("/v1/runs", query)
     return {
       total: p.total,
+      total_exact: p.total_exact,
       runs: p.runs,
       next:
         p.next_before === null
