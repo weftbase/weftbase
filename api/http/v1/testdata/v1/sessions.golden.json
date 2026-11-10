@@ -10,6 +10,7 @@
       "first_seen": "2020-01-01T09:00:00.123Z",
       "last_seen": "2020-01-01T09:03:00.323Z",
       "status": "interrupted",
+      "display_status": "interrupted",
       "usage": {
         "input_tokens": 18,
         "output_tokens": 6
@@ -45,6 +46,7 @@
       "first_seen": "2020-01-01T09:02:00.123Z",
       "last_seen": "2020-01-01T09:02:05.123Z",
       "status": "succeeded",
+      "display_status": "succeeded",
       "usage": {
         "input_tokens": 12,
         "output_tokens": 6

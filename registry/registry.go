@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -399,6 +400,23 @@ func (r *Registry) Lookup(tx store.Tx, s tenant.Scope, id string) (Version, erro
 		return Version{}, err
 	}
 	return r.version(tx, s, id)
+}
+
+// LookupLabeled is Lookup with the labels the version holds now, in tx:
+// what an event names a version by ({id, number, labels}).
+func (r *Registry) LookupLabeled(tx store.Tx, s tenant.Scope, id string) (Version, error) {
+	v, err := r.Lookup(tx, s, id)
+	if err != nil {
+		return v, err
+	}
+	labels, err := r.labelsOf(tx, s, v.Agent)
+	for l, lid := range labels {
+		if lid == v.ID {
+			v.Labels = append(v.Labels, l)
+		}
+	}
+	slices.Sort(v.Labels)
+	return v, err
 }
 
 // Version reads one AgentVersion with its labels.

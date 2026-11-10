@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -24,10 +25,11 @@ import (
 // resume carries no decision for ("DENIED: no decision"), so a resume
 // is never sent early: one decision of two leaves the run parked.
 //
-// POST /v1/runs/{id}/resume (Resume) still resumes at once: the
-// decisions it carries are recorded on the records by the caller, the
-// records already decided keep theirs, and a call it leaves out is
-// recorded denied, "no decision", which is what weft does with it.
+// Every change of a record writes its own approval.* event
+// (resource_kind approval, data.chain_run_id) in the transaction that
+// makes it: approval.requested at the park, approval.decided for a
+// person's decision, approval.expired when the expiry denies it,
+// approval.cancelled when its run ends without resuming.
 
 // Approval statuses.
 const (
@@ -38,6 +40,10 @@ const (
 	ApprovalExpired   = "expired"   // the approval expiry passed: denied by the system
 	ApprovalCancelled = "cancelled" // the parked run was cancelled
 )
+
+// EventApprovalCancelled is the event a pending approval writes when its
+// parked run ends without resuming (cancelled, or its version retired).
+const EventApprovalCancelled = "approval.cancelled"
 
 // Approval errors.
 var (
@@ -142,30 +148,32 @@ func (l *Ledger) request(tx store.Tx, s tenant.Scope, run Run, pending []wire.Pe
 			ApprovalPending, now); err != nil {
 			return fmt.Errorf("sessions: insert approval: %w", err)
 		}
-		if err := l.emitApproval(tx, s, events.Actor{Kind: "worker", ID: run.worker}, events.ApprovalRequested, a, nil); err != nil {
+		if err := l.emitApproval(tx, s, events.Actor{Kind: "worker", ID: run.worker}, events.ApprovalRequested, a, run.chain(), nil); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (l *Ledger) emitApproval(tx store.Tx, s tenant.Scope, actor events.Actor, typ string, a Approval, extra map[string]any) error {
-	var resumeOf string
-	_ = store.QueryRow(tx, `SELECT resume_of FROM runs WHERE id = ?`, a.RunID).Scan(&resumeOf)
-	data := map[string]any{"approval_id": a.ID, "run_id": a.RunID, "chain_run_id": l.chainHead(tx, s, a.RunID, resumeOf),
+func (l *Ledger) emitApproval(tx store.Tx, s tenant.Scope, actor events.Actor, typ string, a Approval, chain string, extra map[string]any) error {
+	ref, err := l.versionRef(tx, s, a.AgentVersion)
+	if err != nil {
+		return err
+	}
+	data := map[string]any{"approval_id": a.ID, "run_id": a.RunID, "chain_run_id": chain, "agent_version": ref,
 		"call_id": a.CallID, "agent": a.Agent, "tool": a.Tool,
 		"args_sha256": a.ArgsSHA256, "status": a.Status}
 	for k, v := range extra {
 		data[k] = v
 	}
-	_, err := l.log.Emit(tx, s, events.Event{Type: typ, ResourceKind: "approval", ResourceID: a.ID, Actor: actor,
+	_, err = l.log.Emit(tx, s, events.Event{Type: typ, ResourceKind: "approval", ResourceID: a.ID, Actor: actor,
 		Audited: typ == events.ApprovalDecided}, data)
 	return err
 }
 
 func (l *Ledger) approvalsOf(tx store.Tx, s tenant.Scope, runID string) ([]Approval, error) {
-	rows, err := store.Query(tx, selectApproval+` WHERE run_id = ? AND project_id = ? AND env = ? AND tenant_id = ? ORDER BY requested_at, id`,
-		runID, s.Project(), s.Env(), s.Tenant())
+	where, args := exact(s)
+	rows, err := store.Query(tx, selectApproval+` WHERE run_id = ? AND `+where+` ORDER BY requested_at, id`, append([]any{runID}, args...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -181,8 +189,9 @@ func (l *Ledger) approvalsOf(tx store.Tx, s tenant.Scope, runID string) ([]Appro
 	return out, rows.Err()
 }
 
-// settle records a decision on a pending record.
-func (l *Ledger) settle(tx store.Tx, s tenant.Scope, actor events.Actor, a *Approval, status, reason, content string) error {
+// settle records a decision on a pending record, with its event:
+// approval.decided, or approval.expired for the expiry's denial.
+func (l *Ledger) settle(tx store.Tx, s tenant.Scope, actor events.Actor, a *Approval, chain, status, reason, content string) error {
 	now := l.ts()
 	if _, err := store.Exec(tx, `UPDATE approvals SET status = ?, reason = ?, content = ?, actor_kind = ?, actor_id = ?, decided_at = ?
 		WHERE id = ? AND status = ?`, status, reason, content, actor.Kind, actor.ID, now, a.ID, ApprovalPending); err != nil {
@@ -193,9 +202,9 @@ func (l *Ledger) settle(tx store.Tx, s tenant.Scope, actor events.Actor, a *Appr
 	a.Actor = &events.Actor{Kind: actor.Kind, ID: actor.ID}
 	typ := events.ApprovalDecided
 	if status == ApprovalExpired {
-		return nil // approval.expired is written once for the run, by the timer
+		typ = events.ApprovalExpired
 	}
-	return l.emitApproval(tx, s, actor, typ, *a, map[string]any{"outcome": a.Outcome, "reason": reason})
+	return l.emitApproval(tx, s, actor, typ, *a, chain, map[string]any{"outcome": a.Outcome, "reason": reason})
 }
 
 // resumeDecided resumes a parked run with the decisions of its approval
@@ -204,8 +213,8 @@ func (l *Ledger) settle(tx store.Tx, s tenant.Scope, actor events.Actor, a *Appr
 // reason; ApprovalDenied "no decision" is what weft does with a call a
 // resume leaves out).
 func (l *Ledger) resumeDecided(tx store.Tx, s tenant.Scope, actor events.Actor, parked Run, given []wire.Decision, fallback, fallbackReason string) (Run, error) {
-	if parked.Status != StatusParked || parked.ResumedBy != "" {
-		return Run{}, fmt.Errorf("%w: run %s is %s", ErrNotParked, parked.ID, parked.Status)
+	if err := resumable(parked); err != nil {
+		return Run{}, err
 	}
 	as, err := l.approvalsOf(tx, s, parked.ID)
 	if err != nil {
@@ -220,9 +229,9 @@ func (l *Ledger) resumeDecided(tx store.Tx, s tenant.Scope, actor events.Actor, 
 		a := &as[i]
 		if a.Status == ApprovalPending {
 			if d, ok := byCall[a.CallID]; ok {
-				err = l.settle(tx, s, actor, a, statusOf(d.Decision), d.Reason, d.Content)
+				err = l.settle(tx, s, actor, a, parked.chain(), statusOf(d.Decision), d.Reason, d.Content)
 			} else {
-				err = l.settle(tx, s, actor, a, fallback, fallbackReason, "")
+				err = l.settle(tx, s, actor, a, parked.chain(), fallback, fallbackReason, "")
 			}
 			if err != nil {
 				return Run{}, err
@@ -244,11 +253,30 @@ func (l *Ledger) resumeDecided(tx store.Tx, s tenant.Scope, actor events.Actor, 
 	return run, err
 }
 
-// cancelApprovals closes the pending records of a parked run that ended.
-func (l *Ledger) cancelApprovals(tx store.Tx, runID string) error {
-	_, err := store.Exec(tx, `UPDATE approvals SET status = ?, decided_at = ? WHERE run_id = ? AND status = ?`,
-		ApprovalCancelled, l.ts(), runID, ApprovalPending)
-	return err
+// cancelApprovals closes the pending records of a parked run that ended
+// without resuming (cancelled by a person, or its version retired), each
+// with its approval.cancelled event; cause is the run's cancel cause.
+func (l *Ledger) cancelApprovals(tx store.Tx, s tenant.Scope, actor events.Actor, run Run, cause string) error {
+	as, err := l.approvalsOf(tx, s, run.ID)
+	if err != nil {
+		return err
+	}
+	now := l.ts()
+	for _, a := range as {
+		if a.Status != ApprovalPending {
+			continue
+		}
+		if _, err := store.Exec(tx, `UPDATE approvals SET status = ?, reason = ?, decided_at = ? WHERE id = ? AND status = ?`,
+			ApprovalCancelled, cause, now, a.ID, ApprovalPending); err != nil {
+			return err
+		}
+		t := parseTS(now)
+		a.Status, a.Reason, a.DecidedAt = ApprovalCancelled, cause, &t
+		if err := l.emitApproval(tx, s, actor, EventApprovalCancelled, a, run.chain(), map[string]any{"cancel_cause": cause}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Decide records a person's decision on an approval — approve, deny,
@@ -285,15 +313,15 @@ func (l *Ledger) Decide(ctx context.Context, s tenant.Scope, actor events.Actor,
 			}
 			return fmt.Errorf("%w: approval %s is %s", ErrNotPending, id, a.Status)
 		}
-		if err := l.settle(tx, s, actor, &a, statusOf(decision), reason, content); err != nil {
+		parked, err := l.get(tx, s, a.RunID)
+		if err != nil {
+			return err
+		}
+		if err := l.settle(tx, s, actor, &a, parked.chain(), statusOf(decision), reason, content); err != nil {
 			return err
 		}
 		var left int
 		if err := store.QueryRow(tx, `SELECT COUNT(*) FROM approvals WHERE run_id = ? AND status = ?`, a.RunID, ApprovalPending).Scan(&left); err != nil || left > 0 {
-			return err
-		}
-		parked, err := l.get(tx, s, a.RunID)
-		if err != nil {
 			return err
 		}
 		run, err := l.resumeDecided(tx, s, actor, parked, nil, ApprovalDenied, "no decision")
@@ -306,25 +334,31 @@ func (l *Ledger) Decide(ctx context.Context, s tenant.Scope, actor events.Actor,
 	return a, err
 }
 
+// approval reads one record of s's own tenant (what a decision acts
+// on).
 func (l *Ledger) approval(tx store.Tx, s tenant.Scope, id string) (Approval, error) {
-	a, err := scanApproval(store.QueryRow(tx, selectApproval+` WHERE id = ? AND project_id = ? AND env = ? AND tenant_id = ?`,
-		id, s.Project(), s.Env(), s.Tenant()))
+	where, args := exact(s)
+	a, err := scanApproval(store.QueryRow(tx, selectApproval+` WHERE id = ? AND `+where, append([]any{id}, args...)...))
 	if err != nil {
 		return Approval{}, fmt.Errorf("approval %s: %w", id, err)
 	}
 	return a, nil
 }
 
-// Approval reads one approval in s.
+// Approval reads one approval s can read (every tenant's under a
+// project-level scope).
 func (l *Ledger) Approval(ctx context.Context, s tenant.Scope, id string) (Approval, error) {
 	if s.IsZero() {
 		return Approval{}, tenant.ErrZeroScope
 	}
 	var a Approval
 	err := l.db.Read(ctx, func(tx store.Tx) error {
+		where, args := within(s, "")
 		var err error
-		a, err = l.approval(tx, s, id)
-		return err
+		if a, err = scanApproval(store.QueryRow(tx, selectApproval+` WHERE id = ? AND `+where, append([]any{id}, args...)...)); err != nil {
+			return fmt.Errorf("approval %s: %w", id, err)
+		}
+		return nil
 	})
 	return a, err
 }
@@ -361,8 +395,8 @@ func (l *Ledger) Approvals(ctx context.Context, s tenant.Scope, q ApprovalQuery)
 		q.Limit = 100
 	}
 	q.Limit, q.Offset = min(q.Limit, 500), max(q.Offset, 0)
-	where := ` WHERE project_id = ? AND env = ? AND tenant_id = ?`
-	args := []any{s.Project(), s.Env(), s.Tenant()}
+	scopeWhere, args := within(s, "")
+	where := ` WHERE ` + scopeWhere
 	scope := len(args)
 	switch q.Status {
 	case "":
@@ -384,7 +418,7 @@ func (l *Ledger) Approvals(ctx context.Context, s tenant.Scope, q ApprovalQuery)
 		if err := store.QueryRow(tx, `SELECT COUNT(*) FROM approvals`+where, args...).Scan(&page.Total); err != nil {
 			return err
 		}
-		if err := store.QueryRow(tx, `SELECT COUNT(*) FROM approvals WHERE project_id = ? AND env = ? AND tenant_id = ? AND status = ?`,
+		if err := store.QueryRow(tx, `SELECT COUNT(*) FROM approvals WHERE `+scopeWhere+` AND status = ?`,
 			append(args[:scope:scope], ApprovalPending)...).Scan(&page.Pending); err != nil {
 			return err
 		}
@@ -410,22 +444,42 @@ func (l *Ledger) Approvals(ctx context.Context, s tenant.Scope, q ApprovalQuery)
 	return page, err
 }
 
-// RunApprovals are the approvals of the given runs, by run id: what a
-// run page shows of who decided its calls.
+// RunApprovals are the approvals of the given runs s can read, by run
+// id, each run's in request order: what a run page shows of who decided
+// its calls. One read per 200 runs.
 func (l *Ledger) RunApprovals(ctx context.Context, s tenant.Scope, runIDs ...string) (map[string][]Approval, error) {
 	out := map[string][]Approval{}
-	if s.IsZero() || len(runIDs) == 0 {
+	if len(runIDs) == 0 {
 		return out, nil
 	}
+	if s.IsZero() {
+		return nil, tenant.ErrZeroScope
+	}
+	ids := slices.Compact(slices.Sorted(slices.Values(runIDs)))
 	err := l.db.Read(ctx, func(tx store.Tx) error {
-		for _, id := range runIDs {
-			as, err := l.approvalsOf(tx, s, id)
+		where, scope := within(s, "")
+		for len(ids) > 0 {
+			n := min(len(ids), 200)
+			args := append([]any{}, scope...)
+			for _, id := range ids[:n] {
+				args = append(args, id)
+			}
+			rows, err := store.Query(tx, selectApproval+` WHERE `+where+` AND run_id IN (`+placeholders(n)+`) ORDER BY requested_at, id`, args...)
 			if err != nil {
 				return err
 			}
-			if len(as) > 0 {
-				out[id] = as
+			for rows.Next() {
+				a, err := scanApproval(rows)
+				if err != nil {
+					_ = rows.Close()
+					return err
+				}
+				out[a.RunID] = append(out[a.RunID], a)
 			}
+			if err := rows.Close(); err != nil {
+				return err
+			}
+			ids = ids[n:]
 		}
 		return nil
 	})
@@ -447,9 +501,10 @@ func (l *Ledger) ApprovalDecisions(ctx context.Context, s tenant.Scope, since, u
 	}
 	var out []ApprovalDecision
 	err := l.db.Read(ctx, func(tx store.Tx) error {
-		rows, err := store.Query(tx, `SELECT status, decided_at FROM approvals WHERE project_id = ? AND env = ? AND tenant_id = ?
+		where, args := within(s, "")
+		rows, err := store.Query(tx, `SELECT status, decided_at FROM approvals WHERE `+where+`
 			AND decided_at >= ? AND decided_at < ? AND (? = '' OR agent = ?)`,
-			s.Project(), s.Env(), s.Tenant(), since.UTC().Format(tsFormat), until.UTC().Format(tsFormat), agent, agent)
+			append(args, since.UTC().Format(tsFormat), until.UTC().Format(tsFormat), agent, agent)...)
 		if err != nil {
 			return err
 		}

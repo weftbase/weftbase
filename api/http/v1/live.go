@@ -466,6 +466,9 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 		s.backfill(ctx, sw, sel, kinds, sent, filter)
 	}
 
+	// One view of the ledger for the connection: its reads are kept for
+	// controlTTL, not re-read on every frame.
+	ctl := s.control(r)
 	ticker := time.NewTicker(pingEvery)
 	defer ticker.Stop()
 	for sw.err == nil {
@@ -496,7 +499,8 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 			if key, ok := liveDedupKey(f); ok && sent.seen(key) {
 				continue
 			}
-			writeFrame(sw, f, s.coster(ctx), s.control(r))
+			ctl.fresh()
+			writeFrame(sw, f, s.coster(ctx), ctl)
 		}
 	}
 }
@@ -591,9 +595,16 @@ func writeFrame(sw *sseWriter, f obsdb.Frame, c *coster, ctl *control) {
 			sw.frame("id: %d\nevent: run\ndata: %s\n\n", f.Seq, data)
 			break
 		}
-		// The row as a list draws it: the ledger's fields too.
+		// The row as a list draws it: the ledger's fields too. A ledger
+		// that cannot be read is no reason to guess: the frame is held
+		// back (logged), the next one carries the row.
 		one := []runRow{c.row(*f.Run)}
 		ctl.decorate(one)
+		if ctl.err != nil {
+			slog.Warn("weftbase: a run frame was held back: the control store could not be read", "run", f.Run.ID, "err", ctl.err)
+			ctl.reset()
+			return
+		}
 		rowJSON, err := json.Marshal(one[0])
 		if err != nil {
 			return

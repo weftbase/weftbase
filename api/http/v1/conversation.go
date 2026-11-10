@@ -184,6 +184,9 @@ func (s *Server) serveSessionConversation(w http.ResponseWriter, r *http.Request
 	sr := sessRow(det.SessionRow)
 	total, _, all := s.sessionCost(r.Context(), id)
 	sr.costFields, sr.Derived = total.fields(), allDerived(all)
+	one := []sessionRow{sr}
+	ctl.sessionDisplays(one)
+	sr = one[0]
 	var sd sessionDoc
 	s.delegatedSessions(r.Context(), id, &sd)
 	doc := conversationDoc{SessionID: id, PublicID: det.PublicID, Agent: det.Agent, Title: sr.Title, Status: sr.Status,
@@ -217,6 +220,12 @@ func (s *Server) serveSessionConversation(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	// The page's chains in one batch (each turn's head).
+	var heads []runRow
+	for i := offset; i < len(turns) && i < offset+limit; i++ {
+		heads = append(heads, turns[i][0])
+	}
+	ctl.chainsOf(cost, heads)
 	for i := offset; i < len(turns) && i < offset+limit; i++ {
 		t := s.conversationTurn(r, ctl, cost, turns[i], marks)
 		t.Index = i + 1
@@ -225,6 +234,9 @@ func (s *Server) serveSessionConversation(w http.ResponseWriter, r *http.Request
 	doc.SkippedTurns = skippedTurns(turns, marks)
 	if next := offset + len(doc.Turns); next < len(turns) {
 		doc.NextOffset = &next
+	}
+	if ctl.unavailable(w, r) {
+		return
 	}
 	writeJSON(w, r, http.StatusOK, doc)
 }

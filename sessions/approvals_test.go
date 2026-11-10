@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/weftbase/weftbase/client/wire"
@@ -107,33 +108,28 @@ func TestApprovalsDecide(t *testing.T) {
 	}
 }
 
-// POST /runs/{id}/resume still resumes at once: its decisions are
-// recorded by the caller, and a call it leaves out is denied, as weft
-// denies it.
-func TestResumeRecordsApprovals(t *testing.T) {
+// Every decision writes its approval.decided (resource_kind approval,
+// data.chain_run_id the chain's first run); the resume its run.queued.
+func TestDecisionEvents(t *testing.T) {
 	f := setup(t)
-	ctx := context.Background()
 	run := f.parkOn(t, refund, email)
-	res, err := f.l.Resume(ctx, f.s, alice, run.ID, []wire.Decision{{CallID: "c1", Decision: "resolve", Content: "refunded by hand"}})
-	if err != nil {
-		t.Fatal(err)
+	res := f.decide(t, alice, run.ID, "approve")
+	if ts := strings.Join(f.typesOf(t, "approval"), ","); ts != "approval.requested,approval.requested,approval.decided,approval.decided" {
+		t.Errorf("approval events = %s", ts)
 	}
-	page, _ := f.l.Approvals(ctx, f.s, sessions.ApprovalQuery{RunID: run.ID})
-	if len(page.Approvals) != 2 || page.Pending != 0 {
-		t.Fatalf("approvals = %+v", page)
-	}
-	by := map[string]sessions.Approval{}
-	for _, a := range page.Approvals {
-		by[a.CallID] = a
-		if a.ResumedBy != res.ID || a.Actor == nil || a.Actor.ID != "alice" {
-			t.Errorf("approval = %+v", a)
+	sel := events.ForScope(f.s, false)
+	sel.ResourceKind = "approval"
+	evs, _ := f.log.List(context.Background(), sel, 0, 100)
+	for _, e := range evs {
+		var d struct {
+			Chain string `json:"chain_run_id"`
+		}
+		if json.Unmarshal(e.Data, &d) != nil || d.Chain != run.ID {
+			t.Errorf("%s data = %s, want chain_run_id %s", e.Type, e.Data, run.ID)
 		}
 	}
-	if a := by["c1"]; a.Status != "resolved" || a.Content != "refunded by hand" {
-		t.Errorf("c1 = %+v", a)
-	}
-	if a := by["c2"]; a.Status != "denied" || a.Reason != "no decision" {
-		t.Errorf("c2 = %+v", a)
+	if res.ChainID != run.ID {
+		t.Errorf("the resume's chain = %q", res.ChainID)
 	}
 }
 

@@ -36,11 +36,14 @@ import (
 //	agent       the agent's name, exact
 //	tag.<k>=<v> metadata matches, /v1/runs' meaning
 //	public_id   /v1/runs' meaning
-//	parent      "*" (the default: every run, subagent children
-//	            included — each counted under its own agent) | "" the
-//	            top-level runs | a run id its children. Note the
-//	            default differs from /v1/runs', which lists the
-//	            top-level runs: a group's runs_query says all=1
+//	parent      "" the top-level runs | "*" every run, subagent
+//	            children included (each counted under its own agent) |
+//	            a run id its children. The default depends on by:
+//	            agent and error_type group runs, and count the
+//	            top-level ones (a child run is its parent's work, as
+//	            /v1/runs lists them); model, tool and step group calls,
+//	            and count every run's (parent=*): a group's runs_query
+//	            then says all=1
 //	status      /v1/runs' status words (default: any); an unknown
 //	            value is 400, as since, until and by are
 //
@@ -267,7 +270,12 @@ func (s *Server) serveStats(w http.ResponseWriter, r *http.Request) {
 	// each bucket, read from the run rows.
 	var pass outcomePass
 	if page.By == obsdb.StatsByAgent && query.Status == "" {
-		if pass, err = s.outcomes(r.Context(), s.control(r), query.RunQuery, page.Since, page.Until, page.Buckets, true); err != nil {
+		ctl := s.control(r)
+		pass, err = s.outcomes(r.Context(), ctl, query.RunQuery, page.Since, page.Until, page.Buckets, true)
+		if ctl.unavailable(w, r) {
+			return
+		}
+		if err != nil {
 			dbError(w, r, "stats", "", err)
 			return
 		}
@@ -454,10 +462,13 @@ func bucketStarts(since time.Time, width time.Duration, n int) []time.Time {
 // grouped form's has not: cost and the runs' own durations.
 //
 // A run is counted in the bucket it started in, under its
-// display_status as the trace store alone knows it (a queued run is not
-// here). Top-level runs only unless parent says otherwise, and a parked
-// run with its resume is one run, counted at the resume. Tokens and
-// cost are the whole run's, its subagents' included.
+// display_status — the ledger's word where it holds the run, as the
+// runs list shows it — and a queued run no trace names yet is counted
+// too, from the ledger (at its admission). Top-level runs only unless
+// parent says otherwise, and a parked run with its resume is one run,
+// counted at the resume (at the parked run while its resume is still
+// queued, as queued). Tokens and cost are the whole run's, its
+// subagents' included.
 type statsTotal struct {
 	By           string             `json:"by"`
 	Since        time.Time          `json:"since"`
@@ -478,6 +489,7 @@ type statsTotalBucket struct {
 	Failed      int64     `json:"failed"`
 	Cancelled   int64     `json:"cancelled"`
 	Waiting     int64     `json:"waiting"`
+	Queued      int64     `json:"queued"`
 	Running     int64     `json:"running"`
 	Interrupted int64     `json:"interrupted"`
 	// FailureRate is failed / (succeeded + failed): of the runs that
@@ -504,10 +516,17 @@ type statsTotalBucket struct {
 func (b *statsTotalBucket) add(r runRow) {
 	// A parked run that was resumed is not a run of its own here: its
 	// chain is counted once, at the run that ended it (or still goes
-	// on). Its tokens and cost count where they were spent.
-	if r.ResumedBy == "" {
+	// on) — at the parked run while its resume is queued with no trace
+	// yet, as queued. Its tokens and cost count where they were spent.
+	if r.ResumedBy == "" || r.resumeQueued {
 		b.Runs++
-		switch r.DisplayStatus {
+		status := r.DisplayStatus
+		if r.resumeQueued {
+			status = displayQueued
+		}
+		switch status {
+		case displayQueued:
+			b.Queued++
 		case displaySucceeded:
 			b.Succeeded++
 		case displayFailed:
@@ -550,8 +569,13 @@ func (b *statsTotalBucket) finish() {
 	}
 }
 
-// statsTotalRows bounds the rows one by=total answer reads.
-const statsTotalRows = 20000
+// statsTotalRows bounds the rows one by=total answer reads, and
+// statsBudget its time: past either the answer says capped (its oldest
+// buckets short) rather than reading on.
+const (
+	statsTotalRows = 20000
+	statsBudget    = 5 * time.Second
+)
 
 func (s *Server) serveStatsTotal(w http.ResponseWriter, r *http.Request, buckets int) {
 	q := r.URL.Query()
@@ -578,7 +602,11 @@ func (s *Server) serveStatsTotal(w http.ResponseWriter, r *http.Request, buckets
 	if _, set := q["parent"]; set {
 		query.ParentRunID = parentParam(q)
 	}
-	pass, err := s.outcomes(r.Context(), s.control(r), query, since, until, buckets, false)
+	ctl := s.control(r)
+	pass, err := s.outcomes(r.Context(), ctl, query, since, until, buckets, false)
+	if ctl.unavailable(w, r) {
+		return
+	}
 	if err != nil {
 		dbError(w, r, "stats", "", err)
 		return
@@ -590,7 +618,12 @@ func (s *Server) serveStatsTotal(w http.ResponseWriter, r *http.Request, buckets
 	// made can still end succeeded, and this is where that shows.
 	if s.ledger != nil {
 		if _, sc, _ := authz.From(r.Context()); !sc.IsZero() {
-			if ds, err := s.ledger.ApprovalDecisions(r.Context(), sc, since, until, q.Get("agent")); err == nil {
+			ds, err := s.ledger.ApprovalDecisions(r.Context(), sc, since, until, q.Get("agent"))
+			if err != nil {
+				writeError(w, r, http.StatusServiceUnavailable, "unavailable", "the control store could not be read: "+err.Error())
+				return
+			}
+			{
 				for _, d := range ds {
 					i := min(int(d.At.Sub(since)/width), buckets-1)
 					for _, b := range []*statsTotalBucket{&out.Total, &out.Series[i]} {
@@ -638,6 +671,7 @@ func (s *Server) outcomes(ctx context.Context, ctl *control, query obsdb.RunQuer
 	query.Before, query.Limit = until, 500
 	c := s.coster(ctx)
 	read := 0
+	deadline := s.now().Add(statsBudget)
 pages:
 	for {
 		page, err := s.db.Runs(ctx, query)
@@ -653,6 +687,9 @@ pages:
 		}
 		if ctl != nil {
 			ctl.decorate(rows)
+			if ctl.err != nil {
+				return pass, ctl.err
+			}
 		}
 		for k, rec := range page.Runs {
 			if rec.Started.Before(since) {
@@ -679,11 +716,45 @@ pages:
 		if page.NextBefore == nil {
 			break
 		}
-		if read >= statsTotalRows {
+		if read >= statsTotalRows || !s.now().Before(deadline) {
 			pass.capped = true
 			break
 		}
 		query.Before, query.BeforeID = *page.NextBefore, page.NextBeforeID
+	}
+	// The queued runs no trace names yet, from the ledger, where the
+	// query can hold one (no filter a queued run cannot match).
+	if ctl != nil && ctl.controlled() && len(query.Meta) == 0 && query.PublicID == "" && query.Status == "" &&
+		(query.ParentRunID == "" || query.ParentRunID == "*") {
+		qq := sessions.QueuedQuery{Agent: query.Agent, Since: since, Until: until, Limit: 500}
+		for read < statsTotalRows {
+			queued, _, err := s.ledger.Queued(ctx, ctl.sc, qq)
+			if err != nil {
+				ctl.fail(err)
+				return pass, err
+			}
+			for _, lr := range queued {
+				row := ctl.ledgerRow(lr)
+				i := min(int(lr.CreatedAt.Sub(since)/width), buckets-1)
+				pass.total.series[i].add(row)
+				pass.total.total.add(row)
+				if byAgent {
+					o := pass.byAgent[lr.Agent]
+					if o == nil {
+						o = fresh()
+						pass.byAgent[lr.Agent] = o
+					}
+					o.series[i].add(row)
+					o.total.add(row)
+				}
+				read++
+			}
+			if len(queued) < qq.Limit {
+				break
+			}
+			last := queued[len(queued)-1]
+			qq.Before, qq.BeforeID = last.CreatedAt, last.ID
+		}
 	}
 	for _, o := range append([]*outcomeSeries{&pass.total}, mapValues(pass.byAgent)...) {
 		for i := range o.series {

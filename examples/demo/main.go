@@ -75,13 +75,17 @@ type config struct {
 
 func main() {
 	cfg := config{in: os.Stdin, out: os.Stdout}
-	flag.StringVar(&cfg.addr, "addr", "127.0.0.1:7331", "listen `address` (the Console dev server proxies /v1 to :7331)")
-	flag.StringVar(&cfg.dir, "data", "", "data `dir`ectory (default: a temporary one, removed on exit)")
-	flag.Float64Var(&cfg.speed, "speed", 1, "scale of the scripted latency: 1 is realistic, 0 is none")
-	flag.DurationVar(&cfg.every, "every", 4*time.Second, "start a new run this often after the first batch (0: never)")
-	flag.StringVar(&cfg.console, "console", "http://localhost:3000", "also print a sign-in link for a Console dev server at this `url` (\"\": none)")
-	flag.IntVar(&cfg.pending, "pending-every", 0, "after the first batch, leave every `n`th refund pending for you to decide (0: decide them all)")
-	flag.Parse()
+	// The demo's own flag set: a package it imports (weft's wefttest,
+	// for the scripted models) registers a test flag on flag.CommandLine,
+	// which -h would otherwise list.
+	flags := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	flags.StringVar(&cfg.addr, "addr", "127.0.0.1:7331", "listen `address` (the Console dev server proxies /v1 to :7331)")
+	flags.StringVar(&cfg.dir, "data", "", "data `dir`ectory (default: a temporary one, removed on exit)")
+	flags.Float64Var(&cfg.speed, "speed", 1, "scale of the scripted latency: 1 is realistic, 0 is none")
+	flags.DurationVar(&cfg.every, "every", 4*time.Second, "start a new run this often after the first batch (0: never)")
+	flags.StringVar(&cfg.console, "console", "http://localhost:3000", "also print a sign-in link for a Console dev server at this `url` (\"\": none)")
+	flags.IntVar(&cfg.pending, "pending-every", 0, "after the first batch, leave every `n`th refund pending for you to decide (0: decide them all)")
+	_ = flags.Parse(os.Args[1:])
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -423,7 +427,7 @@ func (c client) play(ctx context.Context, speed shop.Speed, s scene) error {
 		// on is an approval. Deciding the last one resumes the run as a
 		// new run on the same AgentVersion, which may park again.
 		for id := run.ID; ; {
-			done, err := c.wait(ctx, id, "succeeded", "failed", "canceled", "parked")
+			done, err := c.wait(ctx, id, "succeeded", "failed", "cancelled", "parked")
 			if err != nil {
 				return err
 			}

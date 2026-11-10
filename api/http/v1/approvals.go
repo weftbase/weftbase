@@ -75,6 +75,9 @@ func (s *Server) serveApprovals(w http.ResponseWriter, r *http.Request) {
 	for _, a := range page.Approvals {
 		out.Approvals = append(out.Approvals, ctl.approval(a))
 	}
+	if ctl.unavailable(w, r) {
+		return
+	}
 	writeJSON(w, r, http.StatusOK, out)
 }
 
@@ -94,14 +97,7 @@ type approvalsPage struct {
 }
 
 func (c *control) approval(a sessions.Approval) approvalDoc {
-	ref := versionRef{ID: a.AgentVersion, Labels: []string{}}
-	if v, _, ok := c.version(a.Agent, a.AgentVersion); ok {
-		ref.Number = v.Number
-		if v.Labels != nil {
-			ref.Labels = v.Labels
-		}
-	}
-	return approvalDoc{Approval: a, AgentVersion: ref}
+	return approvalDoc{Approval: a, AgentVersion: *c.versionRef(a.Agent, a.AgentVersion)}
 }
 
 func (c *control) approvalDocs(as []sessions.Approval) []approvalDoc {

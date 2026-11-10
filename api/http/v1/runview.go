@@ -3,6 +3,7 @@ package v1
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"slices"
 	"strconv"
@@ -16,6 +17,7 @@ import (
 	"github.com/weftbase/weftbase/obsdb"
 	"github.com/weftbase/weftbase/registry"
 	"github.com/weftbase/weftbase/sessions"
+	"github.com/weftbase/weftbase/store"
 	"github.com/weftbase/weftbase/tenant"
 )
 
@@ -94,6 +96,16 @@ type controlFields struct {
 	// is where that reads.
 	ApprovalsOutcome string `json:"approvals_outcome,omitempty"`
 
+	// endedParked is when the ledger ended a run that was waiting on a
+	// person (cancelled, its version retired) without resuming it: the
+	// wait lasted until then, and so did the logical run — the trace's
+	// own end is the park.
+	endedParked *time.Time
+
+	// resumeQueued: the run was resumed, and its resume is queued with
+	// no trace yet (the statistics count the chain here, as queued).
+	resumeQueued bool
+
 	// parkedAt is when the ledger parked the run. The ledger learns of
 	// a park from the worker's ack, before the run's last records reach
 	// the trace store: until they do the trace row still reads running,
@@ -154,7 +166,15 @@ type waitDoc struct {
 	DecidedBy []events.Actor `json:"decided_by"`
 }
 
-// control is one request's view of the ledger and the registry.
+// control is one request's view of the ledger and the registry: what
+// it read is kept for the request (a live stream keeps one per
+// connection, refreshed after controlTTL), so a page asks each store a
+// bounded number of times whatever its row count.
+//
+// A control-store read that fails is never guessed around: the first
+// error is kept (err), every read after it is skipped, and the handler
+// answers 503 unavailable (unavailable) instead of a page that would
+// show the trace store's word where the ledger's belongs.
 type control struct {
 	s          *Server
 	ctx        context.Context
@@ -162,45 +182,187 @@ type control struct {
 	versions   map[string]registry.Version // by id, of the agents asked about
 	agents     map[string]bool
 	placements map[string]string
+	// ledger holds the ledger rows read so far (with their chains'
+	// runs), asked the ids already asked for.
+	ledger map[string]sessions.Run
+	asked  map[string]bool
+	// rows are the run rows read so far for chains (by id; missing the
+	// ids no store holds), chains the chains built.
+	rows    map[string]runRow
+	missing map[string]bool
+	chains  map[string]*chainDoc
+	// approvals are the approval records read so far, by run id.
+	approvalsOf map[string][]sessions.Approval
+	approvalsAt map[string]bool
+	// content is whether the caller may read run content (runs.content):
+	// without it a row's prompt_preview and its title are redacted.
+	content bool
+	err     error
+	// readAt is when the caches were filled (live: they are dropped
+	// after controlTTL).
+	readAt time.Time
 }
 
+// controlTTL is how long a live stream's control keeps what it read of
+// the ledger before a frame reads it again: one read per connection per
+// TTL however many frames arrive, never a frame's worth stale for long.
+const controlTTL = time.Second
+
 func (s *Server) control(r *http.Request) *control {
-	_, sc, _ := authz.From(r.Context())
-	return &control{s: s, ctx: r.Context(), sc: sc, versions: map[string]registry.Version{}, agents: map[string]bool{}}
+	p, sc, _ := authz.From(r.Context())
+	c := &control{s: s, ctx: r.Context(), sc: sc, content: authz.Can(p, authz.RunsContent).Allow}
+	c.reset()
+	return c
+}
+
+// reset drops what the control read.
+func (c *control) reset() {
+	c.versions, c.agents, c.placements = map[string]registry.Version{}, map[string]bool{}, nil
+	c.ledger, c.asked = map[string]sessions.Run{}, map[string]bool{}
+	c.rows, c.missing, c.chains = map[string]runRow{}, map[string]bool{}, map[string]*chainDoc{}
+	c.approvalsOf, c.approvalsAt = map[string][]sessions.Approval{}, map[string]bool{}
+	c.err, c.readAt = nil, c.s.now()
+}
+
+// fresh resets a long-lived control (a live stream's) once its reads
+// are older than controlTTL.
+func (c *control) fresh() {
+	if c.s.now().Sub(c.readAt) >= controlTTL {
+		c.reset()
+	}
+}
+
+// fail keeps the first control-store error.
+func (c *control) fail(err error) {
+	if err != nil && c.err == nil {
+		c.err = err
+	}
+}
+
+// unavailable answers 503 when a control-store read failed; true when
+// it did (the handler then writes nothing else).
+func (c *control) unavailable(w http.ResponseWriter, r *http.Request) bool {
+	if c.err == nil {
+		return false
+	}
+	writeError(w, r, http.StatusServiceUnavailable, "unavailable", "the control store could not be read: "+c.err.Error())
+	return true
+}
+
+// controlled reports whether the request reads the ledger at all.
+func (c *control) controlled() bool { return c.s.ledger != nil && !c.sc.IsZero() }
+
+// lookup reads the ledger rows of ids not asked for yet (with every run
+// of their chains), in one read.
+func (c *control) lookup(ids []string) {
+	if !c.controlled() || c.err != nil {
+		return
+	}
+	var ask []string
+	for _, id := range ids {
+		if !c.asked[id] {
+			c.asked[id] = true
+			ask = append(ask, id)
+		}
+	}
+	if len(ask) == 0 {
+		return
+	}
+	m, err := c.s.ledger.ByID(c.ctx, c.sc, ask)
+	if err != nil {
+		c.fail(err)
+		return
+	}
+	for id, run := range m {
+		c.ledger[id] = run
+		c.asked[id] = true
+	}
 }
 
 // ledgerRuns reads the ledger rows of ids (none without a ledger).
 func (c *control) ledgerRuns(ids []string) map[string]sessions.Run {
-	if c.s.ledger == nil || c.sc.IsZero() {
-		return nil
+	c.lookup(ids)
+	out := map[string]sessions.Run{}
+	for _, id := range ids {
+		if run, ok := c.ledger[id]; ok {
+			out[id] = run
+		}
 	}
-	m, err := c.s.ledger.ByID(c.ctx, c.sc, ids)
-	if err != nil {
-		return nil
-	}
-	return m
+	return out
 }
 
 func (c *control) version(agent, id string) (registry.Version, string, bool) {
 	if c.s.registry == nil || c.sc.IsZero() {
 		return registry.Version{}, "", false
 	}
-	if !c.agents[agent] {
+	if !c.agents[agent] && c.err == nil {
 		c.agents[agent] = true
-		if vs, err := c.s.registry.Versions(c.ctx, c.sc, agent); err == nil {
-			for _, v := range vs {
-				c.versions[v.ID] = v
-			}
+		vs, err := c.s.registry.Versions(c.ctx, c.sc, agent)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			c.fail(err)
+		}
+		for _, v := range vs {
+			c.versions[v.ID] = v
 		}
 	}
-	if c.placements == nil {
-		c.placements, _ = c.s.registry.Placements(c.ctx, c.sc)
+	if c.placements == nil && c.err == nil {
+		var err error
+		if c.placements, err = c.s.registry.Placements(c.ctx, c.sc); err != nil {
+			c.fail(err)
+		}
 		if c.placements == nil {
 			c.placements = map[string]string{}
 		}
 	}
 	v, ok := c.versions[id]
 	return v, c.placements[v.BuildID], ok
+}
+
+// versionRef is the agent_version every document carries: the
+// version's id, number and the labels it holds now.
+func (c *control) versionRef(agent, id string) *versionRef {
+	if id == "" {
+		return nil
+	}
+	ref := &versionRef{ID: id, Labels: []string{}}
+	if v, _, ok := c.version(agent, id); ok {
+		ref.Number = v.Number
+		if v.Labels != nil {
+			ref.Labels = v.Labels
+		}
+	}
+	return ref
+}
+
+// approvalsFor reads the approval records of runIDs not read yet, in one
+// read, and returns those of runIDs.
+func (c *control) approvalsFor(runIDs ...string) map[string][]sessions.Approval {
+	out := map[string][]sessions.Approval{}
+	if !c.controlled() {
+		return out
+	}
+	var ask []string
+	for _, id := range runIDs {
+		if !c.approvalsAt[id] {
+			c.approvalsAt[id] = true
+			ask = append(ask, id)
+		}
+	}
+	if len(ask) > 0 && c.err == nil {
+		m, err := c.s.ledger.RunApprovals(c.ctx, c.sc, ask...)
+		if err != nil {
+			c.fail(err)
+		}
+		for id, as := range m {
+			c.approvalsOf[id] = as
+		}
+	}
+	for _, id := range runIDs {
+		if as, ok := c.approvalsOf[id]; ok {
+			out[id] = as
+		}
+	}
+	return out
 }
 
 // displayStatus is the one word for a run: the ledger's where it has a
@@ -221,7 +383,7 @@ func displayStatus(tr *runRow, lr *sessions.Run) string {
 			return displayWaiting
 		case sessions.StatusSucceeded:
 			return displaySucceeded
-		case sessions.StatusCanceled:
+		case sessions.StatusCancelled:
 			return displayCancelled
 		default:
 			return displayFailed
@@ -236,7 +398,8 @@ func displayStatus(tr *runRow, lr *sessions.Run) string {
 	return tr.Status
 }
 
-// decorate sets the control fields of trace rows.
+// decorate sets the control fields of trace rows, and redacts what the
+// caller may not read (redact).
 func (c *control) decorate(rows []runRow) {
 	ids := make([]string, 0, len(rows))
 	for _, r := range rows {
@@ -244,11 +407,12 @@ func (c *control) decorate(rows []runRow) {
 			ids = append(ids, r.ID)
 		}
 	}
-	ledger := c.ledgerRuns(ids)
+	c.lookup(ids)
 	for i := range rows {
 		r := &rows[i]
-		lr, ok := ledger[r.ID]
-		if !ok {
+		c.redact(r)
+		lr, ok := c.ledger[r.ID]
+		if !ok || r.ParentRunID != "" {
 			r.DisplayStatus = displayStatus(r, nil)
 			continue
 		}
@@ -256,9 +420,34 @@ func (c *control) decorate(rows []runRow) {
 	}
 }
 
+// redact clears what a row would show of the run's content to a caller
+// without runs.content: its prompt preview and its session title. Today
+// every credential that reads runs reads content too (authz.Can), so
+// nothing changes on the wire until restricted keys land; the spans
+// route redacts its content attributes the same way (redactSpans).
+func (c *control) redact(r *runRow) {
+	if c.content {
+		return
+	}
+	r.PromptPreview = ""
+	if _, ok := r.Meta[obsdb.SessionTitleKey]; ok {
+		meta := make(map[string]string, len(r.Meta))
+		for k, v := range r.Meta {
+			if k != obsdb.SessionTitleKey {
+				meta[k] = v
+			}
+		}
+		r.Meta = meta
+	}
+}
+
 func (c *control) fromLedger(r *runRow, lr sessions.Run) {
 	r.DisplayStatus = displayStatus(r, &lr)
 	r.ResolvedVia = lr.ResolvedVia
+	if lr.ParkedAt != nil && lr.ResumedBy == "" && sessions.Terminal(lr.Status) && lr.FinishedAt != nil {
+		f := *lr.FinishedAt
+		r.parkedAt, r.endedParked = lr.ParkedAt, &f
+	}
 	if lr.Status == sessions.StatusParked {
 		r.parkedAt = lr.ParkedAt
 		if r.Finished == nil && r.Usage == (core.Usage{}) {
@@ -269,28 +458,33 @@ func (c *control) fromLedger(r *runRow, lr sessions.Run) {
 	if lr.ResumedBy != "" && r.ResumedBy == "" {
 		r.ResumedBy = lr.ResumedBy // the resume is admitted before any span of it arrives
 	}
+	if next, ok := c.ledger[lr.ResumedBy]; ok && lr.ResumedBy != "" && next.Status == sessions.StatusQueued {
+		r.resumeQueued = true
+	}
+	if lr.ResumeOf != "" && r.ResumedFrom == "" {
+		r.ResumedFrom = lr.ResumeOf
+	}
+	r.AgentVersion = c.versionRef(lr.Agent, lr.AgentVersion)
 	if v, placement, ok := c.version(lr.Agent, lr.AgentVersion); ok {
-		labels := v.Labels
-		if labels == nil {
-			labels = []string{}
-		}
-		r.AgentVersion = &versionRef{ID: v.ID, Number: v.Number, Labels: labels}
 		r.Placement = placement
 		r.ManifestDrift = r.ManifestHash != "" && v.ManifestHash != "" && r.ManifestHash != v.ManifestHash
-	} else {
-		r.AgentVersion = &versionRef{ID: lr.AgentVersion, Labels: []string{}}
 	}
 }
 
 // ledgerRow is the row of a run only the ledger knows (queued: nothing
-// of it has been traced).
+// of it has been traced). Its status is absent: status is the trace
+// store's word, and the trace store has none; display_status says what
+// the ledger knows.
 func (c *control) ledgerRow(lr sessions.Run) runRow {
 	r := runRow{ID: lr.ID, Agent: lr.Agent, Meta: map[string]string{}, Started: lr.CreatedAt, LastSeen: lr.CreatedAt,
-		Status: lr.Status, ResumedFrom: lr.ResumeOf, ResumedBy: lr.ResumedBy, Err: lr.Error, CancelCause: lr.CancelCause}
+		ResumedFrom: lr.ResumeOf, ResumedBy: lr.ResumedBy, Err: lr.Error, CancelCause: lr.CancelCause}
 	for k, v := range lr.Metadata {
 		r.Meta[k] = v
 	}
-	r.SessionID = lr.Metadata["weft.session.id"]
+	r.SessionID = lr.Metadata[sessions.MetaSessionID]
+	if n, err := strconv.Atoi(lr.Metadata[sessions.MetaTurn]); err == nil {
+		r.Turn = n
+	}
 	if lr.Input != nil {
 		r.PromptPreview = inputPreview(*lr.Input)
 	}
@@ -300,61 +494,191 @@ func (c *control) ledgerRow(lr sessions.Run) runRow {
 	}
 	r.Cache = "not_reported"
 	r.LedgerOnly = true
+	c.redact(&r)
 	c.fromLedger(&r, lr)
 	return r
+}
+
+// fetch reads the rows of ids not read yet, batched: the trace store's
+// (one Runs read per 500 ids, children included, decorated), else the
+// ledger's own (a run no trace names yet); an id neither holds is
+// missing.
+func (c *control) fetch(cost *coster, ids []string) {
+	var need []string
+	for _, id := range ids {
+		if _, ok := c.rows[id]; !ok && !c.missing[id] && !slices.Contains(need, id) {
+			need = append(need, id)
+		}
+	}
+	for len(need) > 0 && c.err == nil {
+		n := min(len(need), 500)
+		batch := need[:n]
+		need = need[n:]
+		page, err := c.s.db.Runs(c.ctx, obsdb.RunQuery{IDs: batch, ParentRunID: "*", Limit: 500})
+		if err != nil {
+			c.fail(err)
+			return
+		}
+		cost.primeTrees(page.Runs)
+		rows := make([]runRow, 0, len(page.Runs))
+		for _, rec := range page.Runs {
+			rows = append(rows, cost.row(rec))
+		}
+		c.decorate(rows)
+		for _, r := range rows {
+			c.rows[r.ID] = r
+		}
+		c.lookup(batch)
+		for _, id := range batch {
+			if _, ok := c.rows[id]; ok {
+				continue
+			}
+			if lr, ok := c.ledger[id]; ok {
+				c.rows[id] = c.ledgerRow(lr)
+			} else {
+				c.missing[id] = true
+			}
+		}
+	}
 }
 
 // read is one run's row with its control fields: the trace store's,
 // else the ledger's own (a run no trace names yet).
 func (c *control) read(cost *coster, id string) (runRow, bool) {
-	if det, err := c.s.db.Run(c.ctx, id); err == nil {
-		rows := []runRow{cost.row(det.RunRow)}
-		c.decorate(rows)
-		return rows[0], true
-	}
-	if lr, ok := c.ledgerRuns([]string{id})[id]; ok {
-		return c.ledgerRow(lr), true
-	}
-	return runRow{}, false
+	c.fetch(cost, []string{id})
+	r, ok := c.rows[id]
+	return r, ok
+}
+
+// inChain reports whether a row is one of several runs a park and its
+// resume link.
+func inChain(r runRow) bool {
+	return r.ResumedFrom != "" || r.ResumedBy != "" || r.DisplayStatus == displayWaiting || r.endedParked != nil
 }
 
 // chain builds the chain a run belongs to, from any of its runs; nil
 // when the run is alone (never parked, never a resume).
 func (c *control) chain(cost *coster, of runRow) *chainDoc {
-	if of.ResumedFrom == "" && of.ResumedBy == "" && of.DisplayStatus != displayWaiting {
-		return nil
+	return c.chainsOf(cost, []runRow{of})[of.ID]
+}
+
+// maxLinks bounds a chain's runs on either side of a row.
+const maxLinks = 64
+
+// chainsOf builds the chains of a set of rows (keyed by row id; a row
+// alone has none) with batched reads: every run of the rows' chains the
+// ledger holds is already read with them (control.lookup); the rest are
+// read one link further per round, one trace read per round for every
+// row at once, so a page costs O(chain length) reads, not O(rows); the
+// approvals of every chain in one read.
+func (c *control) chainsOf(cost *coster, rows []runRow) map[string]*chainDoc {
+	out := map[string]*chainDoc{}
+	var todo []runRow
+	for _, r := range rows {
+		if _, ok := c.rows[r.ID]; !ok {
+			c.rows[r.ID] = r
+		}
+		if doc, ok := c.chains[r.ID]; ok {
+			if doc != nil {
+				out[r.ID] = doc
+			}
+			continue
+		}
+		if inChain(r) {
+			todo = append(todo, r)
+		} else {
+			c.chains[r.ID] = nil
+		}
 	}
-	const maxLinks = 64
-	read := func(id string) (runRow, bool) { return c.read(cost, id) }
-	runs := []runRow{of}
-	for n := 0; runs[0].ResumedFrom != "" && n < maxLinks; n++ {
-		prev, ok := read(runs[0].ResumedFrom)
-		if !ok {
+	if len(todo) == 0 {
+		return out
+	}
+	// The ledger's runs of the rows' chains, read with the rows.
+	var seed []string
+	for _, r := range todo {
+		if lr, ok := c.ledger[r.ID]; ok {
+			for id, m := range c.ledger {
+				if m.ChainID == lr.ChainID && m.ChainID != "" {
+					seed = append(seed, id)
+				}
+			}
+		}
+	}
+	c.fetch(cost, seed)
+	// Then link by link: each round reads every row's next missing link.
+	for round := 0; round < maxLinks && c.err == nil; round++ {
+		var need []string
+		for _, r := range todo {
+			for _, side := range []func(runRow) string{
+				func(x runRow) string { return x.ResumedFrom },
+				func(x runRow) string { return x.ResumedBy },
+			} {
+				at := r
+				for n := 0; n < maxLinks; n++ {
+					next := side(at)
+					if next == "" || c.missing[next] {
+						break
+					}
+					row, ok := c.rows[next]
+					if !ok {
+						need = append(need, next)
+						break
+					}
+					at = row
+				}
+			}
+		}
+		if len(need) == 0 {
 			break
 		}
-		runs = append([]runRow{prev}, runs...)
+		c.fetch(cost, need)
 	}
-	for n := 0; runs[len(runs)-1].ResumedBy != "" && n < maxLinks; n++ {
-		next, ok := read(runs[len(runs)-1].ResumedBy)
-		if !ok {
-			break
+	// The chains, and their approvals in one read.
+	members := map[string][]runRow{}
+	var all []string
+	for _, r := range todo {
+		runs := []runRow{r}
+		for n := 0; runs[0].ResumedFrom != "" && n < maxLinks; n++ {
+			prev, ok := c.rows[runs[0].ResumedFrom]
+			if !ok {
+				break
+			}
+			runs = append([]runRow{prev}, runs...)
 		}
-		runs = append(runs, next)
+		for n := 0; runs[len(runs)-1].ResumedBy != "" && n < maxLinks; n++ {
+			next, ok := c.rows[runs[len(runs)-1].ResumedBy]
+			if !ok {
+				break
+			}
+			runs = append(runs, next)
+		}
+		members[r.ID] = runs
+		for _, m := range runs {
+			all = append(all, m.ID)
+		}
 	}
-	ids := make([]string, len(runs))
-	for i, r := range runs {
-		ids[i] = r.ID
+	approvals := c.approvalsFor(all...)
+	for _, r := range todo {
+		doc := c.build(members[r.ID], approvals)
+		c.chains[r.ID] = doc
+		out[r.ID] = doc
 	}
-	var approvals map[string][]sessions.Approval
-	if c.s.ledger != nil && !c.sc.IsZero() {
-		approvals, _ = c.s.ledger.RunApprovals(c.ctx, c.sc, ids...)
-	}
+	return out
+}
+
+// build is one chain's document from its runs, in order.
+func (c *control) build(runs []runRow, approvals map[string][]sessions.Approval) *chainDoc {
 	last := runs[len(runs)-1]
 	doc := &chainDoc{DisplayStatus: last.DisplayStatus, StoppedBy: last.StoppedBy, ErrorType: last.ErrorType,
 		CancelCause: last.CancelCause, Err: last.Err, Started: runs[0].Started, CostKnown: true, Waits: []waitDoc{}}
 	now := c.s.now()
 	end := now
-	if last.Finished != nil && last.DisplayStatus != displayWaiting {
+	switch {
+	case last.endedParked != nil:
+		f := *last.endedParked
+		doc.Finished, end = &f, f
+	case last.Finished != nil && last.DisplayStatus != displayWaiting && last.DisplayStatus != displayQueued &&
+		last.DisplayStatus != displayRunning:
 		f := *last.Finished
 		doc.Finished, end = &f, f
 	}
@@ -368,9 +692,9 @@ func (c *control) chain(cost *coster, of runRow) *chainDoc {
 		if !r.CostKnown && !r.LedgerOnly {
 			doc.CostKnown = false
 		}
-		parked := r.DisplayStatus == displayWaiting || r.ResumedBy != ""
+		parked := r.DisplayStatus == displayWaiting || r.ResumedBy != "" || r.endedParked != nil
 		from := r.Finished
-		if from == nil {
+		if from == nil || r.endedParked != nil {
 			from = r.parkedAt
 		}
 		if !parked || from == nil {
@@ -396,8 +720,12 @@ func (c *control) chain(cost *coster, of runRow) *chainDoc {
 			}
 		}
 		until := now
-		if i+1 < len(runs) && !runs[i+1].LedgerOnly {
+		switch {
+		case i+1 < len(runs) && !runs[i+1].LedgerOnly:
 			t := runs[i+1].Started
+			w.To, until = &t, t
+		case r.endedParked != nil:
+			t := *r.endedParked
 			w.To, until = &t, t
 		}
 		doc.WaitingMS += max(until.Sub(w.From).Milliseconds(), 0)
@@ -462,12 +790,14 @@ func inputPreview(in wire.Input) string {
 // alike (display_status, chains and approvals mean the same in both):
 //
 //   - the control fields on every row (control.decorate);
-//   - chains: one row per logical run. Where the read is unfiltered and
-//     newest first, a resume is dropped (the run it continues is a row
-//     of its own, at its start). Where the read is filtered or sorted
-//     (mapped: a status, a search), a chain is shown where its last run
-//     is read, as its first run's row; a run that was resumed is
-//     skipped. Either way a chain is one row, on one page only;
+//   - chains (the default; chains=0 turns it off): one row per logical
+//     run. Where the read is unfiltered and in start order, a resume is
+//     dropped (the run it continues is a row of its own, at its start).
+//     Where the read is filtered or sorted (mapped: a status, a
+//     search), a chain is shown where its last traced run is read, as
+//     its first run's row; a run that was resumed is skipped unless what
+//     resumed it is a queued run no trace names yet (that chain is shown
+//     there). Either way a chain is one row, on one page only;
 //   - display: the rows held to a display status (a chain's is its
 //     last run's);
 //   - approvals: the chains held to the outcome of their approvals.
@@ -485,12 +815,25 @@ type view struct {
 // has to be filled, and the store's total is an upper bound.
 func (v view) folds() bool { return v.chains || v.display != "" || v.approvals != "" }
 
+// prepare reads, in a bounded number of reads, what keep needs of a
+// page of decorated rows: their chains.
+func (v view) prepare(ctl *control, cost *coster, rows []runRow) {
+	if v.chains {
+		ctl.chainsOf(cost, rows)
+	}
+}
+
 // keep is one decorated row through the view: the row to show, or
-// false.
+// false. prepare has read the page's chains.
 func (v view) keep(ctl *control, cost *coster, row runRow) (runRow, bool) {
 	if v.chains {
 		if v.mapped && row.ResumedBy != "" {
-			return row, false // its chain is shown where its last run is
+			next, ok := ctl.read(cost, row.ResumedBy)
+			if !ok || !next.LedgerOnly {
+				return row, false // its chain is shown where its last run is
+			}
+			// What resumed it is queued, with no trace yet: its chain is
+			// shown here, or it would be shown nowhere.
 		}
 		if !v.mapped && row.ResumedFrom != "" {
 			return row, false // its chain's first run is a row of its own
@@ -518,9 +861,11 @@ func (v view) keep(ctl *control, cost *coster, row runRow) (runRow, bool) {
 // viewParams reads display_status, chains and approvals, which the list
 // and the search share; display_status sets the trace-store status that
 // finds its candidates (status is the caller's own, "" when none was
-// given).
-func viewParams(w http.ResponseWriter, r *http.Request, q map[string][]string, status *obsdb.Status) (v view, ok bool) {
-	display, dst, ok := displayParam(w, r, q)
+// given). chains is on unless chains=0 (false) says otherwise; raw is
+// what the caller's own default is when chains is absent (an id_prefix
+// lookup, a run's children: every run, as it is).
+func viewParams(w http.ResponseWriter, r *http.Request, q map[string][]string, status *obsdb.Status, raw bool) (v view, ok bool) {
+	display, _, ok := displayParam(w, r, q)
 	if !ok {
 		return v, false
 	}
@@ -535,17 +880,20 @@ func viewParams(w http.ResponseWriter, r *http.Request, q map[string][]string, s
 		// still on their way, a run lost with its worker). Every row is
 		// read and held to its display status, so the answer is exact
 		// and agrees with the statistics.
-		_ = dst
 		v.mapped = true
 	}
 	v.display = display
+	v.chains = !raw
 	if vs := q["chains"]; len(vs) > 0 && vs[0] != "" {
-		b, err := strconv.ParseBool(vs[0])
-		if err != nil {
-			badRequest(w, r, "chains must be true or false (1 or 0)")
+		switch vs[0] {
+		case "1", "true":
+			v.chains = true
+		case "0", "false":
+			v.chains = false
+		default:
+			badRequest(w, r, "chains is 0 (every run as it is) or 1 (one row per logical run, the default)")
 			return v, false
 		}
-		v.chains = b
 	}
 	if vs := q["approvals"]; len(vs) > 0 && vs[0] != "" {
 		switch vs[0] {
@@ -555,7 +903,7 @@ func viewParams(w http.ResponseWriter, r *http.Request, q map[string][]string, s
 			return v, false
 		}
 		if !v.chains {
-			badRequest(w, r, "approvals needs chains=1: an approval's outcome is its logical run's")
+			badRequest(w, r, "approvals needs the logical runs (not chains=0): an approval's outcome is its logical run's")
 			return v, false
 		}
 		v.approvals = vs[0]
@@ -565,43 +913,134 @@ func viewParams(w http.ResponseWriter, r *http.Request, q map[string][]string, s
 
 // fillScanPages bounds how many store pages one filled answer reads: a
 // filter that keeps almost nothing ends there with a cursor, the page
-// short, rather than reading the whole store.
-const fillScanPages = 40
+// short, rather than reading the whole store. fillBudget bounds its
+// time the same way: past it the page ends where it is, with its cursor
+// and partial true.
+const (
+	fillScanPages = 40
+	fillBudget    = 2 * time.Second
+)
 
 // fillStorePage is the store page a folded read asks for.
 const fillStorePage = 200
 
-// queuedRows are the queued runs the trace store does not know, for the
-// first page of a list no other filter narrows.
-func (s *Server) queuedRows(r *http.Request, ctl *control, query obsdb.RunQuery, v view, have []runRow) []runRow {
-	narrowed := query.SessionID != "" || query.PublicID != "" || query.StoppedBy != "" || query.ErrorType != "" ||
-		query.IDPrefix != "" || len(query.Errs) > 0 || len(query.Meta) > 0 || query.TurnBelow > 0 || query.TurnAbove > 0 ||
-		(query.ParentRunID != "" && query.ParentRunID != "*") || !query.Before.IsZero() || v.approvals != ""
-	if s.ledger == nil || ctl.sc.IsZero() || narrowed || query.Status != "" || (v.display != "" && v.display != displayQueued) {
-		return nil
+// queuedQuery is the ledger's side of a list: the queued runs no trace
+// names yet, under the list's filters; ok false when the list's filters
+// cannot hold one (a queued run has no stop, no error, no trace).
+func (s *Server) queuedQuery(ctl *control, query obsdb.RunQuery, v view) (sessions.QueuedQuery, bool) {
+	narrowed := query.PublicID != "" || query.StoppedBy != "" || query.ErrorType != "" ||
+		query.IDPrefix != "" || query.Errs != nil || len(query.Meta) > 0 || query.TurnBelow > 0 || query.TurnAbove > 0 ||
+		(query.ParentRunID != "" && query.ParentRunID != "*") || v.approvals != ""
+	if !ctl.controlled() || narrowed || query.Status != "" || (v.display != "" && v.display != displayQueued) {
+		return sessions.QueuedQuery{}, false
 	}
-	queued, err := s.ledger.Queued(r.Context(), ctl.sc, query.Agent, 100)
-	if err != nil {
-		return nil
+	return sessions.QueuedQuery{Agent: query.Agent, SessionID: query.SessionID, Before: query.Before, BeforeID: query.BeforeID,
+		Oldest: query.Oldest, Resumes: !v.chains || v.display == displayQueued}, true
+}
+
+// pageKey is a row's place in a list: (started, id), newest first
+// unless oldest.
+type pageKey struct {
+	at time.Time
+	id string
+}
+
+func keyOf(r runRow) pageKey { return pageKey{r.Started, r.ID} }
+
+// ahead reports whether a comes before b in the list's order.
+func ahead(a, b pageKey, oldest bool) bool {
+	if !a.at.Equal(b.at) {
+		return a.at.After(b.at) != oldest
 	}
-	seen := map[string]bool{}
-	for _, row := range have {
-		seen[row.ID] = true
-	}
-	var extra []runRow
-	for _, lr := range queued {
-		if seen[lr.ID] || (v.chains && lr.ResumeOf != "") {
-			continue
+	return (a.id > b.id) != oldest
+}
+
+// mergeQueued merges the ledger's queued rows into a list page the trace
+// store filled: by (started, id), the page cut at want, its cursor
+// where the merged page ends. traceNext is the trace store's own cursor
+// (nil when it is exhausted); qFull says the ledger may hold more
+// queued rows past the ones read.
+func mergeQueued(out *runsPage, queued []runRow, want int, oldest, qFull bool) {
+	var cursor *pageKey
+	if out.NextBefore != nil {
+		k := pageKey{at: *out.NextBefore}
+		if out.NextBeforeID != nil {
+			k.id = *out.NextBeforeID
 		}
-		extra = append(extra, ctl.ledgerRow(lr))
+		cursor = &k
 	}
-	return extra
+	merged := append([]runRow{}, out.Runs...)
+	for _, q := range queued {
+		if cursor == nil || ahead(keyOf(q), *cursor, oldest) {
+			merged = append(merged, q)
+		}
+	}
+	slices.SortStableFunc(merged, func(a, b runRow) int {
+		switch {
+		case ahead(keyOf(a), keyOf(b), oldest):
+			return -1
+		case ahead(keyOf(b), keyOf(a), oldest):
+			return 1
+		}
+		return 0
+	})
+	switch {
+	case len(merged) > want:
+		merged = merged[:want]
+		k := keyOf(merged[want-1])
+		cursor = &k
+	case cursor == nil && qFull && len(merged) > 0:
+		k := keyOf(merged[len(merged)-1])
+		cursor = &k
+	}
+	out.Runs = merged
+	out.NextBefore, out.NextBeforeID = nil, nil
+	if cursor != nil {
+		at, id := cursor.at, cursor.id
+		out.NextBefore = &at
+		if id != "" {
+			out.NextBeforeID = &id
+		}
+	}
+}
+
+// serveQueuedRuns answers /v1/runs?display_status=queued: the ledger's
+// queued runs alone (no trace names them), paged by (created_at, id)
+// and counted exactly; a queued resume reads as its chain's row.
+func (s *Server) serveQueuedRuns(w http.ResponseWriter, r *http.Request, ctl *control, qq sessions.QueuedQuery, v view, want int) {
+	out := runsPage{Runs: []runRow{}, TotalExact: true}
+	qq.Limit = want
+	runs, total, err := s.ledger.Queued(r.Context(), ctl.sc, qq)
+	if err != nil {
+		ctl.fail(err)
+	}
+	cost := s.coster(r.Context())
+	rows := make([]runRow, 0, len(runs))
+	for _, lr := range runs {
+		rows = append(rows, ctl.ledgerRow(lr))
+	}
+	v.prepare(ctl, cost, rows)
+	for _, row := range rows {
+		if kept, ok := v.keep(ctl, cost, row); ok {
+			out.Runs = append(out.Runs, kept)
+		}
+	}
+	if ctl.unavailable(w, r) {
+		return
+	}
+	out.Total = total
+	if len(runs) == want {
+		last := runs[len(runs)-1]
+		at, id := last.CreatedAt, last.ID
+		out.NextBefore, out.NextBeforeID = &at, &id
+	}
+	writeJSON(w, r, http.StatusOK, out)
 }
 
 // serveLedgerRun answers GET /v1/runs/{id} for a run only the ledger
-// knows; false when it is not one.
-func (s *Server) serveLedgerRun(w http.ResponseWriter, r *http.Request, id string) bool {
-	ctl := s.control(r)
+// knows; false when it is not one (or the ledger could not be read:
+// ctl.err, which the caller answers).
+func (s *Server) serveLedgerRun(w http.ResponseWriter, r *http.Request, ctl *control, id string) bool {
 	lr, ok := ctl.ledgerRuns([]string{id})[id]
 	if !ok {
 		return false
@@ -612,6 +1051,9 @@ func (s *Server) serveLedgerRun(w http.ResponseWriter, r *http.Request, id strin
 	}
 	page := runPage{runDoc: runDoc{runRow: row, Children: []runRow{}, Holes: []stepHole{}}, Compactions: []runCompaction{}}
 	ctl.approvals(&page)
+	if ctl.unavailable(w, r) {
+		return true
+	}
 	writeJSON(w, r, http.StatusOK, page)
 	return true
 }
@@ -619,17 +1061,14 @@ func (s *Server) serveLedgerRun(w http.ResponseWriter, r *http.Request, id strin
 // approvals sets a run page's approval records, and names who decided
 // in its decided / resumes blocks where no record of the run did.
 func (c *control) approvals(page *runPage) {
-	if c.s.ledger == nil || c.sc.IsZero() {
+	if !c.controlled() {
 		return
 	}
 	parked := page.ID
 	if page.ResumedFrom != "" {
 		parked = page.ResumedFrom
 	}
-	m, err := c.s.ledger.RunApprovals(c.ctx, c.sc, page.ID, parked)
-	if err != nil {
-		return
-	}
+	m := c.approvalsFor(page.ID, parked)
 	page.Approvals = c.approvalDocs(m[page.ID])
 	for doc, of := range map[*decisionDoc]string{page.Decided: page.ID, page.Resumes: parked} {
 		if doc == nil {
@@ -659,19 +1098,20 @@ func (c *control) approvals(page *runPage) {
 func (s *Server) serveChainSpans(w http.ResponseWriter, r *http.Request, tr obsdb.TreeReader, id string) {
 	ctl := s.control(r)
 	cost := s.coster(r.Context())
-	var of runRow
-	if det, err := s.db.Run(r.Context(), id); err == nil {
-		one := []runRow{cost.row(det.RunRow)}
-		ctl.decorate(one)
-		of = one[0]
-	} else if lr, ok := ctl.ledgerRuns([]string{id})[id]; ok {
-		of = ctl.ledgerRow(lr)
-	} else {
-		dbError(w, r, "run", id, err)
+	of, ok := ctl.read(cost, id)
+	if ctl.unavailable(w, r) {
+		return
+	}
+	if !ok {
+		notFound(w, r, "no run "+id)
 		return
 	}
 	out := treeSpansDoc{Spans: []spanDTO{}, Holes: []treeHole{}, Chain: []string{id}}
-	if ch := ctl.chain(cost, of); ch != nil {
+	ch := ctl.chain(cost, of)
+	if ctl.unavailable(w, r) {
+		return
+	}
+	if ch != nil {
 		out.Chain, out.Waits = out.Chain[:0], ch.Waits
 		for _, run := range ch.Runs {
 			out.Chain = append(out.Chain, run.ID)
@@ -685,5 +1125,6 @@ func (s *Server) serveChainSpans(w http.ResponseWriter, r *http.Request, tr obsd
 		out.Spans = append(out.Spans, doc.Spans...)
 		out.Holes = append(out.Holes, doc.Holes...)
 	}
+	redactSpans(r, out.Spans)
 	writeJSON(w, r, http.StatusOK, out)
 }

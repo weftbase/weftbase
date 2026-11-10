@@ -244,6 +244,9 @@ func (s *Server) logCounts(ctx context.Context, runID string) (warn, errs int64,
 	return c.Warn, c.Error, c.Capped
 }
 
+// logsScanBudget bounds the lines one wide logs read scans.
+const logsScanBudget = 50000
+
 // descendantsCap bounds the runs a tree read follows.
 const descendantsCap = 500
 
@@ -323,19 +326,23 @@ func (s *Server) serveRunLogsWide(w http.ResponseWriter, r *http.Request, id str
 		minSeverity = n
 	}
 	ctl := s.control(r)
-	of, found := ctl.read(s.coster(r.Context()), id)
-	if !found {
-		notFound(w, r, "no run "+id)
-		return
-	}
+	cost := s.coster(r.Context())
+	of, found := ctl.read(cost, id)
 	heads := []string{id}
-	if chain {
-		if ch := ctl.chain(s.coster(r.Context()), of); ch != nil {
+	if found && chain {
+		if ch := ctl.chain(cost, of); ch != nil {
 			heads = heads[:0]
 			for _, m := range ch.Runs {
 				heads = append(heads, m.ID)
 			}
 		}
+	}
+	if ctl.unavailable(w, r) {
+		return
+	}
+	if !found {
+		notFound(w, r, "no run "+id)
+		return
 	}
 	out := logsPage{Logs: []logRow{}}
 	holes := holeSet{}
@@ -374,6 +381,10 @@ func (s *Server) serveRunLogsWide(w http.ResponseWriter, r *http.Request, id str
 		}
 		return false
 	}
+	// The read's budget (B12): a filter that keeps almost nothing over a
+	// large tree ends after logsScanBudget lines or fillBudget, with the
+	// cursor where it stopped and partial set, rather than scanning on.
+	deadline, scanned := s.now().Add(fillBudget), 0
 	for ; k < len(out.Runs) && out.NextCursor == ""; k, from = k+1, 0 {
 		run := out.Runs[k]
 		for {
@@ -386,6 +397,7 @@ func (s *Server) serveRunLogsWide(w http.ResponseWriter, r *http.Request, id str
 			}
 			for _, l := range page.Logs {
 				from = l.Index + 1
+				scanned++
 				if !matches(l) {
 					continue
 				}
@@ -401,6 +413,11 @@ func (s *Server) serveRunLogsWide(w http.ResponseWriter, r *http.Request, id str
 				}
 			}
 			if out.NextCursor != "" || len(page.Logs) < 500 {
+				break
+			}
+			if scanned >= logsScanBudget || !s.now().Before(deadline) {
+				out.NextCursor = strconv.Itoa(k) + ":" + strconv.FormatInt(from, 10)
+				out.Partial, out.PartialReason = true, "the read stopped at its budget ("+strconv.Itoa(logsScanBudget)+" lines or "+fillBudget.String()+"): next_cursor reads on"
 				break
 			}
 		}

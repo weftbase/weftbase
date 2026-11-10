@@ -14,12 +14,19 @@
 // queue's timer table) enforce its Policy: a run still queued with no
 // worker after QueueTTL fails worker_lost; a parked run whose approval
 // expiry passes is resumed with its pending calls denied; a parked run
-// past MaxPinAge is migrated to the agent's prod version (or canceled
+// past MaxPinAge is migrated to the agent's prod version (or cancelled
 // version_retired when there is none).
+//
+// Reads (Get, List, ByID, Queued, the approval reads) under a
+// project-level scope see every tenant of its project and env, as the
+// events stream does for a project-level principal; under a tenant's
+// scope they see that tenant only. Writes act within the caller's own
+// tenant.
 package sessions
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,23 +50,31 @@ const (
 	StatusParked    = "parked"
 	StatusSucceeded = "succeeded"
 	StatusFailed    = "failed"
-	StatusCanceled  = "canceled"
+	StatusCancelled = "cancelled"
 )
 
 // Terminal reports whether a status is an end.
 func Terminal(status string) bool {
-	return status == StatusSucceeded || status == StatusFailed || status == StatusCanceled
+	return status == StatusSucceeded || status == StatusFailed || status == StatusCancelled
 }
 
 // Errors.
 var (
-	// ErrFinished: the run already ended (cancel → 409).
+	// ErrFinished: the run already ended (cancel → 409
+	// already_finished).
 	ErrFinished = errors.New("sessions: the run has finished")
-	// ErrNotParked: resume of a run that is not parked, or was resumed
-	// already (409).
+	// ErrNotParked: a resume of a run that is not parked (409
+	// not_parked).
 	ErrNotParked = errors.New("sessions: the run is not parked")
-	// ErrNotRunning: steer of a run that is not running (409).
+	// ErrAlreadyResumed: a parked run that was resumed already: a cancel
+	// or a resume goes to its resume (409 already_resumed).
+	ErrAlreadyResumed = errors.New("sessions: the parked run was resumed already")
+	// ErrNotRunning: steer of a run that is not running (409
+	// not_running).
 	ErrNotRunning = errors.New("sessions: the run is not running")
+	// ErrSessionBusy: a turn of a session whose previous turn is queued,
+	// running or waiting on a person (409 session_busy).
+	ErrSessionBusy = errors.New("sessions: the session has a turn in progress")
 	// ErrNotSupported: a verb that has not landed (steer).
 	ErrNotSupported = errors.New("sessions: not supported yet")
 	// ErrInvalid: a malformed request (400).
@@ -128,8 +143,11 @@ type Usage struct {
 
 // Run is one ledger row.
 type Run struct {
-	ID              string             `json:"id"`
-	TenantID        string             `json:"tenant_id"`
+	ID       string `json:"id"`
+	TenantID string `json:"tenant_id"`
+	// ChainID is the first run of the park-and-resume chain the run
+	// belongs to (its own id when it resumes nothing).
+	ChainID         string             `json:"chain_id"`
 	Agent           string             `json:"agent"`
 	AgentVersion    string             `json:"agent_version"`
 	ResolvedVia     string             `json:"resolved_via"`
@@ -150,6 +168,8 @@ type Run struct {
 	PinExpiredAt    *time.Time         `json:"pin_expired_at,omitempty"`
 	FinishedAt      *time.Time         `json:"finished_at,omitempty"`
 
+	sessionID  string
+	turn       int
 	queueItem  string
 	commandID  string
 	worker     string
@@ -227,10 +247,17 @@ type AdmitRequest struct {
 	Input    wire.Input        `json:"input"`
 	Metadata map[string]string `json:"metadata,omitempty"`
 	// SessionID makes the run the next turn of that session: the
-	// ledger stamps weft.session.id and the turn number (one more than
-	// the session's turns it holds) on the run's metadata. The input is
-	// the caller's: the ledger keeps no transcript.
+	// ledger stamps weft.session.id and the turn number on the run's
+	// metadata. The input is the caller's: the ledger keeps no
+	// transcript. A session whose previous turn the ledger holds queued,
+	// running or parked (not resumed) is ErrSessionBusy, checked in the
+	// admitting transaction.
 	SessionID string `json:"session_id,omitempty"`
+	// TraceTurn is the highest turn of the session the trace store
+	// holds (the caller reads it; turns an app ran itself are only
+	// there). The new turn is one more than the highest of it and the
+	// ledger's own, so a deleted turn's number is never reused.
+	TraceTurn int `json:"-"`
 	// Priority orders the start among queued runs.
 	Priority int `json:"priority,omitempty"`
 }
@@ -259,20 +286,34 @@ func (l *Ledger) Admit(ctx context.Context, s tenant.Scope, actor events.Actor, 
 			return err
 		}
 		in := req.Input
+		turn, sessionID := 0, req.SessionID
+		if sessionID == "" {
+			// A caller that names the session in the metadata itself
+			// (weft.session.id, and its own weft.turn) keeps its numbers;
+			// the ledger records the session so its runs are the
+			// session's (listed, deleted with it).
+			sessionID = req.Metadata[MetaSessionID]
+			turn, _ = strconv.Atoi(req.Metadata[MetaTurn])
+		}
 		if req.SessionID != "" {
-			turns, err := l.sessionTurns(tx, s, req.SessionID)
+			if err := l.sessionIdle(tx, s, req.SessionID); err != nil {
+				return err
+			}
+			last, err := l.lastTurn(tx, s, req.SessionID)
 			if err != nil {
 				return err
 			}
+			turn = max(last, req.TraceTurn) + 1
 			md := map[string]string{}
 			for k, val := range req.Metadata {
 				md[k] = val
 			}
-			md[MetaSessionID], md[MetaTurn] = req.SessionID, strconv.Itoa(turns+1)
+			md[MetaSessionID], md[MetaTurn] = req.SessionID, strconv.Itoa(turn)
 			req.Metadata = md
 		}
-		run = Run{ID: "run_" + ulid.New(), TenantID: s.Tenant(), Agent: v.Agent, AgentVersion: v.ID, ResolvedVia: via,
-			Status: StatusQueued, Input: &in, Metadata: req.Metadata}
+		id := "run_" + ulid.New()
+		run = Run{ID: id, ChainID: id, TenantID: s.Tenant(), Agent: v.Agent, AgentVersion: v.ID, ResolvedVia: via,
+			Status: StatusQueued, Input: &in, Metadata: req.Metadata, sessionID: sessionID, turn: turn}
 		return l.insert(tx, s, actor, &run, queue.KindRun, req.Priority)
 	})
 	return run, err
@@ -292,10 +333,10 @@ func (l *Ledger) insert(tx store.Tx, s tenant.Scope, actor events.Actor, run *Ru
 	run.queueItem = item
 	_, err = store.Exec(tx, `INSERT INTO runs (id, project_id, env, tenant_id, agent, agent_version, resolved_via, status, input, metadata,
 		resume_of, resumed_by, decisions, checkpoint, pending, command_id, worker, error, cancel_cause, cancel_requested,
-		input_tokens, output_tokens, created_at, updated_at, queue_item)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, '', '', '', '', '', '', 0, 0, 0, ?, ?, ?)`,
+		input_tokens, output_tokens, created_at, updated_at, queue_item, chain_id, session_id, turn)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, '', '', '', '', '', '', 0, 0, 0, ?, ?, ?, ?, ?, ?)`,
 		run.ID, s.Project(), s.Env(), s.Tenant(), run.Agent, run.AgentVersion, run.ResolvedVia, run.Status,
-		string(input), string(meta), run.ResumeOf, string(dec), now, now, item)
+		string(input), string(meta), run.ResumeOf, string(dec), now, now, item, run.ChainID, run.sessionID, run.turn)
 	if err != nil {
 		return fmt.Errorf("sessions: insert run: %w", err)
 	}
@@ -307,31 +348,78 @@ func (l *Ledger) insert(tx store.Tx, s tenant.Scope, actor events.Actor, run *Ru
 	return l.emit(tx, s, actor, events.RunQueued, *run, nil)
 }
 
+// VersionRef is how a document names an AgentVersion: its id, its
+// number and the labels it holds (an event's, when it was written).
+type VersionRef struct {
+	ID     string   `json:"id"`
+	Number int      `json:"number"`
+	Labels []string `json:"labels"`
+}
+
+// versionRef names a version in tx (its id alone when the registry no
+// longer has it).
+func (l *Ledger) versionRef(tx store.Tx, s tenant.Scope, id string) (VersionRef, error) {
+	ref := VersionRef{ID: id, Labels: []string{}}
+	v, err := l.reg.LookupLabeled(tx, s, id)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		return ref, nil
+	case err != nil:
+		return ref, err
+	}
+	ref.Number = v.Number
+	if v.Labels != nil {
+		ref.Labels = v.Labels
+	}
+	return ref, nil
+}
+
 func (l *Ledger) emit(tx store.Tx, s tenant.Scope, actor events.Actor, typ string, run Run, extra map[string]any) error {
-	data := map[string]any{"run_id": run.ID, "chain_run_id": l.chainHead(tx, s, run.ID, run.ResumeOf), "agent": run.Agent,
-		"agent_version": run.AgentVersion, "resolved_via": run.ResolvedVia, "status": run.Status}
+	ref, err := l.versionRef(tx, s, run.AgentVersion)
+	if err != nil {
+		return err
+	}
+	data := map[string]any{"run_id": run.ID, "chain_run_id": run.chain(), "agent": run.Agent,
+		"agent_version": ref, "resolved_via": run.ResolvedVia, "status": run.Status}
 	if run.ResumeOf != "" {
 		data["resume_of"] = run.ResumeOf
+	}
+	if run.sessionID != "" {
+		// A session page hears its queued turn end (cancelled, failed by
+		// the queue time-to-live) without a trace to tell it.
+		data["session_id"] = run.sessionID
 	}
 	for k, v := range extra {
 		data[k] = v
 	}
-	_, err := l.log.Emit(tx, s, events.Event{Type: typ, ResourceKind: "run", ResourceID: run.ID, Actor: actor}, data)
+	_, err = l.log.Emit(tx, s, events.Event{Type: typ, ResourceKind: "run", ResourceID: run.ID, Actor: actor}, data)
 	return err
 }
 
-// chainHead is the first run of the chain a run belongs to: the run a
+// chain is the first run of the chain the run belongs to: the run a
 // park-and-resume chain started with (the run itself when it resumes
 // nothing). A page that shows the logical run matches events by it.
-func (l *Ledger) chainHead(tx store.Tx, s tenant.Scope, id, resumeOf string) string {
-	for n := 0; resumeOf != "" && n < 64; n++ {
-		id = resumeOf
-		if err := store.QueryRow(tx, `SELECT resume_of FROM runs WHERE id = ? AND project_id = ? AND env = ? AND tenant_id = ?`,
-			id, s.Project(), s.Env(), s.Tenant()).Scan(&resumeOf); err != nil {
-			break
-		}
+func (r Run) chain() string {
+	if r.ChainID != "" {
+		return r.ChainID
 	}
-	return id
+	return r.ID
+}
+
+// within is the WHERE fragment (with its arguments) that holds a read
+// to s: its project and env, and its tenant unless s is project-level
+// — a project-level principal reads every tenant, as the events stream
+// lets it. col prefixes the columns ("" or "r.").
+func within(s tenant.Scope, col string) (string, []any) {
+	if s.ProjectLevel() {
+		return col + `project_id = ? AND ` + col + `env = ?`, []any{s.Project(), s.Env()}
+	}
+	return col + `project_id = ? AND ` + col + `env = ? AND ` + col + `tenant_id = ?`, []any{s.Project(), s.Env(), s.Tenant()}
+}
+
+// exact is the WHERE fragment that holds a write to s's own tenant.
+func exact(s tenant.Scope) (string, []any) {
+	return `project_id = ? AND env = ? AND tenant_id = ?`, []any{s.Project(), s.Env(), s.Tenant()}
 }
 
 // ItemRunID reads the run id of a queue item's payload.
@@ -345,7 +433,7 @@ func ItemRunID(payload json.RawMessage) (string, error) {
 
 const selectRun = `SELECT id, tenant_id, agent, agent_version, resolved_via, status, input, metadata, resume_of, resumed_by,
 	decisions, checkpoint, pending, command_id, worker, error, cancel_cause, cancel_requested, input_tokens, output_tokens,
-	created_at, started_at, finished_at, queue_item, parked_at, migrated_to, pin_expired_at FROM runs`
+	created_at, started_at, finished_at, queue_item, parked_at, migrated_to, pin_expired_at, chain_id, session_id, turn FROM runs`
 
 func scanRun(r interface{ Scan(...any) error }) (Run, error) {
 	var run Run
@@ -354,7 +442,7 @@ func scanRun(r interface{ Scan(...any) error }) (Run, error) {
 	err := r.Scan(&run.ID, &run.TenantID, &run.Agent, &run.AgentVersion, &run.ResolvedVia, &run.Status, &input, &meta,
 		&run.ResumeOf, &run.ResumedBy, &dec, &checkpoint, &pending, &run.commandID, &run.worker, &run.Error, &run.CancelCause,
 		&run.CancelRequested, &run.Usage.InputTokens, &run.Usage.OutputTokens, &created, &started, &finished,
-		&run.queueItem, &parked, &run.MigratedTo, &pinExpired)
+		&run.queueItem, &parked, &run.MigratedTo, &pinExpired, &run.ChainID, &run.sessionID, &run.turn)
 	if err != nil {
 		return Run{}, store.NotFound(err)
 	}
@@ -378,25 +466,30 @@ func tsPtr(s *string) *time.Time {
 	return &t
 }
 
+// get reads one run of s's own tenant (what a write acts on).
 func (l *Ledger) get(tx store.Tx, s tenant.Scope, id string) (Run, error) {
-	run, err := scanRun(store.QueryRow(tx, selectRun+` WHERE id = ? AND project_id = ? AND env = ? AND tenant_id = ?`,
-		id, s.Project(), s.Env(), s.Tenant()))
+	where, args := exact(s)
+	run, err := scanRun(store.QueryRow(tx, selectRun+` WHERE id = ? AND `+where, append([]any{id}, args...)...))
 	if err != nil {
 		return Run{}, fmt.Errorf("run %s: %w", id, err)
 	}
 	return run, nil
 }
 
-// Get reads one run in s; another tenant's run is store.ErrNotFound.
+// Get reads one run s can read (every tenant's under a project-level
+// scope); another tenant's run is store.ErrNotFound.
 func (l *Ledger) Get(ctx context.Context, s tenant.Scope, id string) (Run, error) {
 	if s.IsZero() {
 		return Run{}, tenant.ErrZeroScope
 	}
 	var run Run
 	err := l.db.Read(ctx, func(tx store.Tx) error {
+		where, args := within(s, "")
 		var err error
-		run, err = l.get(tx, s, id)
-		return err
+		if run, err = scanRun(store.QueryRow(tx, selectRun+` WHERE id = ? AND `+where, append([]any{id}, args...)...)); err != nil {
+			return fmt.Errorf("run %s: %w", id, err)
+		}
+		return nil
 	})
 	return run, err
 }
@@ -411,8 +504,8 @@ func (l *Ledger) List(ctx context.Context, s tenant.Scope, limit int) ([]Run, er
 	}
 	var out []Run
 	err := l.db.Read(ctx, func(tx store.Tx) error {
-		rows, err := store.Query(tx, selectRun+` WHERE project_id = ? AND env = ? AND tenant_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`,
-			s.Project(), s.Env(), s.Tenant(), limit)
+		where, args := within(s, "")
+		rows, err := store.Query(tx, selectRun+` WHERE `+where+` ORDER BY created_at DESC, id DESC LIMIT ?`, append(args, limit)...)
 		if err != nil {
 			return err
 		}
@@ -429,43 +522,33 @@ func (l *Ledger) List(ctx context.Context, s tenant.Scope, limit int) ([]Run, er
 	return out, err
 }
 
-// Resume admits a new run that continues a parked one on the parked
-// run's own AgentVersion (resolved_via pin), with the decisions on its
-// pending calls. A run that is not parked, or was resumed already, is
-// ErrNotParked.
-func (l *Ledger) Resume(ctx context.Context, s tenant.Scope, actor events.Actor, runID string, decisions []wire.Decision) (Run, error) {
-	if s.IsZero() {
-		return Run{}, tenant.ErrZeroScope
+// resumable refuses a resume (or a cancel) of a run that is not an open
+// park.
+func resumable(parked Run) error {
+	switch {
+	case parked.Status != StatusParked:
+		return fmt.Errorf("%w: run %s is %s", ErrNotParked, parked.ID, parked.Status)
+	case parked.ResumedBy != "":
+		return fmt.Errorf("%w: run %s was resumed by %s", ErrAlreadyResumed, parked.ID, parked.ResumedBy)
 	}
-	for _, d := range decisions {
-		if d.CallID == "" || (d.Decision != "approve" && d.Decision != "deny" && d.Decision != "resolve") {
-			return Run{}, fmt.Errorf("%w: a decision needs a call_id and approve, deny or resolve", ErrInvalid)
-		}
-	}
-	var run Run
-	err := l.db.InTx(ctx, func(tx store.Tx) error {
-		parked, err := l.get(tx, s, runID)
-		if err != nil {
-			return err
-		}
-		run, err = l.resumeDecided(tx, s, actor, parked, decisions, ApprovalDenied, "no decision")
-		return err
-	})
-	return run, err
+	return nil
 }
 
 // resume admits the run that continues parked: on its pin, or on the
-// version it was migrated to.
+// version it was migrated to. A parked run resumes once its approvals
+// are decided (Decide), or by the ledger's own timers; there is no
+// other door.
 func (l *Ledger) resume(tx store.Tx, s tenant.Scope, actor events.Actor, parked Run, decisions []wire.Decision) (Run, error) {
-	if parked.Status != StatusParked || parked.ResumedBy != "" {
-		return Run{}, fmt.Errorf("%w: run %s is %s", ErrNotParked, parked.ID, parked.Status)
+	if err := resumable(parked); err != nil {
+		return Run{}, err
 	}
 	version, via := parked.AgentVersion, registry.ViaPin
 	if parked.MigratedTo != "" {
 		version, via = parked.MigratedTo, ViaMigrate
 	}
-	run := Run{ID: "run_" + ulid.New(), TenantID: s.Tenant(), Agent: parked.Agent, AgentVersion: version,
-		ResolvedVia: via, Status: StatusQueued, Metadata: parked.Metadata, ResumeOf: parked.ID, decisions: decisions}
+	run := Run{ID: "run_" + ulid.New(), ChainID: parked.chain(), TenantID: s.Tenant(), Agent: parked.Agent, AgentVersion: version,
+		ResolvedVia: via, Status: StatusQueued, Metadata: parked.Metadata, ResumeOf: parked.ID, decisions: decisions,
+		sessionID: parked.sessionID, turn: parked.turn}
 	if _, err := store.Exec(tx, `UPDATE runs SET resumed_by = ?, updated_at = ? WHERE id = ?`, run.ID, l.ts(), parked.ID); err != nil {
 		return Run{}, err
 	}
@@ -473,10 +556,10 @@ func (l *Ledger) resume(tx store.Tx, s tenant.Scope, actor events.Actor, parked 
 }
 
 // Cancel cancels a run with cause "user". A queued or parked run ends
-// canceled at once (run.canceled); a running run is marked
+// cancelled at once (run.cancelled); a running run is marked
 // cancel_requested and the cancel goes to its worker after the commit,
 // which reports the end. A finished run is ErrFinished; a parked run
-// that was resumed is ErrNotParked (cancel its resume).
+// that was resumed is ErrAlreadyResumed (cancel its resume).
 func (l *Ledger) Cancel(ctx context.Context, s tenant.Scope, actor events.Actor, runID, reason string) (Run, error) {
 	if s.IsZero() {
 		return Run{}, tenant.ErrZeroScope
@@ -492,7 +575,7 @@ func (l *Ledger) Cancel(ctx context.Context, s tenant.Scope, actor events.Actor,
 		case Terminal(run.Status):
 			return fmt.Errorf("%w: run %s is %s", ErrFinished, runID, run.Status)
 		case run.Status == StatusParked && run.ResumedBy != "":
-			return fmt.Errorf("%w: run %s was resumed by %s; cancel that run", ErrNotParked, runID, run.ResumedBy)
+			return fmt.Errorf("%w: run %s was resumed by %s; cancel that run", ErrAlreadyResumed, runID, run.ResumedBy)
 		case run.Status == StatusRunning:
 			if run.CancelRequested {
 				return nil
@@ -506,7 +589,7 @@ func (l *Ledger) Cancel(ctx context.Context, s tenant.Scope, actor events.Actor,
 		// started) is ended here and the cancel still goes to it.
 		deliver = run.Status == StatusQueued && run.commandID != ""
 		if run.Status == StatusQueued && run.queueItem != "" {
-			if _, err := l.q.Cancel(tx, s, run.queueItem, "canceled"); err != nil {
+			if _, err := l.q.Cancel(tx, s, run.queueItem, StatusCancelled); err != nil {
 				return err
 			}
 		}
@@ -553,7 +636,7 @@ func (l *Ledger) Steer(ctx context.Context, s tenant.Scope, actor events.Actor, 
 // Prepare is the hub's first step for a claimed item (its payload), in the
 // transaction that records the dispatch: it returns the command for
 // the run, or ok false when nothing is to be dispatched — the run ended
-// (canceled while queued), or it was dispatched before and its worker
+// (cancelled while queued), or it was dispatched before and its worker
 // is gone (a restart, an expired lease): that run is lost, never
 // re-sent (at-most-once).
 func (l *Ledger) Prepare(tx store.Tx, s tenant.Scope, payload json.RawMessage, commandID, worker string) (wire.Command, bool, error) {
@@ -620,8 +703,8 @@ func (l *Ledger) Started(tx store.Tx, s tenant.Scope, runID string) error {
 }
 
 // Finished records a run's end from its worker's finished ack:
-// succeeded (run.finished), failed (run.failed), canceled
-// (run.canceled), parked (run.parked, with the pending calls and the
+// succeeded (run.finished), failed (run.failed), cancelled
+// (run.cancelled), parked (run.parked, with the pending calls and the
 // checkpoint its resume is sent). A run that ended already is left
 // alone: the first end wins.
 func (l *Ledger) Finished(tx store.Tx, s tenant.Scope, runID string, ack wire.Ack) error {
@@ -652,12 +735,12 @@ func (l *Ledger) end(tx store.Tx, s tenant.Scope, actor events.Actor, run *Run, 
 	case wire.StatusSucceeded:
 		typ, status = events.RunFinished, StatusSucceeded
 	case wire.StatusCanceled:
-		typ, status = events.RunCanceled, StatusCanceled
+		typ, status = events.RunCancelled, StatusCancelled
 	case wire.StatusParked:
 		typ, status = events.RunParked, StatusParked
 	}
 	cause := run.CancelCause
-	if status == StatusCanceled && ack.Cause != "" {
+	if status == StatusCancelled && ack.Cause != "" {
 		cause = ack.Cause
 	}
 	pending, _ := json.Marshal(ack.Pending)
@@ -674,7 +757,7 @@ func (l *Ledger) end(tx store.Tx, s tenant.Scope, actor events.Actor, run *Run, 
 		finished, parked = nil, now
 	}
 	if _, err := store.Exec(tx, `UPDATE runs SET status = ?, error = ?, cancel_cause = ?, pending = ?, checkpoint = ?,
-		input_tokens = ?, output_tokens = ?, finished_at = ?, parked_at = ?, updated_at = ? WHERE id = ?`,
+		input_tokens = ?, output_tokens = ?, finished_at = ?, parked_at = COALESCE(?, parked_at), updated_at = ? WHERE id = ?`,
 		status, ack.Error, cause, string(pending), string(ack.Checkpoint), u.InputTokens, u.OutputTokens, finished, parked, now, run.ID); err != nil {
 		return err
 	}
@@ -688,7 +771,7 @@ func (l *Ledger) end(tx store.Tx, s tenant.Scope, actor events.Actor, run *Run, 
 	} else if run.Status == StatusParked {
 		// A parked run that ends (cancelled) takes its open approvals
 		// with it.
-		if err := l.cancelApprovals(tx, run.ID); err != nil {
+		if err := l.cancelApprovals(tx, s, actor, *run, cause); err != nil {
 			return err
 		}
 	}
@@ -697,7 +780,7 @@ func (l *Ledger) end(tx store.Tx, s tenant.Scope, actor events.Actor, run *Run, 
 	if ack.Error != "" {
 		extra["error"] = ack.Error
 	}
-	if status == StatusCanceled {
+	if status == StatusCancelled {
 		extra["cancel_cause"] = cause
 	}
 	if status == StatusParked {
@@ -710,31 +793,189 @@ func (l *Ledger) end(tx store.Tx, s tenant.Scope, actor events.Actor, run *Run, 
 	return l.emit(tx, s, actor, typ, *run, extra)
 }
 
-// ByID reads the scope's runs among ids, by id: the ledger's side of a
-// page of runs the trace store listed. Ids it does not hold are absent.
+// scanRuns scans every row of a selectRun query.
+func scanRuns(rows interface {
+	Next() bool
+	Scan(...any) error
+	Err() error
+	Close() error
+}, add func(Run)) error {
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		run, err := scanRun(rows)
+		if err != nil {
+			return err
+		}
+		add(run)
+	}
+	return rows.Err()
+}
+
+// placeholders is "?, ?, …" for n values.
+func placeholders(n int) string { return "?" + strings.Repeat(", ?", n-1) }
+
+// ByID reads the runs among ids s can read, and every run of their
+// chains (a parked run, its resumes), by id: the ledger's side of a page
+// of runs the trace store listed, its chains included, in one read. Ids
+// it does not hold are absent.
 func (l *Ledger) ByID(ctx context.Context, s tenant.Scope, ids []string) (map[string]Run, error) {
 	out := map[string]Run{}
-	if s.IsZero() || len(ids) == 0 {
+	if len(ids) == 0 {
 		return out, nil
+	}
+	if s.IsZero() {
+		return nil, tenant.ErrZeroScope
+	}
+	err := l.db.Read(ctx, func(tx store.Tx) error {
+		where, scope := within(s, "")
+		for len(ids) > 0 {
+			n := min(len(ids), 200)
+			args := append([]any{}, scope...)
+			for _, id := range ids[:n] {
+				args = append(args, id)
+			}
+			args = append(args, scope...)
+			for _, id := range ids[:n] {
+				args = append(args, id)
+			}
+			q := selectRun + ` WHERE ` + where + ` AND (id IN (` + placeholders(n) + `) OR chain_id IN
+				(SELECT chain_id FROM runs WHERE ` + where + ` AND id IN (` + placeholders(n) + `) AND chain_id <> ''))`
+			rows, err := store.Query(tx, q, args...)
+			if err != nil {
+				return err
+			}
+			if err := scanRuns(rows, func(r Run) { out[r.ID] = r }); err != nil {
+				return err
+			}
+			ids = ids[n:]
+		}
+		return nil
+	})
+	return out, err
+}
+
+// QueuedQuery pages the runs still waiting for a worker (Queued).
+type QueuedQuery struct {
+	Agent     string // "" every agent
+	SessionID string // "" every run
+	// Resumes keeps the queued resumes too; without it only the runs
+	// that resume nothing (a resume's chain is listed by its first run).
+	Resumes bool
+	// Before / BeforeID is the cursor (created_at, id): the runs after
+	// that one in the page order. Oldest turns the order around (oldest
+	// first; the cursor then reads the runs after it).
+	Before   time.Time
+	BeforeID string
+	Oldest   bool
+	// Since / Until bound created_at (zero: none), [Since, Until).
+	Since, Until time.Time
+	Limit        int // default 100, at most 500
+}
+
+// Queued pages the runs s can read that wait for a worker (queued),
+// newest first, and counts every one the query matches, the cursor
+// aside.
+func (l *Ledger) Queued(ctx context.Context, s tenant.Scope, q QueuedQuery) (runs []Run, total int, err error) {
+	if s.IsZero() {
+		return nil, 0, tenant.ErrZeroScope
+	}
+	if q.Limit <= 0 {
+		q.Limit = 100
+	}
+	q.Limit = min(q.Limit, 500)
+	where, args := within(s, "")
+	where += ` AND status = ?`
+	args = append(args, StatusQueued)
+	if q.Agent != "" {
+		where += ` AND agent = ?`
+		args = append(args, q.Agent)
+	}
+	if q.SessionID != "" {
+		where += ` AND session_id = ?`
+		args = append(args, q.SessionID)
+	}
+	if !q.Resumes {
+		where += ` AND resume_of = ''`
+	}
+	if !q.Since.IsZero() {
+		where += ` AND created_at >= ?`
+		args = append(args, q.Since.UTC().Format(tsFormat))
+	}
+	if !q.Until.IsZero() {
+		where += ` AND created_at < ?`
+		args = append(args, q.Until.UTC().Format(tsFormat))
+	}
+	page, pargs := where, append([]any{}, args...)
+	order := ` ORDER BY created_at DESC, id DESC`
+	if q.Oldest {
+		order = ` ORDER BY created_at, id`
+	}
+	if !q.Before.IsZero() {
+		at := q.Before.UTC().Format(tsFormat)
+		cmp := "<"
+		if q.Oldest {
+			cmp = ">"
+		}
+		if q.BeforeID != "" {
+			page += ` AND (created_at ` + cmp + ` ? OR (created_at = ? AND id ` + cmp + ` ?))`
+			pargs = append(pargs, at, at, q.BeforeID)
+		} else {
+			page += ` AND created_at ` + cmp + ` ?`
+			pargs = append(pargs, at)
+		}
+	}
+	err = l.db.Read(ctx, func(tx store.Tx) error {
+		if err := store.QueryRow(tx, `SELECT COUNT(*) FROM runs WHERE `+where, args...).Scan(&total); err != nil {
+			return err
+		}
+		rows, err := store.Query(tx, selectRun+` WHERE `+page+order+` LIMIT ?`, append(pargs, q.Limit)...)
+		if err != nil {
+			return err
+		}
+		return scanRuns(rows, func(r Run) { runs = append(runs, r) })
+	})
+	return runs, total, err
+}
+
+// ErrActive: a delete of a run that is queued, running or waiting on a
+// person (409 run_active): cancel it first.
+var ErrActive = errors.New("sessions: the run is still active")
+
+// active reports whether the platform still has the run in hand.
+func active(r Run) bool {
+	return r.Status == StatusQueued || r.Status == StatusRunning || (r.Status == StatusParked && r.ResumedBy == "")
+}
+
+// Owners reads which tenant holds each of ids in s's project and env,
+// whatever s's tenant: what lets a caller refuse to touch a run another
+// tenant owns where the trace store cannot tell (it is not
+// tenant-scoped yet). Ids the ledger does not hold are absent.
+func (l *Ledger) Owners(ctx context.Context, s tenant.Scope, ids []string) (map[string]string, error) {
+	out := map[string]string{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	if s.IsZero() {
+		return nil, tenant.ErrZeroScope
 	}
 	err := l.db.Read(ctx, func(tx store.Tx) error {
 		for len(ids) > 0 {
 			n := min(len(ids), 200)
-			args := []any{s.Project(), s.Env(), s.Tenant()}
+			args := []any{s.Project(), s.Env()}
 			for _, id := range ids[:n] {
 				args = append(args, id)
 			}
-			rows, err := store.Query(tx, selectRun+` WHERE project_id = ? AND env = ? AND tenant_id = ? AND id IN (?`+strings.Repeat(", ?", n-1)+`)`, args...)
+			rows, err := store.Query(tx, `SELECT id, tenant_id FROM runs WHERE project_id = ? AND env = ? AND id IN (`+placeholders(n)+`)`, args...)
 			if err != nil {
 				return err
 			}
 			for rows.Next() {
-				run, err := scanRun(rows)
-				if err != nil {
+				var id, t string
+				if err := rows.Scan(&id, &t); err != nil {
 					_ = rows.Close()
 					return err
 				}
-				out[run.ID] = run
+				out[id] = t
 			}
 			if err := rows.Close(); err != nil {
 				return err
@@ -746,86 +987,115 @@ func (l *Ledger) ByID(ctx context.Context, s tenant.Scope, ids []string) (map[st
 	return out, err
 }
 
-// Queued lists the scope's runs still waiting for a worker, newest
-// first (at most limit; agent "" is every agent): the runs no trace
-// names yet.
-func (l *Ledger) Queued(ctx context.Context, s tenant.Scope, agent string, limit int) ([]Run, error) {
-	if s.IsZero() {
-		return nil, tenant.ErrZeroScope
-	}
-	if limit <= 0 || limit > 500 {
-		limit = 100
-	}
-	var out []Run
-	err := l.db.Read(ctx, func(tx store.Tx) error {
-		rows, err := store.Query(tx, selectRun+` WHERE project_id = ? AND env = ? AND tenant_id = ? AND status = ? AND (? = '' OR agent = ?)
-			ORDER BY created_at DESC, id DESC LIMIT ?`, s.Project(), s.Env(), s.Tenant(), StatusQueued, agent, agent, limit)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = rows.Close() }()
-		for rows.Next() {
-			run, err := scanRun(rows)
-			if err != nil {
-				return err
-			}
-			out = append(out, run)
-		}
-		return rows.Err()
-	})
-	return out, err
-}
-
-// ErrActive: a delete of a run that is queued, running or waiting on a
-// person (409 run_active): cancel it first.
-var ErrActive = errors.New("sessions: the run is still active")
-
-// Delete removes ended runs from the ledger with their approval
-// records, in one transaction, and writes one audited run.deleted
-// event naming them. Ids the scope does not hold are skipped; a run
-// that is queued, running, or parked and not resumed is ErrActive and
-// nothing is deleted. It returns how many runs and approvals went.
+// Delete is the authoritative half of deleting a logical run: in one
+// transaction it refuses (ErrActive, nothing deleted) when one of ids is
+// a run the ledger still has in hand — queued, running, or parked and
+// not resumed — else removes the ones it holds with their approval
+// records and writes one audited run.deleted naming every id (the
+// trace store's own runs included: a delete of a run only the trace
+// store knows is audited too). The caller deletes the trace store's
+// rows after it; a retry of a half-done delete finds nothing here and
+// is harmless. It returns how many ledger runs and approvals went.
 func (l *Ledger) Delete(ctx context.Context, s tenant.Scope, actor events.Actor, ids []string) (runs, approvals int, err error) {
 	if s.IsZero() {
 		return 0, 0, tenant.ErrZeroScope
 	}
+	if len(ids) == 0 {
+		return 0, 0, nil
+	}
 	err = l.db.InTx(ctx, func(tx store.Tx) error {
 		runs, approvals = 0, 0
-		var gone []string
+		var held []Run
 		for _, id := range ids {
 			run, ok, err := l.getOpt(tx, s, id)
 			if err != nil {
 				return err
 			}
-			if !ok {
-				continue
-			}
-			if run.Status == StatusQueued || run.Status == StatusRunning || (run.Status == StatusParked && run.ResumedBy == "") {
-				return fmt.Errorf("%w: run %s is %s", ErrActive, id, run.Status)
-			}
-			gone = append(gone, id)
-		}
-		for _, id := range gone {
-			res, err := store.Exec(tx, `DELETE FROM approvals WHERE run_id = ? AND project_id = ? AND env = ? AND tenant_id = ?`,
-				id, s.Project(), s.Env(), s.Tenant())
-			if err != nil {
-				return err
-			}
-			n, _ := res.RowsAffected()
-			approvals += int(n)
-			if _, err := store.Exec(tx, `DELETE FROM runs WHERE id = ? AND project_id = ? AND env = ? AND tenant_id = ?`,
-				id, s.Project(), s.Env(), s.Tenant()); err != nil {
-				return err
+			if ok {
+				held = append(held, run)
 			}
 		}
-		if runs = len(gone); runs == 0 {
-			return nil
+		var err error
+		if runs, approvals, err = l.deleteRuns(tx, s, held); err != nil {
+			return err
 		}
-		_, err := l.log.Emit(tx, s, events.Event{Type: events.RunDeleted, ResourceKind: "run", ResourceID: gone[0], Actor: actor, Audited: true},
-			map[string]any{"run_ids": gone, "approvals": approvals})
+		data := map[string]any{"run_ids": ids, "ledger_runs": runs, "approvals": approvals}
+		for _, h := range held {
+			if h.sessionID != "" {
+				data["session_id"] = h.sessionID
+			}
+		}
+		_, err = l.log.Emit(tx, s, events.Event{Type: events.RunDeleted, ResourceKind: "run", ResourceID: ids[0], Actor: actor, Audited: true}, data)
 		return err
 	})
 	return runs, approvals, err
+}
+
+// deleteRuns refuses when one of runs is active, else deletes them with
+// their approvals.
+func (l *Ledger) deleteRuns(tx store.Tx, s tenant.Scope, runs []Run) (n, approvals int, err error) {
+	for _, run := range runs {
+		if active(run) {
+			return 0, 0, fmt.Errorf("%w: run %s is %s", ErrActive, run.ID, run.Status)
+		}
+	}
+	where, args := exact(s)
+	for _, run := range runs {
+		res, err := store.Exec(tx, `DELETE FROM approvals WHERE run_id = ? AND `+where, append([]any{run.ID}, args...)...)
+		if err != nil {
+			return 0, 0, err
+		}
+		k, _ := res.RowsAffected()
+		approvals += int(k)
+		if _, err := store.Exec(tx, `DELETE FROM runs WHERE id = ? AND `+where, append([]any{run.ID}, args...)...); err != nil {
+			return 0, 0, err
+		}
+	}
+	return len(runs), approvals, nil
+}
+
+// DeleteSession is the authoritative half of deleting a session: in one
+// transaction it refuses (ErrActive) while a run of the session is in
+// the platform's hands, else removes every ledger run of the session
+// (the queued ones no trace names included) with their approvals, and
+// writes one audited session.deleted naming them and traced (the runs
+// the trace store holds of it). A turn admitted after it commits is a
+// new turn of a new conversation. It returns every run id deleted.
+func (l *Ledger) DeleteSession(ctx context.Context, s tenant.Scope, actor events.Actor, sessionID string, traced []string) (ids []string, runs, approvals int, err error) {
+	if s.IsZero() {
+		return nil, 0, 0, tenant.ErrZeroScope
+	}
+	err = l.db.InTx(ctx, func(tx store.Tx) error {
+		ids = append([]string{}, traced...)
+		seen := map[string]bool{}
+		for _, id := range ids {
+			seen[id] = true
+		}
+		where, args := exact(s)
+		rows, err := store.Query(tx, selectRun+` WHERE `+where+` AND session_id = ? ORDER BY created_at, id`, append(args, sessionID)...)
+		if err != nil {
+			return err
+		}
+		var held []Run
+		if err := scanRuns(rows, func(r Run) { held = append(held, r) }); err != nil {
+			return err
+		}
+		for _, r := range held {
+			if !seen[r.ID] {
+				ids = append(ids, r.ID)
+			}
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+		if runs, approvals, err = l.deleteRuns(tx, s, held); err != nil {
+			return err
+		}
+		_, err = l.log.Emit(tx, s, events.Event{Type: events.SessionDeleted, ResourceKind: "session", ResourceID: sessionID, Actor: actor, Audited: true},
+			map[string]any{"session_id": sessionID, "run_ids": ids, "ledger_runs": runs, "approvals": approvals})
+		return err
+	})
+	return ids, runs, approvals, err
 }
 
 // The run metadata keys that make a run a session's turn (weft's own).
@@ -834,34 +1104,67 @@ const (
 	MetaTurn      = "weft.turn"
 )
 
-// sessionLike matches the runs whose metadata names the session: the
-// metadata column is the JSON encoding/json writes ("key":"value", no
-// space), so the pair is matched as text.
-func sessionLike(sessionID string) string {
-	pair, _ := json.Marshal(map[string]string{MetaSessionID: sessionID})
-	esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(string(pair[1 : len(pair)-1]))
-	return "%" + esc + "%"
+// sessionIdle refuses (ErrSessionBusy) a turn of a session the ledger
+// holds a run of that is queued, running, or parked and not resumed.
+func (l *Ledger) sessionIdle(tx store.Tx, s tenant.Scope, sessionID string) error {
+	where, args := exact(s)
+	var id, status string
+	err := store.QueryRow(tx, `SELECT id, status FROM runs WHERE `+where+` AND session_id = ?
+		AND (status IN (?, ?) OR (status = ? AND resumed_by = '')) ORDER BY created_at DESC LIMIT 1`,
+		append(args, sessionID, StatusQueued, StatusRunning, StatusParked)...).Scan(&id, &status)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil
+	case err != nil:
+		return err
+	}
+	word := status
+	if status == StatusParked {
+		word = "waiting on a person"
+	}
+	return fmt.Errorf("%w: session %s: its run %s is %s; a new turn starts when it has ended", ErrSessionBusy, sessionID, id, word)
 }
 
-// sessionTurns counts the session's turns the ledger holds: its runs
-// that resume nothing.
-func (l *Ledger) sessionTurns(tx store.Tx, s tenant.Scope, sessionID string) (int, error) {
+// lastTurn is the highest turn the ledger holds of the session (0 for
+// none).
+func (l *Ledger) lastTurn(tx store.Tx, s tenant.Scope, sessionID string) (int, error) {
+	where, args := exact(s)
 	var n int
-	err := store.QueryRow(tx, `SELECT COUNT(*) FROM runs WHERE project_id = ? AND env = ? AND tenant_id = ? AND resume_of = ''
-		AND metadata LIKE ? ESCAPE '\'`, s.Project(), s.Env(), s.Tenant(), sessionLike(sessionID)).Scan(&n)
+	err := store.QueryRow(tx, `SELECT COALESCE(MAX(turn), 0) FROM runs WHERE `+where+` AND session_id = ?`, append(args, sessionID)...).Scan(&n)
 	return n, err
 }
 
-// SessionRuns are the ids of the session's runs the ledger holds,
-// oldest first: every one, a queued run no trace names yet included.
+// SessionLast is the session's newest run the ledger holds (s's own
+// tenant), ok false when it holds none: what the next turn's history
+// waits on.
+func (l *Ledger) SessionLast(ctx context.Context, s tenant.Scope, sessionID string) (run Run, ok bool, err error) {
+	if s.IsZero() {
+		return Run{}, false, tenant.ErrZeroScope
+	}
+	err = l.db.Read(ctx, func(tx store.Tx) error {
+		where, args := exact(s)
+		run, err = scanRun(store.QueryRow(tx, selectRun+` WHERE `+where+` AND session_id = ? ORDER BY created_at DESC, id DESC LIMIT 1`,
+			append(args, sessionID)...))
+		if errors.Is(err, store.ErrNotFound) {
+			return nil
+		}
+		ok = err == nil
+		return err
+	})
+	return run, ok, err
+}
+
+// SessionRuns are the ids of the session's runs the ledger holds (s's
+// own tenant), oldest first: every one, a queued run no trace names
+// yet included.
 func (l *Ledger) SessionRuns(ctx context.Context, s tenant.Scope, sessionID string) ([]string, error) {
 	if s.IsZero() {
 		return nil, tenant.ErrZeroScope
 	}
 	var out []string
 	err := l.db.Read(ctx, func(tx store.Tx) error {
-		rows, err := store.Query(tx, `SELECT id FROM runs WHERE project_id = ? AND env = ? AND tenant_id = ?
-			AND metadata LIKE ? ESCAPE '\' ORDER BY created_at, id`, s.Project(), s.Env(), s.Tenant(), sessionLike(sessionID))
+		where, args := exact(s)
+		rows, err := store.Query(tx, `SELECT id FROM runs WHERE `+where+` AND session_id = ? ORDER BY created_at, id`, append(args, sessionID)...)
 		if err != nil {
 			return err
 		}
@@ -874,6 +1177,114 @@ func (l *Ledger) SessionRuns(ctx context.Context, s tenant.Scope, sessionID stri
 			out = append(out, id)
 		}
 		return rows.Err()
+	})
+	return out, err
+}
+
+// DispatchedToBuild reports, for each of runIDs, whether the run — or,
+// for a subagent child (an id "<parent>/<step>/<call>"), the root run
+// it descends from — is a run the ledger dispatched to a worker of the
+// build with that digest: its AgentVersion's build is digest, and it
+// was handed to a worker (a command was sent, or it started). What
+// OTLP ingest checks a worker key's records against: a build's key
+// writes its own runs' records only. One read for the batch; s's
+// project and env, every tenant (a worker serves them all).
+func (l *Ledger) DispatchedToBuild(ctx context.Context, s tenant.Scope, digest string, runIDs []string) (map[string]bool, error) {
+	out := make(map[string]bool, len(runIDs))
+	if s.IsZero() {
+		return nil, tenant.ErrZeroScope
+	}
+	roots := map[string]bool{}
+	for _, id := range runIDs {
+		out[id] = false
+		roots[RootRunID(id)] = true
+	}
+	if len(roots) == 0 || digest == "" {
+		return out, nil
+	}
+	ids := make([]string, 0, len(roots))
+	for id := range roots {
+		ids = append(ids, id)
+	}
+	ok := map[string]bool{}
+	err := l.db.Read(ctx, func(tx store.Tx) error {
+		for len(ids) > 0 {
+			n := min(len(ids), 200)
+			args := []any{s.Project(), s.Env(), digest}
+			for _, id := range ids[:n] {
+				args = append(args, id)
+			}
+			rows, err := store.Query(tx, `SELECT r.id FROM runs AS r JOIN agent_versions AS v ON v.id = r.agent_version
+				WHERE r.project_id = ? AND r.env = ? AND v.build_digest = ? AND (r.command_id <> '' OR r.started_at IS NOT NULL)
+				AND r.id IN (`+placeholders(n)+`)`, args...)
+			if err != nil {
+				return err
+			}
+			for rows.Next() {
+				var id string
+				if err := rows.Scan(&id); err != nil {
+					_ = rows.Close()
+					return err
+				}
+				ok[id] = true
+			}
+			if err := rows.Close(); err != nil {
+				return err
+			}
+			ids = ids[n:]
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range runIDs {
+		out[id] = ok[RootRunID(id)]
+	}
+	return out, nil
+}
+
+// RootRunID is the run a run id descends from: weft names a subagent
+// child "<parent>/<step>/<call>" (and a child's resume
+// "<parent>/resume/<call>"), so the root is the id up to its first '/'.
+func RootRunID(id string) string {
+	if i := strings.IndexByte(id, '/'); i > 0 {
+		return id[:i]
+	}
+	return id
+}
+
+// SessionsLast is each session's newest run the ledger holds (s can
+// read), by session id, in one read: what a list of sessions shows of
+// a turn the trace store does not know yet (a queued turn, one waiting
+// on a person). Sessions it holds no run of are absent.
+func (l *Ledger) SessionsLast(ctx context.Context, s tenant.Scope, sessionIDs []string) (map[string]Run, error) {
+	out := map[string]Run{}
+	if len(sessionIDs) == 0 {
+		return out, nil
+	}
+	if s.IsZero() {
+		return nil, tenant.ErrZeroScope
+	}
+	err := l.db.Read(ctx, func(tx store.Tx) error {
+		where, scope := within(s, "")
+		ids := sessionIDs
+		for len(ids) > 0 {
+			n := min(len(ids), 200)
+			args := append([]any{}, scope...)
+			for _, id := range ids[:n] {
+				args = append(args, id)
+			}
+			rows, err := store.Query(tx, selectRun+` WHERE `+where+` AND session_id IN (`+placeholders(n)+`) ORDER BY created_at, id`, args...)
+			if err != nil {
+				return err
+			}
+			if err := scanRuns(rows, func(r Run) { out[r.sessionID] = r }); err != nil {
+				return err
+			}
+			ids = ids[n:]
+		}
+		return nil
 	})
 	return out, err
 }

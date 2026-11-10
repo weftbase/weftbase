@@ -74,21 +74,15 @@ func (l *Ledger) queueTTL(tx store.Tx, s tenant.Scope, runID string) error {
 }
 
 // approvalExpiry resumes a parked run that nobody decided in time with
-// every pending call denied, and records approval.expired.
+// every pending call denied: each approval still pending writes its own
+// approval.expired, and the resume its run.queued.
 func (l *Ledger) approvalExpiry(tx store.Tx, s tenant.Scope, runID string) error {
 	parked, ok, err := l.getOpt(tx, s, runID)
 	if err != nil || !ok || parked.Status != StatusParked || parked.ResumedBy != "" {
 		return err
 	}
-	calls := make([]string, len(parked.Pending))
-	for i, p := range parked.Pending {
-		calls[i] = p.CallID
-	}
-	res, err := l.resumeDecided(tx, s, events.System, parked, nil, ApprovalExpired, "approval expired")
-	if err != nil {
-		return err
-	}
-	return l.emit(tx, s, events.System, events.ApprovalExpired, parked, map[string]any{"calls": calls, "resumed_by": res.ID})
+	_, err = l.resumeDecided(tx, s, events.System, parked, nil, ApprovalExpired, "approval expired")
+	return err
 }
 
 // maxPinAge migrates a parked run that outlived its maximum pin age to

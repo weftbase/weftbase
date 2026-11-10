@@ -14,6 +14,7 @@ import (
 
 	"github.com/weftbase/weft/core"
 	"github.com/weftbase/weft/version"
+	"github.com/weftbase/weftbase/authz"
 	"github.com/weftbase/weftbase/internal/httpx"
 	"github.com/weftbase/weftbase/obsdb"
 )
@@ -123,7 +124,7 @@ type runRow struct {
 	Started      time.Time         `json:"started"`
 	Finished     *time.Time        `json:"finished"`
 	LastSeen     time.Time         `json:"last_seen"`
-	Status       string            `json:"status"` // derived: a stale running row reads "interrupted"
+	Status       string            `json:"status,omitempty"` // the trace store's derived word (a stale running row reads "interrupted"); absent on a ledger_only row
 	// Settling marks a run whose root span is stored (status already
 	// succeeded or failed from it) but whose run_finish record is not,
 	// heard from within 30 s by its own timestamps (obsdb.RunRow.Settling,
@@ -325,12 +326,16 @@ func problemsOf(p obsdb.Problems) problemFields {
 }
 
 type runsPage struct {
-	// Total counts the trace store's match. With display_status, chains
-	// or approvals the answer is a fold of that match: total is then an
-	// upper bound, and exact only where total_exact says so (the first
-	// page held every row).
-	Total      int        `json:"total"`
-	TotalExact bool       `json:"total_exact"`
+	// Total counts the trace store's match and the ledger's queued runs
+	// no trace names yet. Logical runs (the default), display_status and
+	// approvals fold that match: total is then an upper bound, and exact
+	// only where total_exact says so (the first page held every row).
+	Total      int  `json:"total"`
+	TotalExact bool `json:"total_exact"`
+	// Partial says the page was cut by the read's budget (fillScanPages
+	// store pages, fillBudget of time) before it held limit rows: it may
+	// be short, and next_before resumes where the read stopped.
+	Partial    bool       `json:"partial,omitempty"`
 	Runs       []runRow   `json:"runs"`
 	NextBefore *time.Time `json:"next_before"`
 	// NextBeforeID is the cursor's second half: with next_before, the
@@ -697,12 +702,20 @@ type sessionRow struct {
 	// Turns counts the session's turns as a person counts them: a run
 	// that resumes a parked one continues its turn. Runs counts every
 	// run (turns plus resumes).
-	Turns     int        `json:"turns"`
-	Runs      int        `json:"runs"`
-	FirstSeen time.Time  `json:"first_seen"`
-	LastSeen  time.Time  `json:"last_seen"`
-	Status    string     `json:"status"`
-	Usage     core.Usage `json:"usage"`
+	Turns     int       `json:"turns"`
+	Runs      int       `json:"runs"`
+	FirstSeen time.Time `json:"first_seen"`
+	LastSeen  time.Time `json:"last_seen"`
+	// Status is the trace store's word for the newest turn (a turn
+	// outcome: succeeded, failed, running, interrupted, cancelled,
+	// ended, parked, resumed); DisplayStatus the one word a list draws
+	// (a run's display_status words): the ledger's where it holds a turn
+	// the trace store does not show yet — queued, or waiting on a
+	// person — else the outcome's (parked reads waiting, resumed
+	// running, ended cancelled).
+	Status        string     `json:"status"`
+	DisplayStatus string     `json:"display_status"`
+	Usage         core.Usage `json:"usage"`
 	// SummarizerUsage is what weft/thread's summarizer model calls cost
 	// the session (obsdb.SessionRow.SummarizerUsage, record contract §6):
 	// apart from usage, never folded into it nor priced here (U15.1).
@@ -775,7 +788,7 @@ func sessRow(r obsdb.SessionRow) sessionRow {
 		SummarizerUsage: sum,
 		ID:              r.ID, PublicID: r.PublicID, Agent: r.Agent, Turns: max(r.Turns-r.Resumes, 0), Runs: r.Turns,
 		FirstSeen: r.FirstSeen, LastSeen: r.LastSeen,
-		Status: sessionStatus(r), Usage: r.Usage,
+		Status: sessionStatus(r), DisplayStatus: outcomeDisplay(sessionStatus(r)), Usage: r.Usage,
 		Title: r.Title, FirstPrompt: r.FirstPrompt, ContentOff: r.ContentOff,
 		ParentSession: r.ParentSession, ParentTurn: turnOf(r.ParentSession, r.ParentRun),
 		ParentCall: r.ParentCall, ParentRun: r.ParentRun,
@@ -792,6 +805,51 @@ func sessionStatus(r obsdb.SessionRow) string {
 		return string(r.Outcomes[n-1])
 	}
 	return string(r.Status)
+}
+
+// outcomeDisplay is a turn outcome's display status.
+func outcomeDisplay(outcome string) string {
+	switch outcome {
+	case string(obsdb.OutcomeParked):
+		return displayWaiting
+	case string(obsdb.OutcomeResumed):
+		return displayRunning
+	case string(obsdb.OutcomeEnded):
+		return displayCancelled
+	}
+	if slices.Contains(displayStatuses, outcome) {
+		return outcome
+	}
+	return displayInterrupted
+}
+
+// sessionDisplays sets the display_status of session rows from the
+// ledger's newest run of each (one read): a turn the ledger holds in
+// hand, or one newer than anything the trace store has of the session
+// (cancelled or failed while queued), reads the ledger's word.
+func (c *control) sessionDisplays(rows []sessionRow) {
+	if !c.controlled() || len(rows) == 0 || c.err != nil {
+		return
+	}
+	ids := make([]string, len(rows))
+	for i, r := range rows {
+		ids[i] = r.ID
+	}
+	last, err := c.s.ledger.SessionsLast(c.ctx, c.sc, ids)
+	if err != nil {
+		c.fail(err)
+		return
+	}
+	for i := range rows {
+		lr, ok := last[rows[i].ID]
+		if !ok {
+			continue
+		}
+		word := displayStatus(&runRow{}, &lr)
+		if word == displayQueued || word == displayRunning || word == displayWaiting || lr.CreatedAt.After(rows[i].LastSeen) {
+			rows[i].DisplayStatus = word
+		}
+	}
 }
 
 // outcomeWords is a session row's strip as JSON strings.
@@ -907,7 +965,11 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	query.Status = st
-	v, ok := viewParams(w, r, q, &query.Status)
+	// A lookup by id prefix and a run's children read every run as it
+	// is unless chains says otherwise; every other list is one row per
+	// logical run.
+	raw := query.IDPrefix != "" || (query.ParentRunID != "" && query.ParentRunID != "*")
+	v, ok := viewParams(w, r, q, &query.Status, raw)
 	if !ok {
 		return
 	}
@@ -968,15 +1030,25 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 	// kept (or it ends): the cursor then names the last store row read,
 	// whether or not it was kept.
 	want := obsdb.LimitOf(query.Limit)
+	ctl := s.control(r)
+	qq, withQueued := s.queuedQuery(ctl, query, v)
+	if v.display == displayQueued {
+		if !withQueued {
+			writeJSON(w, r, http.StatusOK, runsPage{Runs: []runRow{}, TotalExact: true})
+			return
+		}
+		s.serveQueuedRuns(w, r, ctl, qq, v, want)
+		return
+	}
 	if v.folds() {
 		query.Limit = max(want, fillStorePage) // fewer, larger reads behind a fold
 	}
 	out := runsPage{Runs: make([]runRow, 0, want), TotalExact: true}
 	c := s.coster(r.Context())
-	ctl := s.control(r)
 	first := query.Before.IsZero()
-	exhausted := v.display == displayQueued
-	for scans := 0; v.display != displayQueued; scans++ {
+	exhausted := false
+	deadline := s.now().Add(fillBudget)
+	for scans := 0; ; scans++ {
 		page, err := s.db.Runs(r.Context(), query)
 		if err != nil {
 			dbError(w, r, "runs", "", err)
@@ -991,6 +1063,10 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 			rows = append(rows, c.row(rec))
 		}
 		ctl.decorate(rows)
+		v.prepare(ctl, c, rows)
+		if ctl.unavailable(w, r) {
+			return
+		}
 		cut := -1
 		for i, row := range rows {
 			if kept, ok := v.keep(ctl, c, row); ok {
@@ -1021,7 +1097,11 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 			out.NextBefore, out.NextBeforeID = nil, nil
 			exhausted = true
 		}
-		if !v.folds() || cut >= 0 || exhausted || len(out.Runs) >= want || scans+1 >= fillScanPages {
+		if !v.folds() || cut >= 0 || exhausted || len(out.Runs) >= want {
+			break
+		}
+		if scans+1 >= fillScanPages || !s.now().Before(deadline) {
+			out.Partial = true // the page ends short, its cursor where the read stopped
 			break
 		}
 		query.Before, query.BeforeID = *out.NextBefore, ""
@@ -1029,26 +1109,49 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 			query.BeforeID = *out.NextBeforeID
 		}
 	}
+	queuedAll := true
+	if withQueued {
+		// The queued runs no trace names yet, merged by start: read from
+		// the request's own cursor, kept where they fall before the
+		// trace store's, counted exactly.
+		qq.Limit = want
+		queued, qTotal, err := s.ledger.Queued(r.Context(), ctl.sc, qq)
+		if err != nil {
+			ctl.fail(err)
+		}
+		rows := make([]runRow, 0, len(queued))
+		seen := map[string]bool{}
+		for _, row := range out.Runs {
+			seen[row.ID] = true
+		}
+		for _, lr := range queued {
+			if !seen[lr.ID] {
+				rows = append(rows, ctl.ledgerRow(lr))
+			}
+		}
+		if ctl.unavailable(w, r) {
+			return
+		}
+		before := len(out.Runs) + len(rows)
+		mergeQueued(&out, rows, want, query.Oldest, len(queued) == want)
+		queuedAll = len(queued) < want && len(out.Runs) == before
+		out.Total += qTotal
+	}
 	if v.folds() {
 		// The store counted its own match, before the fold: an upper
 		// bound, exact only when this answer holds every row there is.
-		out.TotalExact = first && exhausted
+		// (Without a fold both counts are exact as they stand.)
+		out.TotalExact = first && exhausted && queuedAll && out.NextBefore == nil
 		if out.TotalExact {
 			out.Total = len(out.Runs)
-		}
-	}
-	if first {
-		extra := s.queuedRows(r, ctl, query, v, out.Runs)
-		out.Total += len(extra)
-		if query.Oldest {
-			out.Runs = append(out.Runs, extra...)
-		} else if len(extra) > 0 {
-			out.Runs = append(extra, out.Runs...)
 		}
 	}
 	// The marks only on a page the request narrowed to a conversation.
 	if q.Get("public_id") != "" || q.Get("session") != "" {
 		out.TurnMarksCapped = s.turnMarks(r.Context(), out.Runs)
+	}
+	if ctl.unavailable(w, r) {
+		return
 	}
 	writeJSON(w, r, http.StatusOK, out)
 }
@@ -1280,9 +1383,12 @@ func limitParam(w http.ResponseWriter, r *http.Request, q map[string][]string) (
 func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 	det, err := s.db.Run(r.Context(), id)
 	if err != nil {
-		// A run the ledger admitted and no trace names yet (queued).
-		if s.serveLedgerRun(w, r, id) {
-			return
+		if errors.Is(err, obsdb.ErrNotFound) {
+			// A run the ledger admitted and no trace names yet (queued).
+			ctl := s.control(r)
+			if s.serveLedgerRun(w, r, ctl, id) || ctl.unavailable(w, r) {
+				return
+			}
 		}
 		dbError(w, r, "run", id, err)
 		return
@@ -1318,6 +1424,9 @@ func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 	s.runDecisions(r, det.RunRow, &page)
 	ctl.approvals(&page)
 	page.Summarizer = s.runSummarizer(r, det.RunRow)
+	if ctl.unavailable(w, r) {
+		return
+	}
 	writeJSON(w, r, http.StatusOK, page)
 }
 
@@ -1802,6 +1911,7 @@ func (s *Server) serveRunSpans(w http.ResponseWriter, r *http.Request, id string
 		for i := range doc.Spans {
 			doc.Spans[i].RunID = id
 		}
+		redactSpans(r, doc.Spans)
 		writeJSON(w, r, http.StatusOK, doc)
 		return
 	}
@@ -1819,7 +1929,50 @@ func (s *Server) serveRunSpans(w http.ResponseWriter, r *http.Request, id string
 		dbError(w, r, "span tree of run", id, err)
 		return
 	}
+	redactSpans(r, doc.Spans)
 	writeJSON(w, r, http.StatusOK, doc)
+}
+
+// contentAttr reports whether a span attribute carries run content —
+// prompts, messages, tool arguments and results — which the spans
+// route (runs.read) serves only to a caller that may read content
+// (runs.content).
+func contentAttr(k string) bool {
+	if strings.HasPrefix(k, "weft.content.") || strings.HasPrefix(k, "gen_ai.prompt") || strings.HasPrefix(k, "gen_ai.completion") {
+		return true
+	}
+	switch k {
+	case "gen_ai.input.messages", "gen_ai.output.messages", "gen_ai.system_instructions",
+		"gen_ai.tool.call.arguments", "gen_ai.tool.call.result":
+		return true
+	}
+	return false
+}
+
+// redactSpans drops the content attributes of spans (contentAttr) when
+// the caller lacks runs.content. Every credential that reads runs today
+// reads content too (authz.Can), so this changes nothing on the wire
+// until restricted keys land.
+func redactSpans(r *http.Request, list []spanDTO) {
+	p, _, _ := authz.From(r.Context())
+	if authz.Can(p, authz.RunsContent).Allow {
+		return
+	}
+	strip := func(attrs map[string]any) map[string]any {
+		out := make(map[string]any, len(attrs))
+		for k, v := range attrs {
+			if !contentAttr(k) {
+				out[k] = v
+			}
+		}
+		return out
+	}
+	for i := range list {
+		list[i].Attrs = strip(list[i].Attrs)
+		for j := range list[i].Events {
+			list[i].Events[j].Attrs = strip(list[i].Events[j].Attrs)
+		}
+	}
 }
 
 // treeSpans reads one run's tree: its spans and its descendants', and
@@ -2071,6 +2224,11 @@ func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 		}
 		out.Sessions = append(out.Sessions, srow)
 	}
+	ctl := s.control(r)
+	ctl.sessionDisplays(out.Sessions)
+	if ctl.unavailable(w, r) {
+		return
+	}
 	if page.NextBefore != nil { // the database's own cursor, as in serveRuns
 		next := *page.NextBefore
 		out.NextBefore = &next
@@ -2153,9 +2311,16 @@ func (s *Server) serveSession(w http.ResponseWriter, r *http.Request, id string)
 	for _, rr := range det.Runs {
 		doc.Runs = append(doc.Runs, c.row(rr))
 	}
-	s.control(r).decorate(doc.Runs)
+	ctl := s.control(r)
+	ctl.decorate(doc.Runs)
+	one := []sessionRow{doc.sessionRow}
+	ctl.sessionDisplays(one)
+	doc.sessionRow = one[0]
 	numberDerivedTurns(doc.Runs)
 	s.delegatedSessions(r.Context(), id, &doc)
+	if ctl.unavailable(w, r) {
+		return
+	}
 	writeJSON(w, r, http.StatusOK, doc)
 }
 

@@ -135,7 +135,7 @@ func TestDemo(t *testing.T) {
 	var all []any
 	deadline := time.Now().Add(40 * time.Second)
 	for {
-		all = list(getAny(t, c, "/v1/runs?parent=*&limit=300"), "runs")
+		all = list(getAny(t, c, "/v1/runs?parent=*&chains=0&limit=300"), "runs")
 		unsettled := 0
 		for _, r := range all {
 			switch {
@@ -395,22 +395,27 @@ func TestDemo(t *testing.T) {
 	})
 
 	t.Run("queued", func(t *testing.T) {
-		// reports takes one run at a time: of its two, started together,
-		// one waited in the queue until the other was done.
-		var waits []time.Duration
+		// reports takes one run at a time: of its two, admitted
+		// together, one waited in the queue until the other was done —
+		// the order, not a time (a loaded machine stretches every wait).
+		type status struct {
+			ID         string    `json:"id"`
+			CreatedAt  time.Time `json:"created_at"`
+			StartedAt  time.Time `json:"started_at"`
+			FinishedAt time.Time `json:"finished_at"`
+		}
+		var runs []status
 		for _, r := range byAgent(chains, "reports") {
-			var st struct {
-				CreatedAt time.Time `json:"created_at"`
-				StartedAt time.Time `json:"started_at"`
-			}
+			var st status
 			if err := c.get(ctx, "/v1/runs/"+str(r, "id")+"/status", &st); err != nil {
 				t.Fatal(err)
 			}
-			waits = append(waits, st.StartedAt.Sub(st.CreatedAt))
+			runs = append(runs, st)
 		}
-		slices.Sort(waits)
-		if len(waits) != 2 || waits[0] > 500*time.Millisecond || waits[1] < time.Second {
-			t.Errorf("the reports runs waited %v in the queue, want one at once and one for over a second", waits)
+		slices.SortFunc(runs, func(a, b status) int { return a.StartedAt.Compare(b.StartedAt) })
+		if len(runs) != 2 || runs[0].FinishedAt.IsZero() || runs[1].StartedAt.Before(runs[0].FinishedAt) ||
+			!runs[1].CreatedAt.Before(runs[0].FinishedAt) {
+			t.Errorf("the reports runs = %+v, want the second admitted before the first ended and started after it", runs)
 		}
 	})
 
@@ -676,7 +681,10 @@ func TestDemo(t *testing.T) {
 				t.Errorf("skipped turn = %v", sk)
 			}
 		}
-		if reasons["resumed"] != 2 || reasons["steered"]+reasons["deferred"] != 1 || reasons["not_recorded"] != 0 {
+		// The steer is delivered: it is sent while the turn's tool call is
+		// held open, so the drain after that tool batch always takes it
+		// (the steered turn's reply above is the steer's answer).
+		if reasons["resumed"] != 2 || reasons["steered"] != 1 || reasons["deferred"] != 0 || reasons["not_recorded"] != 0 {
 			t.Errorf("skipped turns = %v", at(conv, "skipped_turns"))
 		}
 		for i, turn := range turns {
@@ -790,7 +798,7 @@ func TestDemo(t *testing.T) {
 			len(list(del, "run_ids")) != 3 || at(del, "ledger_runs") != 3.0 || at(del, "approvals") != 2.0 {
 			t.Fatalf("deleting the chain by its last run: %v %v", del, err)
 		}
-		for _, r := range list(getAny(t, c, "/v1/runs?parent=*&limit=300"), "runs") {
+		for _, r := range list(getAny(t, c, "/v1/runs?parent=*&chains=0&limit=300"), "runs") {
 			if slices.Contains(list(del, "run_ids"), at(r, "id")) {
 				t.Errorf("run %v is still listed after the delete", at(r, "id"))
 			}

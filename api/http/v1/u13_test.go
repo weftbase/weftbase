@@ -20,7 +20,7 @@ func TestResumeLinkFixtures(t *testing.T) {
 	h := srv.Handler()
 	ingestFile(t, h, "/weftbase/otlp/v1/traces", "../../../obsdb/testdata/contract/resumed/traces.json")
 	ingestFile(t, h, "/weftbase/otlp/v1/logs", "../../../obsdb/testdata/contract/resumed/logs.json")
-	_, _, runs := get(t, h, "/weftbase/v1/runs")
+	_, _, runs := get(t, h, "/weftbase/v1/runs?chains=0") // every run as it is: the parked run and its resume
 	var list struct {
 		Runs []struct {
 			ID          string            `json:"id"`
@@ -57,7 +57,7 @@ func TestResumeLinkFixtures(t *testing.T) {
 	h2 := srv2.Handler()
 	ingestFile(t, h2, "/weftbase/otlp/v1/traces", "../../../obsdb/testdata/contract/approval_denied/traces.json")
 	ingestFile(t, h2, "/weftbase/otlp/v1/logs", "../../../obsdb/testdata/contract/approval_denied/logs.json")
-	_, _, runs2 := get(t, h2, "/weftbase/v1/runs")
+	_, _, runs2 := get(t, h2, "/weftbase/v1/runs?chains=0")
 	var list2 struct {
 		Runs []struct {
 			ID     string `json:"id"`

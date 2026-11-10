@@ -339,7 +339,8 @@ func TestStatsGoldensClickHouse(t *testing.T) {
 	}
 	h := Handler(DB(db))
 	for _, by := range []string{"agent", "model", "tool", "error_type", "step", "total"} {
-		code, _, body := get(t, h, "/weftbase/v1/stats?by="+by+"&"+statsWindow)
+		// parent=*, as the SQLite twin asks: the goldens are of every run.
+		code, _, body := get(t, h, "/weftbase/v1/stats?by="+by+"&parent=*&"+statsWindow)
 		if code != http.StatusOK {
 			t.Fatalf("stats?by=%s on ClickHouse: %d %s", by, code, body)
 		}

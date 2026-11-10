@@ -11,6 +11,7 @@ import (
 	"github.com/weftbase/weft/core/wefttest"
 
 	"github.com/weftbase/weftbase/client/wire"
+	"github.com/weftbase/weftbase/events"
 	"github.com/weftbase/weftbase/registry"
 	"github.com/weftbase/weftbase/sessions"
 	"github.com/weftbase/weftbase/tenant"
@@ -74,8 +75,19 @@ func TestApprovalExpiryEndToEnd(t *testing.T) {
 	if res.Status != sessions.StatusSucceeded || refunded.Load() != 0 {
 		t.Fatalf("the expiry's resume = %+v (refunded %d)", res, refunded.Load())
 	}
-	if got := strings.Join(runEvents(t, app, id), ","); got != "run.queued,run.started,run.parked,approval.expired" {
-		t.Errorf("events = %s", got)
+	if got := strings.Join(runEvents(t, app, id), ","); got != "run.queued,run.started,run.parked" {
+		t.Errorf("run events = %s", got)
+	}
+	// The expiry is the approval's own event, one per approval.
+	sel := events.ForScope(tenant.Default(), false)
+	sel.ResourceKind = "approval"
+	evs, err := app.Events().List(context.Background(), sel, 0, 100)
+	var types []string
+	for _, e := range evs {
+		types = append(types, e.Type)
+	}
+	if err != nil || strings.Join(types, ",") != "approval.requested,approval.expired" {
+		t.Errorf("approval events = %v (%v)", types, err)
 	}
 }
 

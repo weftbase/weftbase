@@ -103,10 +103,9 @@ func TestParkedLocalRunSurvivesANewBuild(t *testing.T) {
 
 	// Node 2 serves the API only: what it admits waits in the queue.
 	app, ts, stop = startApp(t, dir, Roles(RoleAPI))
-	code, res := postJSON(t, ts.URL+"/v1/runs/"+parkedID+"/resume",
-		map[string]any{"decisions": []map[string]any{{"call_id": parked.Pending[0].CallID, "decision": "approve"}}})
-	if code != 202 || res["agent_version"] != verA || res["resolved_via"] != registry.ViaPin {
-		t.Fatalf("resume: %d %v", code, res)
+	res := decide(t, ts.URL, parkedID, "approve")
+	if agv(res) != verA || res["resolved_via"] != registry.ViaPin {
+		t.Fatalf("resume: %v", res)
 	}
 	resID := res["id"].(string)
 	_, hello := postJSON(t, ts.URL+"/v1/runs", map[string]any{"agent": "refunds", "input": map[string]any{"prompt": "hello"}})
@@ -144,12 +143,11 @@ func TestParkedLocalRunSurvivesANewBuild(t *testing.T) {
 
 	// A new run takes prod: B's child.
 	code, fresh := postJSON(t, ts.URL+"/v1/runs", map[string]any{"agent": "refunds", "input": map[string]any{"prompt": "refund 7"}})
-	if code != 202 || fresh["agent_version"] != verB || fresh["resolved_via"] != "label:prod" {
+	if code != 202 || agv(fresh) != verB || fresh["resolved_via"] != "label:prod" {
 		t.Fatalf("new run: %d %v", code, fresh)
 	}
 	p7 := waitRun(t, app, fresh["id"].(string), sessions.StatusParked)
-	_, r7 := postJSON(t, ts.URL+"/v1/runs/"+p7.ID+"/resume",
-		map[string]any{"decisions": []map[string]any{{"call_id": p7.Pending[0].CallID, "decision": "approve"}}})
+	r7 := decide(t, ts.URL, p7.ID, "approve")
 	if d := waitRun(t, app, r7["id"].(string), sessions.StatusSucceeded, sessions.StatusFailed); d.Status != sessions.StatusSucceeded || d.AgentVersion != verB {
 		t.Fatalf("B's resume = %+v", d)
 	}
@@ -198,7 +196,7 @@ func TestOneExecutorPathForEveryPlacement(t *testing.T) {
 	if code, _ := postJSON(t, ts.URL+"/v1/runs/"+id+"/cancel", map[string]any{}); code != 202 {
 		t.Fatalf("cancel a local run: %d", code)
 	}
-	if r := waitRun(t, app, id, sessions.StatusCanceled, sessions.StatusSucceeded); r.Status == sessions.StatusCanceled && r.CancelCause != wire.CauseUser {
+	if r := waitRun(t, app, id, sessions.StatusCancelled, sessions.StatusSucceeded); r.Status == sessions.StatusCancelled && r.CancelCause != wire.CauseUser {
 		t.Fatalf("canceled = %+v", r)
 	}
 	// A crash ends the child's run worker_lost and writes

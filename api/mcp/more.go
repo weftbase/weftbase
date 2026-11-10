@@ -147,7 +147,7 @@ func (m *mcpReader) live(ctx context.Context, _ *sdk.CallToolRequest, in mcpLive
 	q := url.Values{"status": {"running"}, "all": {"1"}}
 	setStr(q, "agent", in.Agent)
 	setInt(q, "limit", int64(in.Limit))
-	b, err := m.get(ctx, "/v1/runs", q)
+	b, err := m.get(ctx, "/v1/runs", rawRuns(q))
 	if err != nil {
 		return nil, nil, err
 	}

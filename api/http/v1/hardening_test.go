@@ -290,8 +290,10 @@ func TestRunsCursorSurvivesATiedPage(t *testing.T) {
 		write("r_tie_"+id, "s_tie_"+id, at)
 	}
 	h := Handler(DB(db))
-	for _, list := range []string{"runs", "sessions"} {
-		_, _, body := get(t, h, "/weftbase/v1/"+list+"?limit=2")
+	// The store's own page (chains=0: no fold, which would cut the page
+	// at limit and resume inside the tie by (started, id) instead).
+	for _, list := range []string{"runs?chains=0&", "sessions?"} {
+		_, _, body := get(t, h, "/weftbase/v1/"+list+"limit=2")
 		var page struct {
 			Runs       []json.RawMessage `json:"runs"`
 			Sessions   []json.RawMessage `json:"sessions"`
@@ -306,7 +308,7 @@ func TestRunsCursorSurvivesATiedPage(t *testing.T) {
 		if page.NextBefore == nil {
 			t.Fatalf("%s: next_before is null on a page with an older row behind it: %s", list, body)
 		}
-		_, _, next := get(t, h, "/weftbase/v1/"+list+"?limit=2&before="+page.NextBefore.Format(time.RFC3339Nano))
+		_, _, next := get(t, h, "/weftbase/v1/"+list+"limit=2&before="+page.NextBefore.Format(time.RFC3339Nano))
 		if !strings.Contains(next, "_old") {
 			t.Errorf("%s: the page after the cursor lacks the older row: %s", list, next)
 		}

@@ -93,7 +93,10 @@ paths:
         use (it slides: a request more than an hour after the last
         renewal renews it and sets the cookie again), at most 30 days
         from the sign-in. The link token is printed by `weftbase dev`
-        and `weftbase signin` (`#signin=<token>`) and is spent once.
+        and `weftbase signin` (`#signin=<token>`) and is spent once. A
+        link a signed-in session minted joins that session's family:
+        the session it is traded for keeps the family's 30-day cap and
+        ends with the family. Audited (`console.session_created`).
       x-weftbase-action: public
       security: []
       requestBody:
@@ -113,6 +116,30 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: endAllSessions
+      summary: End every Console session of the project and env
+      description: |
+        Every Console session ends, and every unused sign-in link with
+        them (a leaked cookie or link, an operator leaving): `weftbase
+        signout --all`. Audited (`console.session_ended`, reason
+        end_all). A caller signed in with a cookie ends its own session
+        too; its cookie is cleared.
+      x-weftbase-action: keys.manage
+      parameters:
+        - $ref: "#/components/parameters/CSRF"
+      responses:
+        "200":
+          description: The sessions ended.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessions_ended]
+                properties:
+                  sessions_ended: { type: integer }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
   /v1/auth/links:
     post:
       operationId: createSignInLink
@@ -121,7 +148,8 @@ paths:
         For a caller that holds a secret key, or is signed in already
         (`weftbase signin` uses it). The link is
         `<origin>/#signin=<token>`, valid once, for 15 minutes; origin
-        defaults to this request's scheme and Host. Audited
+        defaults to this request's scheme and Host. Minted by a
+        signed-in session, the link joins its family. Audited
         (`console.link_created`).
       x-weftbase-action: auth.link
       parameters:
@@ -152,6 +180,9 @@ paths:
     delete:
       operationId: signOut
       summary: End the Console session the cookie names
+      description: >-
+        Ends the session with its family (the sessions signed in with
+        links it minted, and theirs). Audited (`console.session_ended`).
       x-weftbase-action: auth.session
       security:
         - session: []
@@ -305,6 +336,19 @@ paths:
         error, since, until, min_tokens, min_cost, sort or offset it is
         the search over runs (SearchPage: offset-paged, facets).
         Run metadata filters are `tag.<k>=<v>` (any key) and `flow=`.
+
+        A row is one logical run by default: a park and its resumes are
+        one row, at the chain's first run, carrying `chain` (chains=0
+        lists every run as it is). The list merges the ledger's queued
+        runs no trace names yet (`ledger_only`) by start time, under the
+        same cursor; `total` counts the trace store's match plus those
+        queued runs — an upper bound unless `total_exact`. A page the
+        read's budget cut is `partial`.
+
+        Reads of the trace store under a tenant's key are not
+        tenant-scoped in v0.1.0 (the ledger's fields and the queued rows
+        are): see the CHANGELOG. A control store that cannot be read is
+        503 unavailable, never a page that guesses.
       x-weftbase-action: runs.read
       parameters:
         - { name: agent, in: query, schema: { type: string } }
@@ -314,29 +358,29 @@ paths:
           description: >-
             The one word a row reads (its display_status), from the
             trace store and the run ledger: queued rows come from the
-            ledger alone. Not with status. Means the same in the list
-            and in the search (q, since, until, sort, …). A page is
-            filled: the store is read until limit rows are kept. total
-            counts the store's match before the fold (an upper bound);
-            total_exact says when it is the exact count.
+            ledger alone (paged by created_at, counted exactly; a queued
+            resume reads as its chain's row). Not with status. Means the
+            same in the list and in the search (q, since, until, sort, …).
+            A page is filled: the store is read until limit rows are
+            kept. total counts the store's match before the fold (an
+            upper bound); total_exact says when it is the exact count.
           schema: { type: string, enum: [queued, running, waiting, succeeded, failed, cancelled, interrupted] }
         - name: chains
           in: query
           description: >-
-            1: one row per logical run. A resume is folded into the run
-            it continues, whose row carries chain {runs[], display_status,
-            stopped_by?, error_type?, cancel_cause?, err?, started,
-            finished, duration_ms, waiting_ms, steps, usage, cost_usd,
-            cost_known, waits[{run, resumed_by?, from, to, approvals[],
-            decided_by[]}]} and the chain's display_status.
-          schema: { type: string, enum: ["1"] }
+            Logical runs or every run. 1 (the default): one row per
+            logical run — a resume is folded into the run it continues,
+            whose row carries chain and the chain's display_status. 0:
+            every run as it is, a resume a row of its own. An id_prefix
+            lookup and a run's children (parent=<id>) default to 0.
+          schema: { type: string, enum: ["0", "1", "false", "true"], default: "1" }
         - name: approvals
           in: query
           description: >-
-            With chains=1: only logical runs whose approvals read
-            pending, expired (one lapsed with nobody deciding: the node
-            denied the call and resumed the run), denied or approved
-            (a row's approvals_outcome).
+            Only logical runs whose approvals read pending, expired (one
+            lapsed with nobody deciding: the node denied the call and
+            resumed the run), denied or approved (a row's
+            approvals_outcome). Not with chains=0.
           schema: { type: string, enum: [pending, expired, denied, approved] }
         - { name: session, in: query, schema: { type: string } }
         - { name: public_id, in: query, schema: { type: string } }
@@ -379,6 +423,7 @@ paths:
                   - $ref: "#/components/schemas/SearchPage"
         "400": { $ref: "#/components/responses/Error" }
         "501": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
     post:
       operationId: admitRun
       summary: Start a run (queued on the version its selector resolves)
@@ -388,11 +433,16 @@ paths:
         with its agent_version and resolved_via, enqueues it and emits
         run.queued, in one transaction. The run then goes to a worker
         serving that version. With session_id the run is that session's
-        next turn: the ledger stamps weft.session.id and weft.turn on
+        next turn: the ledger stamps weft.session.id and weft.turn (one
+        more than the highest turn the ledger or the trace store holds
+        of the session, so a deleted turn's number is never reused) on
         its metadata, and a caller that sends only input.prompt gets
         the conversation so far put before it (what the session's
-        newest run saw and said). 409 session_busy while that run has
-        not ended.
+        newest run saw and said). 409 session_busy while a run of the
+        session is queued, running or waiting on a person (checked in
+        the admitting transaction); 409 session_settling while the
+        newest turn has ended but its trace has not all arrived (retry);
+        503 unavailable when a store cannot be read.
       x-weftbase-action: runs.create
       parameters:
         - $ref: "#/components/parameters/CSRF"
@@ -411,6 +461,7 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "501": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /v1/runs/stream:
     get:
       operationId: streamRuns
@@ -444,15 +495,19 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/RunPage" }
         "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
     delete:
       operationId: deleteRun
       summary: Delete the whole logical run
       description: >-
         Every run of the run's chain (a parked run and what resumed
         it), their subagent children, the ledger rows and the approval
-        records; one audited run.deleted event. 409 run_active while a
-        run of the chain is queued, running or waiting on a person:
-        cancel it first.
+        records. The ledger goes first, in one transaction that refuses
+        (409 run_active: cancel it first) while a run of the chain is
+        queued, running or waiting on a person and writes one audited
+        run.deleted (a run only the trace store knows is audited too);
+        then the trace store's rows. A retry after a trace-store failure
+        finishes the delete. A run another tenant holds is 404.
       x-weftbase-action: runs.delete
       parameters:
         - $ref: "#/components/parameters/CSRF"
@@ -464,6 +519,7 @@ paths:
               schema: { $ref: "#/components/schemas/DeleteResult" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /v1/runs/{id}/status:
     get:
       operationId: getRunStatus
@@ -484,9 +540,12 @@ paths:
       operationId: cancelRun
       summary: Cancel a run (cause user)
       description: |
-        A queued or parked run ends canceled at once; a running run is
-        marked and the cancel goes to its worker, which reports the end.
-        A finished run, or a parked run that was resumed, is 409.
+        A queued or parked run ends cancelled at once (a parked run's
+        pending approvals with it, each writing approval.cancelled); a
+        running run is marked and the cancel goes to its worker, which
+        reports the end. 409 already_finished for a run that has ended;
+        409 already_resumed for a parked run that was resumed (cancel
+        the run that resumed it).
       x-weftbase-action: runs.cancel
       parameters:
         - $ref: "#/components/parameters/RunID"
@@ -500,7 +559,7 @@ paths:
                 reason: { type: string }
       responses:
         "202":
-          description: Canceled, or the cancel is on its way.
+          description: Cancelled, or the cancel is on its way.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/LedgerRun" }
@@ -516,8 +575,8 @@ paths:
         its next drain point: after a step's tool batch, or at a final
         step, which then takes one more step. They are never drained when
         the run parks or a StopWhen ends it. Writes run.steered. A run
-        that is not running is 409; a message that is not role user is
-        400 invalid_steer.
+        that is not running is 409 not_running; a message that is not
+        role user is 400 invalid_steer.
       x-weftbase-action: runs.steer
       parameters:
         - $ref: "#/components/parameters/RunID"
@@ -545,40 +604,6 @@ paths:
                 properties:
                   run_id: { type: string }
                   steered: { type: integer }
-        "400": { $ref: "#/components/responses/Error" }
-        "404": { $ref: "#/components/responses/Error" }
-        "409": { $ref: "#/components/responses/Error" }
-        "501": { $ref: "#/components/responses/Error" }
-  /v1/runs/{id}/resume:
-    post:
-      operationId: resumeRun
-      summary: Resume a parked run on its pinned version, with decisions
-      x-weftbase-action: runs.create
-      parameters:
-        - $ref: "#/components/parameters/RunID"
-        - $ref: "#/components/parameters/CSRF"
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                decisions:
-                  type: array
-                  items:
-                    type: object
-                    required: [call_id, decision]
-                    properties:
-                      call_id: { type: string }
-                      decision: { type: string, enum: [approve, deny, resolve] }
-                      reason: { type: string }
-                      content: { type: string }
-      responses:
-        "202":
-          description: The new run (resume_of the parked one), queued.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/LedgerRun" }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
@@ -737,8 +762,13 @@ paths:
         - { name: before_id, in: query, schema: { type: string } }
         - $ref: "#/components/parameters/Limit"
       responses:
-        "200": { $ref: "#/components/responses/Loose" }
+        "200":
+          description: A page of sessions.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionsPage" }
         "400": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /v1/sessions/{id}:
     parameters:
       - $ref: "#/components/parameters/SessionID"
@@ -747,15 +777,22 @@ paths:
       summary: One session and its turns
       x-weftbase-action: sessions.read
       responses:
-        "200": { $ref: "#/components/responses/Loose" }
+        "200":
+          description: The session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionDoc" }
         "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
     delete:
       operationId: deleteSession
       summary: Delete a session with its runs (never the app's conversation store)
       description: >-
         The session's trace rows, and its runs' ledger rows and approval
-        records. 409 run_active while one of its runs is queued, running
-        or waiting on a person.
+        records (the queued runs no trace names yet included). The
+        ledger goes first, in one transaction: 409 run_active while one
+        of its runs is queued, running or waiting on a person, else one
+        audited session.deleted; then the trace store's rows.
       x-weftbase-action: sessions.write
       parameters:
         - $ref: "#/components/parameters/CSRF"
@@ -1045,6 +1082,10 @@ paths:
     get:
       operationId: listApprovals
       summary: The calls runs parked on, pending first, then decided (newest decision first)
+      description: >-
+        A project-level credential (an operator, the Local principal, a
+        project key) reads every tenant's approvals, as it reads their
+        events; a tenant's key its own.
       x-weftbase-action: approvals.read
       parameters:
         - name: status
@@ -1092,9 +1133,10 @@ paths:
       operationId: decideApproval
       summary: Approve, deny or resolve a pending approval, bound to its arguments
       description: >-
-        The run resumes (as a new run on its pinned version, resumed_by)
-        once every approval of it is decided; until then it stays
-        parked. 409 args_changed when args_sha256 is not the approval's;
+        The one way a parked run resumes (besides the node's own
+        approval expiry): the run resumes (as a new run on its pinned
+        version, resumed_by) once every approval of it is decided; until
+        then it stays parked. Writes approval.decided. 409 args_changed when args_sha256 is not the approval's;
         409 not_pending when it was decided otherwise, expired or was
         cancelled. The same decision again is a no-op (200). The decider
         (the Console operator, or the API key's id) is recorded as actor.
@@ -1146,9 +1188,14 @@ paths:
         - { name: limit, in: query, schema: { type: integer, minimum: 0, maximum: 100, default: 20 } }
         - { name: tail, in: query, description: "1: the newest page (the last limit turns), whatever offset says.", schema: { type: string, enum: ["1"] } }
       responses:
-        "200": { $ref: "#/components/responses/Loose" }
+        "200":
+          description: The conversation.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Conversation" }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     apiKey:
@@ -1297,7 +1344,7 @@ components:
         status: { type: string, enum: [pending, approved, denied, resolved, expired, cancelled] }
         requested_at: { type: string, format: date-time }
         outcome: { type: string, enum: [approve, deny, resolve], description: Set once decided (expired reads deny). }
-        reason: { type: string }
+        reason: { type: string, description: "The decider's reason; a cancelled approval's is its run's cancel cause (user, version_retired)." }
         content: { type: string }
         decided_at: { type: string, format: date-time }
         actor:
@@ -1334,21 +1381,34 @@ components:
               field: { type: string }
               from: {}
               to: {}
+    VersionRef:
+      type: object
+      description: >-
+        An AgentVersion as every document names it: run rows, ledger
+        rows, approvals, conversation turns and the events' data alike.
+        labels are the ones it holds now (an event's: when it was
+        written).
+      required: [id, number, labels]
+      properties:
+        id: { type: string, description: agv_… }
+        number: { type: integer, description: "numbered per agent from 1; 0 when the registry no longer holds it" }
+        labels: { type: array, items: { type: string } }
     LedgerRun:
       type: object
-      required: [id, tenant_id, agent, agent_version, resolved_via, status, usage, created_at]
+      required: [id, tenant_id, chain_id, agent, agent_version, resolved_via, status, usage, created_at]
       properties:
         id: { type: string }
         tenant_id: { type: string }
+        chain_id: { type: string, description: "The first run of the park-and-resume chain the run belongs to (its own id when it resumes nothing)." }
         agent: { type: string }
-        agent_version: { type: string }
+        agent_version: { $ref: "#/components/schemas/VersionRef" }
         resolved_via: { type: string, description: "label:<name> | latest | pin | migrate" }
-        status: { type: string, enum: [queued, running, parked, succeeded, failed, canceled] }
+        status: { type: string, enum: [queued, running, parked, succeeded, failed, cancelled], description: The ledger's word for the run. }
         input: { type: object, additionalProperties: true }
         metadata: { type: object, additionalProperties: { type: string } }
         resume_of: { type: string }
         resumed_by: { type: string }
-        migrated_to: { type: string, description: "the version a parked run past its maximum pin age resumes on" }
+        migrated_to: { type: string, description: "the version id (agv_…) a parked run past its maximum pin age resumes on" }
         pending:
           type: array
           items:
@@ -1469,11 +1529,90 @@ components:
         input_tokens: { type: integer }
         output_tokens: { type: integer }
       additionalProperties: true
+    Chain:
+      type: object
+      description: One logical run across parks — the parked run, the run that resumed it, and so on — on its first run's row.
+      required: [runs, display_status, approvals_expired, approvals_denied, approvals_approved, approvals_pending, started, finished, duration_ms, waiting_ms, steps, usage, cost_usd, cost_known, waits]
+      properties:
+        runs:
+          type: array
+          items:
+            type: object
+            required: [id, display_status, started, finished]
+            properties:
+              id: { type: string }
+              display_status: { $ref: "#/components/schemas/DisplayStatus" }
+              started: { type: string, format: date-time }
+              finished: { type: [string, "null"], format: date-time }
+        display_status: { $ref: "#/components/schemas/DisplayStatus" }
+        approvals_outcome: { type: string, enum: [pending, expired, denied, approved] }
+        approvals_expired: { type: integer }
+        approvals_denied: { type: integer }
+        approvals_approved: { type: integer }
+        approvals_pending: { type: integer }
+        stopped_by: { type: string }
+        error_type: { type: string }
+        cancel_cause: { type: string }
+        err: { type: string }
+        started: { type: string, format: date-time }
+        finished: { type: [string, "null"], format: date-time }
+        duration_ms: { type: integer, description: First start to last end (to now while it goes on). }
+        waiting_ms: { type: integer, description: The part of duration_ms spent waiting on a person. }
+        steps: { type: integer }
+        usage: { $ref: "#/components/schemas/Usage" }
+        cost_usd: { type: number }
+        cost_known: { type: boolean }
+        waits:
+          type: array
+          items: { $ref: "#/components/schemas/Wait" }
+    Wait:
+      type: object
+      description: One wait on a person, after run parked until resumed_by started (to null while it lasts).
+      required: [run, from, to, approvals, decided_by]
+      properties:
+        run: { type: string }
+        resumed_by: { type: string }
+        from: { type: string, format: date-time }
+        to: { type: [string, "null"], format: date-time }
+        approvals: { type: array, items: { $ref: "#/components/schemas/Approval" } }
+        decided_by:
+          type: array
+          items:
+            type: object
+            properties:
+              kind: { type: string }
+              id: { type: string }
+    DisplayStatus:
+      type: string
+      description: The one word a list draws for a run, a logical run or a session.
+      enum: [queued, running, waiting, succeeded, failed, cancelled, interrupted]
     RunRow:
       type: object
       additionalProperties: true
-      required: [id, parent_run_id, agent, started, status, steps, usage, cost_known]
+      description: >-
+        One run (or, on a list of logical runs, one chain at its first
+        run). status is always the trace store's word and is absent on a
+        ledger_only row; display_status is the word to draw (the
+        ledger's where it holds the run). Under a caller without
+        runs.content (restricted keys, later) prompt_preview and the
+        meta key weft.session.title are left out.
+      required: [display_status, id, parent_run_id, agent, started, steps, usage, cost_known]
       properties:
+        display_status: { $ref: "#/components/schemas/DisplayStatus" }
+        agent_version: { $ref: "#/components/schemas/VersionRef" }
+        resolved_via: { type: string, description: "label:<name> | latest | pin | migrate (a run the ledger admitted)" }
+        placement: { type: string, enum: [embedded, local, remote], description: Where the run's version executes (a run the ledger admitted). }
+        manifest_drift: { type: boolean, description: The manifest the run reported is not the one its AgentVersion registered. }
+        ledger_only: { type: boolean, description: "A run the trace store does not hold yet (queued): status is absent, the trace's fields empty." }
+        chain: { $ref: "#/components/schemas/Chain" }
+        approvals_outcome: { type: string, enum: [pending, expired, denied, approved], description: "With chain: what happened to the logical run's approvals, worst first." }
+        usage_partial: { type: boolean, description: The run is running and usage is what its finished steps reported so far. }
+        resumed_from: { type: string }
+        resumed_by: { type: string }
+        stopped_by: { type: string }
+        cancel_cause: { type: string }
+        error_type: { type: string }
+        settling: { type: boolean }
         id: { type: string }
         parent_run_id: { type: string }
         parent_call_id: { type: string }
@@ -1496,6 +1635,8 @@ components:
         finished: { type: [string, "null"], format: date-time }
         last_seen: { type: string, format: date-time }
         status: { $ref: "#/components/schemas/RunStatus" }
+        children_count: { type: integer }
+        children_failed: { type: integer }
         err: { type: string }
         steps: { type: integer }
         pending: { type: integer }
@@ -1515,21 +1656,24 @@ components:
         catalog_hash: { type: string }
         request_count: { type: integer }
         prompt_preview: { type: string }
-        children_count: { type: integer }
     RunsPage:
       type: object
-      required: [total, runs, next_before, next_before_id]
+      required: [total, total_exact, runs, next_before, next_before_id]
       properties:
-        total: { type: integer }
+        total: { type: integer, description: "The trace store's match plus the ledger's queued runs; an upper bound unless total_exact." }
+        total_exact: { type: boolean }
+        partial: { type: boolean, description: "The read's budget (store pages or time) cut the page before it held limit rows: it may be short; next_before reads on." }
         runs: { type: array, items: { $ref: "#/components/schemas/RunRow" } }
         next_before: { type: [string, "null"], format: date-time }
         next_before_id: { type: [string, "null"] }
         turn_marks_capped: { $ref: "#/components/schemas/Loose" }
     SearchPage:
       type: object
-      required: [total, runs, sort, next_offset]
+      required: [total, total_exact, runs, sort, next_offset]
       properties:
         total: { type: integer }
+        total_exact: { type: boolean }
+        partial: { type: boolean, description: "The read's budget cut the page, or the search reached its deepest offset (100000) with rows left: next_offset is then null." }
         runs: { type: array, items: { $ref: "#/components/schemas/RunRow" } }
         sort: { type: string, enum: [started, duration, tokens, cost] }
         next_offset: { type: [integer, "null"] }
@@ -1553,11 +1697,125 @@ components:
           additionalProperties: true
           properties:
             children: { type: array, items: { $ref: "#/components/schemas/RunRow" } }
+            children_total: { type: integer, description: Every run under this one, at any depth. }
+            children_total_truncated: { type: boolean }
+            approvals: { type: array, items: { $ref: "#/components/schemas/Approval" }, description: The ledger's approval records of the calls this run parked on. }
             holes: { type: array, items: { $ref: "#/components/schemas/Loose" } }
             compactions: { type: array, items: { $ref: "#/components/schemas/Loose" } }
             manifest_available: { type: boolean }
             log_warn: { type: integer }
             log_error: { type: integer }
+    SessionRow:
+      type: object
+      additionalProperties: true
+      description: >-
+        One session. status is the trace store's word for its newest
+        turn (a turn outcome); display_status the word to draw — the
+        ledger's where it holds a turn the trace store does not show yet
+        (queued, waiting on a person, or cancelled before it ran), else
+        the outcome's (parked reads waiting, resumed running, ended
+        cancelled).
+      required: [id, public_id, agent, turns, runs, first_seen, last_seen, status, display_status, usage, cost_known]
+      properties:
+        id: { type: string }
+        public_id: { type: string }
+        agent: { type: string }
+        turns: { type: integer, description: Turns as a person counts them (a resume continues its turn). }
+        runs: { type: integer }
+        first_seen: { type: string, format: date-time }
+        last_seen: { type: string, format: date-time }
+        status: { type: string, enum: [succeeded, failed, running, interrupted, cancelled, ended, parked, resumed] }
+        display_status: { $ref: "#/components/schemas/DisplayStatus" }
+        usage: { $ref: "#/components/schemas/Usage" }
+        title: { type: string }
+        first_prompt: { type: string }
+        outcomes: { type: array, items: { type: string }, description: Each turn's outcome, oldest first. }
+        cost_usd: { type: [number, "null"] }
+        cost_known: { type: boolean }
+    SessionsPage:
+      type: object
+      required: [total, sessions, next_before, next_before_id]
+      properties:
+        total: { type: integer }
+        sessions: { type: array, items: { $ref: "#/components/schemas/SessionRow" } }
+        next_before: { type: [string, "null"], format: date-time }
+        next_before_id: { type: [string, "null"] }
+    SessionDoc:
+      allOf:
+        - $ref: "#/components/schemas/SessionRow"
+        - type: object
+          additionalProperties: true
+          required: [runs, delegated, delegated_usage]
+          properties:
+            runs: { type: array, items: { $ref: "#/components/schemas/RunRow" } }
+            delegated: { type: array, items: { $ref: "#/components/schemas/SessionRow" } }
+            delegated_usage: { $ref: "#/components/schemas/Usage" }
+    Conversation:
+      type: object
+      additionalProperties: true
+      required: [session_id, agent, status, session, delegated, turns, skipped_turns, total_turns, offset, next_offset, session_marks]
+      properties:
+        session_id: { type: string }
+        public_id: { type: string }
+        agent: { type: string }
+        title: { type: string }
+        status: { type: string }
+        session: { $ref: "#/components/schemas/SessionRow" }
+        delegated: { type: array, items: { $ref: "#/components/schemas/SessionRow" } }
+        turns:
+          type: array
+          items: { $ref: "#/components/schemas/ConversationTurn" }
+        skipped_turns:
+          type: array
+          description: The turn numbers no turn of the page carries, each with why (a resume's, a steered or deferred message's, or none recorded).
+          items:
+            type: object
+            required: [turn, reason, note]
+            properties:
+              turn: { type: integer }
+              reason: { type: string, enum: [resumed, steered, deferred, dropped, not_recorded] }
+              into: { type: integer }
+              run_id: { type: string }
+              note: { type: string }
+        total_turns: { type: integer }
+        offset: { type: integer }
+        next_offset: { type: [integer, "null"] }
+        session_marks: { type: array, items: { $ref: "#/components/schemas/Loose" } }
+        marks_capped: { type: boolean }
+    ConversationTurn:
+      type: object
+      additionalProperties: true
+      required: [index, turn, run_id, runs, input, input_known, reply, display_status, started, finished, duration_ms, waiting_ms, model_calls, tool_calls, usage, cost_usd, cost_known, waits, marks]
+      properties:
+        index: { type: integer, description: "The turn's place in the conversation, from 1, without gaps (turn is weft's number)." }
+        turn: { type: integer }
+        run_id: { type: string }
+        runs: { type: array, items: { type: string }, description: The turn's chain (a park and its resumes are one turn). }
+        input: { type: string }
+        input_known: { type: boolean }
+        reply: { type: [string, "null"] }
+        display_status: { $ref: "#/components/schemas/DisplayStatus" }
+        approvals_outcome: { type: string, enum: [pending, expired, denied, approved] }
+        stopped_by: { type: string }
+        error_type: { type: string }
+        cancel_cause: { type: string }
+        err: { type: string }
+        ended_by: { type: string }
+        ended_by_turn: { type: integer }
+        ended_kind: { type: string, enum: [interrupt, rollback] }
+        off_path: { type: boolean }
+        started: { type: string, format: date-time }
+        finished: { type: [string, "null"], format: date-time }
+        duration_ms: { type: integer }
+        waiting_ms: { type: integer }
+        model_calls: { type: integer }
+        tool_calls: { type: integer }
+        usage: { $ref: "#/components/schemas/Usage" }
+        cost_usd: { type: [number, "null"] }
+        cost_known: { type: boolean }
+        agent_version: { $ref: "#/components/schemas/VersionRef" }
+        waits: { type: array, items: { $ref: "#/components/schemas/Wait" } }
+        marks: { type: array, items: { $ref: "#/components/schemas/Loose" } }
     DeleteResult:
       type: object
       required: [deleted, note]
@@ -1662,7 +1920,19 @@ components:
         project_id: { type: string }
         env: { type: string }
         tenant_id: { type: string }
-        type: { type: string, description: run.finished, key.minted, … (plan §6.5). }
+        type:
+          type: string
+          description: >-
+            run.queued, run.started, run.parked, run.finished, run.failed,
+            run.cancelled, run.steered, run.migrated, run.deleted (resource
+            run; data carries run_id, chain_run_id, agent, agent_version
+            {id, number, labels}, resolved_via, status, and session_id for
+            a session's run);
+            approval.requested, approval.decided, approval.expired,
+            approval.cancelled (resource approval, one per approval; data
+            carries approval_id, run_id, chain_run_id, call_id,
+            agent_version, tool, args_sha256, status); session.deleted;
+            key.minted, label.moved, … (plan §6.5).
         resource_kind: { type: string }
         resource_id: { type: string }
         actor:

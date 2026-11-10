@@ -230,6 +230,11 @@ type RunQuery struct {
 	// SessionID both apply): one read for a set of sessions — a reader
 	// prices a level of delegated sessions with one.
 	SessionIDs []string
+	// IDs keeps the runs whose id is one of these (nil any; an empty
+	// non-nil slice none): one read for a set of runs — a page resolves
+	// the other runs of its park-and-resume chains with one per link.
+	// Pair it with ParentRunID "*" to read children too.
+	IDs []string
 	// TurnBelow and TurnAbove keep the runs whose RunRow.Turn is below
 	// / above them (0 = no bound): with SessionID, a turn's neighbours —
 	// TurnBelow N, Limit 1 the newest-started turn before N, and the

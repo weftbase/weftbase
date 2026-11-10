@@ -122,6 +122,17 @@ func (c *Client) Get(ctx context.Context, path string, q url.Values) ([]byte, er
 // Post answers POST path with body as JSON (nil: no body) and returns
 // the response body; errors as Get's.
 func (c *Client) Post(ctx context.Context, path string, body any) ([]byte, error) {
+	return c.send(ctx, http.MethodPost, path, body)
+}
+
+// Delete answers DELETE path (DELETE /v1/runs/{id}, /v1/sessions/{id})
+// and returns the response body; errors as Get's.
+func (c *Client) Delete(ctx context.Context, path string) ([]byte, error) {
+	return c.send(ctx, http.MethodDelete, path, nil)
+}
+
+// send is Post and Delete: method path with body as JSON (nil: none).
+func (c *Client) send(ctx context.Context, method, path string, body any) ([]byte, error) {
 	var rd io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -130,11 +141,13 @@ func (c *Client) Post(ctx context.Context, path string, body any) ([]byte, error
 		}
 		rd = bytes.NewReader(b)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+path, rd)
+	req, err := http.NewRequestWithContext(ctx, method, c.base+path, rd)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	if rd != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
@@ -145,13 +158,13 @@ func (c *Client) Post(ctx context.Context, path string, body any) ([]byte, error
 	defer func() { _ = resp.Body.Close() }()
 	out, err := io.ReadAll(io.LimitReader(resp.Body, MaxBody))
 	if err != nil {
-		return nil, fmt.Errorf("POST %s: %w", path, err)
+		return nil, fmt.Errorf("%s %s: %w", method, path, err)
 	}
 	if resp.StatusCode/100 != 2 {
 		err := apiError(path, resp.StatusCode, out)
 		var se *StatusError
 		if errors.As(err, &se) {
-			se.Line = "POST" + strings.TrimPrefix(se.Line, "GET")
+			se.Line = method + strings.TrimPrefix(se.Line, "GET")
 		}
 		return nil, err
 	}

@@ -3,9 +3,7 @@ package v1
 import (
 	"errors"
 	"net/http"
-	"slices"
 
-	"github.com/weftbase/weftbase/authz"
 	"github.com/weftbase/weftbase/obsdb"
 	"github.com/weftbase/weftbase/sessions"
 )
@@ -42,96 +40,97 @@ type deleteDoc struct {
 // /v1/runs/ is the id). A later read is 404. A live stream following
 // the deleted run emits nothing more unless the app keeps writing to
 // it; a later write starts a new run row under the same id.
+//
+// The whole logical run goes: every run of its chain (a parked run and
+// what resumed it), their subagent children, the ledger rows and the
+// approval records. The ledger goes first, in one transaction that
+// refuses a run the platform still has in hand — queued, running,
+// waiting on a person (409 run_active: cancel first) — and writes the
+// audited run.deleted (a run only the trace store knows is audited
+// too); the trace store's rows after it. A retry of a delete the trace
+// store failed finds the ledger done and finishes.
 func (s *Server) serveDeleteRun(w http.ResponseWriter, r *http.Request, id string) {
-	// The whole logical run goes: every run of its chain (a parked run
-	// and what resumed it), their subagent children, the ledger rows
-	// and the approval records. A run the platform still has in hand —
-	// queued, running, waiting on a person — is refused: cancel first.
 	ctl := s.control(r)
 	cost := s.coster(r.Context())
 	of, ok := ctl.read(cost, id)
-	if !ok {
-		notFound(w, r, "no run "+id)
-		return
-	}
-	members := []runRow{of}
 	ids := []string{id}
-	if ch := ctl.chain(cost, of); ch != nil {
-		members, ids = members[:0], ids[:0]
-		for _, m := range ch.Runs {
-			ids = append(ids, m.ID)
-			if row, ok := ctl.read(cost, m.ID); ok {
-				members = append(members, row)
+	if ok {
+		if ch := ctl.chain(cost, of); ch != nil {
+			ids = ids[:0]
+			for _, m := range ch.Runs {
+				ids = append(ids, m.ID)
 			}
 		}
 	}
-	if !s.deletable(w, r, "run", members) {
+	if ctl.unavailable(w, r) {
+		return
+	}
+	if !ok || !s.owns(w, r, ctl, ids) {
+		if !ok {
+			notFound(w, r, "no run "+id)
+		}
 		return
 	}
 	doc := deleteDoc{Deleted: "run", RunID: id, RunIDs: ids, Note: deleteRunNote}
-	found := false
+	if ctl.controlled() {
+		runs, approvals, err := s.ledger.Delete(r.Context(), ctl.sc, actor(r), ids)
+		if !deleteRefused(w, r, err) {
+			return
+		}
+		doc.LedgerRuns, doc.Approvals = runs, approvals
+	}
 	for _, run := range ids {
-		switch err := s.db.DeleteRun(r.Context(), run); {
-		case err == nil:
-			found = true
-		case !errors.Is(err, obsdb.ErrNotFound):
+		if err := s.db.DeleteRun(r.Context(), run); err != nil && !errors.Is(err, obsdb.ErrNotFound) {
 			deleteError(w, r, "run", run, err)
 			return
 		}
 	}
-	if !s.deleteLedger(w, r, ids, &doc, found) {
-		return
-	}
 	writeJSON(w, r, http.StatusOK, doc)
 }
 
-// deletable refuses (409 run_active) when a run of rows is one the
-// ledger still has in hand. A run only the trace store knows is never
-// refused: nothing here runs it.
-func (s *Server) deletable(w http.ResponseWriter, r *http.Request, noun string, rows []runRow) bool {
-	for _, row := range rows {
-		if row.AgentVersion == nil {
-			continue
-		}
-		switch row.DisplayStatus {
-		case displayQueued, displayRunning, displayWaiting:
-			writeError(w, r, http.StatusConflict, "run_active", "run "+row.ID+" is "+row.DisplayStatus+
-				": cancel it (POST /v1/runs/{id}/cancel) before deleting the "+noun)
+// owns refuses (404, as for a run that does not exist) a delete that
+// names a run another tenant holds in the ledger: the trace store is
+// not tenant-scoped yet and cannot tell, the ledger can. A
+// project-level caller owns every tenant's runs.
+func (s *Server) owns(w http.ResponseWriter, r *http.Request, ctl *control, ids []string) bool {
+	if !ctl.controlled() || ctl.sc.ProjectLevel() {
+		return true
+	}
+	owners, err := s.ledger.Owners(r.Context(), ctl.sc, ids)
+	if err != nil {
+		ctl.fail(err)
+		ctl.unavailable(w, r)
+		return false
+	}
+	for _, id := range ids {
+		if t, ok := owners[id]; ok && t != ctl.sc.Tenant() {
+			notFound(w, r, "no run "+ids[0])
 			return false
 		}
 	}
 	return true
 }
 
-// deleteLedger removes the runs' ledger rows and approvals; false when
-// it answered (an error, or nothing anywhere to delete).
-func (s *Server) deleteLedger(w http.ResponseWriter, r *http.Request, ids []string, doc *deleteDoc, found bool) bool {
-	if s.ledger != nil {
-		if _, sc, _ := authz.From(r.Context()); !sc.IsZero() {
-			runs, approvals, err := s.ledger.Delete(r.Context(), sc, actor(r), ids)
-			switch {
-			case errors.Is(err, sessions.ErrActive):
-				writeError(w, r, http.StatusConflict, "run_active", err.Error())
-				return false
-			case err != nil:
-				controlError(w, r, err)
-				return false
-			}
-			doc.LedgerRuns, doc.Approvals = runs, approvals
-			found = found || runs > 0
-		}
+// deleteRefused answers a failed ledger delete; true when it did not
+// fail.
+func deleteRefused(w http.ResponseWriter, r *http.Request, err error) bool {
+	switch {
+	case err == nil:
+		return true
+	case errors.Is(err, sessions.ErrActive):
+		writeError(w, r, http.StatusConflict, "run_active", err.Error()+": cancel it (POST /v1/runs/{id}/cancel) first")
+	default:
+		writeError(w, r, http.StatusServiceUnavailable, "unavailable", "the control store could not delete: "+err.Error())
 	}
-	if !found {
-		notFound(w, r, "nothing to delete under "+doc.RunID+doc.SessionID)
-		return false
-	}
-	return true
+	return false
 }
 
+// serveDeleteSession answers DELETE /v1/sessions/{id}: every run of the
+// session, the queued ones no trace names yet included, ledger first
+// (one transaction: refused with 409 run_active while a run of it is in
+// hand, so no turn admitted meanwhile is left half-deleted; audited
+// session.deleted), then the trace store's rows.
 func (s *Server) serveDeleteSession(w http.ResponseWriter, r *http.Request, id string) {
-	// The session's runs go from the ledger too, with their approvals —
-	// the queued ones no trace names yet included; refused while one of
-	// them is still in hand.
 	ctl := s.control(r)
 	det, err := s.db.Session(r.Context(), id)
 	traced := err == nil
@@ -143,36 +142,27 @@ func (s *Server) serveDeleteSession(w http.ResponseWriter, r *http.Request, id s
 	for _, rr := range det.Runs {
 		ids = append(ids, rr.ID)
 	}
-	if s.ledger != nil && !ctl.sc.IsZero() {
-		more, err := s.ledger.SessionRuns(r.Context(), ctl.sc, id)
-		if err != nil {
-			controlError(w, r, err)
+	if !s.owns(w, r, ctl, ids) {
+		return
+	}
+	doc := deleteDoc{Deleted: "session", SessionID: id, Note: deleteSessionNote}
+	if ctl.controlled() {
+		all, runs, approvals, err := s.ledger.DeleteSession(r.Context(), ctl.sc, actor(r), id, ids)
+		if !deleteRefused(w, r, err) {
 			return
 		}
-		for _, run := range more {
-			if !slices.Contains(ids, run) {
-				ids = append(ids, run)
-			}
-		}
+		ids, doc.LedgerRuns, doc.Approvals = all, runs, approvals
 	}
 	if len(ids) == 0 {
 		notFound(w, r, "no session "+id)
 		return
 	}
-	for _, lr := range ctl.ledgerRuns(ids) {
-		if row := ctl.ledgerRow(lr); !s.deletable(w, r, "session", []runRow{row}) {
-			return
-		}
-	}
+	doc.RunIDs = ids
 	if traced {
-		if err := s.db.DeleteSession(r.Context(), id); err != nil {
+		if err := s.db.DeleteSession(r.Context(), id); err != nil && !errors.Is(err, obsdb.ErrNotFound) {
 			deleteError(w, r, "session", id, err)
 			return
 		}
-	}
-	doc := deleteDoc{Deleted: "session", SessionID: id, RunIDs: ids, Note: deleteSessionNote}
-	if !s.deleteLedger(w, r, ids, &doc, traced) {
-		return
 	}
 	writeJSON(w, r, http.StatusOK, doc)
 }
