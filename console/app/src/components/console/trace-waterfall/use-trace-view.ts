@@ -41,6 +41,12 @@ export interface TraceView {
   stats: TraceStats
   /** The run is still going and the view follows it. */
   live: boolean
+  /** Something ends at "now" (the run goes on, or a wait on a person is
+   * open): the view's clock ticks, and with it every open row, the axis
+   * and `stats.elapsed`. */
+  ticking: boolean
+  /** Time spent waiting on a person so far, open waits up to now. */
+  waitingMs: number
 }
 
 const TICK_MS = 200
@@ -59,8 +65,6 @@ function useNowWhile(on: boolean, start?: number): number {
 
 export function useTraceView(input: TraceInput): TraceView {
   const live = !!input.running
-  const ticking = useNowWhile(live, input.now)
-  const now = live ? ticking : input.now
   // The tree from the data alone; the clock is laid over it each tick
   // (withNow, linear in the rows).
   const structure = React.useMemo(
@@ -82,10 +86,22 @@ export function useTraceView(input: TraceInput): TraceView {
       input.running,
     ]
   )
+  // The clock ticks while anything ends at now: the run goes on, or it
+  // waits on a person (a parked run reports nothing, but its wait grows).
+  const ticking = live || structure.open.length > 0
+  const clock = useNowWhile(ticking, input.now)
+  const now = ticking ? clock : input.now
   const model = React.useMemo(
     () => withNow(structure, now ?? Date.now()),
     [structure, now]
   )
+  const waitingMs = React.useMemo(() => {
+    const end = now ?? Date.now()
+    return model.waits.reduce(
+      (n, w) => n + Math.max(0, (w.to ?? end) - w.from),
+      0
+    )
+  }, [model.waits, now])
   const scale = React.useMemo(
     () => makeScale(model.t0, model.t1, model.waits),
     [model.t0, model.t1, model.waits]
@@ -196,7 +212,7 @@ export function useTraceView(input: TraceInput): TraceView {
     [model, scale, at, atEnd]
   )
 
-  return { model, scale, playback, stats, live }
+  return { model, scale, playback, stats, live, ticking, waitingMs }
 }
 
 export { SPEEDS }

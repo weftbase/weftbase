@@ -504,6 +504,9 @@ function stripOf(data: RunData, view: TraceView): Stat[] {
     ...counters,
   ].filter(Boolean)
 
+  // An open wait is counted up to now (the server's figure is for waits
+  // that ended).
+  const waitingMs = view.ticking ? view.waitingMs : t.waitingMs
   const share = total > 0 ? (s.tokensIn + s.tokensOut) / total : 0
   // A run that is going: its row carries the usage and cost so far when
   // the server knows them. Until it does, the tokens are those of the
@@ -522,14 +525,16 @@ function stripOf(data: RunData, view: TraceView): Stat[] {
     {
       label: "Duration",
       value:
-        playing || view.live ? (
+        // While anything ends at now (running, or waiting on a person)
+        // the view's clock ticks: the figure follows it every tick.
+        playing || view.ticking ? (
           duration(s.elapsed)
         ) : (
           <StripClock chain={chain}>{(ms) => duration(ms)}</StripClock>
         ),
       hint:
-        t.waitingMs > 0 && !playing
-          ? `${duration(t.waitingMs)} waiting`
+        waitingMs > 0 && !playing
+          ? `${duration(waitingMs)} waiting`
           : chain.status === "waiting" && !playing
             ? "waiting on a person"
             : undefined,
