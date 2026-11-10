@@ -56,6 +56,7 @@ func newStack(t *testing.T, o stackOpts) *stack {
 	s := &stack{log: events.New(control), traces: traces}
 	s.keys = keys.New(control, s.log)
 	s.sessions = authz.NewSessions(control)
+	s.sessions.Audit(s.log)
 	if _, s.key, err = s.keys.Mint(ctx, tenant.Default(), keys.Secret, "test", events.System); err != nil {
 		t.Fatal(err)
 	}

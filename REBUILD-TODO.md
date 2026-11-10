@@ -149,12 +149,12 @@ Commits `d8ff2e34`, `68cef3ee`, `76b4a861` and the one after them.
 
 | Item | Status | Notes |
 |---|---|---|
-| weft v0.24.2 | done | both `go.mod` files require the published tags; `go.work` builds against `../weft` |
+| weft v0.24.2 | done | both `go.mod` files require the published tags; `go.work` no longer names `../weft` (CI and a fresh clone use v0.24.2 from the module proxy) |
 | the demo | done | `examples/demo` (`make demo`): five agents, both placements, scripted models only; a thread-backed session, retries, a fallback model, typed output, an MCP tool, a run that parks twice, an expiring approval, a queued run, manifest drift, stock OTLP traces; `TestDemo` asserts each over `/v1` |
 | local builds report to their node | done | the supervisor hands the child `WEFTBASE_URL` + `WEFTBASE_TOKEN` (a worker key it mints); the link secret is `WEFTBASE_WORKER_TOKEN`; `App.Serving(url)` |
 | approvals as a resource | done (first slice of P§10) | `approvals` table (migration `0004`), one record per parked call; list, get, decide (bound by `args_sha256`, actor recorded, `resolve` too), resume when all are decided, expiry per agent (`AgentApprovalExpiry`); events `approval.requested`, `approval.decided` with `chain_run_id` |
 | run rows say their state | done | `display_status`, `agent_version`, `resolved_via`, `placement`, `manifest_drift`, `approvals_outcome`, `usage_partial` (a running run's usage so far); queued runs listed from the ledger |
-| chains (a park and its resumes are one run) | done | `chains=1` on the list and the search (pages are filled; `total_exact`), `chain` on run detail, `spans?tree=1&chain=1`, `logs?chain=1` |
+| chains (a park and its resumes are one run) | done | one row per chain by default on the list and the search (`chains=0`: every run; pages are filled; `total_exact`), `chain` on run detail, `spans?tree=1&chain=1`, `logs?chain=1` |
 | delete | done | the whole logical run or session from both stores, audited; 409 `run_active` while in hand |
 | agent inventory | done | `/v1/agents?include=summary`, `/v1/agents/{name}`, versions diff, `/v1/tools`, per-version manifest drift |
 | stats | done | `by=total` (outcomes, approvals expired and denied, cost, durations, bucket timestamps), `buckets=`, `outcomes` on `by=agent`; agrees with the list for a window |
@@ -164,31 +164,47 @@ Commits `d8ff2e34`, `68cef3ee`, `76b4a861` and the one after them.
 
 ## Before the v0.1.0 tag
 
-Exact list, in the order they block.
+Exact list, in order; each step waits for the one before. Nothing is
+pushed or tagged without the user's explicit OK.
 
-1. **Tag the client module first** (two-phase release, as weft's):
-   `client/v0.1.0`, then in the root `go.mod` require
-   `github.com/weftbase/weftbase/client v0.1.0`, drop the placeholder
-   `replace` from `go.work`, `GOWORK=off go mod tidy`, and tag `v0.1.0`.
-   Until then `GOWORK=off go build ./...` at the root fails on the
-   placeholder (and only on it), and `go install …/cmd/weftbase@latest`
-   cannot work.
+1. **CI green on this branch's pull request.** The workflow runs on
+   every pull request and on pushes to `main`; nothing of this branch
+   has run in CI yet. Jobs: `test` (both modules, two Go versions),
+   `layering` (+ `client-deps`, `vocab`), `lint`, `clickhouse` (`make
+   clickhouse`: every DSN-gated package, `obsdb/...`, `api/http/v1`,
+   `observe/ingest`; a gated skip fails it), `gowork-off`, `offline`,
+   `console` (`make console-check`: typecheck, lint, tests, vocabulary,
+   formatting, budget, dist freshness). `examples/demo`'s test builds
+   two binaries and starts child processes: CI has not run it yet. Also
+   run `make stress` once by hand.
 2. **Rebuild and commit `console/dist`** from the final `console/app`
-   and run `make console-check` (the embedded Console is what the
-   binary serves; the Go gates do not check its freshness).
-3. **Run what these rounds did not**: the ClickHouse suite
-   (`WEFT_CLICKHOUSE_DSN=… go test -race ./obsdb/clickhouse/...`; one
-   stats clause changed there, untested), `make stress`, and CI:
-   nothing of this branch was pushed, so no workflow has run on it.
-   `examples/demo`'s test builds two binaries with the go tool and
-   starts child processes; CI has not seen it yet. (`make lint` is
-   clean; `make offline` caught a lost-wakeup race in the events hub's
-   pump, fixed in a4af1d88 with a regression test.)
-4. **weft**: no v0.24.3 is needed. The `thread/pool` CI failures were
-   three tests that assumed a scheduling order; the fix is tests and
-   comments only, on weft `main` (7059609a) with CI green. weftbase
-   stays on v0.24.2.
-5. **Set the date** on the `v0.1.0` heading of `CHANGELOG.md`.
+   (`make console-build`), then `make console-check` must pass.
+3. **Set the date** on the `v0.1.0` heading of `CHANGELOG.md`.
+4. **Tag the client module first** (two-phase release, as weft's):
+   `client/v0.1.0` on the commit that has the dated CHANGELOG.
+5. **Require it**: in the root `go.mod` require
+   `github.com/weftbase/weftbase/client v0.1.0`; drop the placeholder
+   `replace` from `go.work`; `make tidy` loses its placeholder logic
+   (it becomes a plain `GOWORK=off go mod tidy` in both modules) and
+   `make gowork-off` its `-replace` (a plain `GOWORK=off go build ./...
+   && go vet ./...`); `GOWORK=off go build ./... && go vet ./...` at
+   the root must pass with no replace anywhere. Update the README's
+   status line ("v0.1.0", no "not tagged yet") and its "Development"
+   paragraph (no placeholder). Commit.
+6. **Tag `v0.1.0`** on that commit.
+7. **Verify from outside**: in a clean directory (no `go.work`, empty
+   `GOFLAGS`), `go install github.com/weftbase/weftbase/cmd/weftbase@v0.1.0`
+   and `weftbase version`; and a fresh clone of the tag runs the README's
+   quick start (`go run ./examples/demo`; the committed `go.work`
+   names only `.` and `./client`, so nothing beside the clone is
+   needed; checked for this branch's tree on 2026-11-10 with the
+   placeholder still in place).
+
+weft: no v0.24.3 is needed. The `thread/pool` CI failures were three
+tests that assumed a scheduling order; the fix is tests and comments
+only, on weft `main` (7059609a) with CI green. weftbase stays on
+v0.24.2, and the workspace no longer builds against a weft checkout:
+CI and a fresh clone get v0.24.2 from the module proxy.
 
 Known and accepted for v0.1.0 (each is in `CHANGELOG.md`, "Not in
 v0.1.0", or below):

@@ -46,12 +46,22 @@ starts on a fresh data directory.
   (`App.Agent`). *Local*: an agent build, a Go binary that serves its
   agents with `client/worker`, run by the node as a supervised child
   process (`App.Local`, `weftbase serve --build`); it is restarted when
-  it crashes, and an older build stays available to the runs pinned to
-  it. A local build reports its traces and logs to its node with no
-  wiring: the supervisor hands it the node's URL and an ingest key.
+  it crashes (what it wrote before it exited, a finished run's last
+  answer included, is read before its other runs are marked lost), and
+  an older build stays available to the runs pinned to it. A local build reports its traces and logs to its node with no
+  wiring: the supervisor hands it the node's URL and an ingest key of
+  its own (a worker key named `build:<digest>`, revoked when the build
+  is retired and when the node stops). That key ingests only the
+  records and spans of the runs dispatched to its build and their
+  subagent children: a batch naming any other run is refused (403), and
+  the rows it writes carry the key's id (`weftbase.ingest.key` on the
+  resource). The child never inherits the node's own `WEFTBASE_URL` or
+  `WEFTBASE_TOKEN`.
 - **The run ledger**: `POST /v1/runs` resolves a version (a label, a
   pin, or the `prod` label then the newest), writes the run and
-  enqueues it in one transaction. Runs are dispatched at most once;
+  enqueues it in one transaction. A worker at an agent's `Concurrency`
+  takes no more of its runs until one ends, and the waiting runs start
+  in the order they were admitted. Runs are dispatched at most once;
   cancel, steer and resume go through the ledger; a run whose worker
   vanished is marked lost, never sent twice. `session_id` makes a run
   the next turn of a session.
@@ -73,8 +83,32 @@ starts on a fresh data directory.
   cost, tokens, sort), each row with its `display_status` (queued,
   running, waiting, succeeded, failed, cancelled, interrupted), its
   AgentVersion, how the version was chosen and its placement. A parked
-  run and the runs that resumed it are one logical run (`chains=1`):
-  one row, one timeline with the waits in it, one set of logs.
+  run and the runs that resumed it are one logical run, the list's and
+  the search's default (`chains=0` lists every run as it is): one row,
+  one timeline with the waits in it, one set of logs. Queued runs no
+  trace names yet are merged into the list by start under one cursor,
+  `limit` honoured and counted exactly; a chain whose resume is still
+  queued keeps its row. `status` is always the trace store's word
+  (absent on a queued `ledger_only` row), `display_status` the one to
+  draw; sessions carry a `display_status` too. A read cut by its budget
+  says `partial`. A control store that cannot be read answers 503
+  `unavailable` instead of guessing a run's state. A project-level
+  credential reads every tenant's ledger runs and approvals.
+- **Run control**: admit (`POST /v1/runs`, a session's next turn
+  refused with `session_busy` in the admitting transaction while the
+  previous one is queued, running or waiting, numbered past every turn
+  the session ever had), cancel, steer; a parked run resumes only
+  through its approvals (`POST /v1/approvals/{id}/decision`, bound to
+  the arguments the decider saw). Conflicts answer `already_finished`,
+  `already_resumed`, `not_parked`, `not_running`. One spelling,
+  `cancelled` (the event is `run.cancelled`), and one AgentVersion
+  shape, `{id, number, labels}`, everywhere; a session's run events
+  carry its `session_id`. A run cancelled while it waited on a person
+  keeps its wait and lasts until the cancel. Every approval
+  change writes its own `approval.*` event (`approval.cancelled` when
+  its run ends without resuming). Deleting a run or a session goes
+  through the ledger first, audited even for a run only the trace store
+  knows.
 - **A run**: steps, spans (with every subagent's, `tree=1`), events,
   transcript (as of any step), the model requests, the tool catalog, app
   logs, export (JSON, JSONL, OTLP), a two-run diff.
@@ -85,17 +119,33 @@ starts on a fresh data directory.
 - **Agents**: the inventory (`/v1/agents?include=summary`, an agent with
   its versions, what changed between two versions, `/v1/tools`).
 - **Statistics**: by agent, model, tool, error type or step, and one
-  series of runs by outcome with cost and durations (`by=total`).
+  series of runs by outcome with cost and durations (`by=total`). A
+  parked call (`weft.tool.pending`) is not counted as a tool call; on
+  SQLite the rollup is written at ingest, so that holds for spans
+  ingested by this release (a data directory of a pre-release build
+  keeps its older counts); ClickHouse reads it at query time.
 - **Streams** (Server-Sent Events): live runs and records
   (`/v1/runs/stream`, one run's, one session's), and the control
-  store's outbox (`/v1/events`), resumable.
+  store's outbox (`/v1/events`), resumable. A replay streams at the
+  reader's pace however long the outbox is (a replay longer than the
+  buffer used to never answer).
 - **OTLP ingest**: any OpenTelemetry app sends traces and logs to
   `/otlp/v1`. weft apps get runs, steps and transcripts; stock GenAI
   spans of other frameworks get a derived run.
 - **Auth**: API keys (`wb_sk_…` secret, `wb_wk_…` worker, `wb_pk_…`
   publishable), and for the Console a one-time sign-in link exchanged
   for an HttpOnly session cookie that lasts 12 hours from its last use.
-  `POST /v1/auth/links` mints a fresh link on a running node.
+  `POST /v1/auth/links` mints a fresh link on a running node. A link a
+  signed-in session mints belongs to that session's family: the session
+  it is traded for keeps the family's 30-day cap and ends at the
+  family's sign-out. `DELETE /v1/auth/sessions` (`weftbase signout
+  --all`) ends every Console session and unused link. Sign-in and
+  sign-out are audited (`console.session_created`,
+  `console.session_ended`) under the session's ref (`ses_…`, never its
+  id); ended sessions and links are pruned.
+- **CORS** is off unless `--allow-origin` (`AllowOrigins`) names
+  origins; a request without a credential (`Open`'s Local principal)
+  never gets CORS headers.
 
 ### The Console
 
@@ -113,7 +163,7 @@ data in it.
 
 `weftbase serve`, `dev` (the server alone, or the server and your app,
 restarted on a `.go` save), `signin` (a fresh Console sign-in link from
-a running server), `runs`, `open`, `export`, `doctor`, `mcp` (a
+a running server), `signout --all`, `runs`, `open`, `export`, `doctor`, `mcp` (a
 read-only MCP server over `/v1` for a coding agent), `vacuum`,
 `version`. See `docs/cli.md`.
 
@@ -137,6 +187,15 @@ model provider is called and no key is needed.
 - **Tenancy** beyond one project and its project tenant: no end-user
   tokens, no per-tenant keys or isolation tests, no roles (a secret key
   and a Console operator may do everything; a restricted key nothing).
+  **The trace store is not tenant-scoped**: a tenant's key reads every
+  tenant's traces, spans, logs and sessions (the ledger's fields, queued
+  runs and approvals are scoped; a delete of a run another tenant holds
+  in the ledger is refused). A project-level operator reads a tenant's
+  ledger runs but cancels or decides only its own tenant's.
+- **Run content behind `runs.content`**: the run lists' prompt preview
+  and session title, and the spans' content attributes, are redacted
+  for a caller without `runs.content`; until restricted keys land every
+  credential that reads runs has it.
 - **Approvals**: no quorum, no signed decisions forwarded to the
   worker, no policies or routing, no webhooks or hosted decision pages,
   no approvals stream of its own, no batch decide.

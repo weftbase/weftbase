@@ -83,9 +83,14 @@ func unsafe(method string) bool {
 // ── CORS (S4.6) ────────────────────────────────────────────────────
 
 // cors answers the API and ingest trees for a client served from
-// another origin. The allowed origin is echoed, never with
-// credentials: a key rides a header, and the session cookie is
-// SameSite=Strict, so a cross-origin page is never a cookie caller.
+// another origin, and only for the origins AllowOrigins names: with
+// none configured no CORS header is ever sent (a page on another origin
+// cannot read an answer, whoever it is). The allowed origin is echoed,
+// never with credentials: a key rides a header, and the session cookie
+// is SameSite=Strict, so a cross-origin page is never a cookie caller.
+// The Local principal never gets them either (wrap strips them once the
+// caller is known): a request with no credential at all must not be
+// readable by another origin's page, allowed or not.
 func (rt *Router) cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
@@ -112,23 +117,23 @@ func (rt *Router) cors(next http.Handler) http.Handler {
 	})
 }
 
-// originAllowed matches an origin against the configured list; with
-// none configured, localhost and 127.0.0.1 on any port, http or https.
+// stripCORS removes the CORS answer cors set (the Local principal's).
+func stripCORS(h http.Header) {
+	for _, k := range []string{"Access-Control-Allow-Origin", "Access-Control-Allow-Methods",
+		"Access-Control-Allow-Headers", "Access-Control-Expose-Headers"} {
+		h.Del(k)
+	}
+}
+
+// originAllowed matches an origin against the configured list ("*"
+// matches any); with none configured, nothing is allowed.
 func originAllowed(origins []string, origin string) bool {
-	if len(origins) > 0 {
-		for _, o := range origins {
-			if o == "*" || o == origin {
-				return true
-			}
+	for _, o := range origins {
+		if o == "*" || o == origin {
+			return true
 		}
-		return false
 	}
-	u, err := url.Parse(origin)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-		return false
-	}
-	host := u.Hostname()
-	return host == "localhost" || host == "127.0.0.1"
+	return false
 }
 
 // crossOriginWrite is the CSRF guard of the callers without a key: the

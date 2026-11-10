@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/weftbase/weftbase/authz"
 	"github.com/weftbase/weftbase/client/wire"
 	buildworker "github.com/weftbase/weftbase/client/worker"
 	"github.com/weftbase/weftbase/events"
@@ -104,7 +106,7 @@ func (a *App) Local(path string, opts ...LocalOption) ([]registry.Version, error
 		a.mu.Unlock()
 	}
 	ex, err := local.New(local.Config{Path: stored, Digest: digest, Args: c.args, Env: c.env, SocketDir: a.socketDir(),
-		Output: c.output, Logger: a.log, Telemetry: a.buildTelemetry})
+		Output: c.output, Logger: a.log, Telemetry: a.telemetryFor(digest)})
 	if err != nil {
 		return nil, fmt.Errorf("weftbase: %w", err)
 	}
@@ -133,44 +135,158 @@ func (a *App) Local(path string, opts ...LocalOption) ([]registry.Version, error
 			if err := old.ex.Retire(ctx, time.Now().Add(a.cfg.drainTimeout())); err != nil {
 				a.log.Warn("weftbase: retiring a build", "digest", old.ex.Digest(), "err", err)
 			}
+			// Retired and drained: its key goes (a start for a pinned
+			// run mints another).
+			a.revokeBuildKey(old.ex.Digest())
 		}()
 	}
 	return versions, nil
 }
 
-// buildKeyName names the ingest key local builds report with.
-const buildKeyName = "local-builds"
+// buildKeyPrefix names a build's ingest key: "build:" and its digest.
+const buildKeyPrefix = "build:"
+
+// buildKey is a build's ingest key, minted on first use.
+type buildKey struct{ id, secret string }
+
+// telemetryFor is a build's Telemetry (local.Config).
+func (a *App) telemetryFor(digest string) func() (string, string) {
+	return func() (string, string) { return a.buildTelemetry(digest) }
+}
 
 // buildTelemetry is where a local build's traces and logs go: this
-// node's URL (Serving) and a worker key, which may ingest and nothing
-// else of the API. The key is minted on first use and lives in memory
-// (the store keeps its hash only); the keys earlier starts of the node
-// minted are revoked then, so one is live at a time. A node that does
-// not ingest, or was never told its URL, hands out nothing: the build
-// runs, and reports wherever its own environment says.
-func (a *App) buildTelemetry() (url, key string) {
+// node's URL (Serving) and the build's own worker key, which may ingest
+// and nothing else of the API, and ingest only the records of the runs
+// dispatched to that build (buildGate). The key is minted at the
+// build's first start and lives in memory (the store keeps its hash
+// only); it is revoked when the build is retired (a later start of the
+// retired build mints another) and at Shutdown, and the keys earlier
+// starts of the node minted are revoked at New. A node that does not
+// ingest, or was never told its URL, hands out nothing: the build runs,
+// and reports nowhere (its own environment's WEFTBASE_URL and
+// WEFTBASE_TOKEN are never inherited).
+func (a *App) buildTelemetry(digest string) (url, key string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.url == "" || !a.roles.has(RoleIngest) || a.shutdown {
 		return "", ""
 	}
-	if a.buildKey == "" {
-		ctx, sc := context.Background(), tenant.Default()
-		if old, err := a.keys.List(ctx, sc); err == nil {
-			for _, k := range old {
-				if k.Name == buildKeyName && k.Kind == keys.Worker && k.RevokedAt == nil {
-					_ = a.keys.Revoke(ctx, sc, k.ID, events.System)
-				}
+	if k, ok := a.buildKeys[digest]; ok {
+		return a.url, k.secret
+	}
+	k, secret, err := a.keys.Mint(context.Background(), tenant.Default(), keys.Worker, buildKeyPrefix+digest, events.System)
+	if err != nil {
+		a.log.Warn("weftbase: no ingest key for a local build; its traces are not collected", "digest", digest, "err", err)
+		return "", ""
+	}
+	a.buildKeys[digest] = buildKey{id: k.ID, secret: secret}
+	return a.url, secret
+}
+
+// revokeBuildKey revokes digest's ingest key, if one is live.
+func (a *App) revokeBuildKey(digest string) {
+	a.mu.Lock()
+	k, ok := a.buildKeys[digest]
+	delete(a.buildKeys, digest)
+	a.mu.Unlock()
+	if ok {
+		if err := a.keys.Revoke(context.Background(), tenant.Default(), k.id, events.System); err != nil {
+			a.log.Warn("weftbase: revoking a build's ingest key", "digest", digest, "err", err)
+		}
+	}
+}
+
+// revokeBuildKeys revokes every build's ingest key this node minted
+// (Shutdown).
+func (a *App) revokeBuildKeys() {
+	a.mu.Lock()
+	ds := make([]string, 0, len(a.buildKeys))
+	for d := range a.buildKeys {
+		ds = append(ds, d)
+	}
+	a.mu.Unlock()
+	for _, d := range ds {
+		a.revokeBuildKey(d)
+	}
+}
+
+// revokeStaleBuildKeys revokes the build ingest keys earlier starts of
+// the node minted (and the single shared key of releases before them).
+func (a *App) revokeStaleBuildKeys(ctx context.Context) error {
+	ks, err := a.keys.List(ctx, tenant.Default())
+	if err != nil {
+		return err
+	}
+	for _, k := range ks {
+		if k.Kind == keys.Worker && k.RevokedAt == nil && (strings.HasPrefix(k.Name, buildKeyPrefix) || k.Name == "local-builds") {
+			if err := a.keys.Revoke(ctx, tenant.Default(), k.ID, events.System); err != nil {
+				return err
 			}
 		}
-		_, secret, err := a.keys.Mint(ctx, sc, keys.Worker, buildKeyName, events.System)
-		if err != nil {
-			a.log.Warn("weftbase: no ingest key for local builds; their traces are not collected", "err", err)
-			return "", ""
-		}
-		a.buildKey = secret
 	}
-	return a.url, a.buildKey
+	return nil
+}
+
+// buildGate is OTLP ingest's ownership check (observe/ingest.Gate): a
+// worker key writes only the runs dispatched to its build, and their
+// subagent children. A worker key that names no build (minted by an
+// operator) writes no run's records.
+type buildGate struct{ a *App }
+
+func (g buildGate) Restricted(r *http.Request) (string, bool) {
+	p, _, ok := authz.From(r.Context())
+	if !ok || p.Kind != authz.Key || p.KeyKind != keys.Worker {
+		return "", false
+	}
+	return p.ID, true
+}
+
+func (g buildGate) Refused(ctx context.Context, r *http.Request, runIDs []string) ([]string, error) {
+	p, sc, _ := authz.From(ctx)
+	digest, err := g.a.keyBuild(ctx, sc, p.ID)
+	if err != nil {
+		return nil, err
+	}
+	if digest == "" {
+		return runIDs, nil
+	}
+	owned, err := g.a.ledger.DispatchedToBuild(ctx, sc, digest, runIDs)
+	if err != nil {
+		return nil, err
+	}
+	var refused []string
+	for _, id := range runIDs {
+		if !owned[id] {
+			refused = append(refused, id)
+		}
+	}
+	return refused, nil
+}
+
+// keyBuild is the digest of the build a worker key was minted for
+// (empty: none).
+func (a *App) keyBuild(ctx context.Context, sc tenant.Scope, keyID string) (string, error) {
+	a.mu.Lock()
+	for d, k := range a.buildKeys {
+		if k.id == keyID {
+			a.mu.Unlock()
+			return d, nil
+		}
+	}
+	a.mu.Unlock()
+	ks, err := a.keys.List(ctx, sc)
+	if err != nil {
+		return "", err
+	}
+	for _, k := range ks {
+		if k.ID == keyID {
+			if d, ok := strings.CutPrefix(k.Name, buildKeyPrefix); ok {
+				return d, nil
+			}
+			return "", nil
+		}
+	}
+	return "", nil
 }
 
 func overlaps(a, b []string) bool {
@@ -250,7 +366,7 @@ func (a *App) restoreBuilds() error {
 			names = append(names, ag.Name)
 		}
 		ex, err := local.New(local.Config{Path: filepath.Join(a.buildsDir(), e.Name()), Digest: digest, Known: &reg,
-			SocketDir: a.socketDir(), Logger: a.log, Telemetry: a.buildTelemetry})
+			SocketDir: a.socketDir(), Logger: a.log, Telemetry: a.telemetryFor(digest)})
 		if err != nil {
 			a.log.Warn("weftbase: restoring a stored build", "digest", digest, "err", err)
 			continue

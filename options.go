@@ -110,8 +110,9 @@ func Base(path string) Option {
 // Title overrides the Console's page title.
 func Title(s string) Option { return func(c *config) { c.title = s } }
 
-// AllowOrigins are the CORS origins (default: localhost and 127.0.0.1
-// on any port) and, under Open, the extra Hosts the API answers.
+// AllowOrigins are the CORS origins (none by default: no CORS header
+// is sent) and, under Open, the extra Hosts the API answers. A request
+// with no credential (Open's Local principal) never gets CORS headers.
 func AllowOrigins(origins ...string) Option {
 	return func(c *config) { c.origins = append(c.origins, origins...) }
 }

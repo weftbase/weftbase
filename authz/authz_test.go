@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -157,7 +158,7 @@ func TestConsoleSessions(t *testing.T) {
 		t.Errorf("live session = %v", err)
 	}
 	// Sign-out ends it.
-	if err := f.sessions.End(ctx, id); err != nil {
+	if _, err := f.sessions.End(ctx, id, events.System); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := a.Authenticate(ctx, req); !errors.Is(err, ErrInvalid) {
@@ -237,7 +238,7 @@ func TestConsoleSessionSlides(t *testing.T) {
 	start := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
 	now := start
 	f.sessions.now = func() time.Time { return now }
-	link, exp, err := f.sessions.CreateLinkBy(ctx, tenant.Default(), events.System)
+	link, exp, err := f.sessions.CreateLinkBy(ctx, tenant.Default(), events.System, "")
 	if err != nil || !exp.Equal(start.Add(LinkTTL)) {
 		t.Fatalf("CreateLinkBy: %v %v", exp, err)
 	}
@@ -270,7 +271,7 @@ func TestConsoleSessionSlides(t *testing.T) {
 	}
 	// The cap: no end past MaxSessionAge after the sign-in.
 	now = start
-	link, _, _ = f.sessions.CreateLinkBy(ctx, tenant.Default(), events.System)
+	link, _, _ = f.sessions.CreateLinkBy(ctx, tenant.Default(), events.System, "")
 	id, _, _ = f.sessions.Exchange(ctx, link, "operator")
 	for now.Before(start.Add(MaxSessionAge - time.Hour)) {
 		now = now.Add(6 * time.Hour)
@@ -278,5 +279,154 @@ func TestConsoleSessionSlides(t *testing.T) {
 	}
 	if exp.After(start.Add(MaxSessionAge)) {
 		t.Errorf("the session's end %v is past the cap %v", exp, start.Add(MaxSessionAge))
+	}
+}
+
+// TestSessionFamily: a link a session mints, and the session it is
+// traded for, belong to that session's family. They keep the family's
+// sign-in time, so the 30-day cap is not reset by chaining links, and
+// signing out of any of them ends the whole family (its unused links
+// too) and nothing else. Sign-in and sign-out are audited with the
+// session's ref, never its id; ended sessions and links are pruned.
+func TestSessionFamily(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+	f.sessions.Audit(f.log)
+	start := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	now := start
+	f.sessions.now = func() time.Time { return now }
+
+	link, _ := f.sessions.CreateLink(ctx, tenant.Default())
+	parent, _, err := f.sessions.Exchange(ctx, link, "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, _ := f.sessions.CreateLink(ctx, tenant.Default()) // another family, same instant
+	stranger, _, err := f.sessions.Exchange(ctx, other, "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 29 days on (the parent kept alive by use), the parent mints a link.
+	for now.Before(start.Add(29 * 24 * time.Hour)) {
+		now = now.Add(6 * time.Hour)
+		if _, _, err := f.sessions.Renew(ctx, parent); err != nil {
+			t.Fatal(err)
+		}
+	}
+	chained, lexp, err := f.sessions.CreateLinkBy(ctx, tenant.Default(), events.System, parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lexp.After(start.Add(MaxSessionAge)) {
+		t.Errorf("a chained link lapses at %v, past the family's cap", lexp)
+	}
+	child, cexp, err := f.sessions.Exchange(ctx, chained, "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cexp.Equal(now.Add(SessionTTL)) {
+		t.Errorf("child ends %v, want %v", cexp, now.Add(SessionTTL))
+	}
+	// Near the cap the child cannot outlive it: renewing stops there.
+	var exp time.Time
+	for now.Before(start.Add(MaxSessionAge - time.Hour)) {
+		now = now.Add(time.Hour)
+		if exp, _, err = f.sessions.Renew(ctx, child); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := f.sessions.Renew(ctx, parent); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !exp.Equal(start.Add(MaxSessionAge)) {
+		t.Errorf("the child's end %v, want the family's cap %v (a chain must not reset it)", exp, start.Add(MaxSessionAge))
+	}
+	pending, _, err := f.sessions.CreateLinkBy(ctx, tenant.Default(), events.System, child)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Signing out of the parent ends the child and the unused link, not
+	// the stranger.
+	if n, err := f.sessions.End(ctx, parent, events.Actor{Kind: "operator", ID: "operator", Credential: SessionRef(parent)}); err != nil || n != 2 {
+		t.Fatalf("End = %d, %v; want 2 sessions", n, err)
+	}
+	if _, err := f.sessions.Lookup(ctx, child); err == nil {
+		t.Error("the child outlived its family's sign-out")
+	}
+	if _, _, err := f.sessions.Exchange(ctx, pending, "operator"); !errors.Is(err, ErrLinkUsed) {
+		t.Errorf("a link of the ended family = %v, want ErrLinkUsed", err)
+	}
+	if _, _, err := f.sessions.CreateLinkBy(ctx, tenant.Default(), events.System, parent); !errors.Is(err, ErrSessionEnded) {
+		t.Errorf("a link from an ended session = %v, want ErrSessionEnded", err)
+	}
+
+	// Audit: created and ended, by ref.
+	evs, err := f.log.List(ctx, events.ForScope(tenant.Default(), true), 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created, ended int
+	for _, e := range evs {
+		switch e.Type {
+		case events.ConsoleSessionCreated:
+			created++
+			if !e.Audited || e.ResourceID == "" || e.Actor.Credential != e.ResourceID {
+				t.Errorf("created event = %+v", e)
+			}
+		case events.ConsoleSessionEnded:
+			ended++
+			if e.ResourceID != SessionRef(parent) {
+				t.Errorf("ended event = %+v", e)
+			}
+		}
+		for _, id := range []string{parent, child, stranger} {
+			if strings.Contains(string(e.Data), id) || strings.Contains(e.ResourceID, id) || e.Actor.Credential == id {
+				t.Errorf("an event carries a session id: %+v", e)
+			}
+		}
+	}
+	if created != 3 || ended != 1 {
+		t.Errorf("events: %d created, %d ended; want 3 and 1", created, ended)
+	}
+
+	// Prune: ended rows go at the next write.
+	now = start.Add(MaxSessionAge + time.Hour)
+	if _, err := f.sessions.CreateLink(ctx, tenant.Default()); err != nil {
+		t.Fatal(err)
+	}
+	var sessions, links int
+	_ = f.db.SQL().QueryRow(`SELECT COUNT(*) FROM console_sessions`).Scan(&sessions)
+	_ = f.db.SQL().QueryRow(`SELECT COUNT(*) FROM console_links`).Scan(&links)
+	if sessions != 0 || links != 1 {
+		t.Errorf("after prune: %d sessions, %d links; want 0 and 1 (the new link)", sessions, links)
+	}
+}
+
+// TestEndAll: every session and unused link of the project and env ends.
+func TestEndAll(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+	var ids []string
+	for range 3 {
+		link, _ := f.sessions.CreateLink(ctx, tenant.Default())
+		id, _, err := f.sessions.Exchange(ctx, link, "operator")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	unused, _ := f.sessions.CreateLink(ctx, tenant.Default())
+	if n, err := f.sessions.EndAll(ctx, tenant.Default(), events.System); err != nil || n != 3 {
+		t.Fatalf("EndAll = %d, %v", n, err)
+	}
+	for _, id := range ids {
+		if _, err := f.sessions.Lookup(ctx, id); err == nil {
+			t.Error("a session outlived EndAll")
+		}
+	}
+	if _, _, err := f.sessions.Exchange(ctx, unused, "operator"); !errors.Is(err, ErrLinkUsed) {
+		t.Errorf("an unused link after EndAll = %v", err)
 	}
 }

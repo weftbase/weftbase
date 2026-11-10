@@ -22,6 +22,10 @@ import (
 var binA, binB string
 
 func TestMain(m *testing.M) {
+	if mode := os.Getenv(fakeChildEnv); mode != "" {
+		fakeChild(mode) // this binary, started by an executor as its build
+		return
+	}
 	dir, err := os.MkdirTemp("", "wb-local")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -194,9 +198,14 @@ func TestCrashLosesTheRunsAndRestarts(t *testing.T) {
 	if ack, _ := e.Dispatch(context.Background(), crash); ack.State != wire.AckAccepted {
 		t.Fatal(ack)
 	}
-	f := next(t, e, func(f wire.Frame) bool { return f.Event == wire.EventDisconnected })
+	// The link's EOF can be reported first (lost false: the process may
+	// live on and redial) when the exit is slow to be reaped; the exit's
+	// own frame, lost, always follows.
 	var d wire.Disconnected
-	if f.Decode(&d) != nil || !d.Lost || !strings.Contains(d.Reason, "exit status 3") {
+	f := next(t, e, func(f wire.Frame) bool {
+		return f.Event == wire.EventDisconnected && f.Decode(&d) == nil && d.Lost
+	})
+	if !strings.Contains(d.Reason, "exit status 3") {
 		t.Fatalf("disconnected = %s", f.Data)
 	}
 	deadline := time.Now().Add(15 * time.Second)

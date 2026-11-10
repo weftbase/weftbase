@@ -662,7 +662,11 @@ func TestUsageWords(t *testing.T) {
 			t.Errorf("weft %v = %d %q, want %q", c.args, code, errb, c.want)
 		}
 	}
-	for _, cmd := range []string{"open", "runs", "export", "doctor", "vacuum", "mcp", "dev"} {
+	// weftbase dev -h (the server alone) names the dev loop's flags too.
+	if _, errb, _ := cli("dev", "-h"); !strings.Contains(errb, "--watch dir") || !strings.Contains(errb, "--no-watch") {
+		t.Errorf("weftbase dev -h does not list --watch and --no-watch:\n%s", errb)
+	}
+	for _, cmd := range []string{"open", "runs", "export", "doctor", "vacuum", "mcp", "dev", "signin", "signout"} {
 		_, errb, _ := cli(cmd, "-h")
 		for _, l := range strings.Split(errb, "\n") {
 			if strings.HasPrefix(l, "  -") && !strings.HasPrefix(l, "  --") {

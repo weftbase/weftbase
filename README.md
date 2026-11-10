@@ -17,9 +17,10 @@ imports weft; weft never imports weftbase.
 
 ## Quick start: the demo
 
-From a checkout (with the weft checkout beside it, see Development):
+From a clone (nothing else beside it is needed):
 
 ```sh
+git clone https://github.com/weftbase/weftbase && cd weftbase
 go run ./examples/demo
 ```
 
@@ -110,7 +111,12 @@ from a running node:
 ```sh
 weftbase signin                                               # beside `weftbase dev`: no flag needed
 weftbase signin --url http://127.0.0.1:7331 --token wb_sk_…   # any node, with a secret key
+weftbase signout --all                                        # end every Console session and unused link
 ```
+
+A link minted from a signed-in Console belongs to that session: the
+session it is traded for ends when that one signs out, and never
+outlives its 30-day cap.
 
 ## Modules
 
@@ -143,16 +149,18 @@ examples/     demo (the tour), approvals (weft's thread approvals, standalone)
 
 ## Development
 
-Both modules require weft at its published version (v0.24.2). The
-committed `go.work` joins `.`, `./client`, `../weft` and `../weft/core`, so
-development builds against the weft checkout beside this repository; the
-client module also builds without the workspace (`GOWORK=off`). The
-server does not yet: it requires the client module at a placeholder
-version until `client/v0.1.0` is tagged.
+Both modules require weft at its published version (v0.24.2), which the
+module proxy serves. The committed `go.work` joins `.` and `./client`
+only; to build against a weft checkout beside this repository, add it
+locally and do not commit it (`go work use ../weft ../weft/core`). The
+client module builds without the workspace (`GOWORK=off`); the server
+requires the client module at a placeholder version until
+`client/v0.1.0` is tagged, which the workspace's `replace` resolves
+(`make gowork-off` builds as the release will).
 
 ```sh
 make build vet test    # both modules, race tests
-make check             # those plus the layering and vocabulary checks
+make check             # those plus the layering, client-deps and vocabulary checks
 make api-check         # the OpenAPI contract against the route table
 make mcp-check         # `weftbase mcp` end to end against a real node
 make demo              # go run ./examples/demo
@@ -161,8 +169,9 @@ make tidy              # never commit a replace
 
 Tests never call a model: `make offline` runs them under
 `WEFT_MODEL_REQUESTS=deny`. ClickHouse tests are gated on
-`WEFT_CLICKHOUSE_DSN` (see `obsdb/clickhouse/README.md`). The Console
-has its own checks (`console/app/README.md`).
+`WEFT_CLICKHOUSE_DSN` (`make clickhouse` runs every gated package and
+fails on a gated skip; see `obsdb/clickhouse/README.md`). The Console
+has its own checks (`make console-check`, `console/app/README.md`).
 
 ## License
 

@@ -5,13 +5,13 @@ GO ?= go
 #   github.com/weftbase/weftbase/client  the client SDK (client/), own go.mod,
 #                                        imports weft, the standard library
 #                                        and OpenTelemetry only
-# The committed go.work joins them with the weft checkout beside this
-# repository (../weft) for development. Every target runs from this
-# directory; the client module's targets run inside client/.
+# The committed go.work joins the two (weft comes from the module proxy
+# at the version both go.mod files require). Every target runs from
+# this directory; the client module's targets run inside client/.
 MODULES := . client
 
 .PHONY: build vet test fmt lint tidy offline stress live vacuum check layering client-deps vocab \
-	mcp-check console-build console-check api-gen api-check tenancy demo
+	mcp-check console-build console-check api-gen api-check tenancy demo gowork-off clickhouse
 
 build:
 	$(GO) build ./...
@@ -29,8 +29,38 @@ test:
 	cd client && $(GO) test -race -timeout $(TEST_TIMEOUT) ./...
 
 # The gate every commit passes: build, vet and race tests in both
-# modules, the layering check and the vocabulary audit.
-check: build vet test layering vocab
+# modules, the layering check, the client module's dependency
+# allow-list and the vocabulary audit.
+check: build vet test layering client-deps vocab
+
+# The build a release makes, without the workspace: GOWORK=off, the
+# client module's placeholder requirement pointed at ./client the way
+# requiring the tagged client/vX.Y.Z will (the replace is dropped again
+# afterwards; go.mod never commits one). The client module must also be
+# tidy on its own.
+gowork-off:
+	@set -e; \
+	$(GO) mod edit -replace github.com/weftbase/weftbase/client=./client; \
+	trap 'cd "$(CURDIR)" && $(GO) mod edit -dropreplace github.com/weftbase/weftbase/client' EXIT; \
+	GOWORK=off $(GO) build ./...; \
+	GOWORK=off $(GO) vet ./...; \
+	cd client && GOWORK=off $(GO) build ./... && GOWORK=off $(GO) mod tidy -diff
+
+# The DSN-gated suites against a ClickHouse server
+# (WEFT_CLICKHOUSE_DSN, e.g. clickhouse://default:weft@127.0.0.1:9000/default):
+# every package with a ClickHouse half. A gated test that skips for want
+# of the DSN fails the target. The verbose log is kept in
+# CLICKHOUSE_LOG.
+CLICKHOUSE_PKGS ?= ./obsdb/... ./api/http/v1/ ./observe/ingest/
+CLICKHOUSE_LOG ?= $${TMPDIR:-/tmp}/weftbase-clickhouse.log
+clickhouse:
+	@test -n "$$WEFT_CLICKHOUSE_DSN" || { echo "clickhouse: set WEFT_CLICKHOUSE_DSN"; exit 1; }
+	@log=$(CLICKHOUSE_LOG); \
+	$(GO) test -race -count=1 -timeout 30m -v $(CLICKHOUSE_PKGS) > $$log 2>&1; status=$$?; \
+	grep -E '^(ok|FAIL|--- FAIL|--- SKIP|panic)' $$log; \
+	test $$status -eq 0 || { echo "clickhouse: tests failed (log: $$log)" >&2; exit 1; }; \
+	if grep -n 'WEFT_CLICKHOUSE_DSN not set' $$log; then \
+	  echo "clickhouse: gated tests skipped although WEFT_CLICKHOUSE_DSN is set (log: $$log)" >&2; exit 1; fi
 
 fmt:
 	$(GO) fmt ./...
@@ -126,16 +156,18 @@ console-build:
 	@test -f $(CONSOLE_APP)/package.json || { echo "console/app is not on this branch yet"; exit 1; }
 	cd $(CONSOLE_APP) && bun install --frozen-lockfile && bun run build
 
-# The freshness gate: rebuild, prove the committed dist matches, fits
-# the 800 KiB gzip budget, and that the app's own checks pass.
+# The Console gate: the app's typecheck, lint, tests, vocabulary audit,
+# formatting and size budget (800 KiB gzipped), on a fresh build that
+# must equal the committed dist.
 console-check: console-build
+	cd $(CONSOLE_APP) && bun run typecheck
+	cd $(CONSOLE_APP) && bun run lint
+	cd $(CONSOLE_APP) && bun run test
+	cd $(CONSOLE_APP) && bun run vocab
+	cd $(CONSOLE_APP) && bun run check
+	cd $(CONSOLE_APP) && bun run budget
 	git diff --exit-code -- console/dist || { echo "console/dist is stale: run 'make console-build' and commit"; exit 1; }
 	test -z "$$(git status --porcelain -- console/dist)" || { git status --short -- console/dist; echo "console/dist has files the commit does not"; exit 1; }
-	total=0; for f in $$(find console/dist -type f); do \
-	  sz=$$(gzip -c $$f | wc -c); total=$$((total+sz)); done; \
-	kib=$$((total / 1024)); echo "console dist: $$kib KiB gzipped (budget 800)"; \
-	test $$kib -le 800 || { echo "console dist exceeds the 800 KiB gzip budget"; exit 1; }
-	cd $(CONSOLE_APP) && bun run check
 
 # ── The /v1 contract ─────────────────────────────────────────────────
 # api/openapi/v1.yaml is the contract (spec-first). Code generation

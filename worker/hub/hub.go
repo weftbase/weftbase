@@ -84,8 +84,9 @@ type Hub struct {
 
 type flight struct {
 	lease queue.Lease // guarded by Hub.mu (extend moves it)
-	// scope is the lease's scope, fixed: read without the lock.
+	// scope and route are the lease's, fixed: read without the lock.
 	scope  tenant.Scope
+	route  string
 	runID  string
 	worker *worker.Worker
 	// heard is when the worker last acked the run.
@@ -160,8 +161,16 @@ func (h *Hub) Attach(ctx context.Context, s tenant.Scope, ex worker.Executor) (*
 	if err != nil {
 		return nil, nil, err
 	}
+	conc := map[string]int{}
+	for _, a := range reg.Agents {
+		conc[a.Name] = a.Concurrency
+	}
+	w.Capacity = map[string]int{}
 	for _, v := range versions {
 		w.Versions = append(w.Versions, v.ID)
+		if c := conc[v.Agent]; c > 0 {
+			w.Capacity[v.ID] = c
+		}
 	}
 	h.router.Add(w)
 	h.wg.Add(1)
@@ -220,7 +229,7 @@ func (h *Hub) claimOne(ctx context.Context) bool {
 		return false
 	}
 	l, err := h.c.Queue.Claim(ctx, queue.ClaimFilter{Owner: h.c.Owner, Kinds: []string{queue.KindRun, queue.KindResume},
-		Routes: h.router.Versions(), TTL: h.c.LeaseTTL})
+		Routes: h.router.Ready(time.Now()), TTL: h.c.LeaseTTL})
 	if errors.Is(err, queue.ErrEmpty) {
 		return false
 	}
@@ -236,8 +245,8 @@ func (h *Hub) claimOne(ctx context.Context) bool {
 
 func (h *Hub) dispatch(ctx context.Context, l queue.Lease) {
 	w, ok := h.router.Pick(l.Route, "")
-	if !ok { // the worker left between the claim and now
-		h.release(ctx, l)
+	if !ok { // the worker left (or filled) between the claim and now
+		h.handBack(l, nil)
 		return
 	}
 	cmdID := wire.NewCommandID()
@@ -259,11 +268,11 @@ func (h *Hub) dispatch(ctx context.Context, l queue.Lease) {
 	if cmd.CommandID == "" {
 		return // nothing to send: done above
 	}
-	f := &flight{lease: l, scope: l.Scope, runID: cmd.RunID, worker: w, heard: time.Now()}
+	f := &flight{lease: l, scope: l.Scope, route: l.Route, runID: cmd.RunID, worker: w, heard: time.Now()}
 	h.mu.Lock()
 	h.flight[cmdID], h.byRun[cmd.RunID] = f, cmdID
 	h.mu.Unlock()
-	h.router.Hold(w, 1)
+	h.router.Hold(w, l.Route, 1)
 
 	ack, err := w.Exec.Dispatch(ctx, cmd)
 	switch {
@@ -273,9 +282,13 @@ func (h *Hub) dispatch(ctx context.Context, l queue.Lease) {
 	case ack.State == wire.AckAccepted:
 		// Running: its acks arrive through Events.
 	case ack.State == wire.AckBusy:
+		// Unrun: back in its place, the route paused on this worker
+		// until one of its runs ends (or busyPause), so the claim loop
+		// neither spins on it nor lets later items overtake it.
 		h.forget(f)
-		_ = h.c.DB.InTx(ctx, func(tx store.Tx) error { return h.c.Sink.Undispatched(tx, l.Scope, cmd.RunID) })
-		h.release(ctx, l)
+		h.router.Pause(w, l.Route, time.Now().Add(busyPause))
+		runID := cmd.RunID
+		h.handBack(l, func(tx store.Tx) error { return h.c.Sink.Undispatched(tx, l.Scope, runID) })
 	default: // rejected, or an answer that is not one
 		why := ack.Error
 		if ack.State != wire.AckRejected {
@@ -285,10 +298,38 @@ func (h *Hub) dispatch(ctx context.Context, l queue.Lease) {
 	}
 }
 
-func (h *Hub) release(ctx context.Context, l queue.Lease) {
-	if err := h.c.Queue.Release(ctx, l, time.Second); err != nil && ctx.Err() == nil {
-		h.log.Warn("hub: release failed", "item", l.ID, "err", err)
+// busyPause is how long a route stays off a worker that answered busy
+// when none of its runs of that version ends sooner.
+const busyPause = time.Second
+
+// handBack returns l's item unworked, keeping its place in the queue,
+// and runs undo (the ledger forgetting the dispatch) in the same
+// transaction. It does not take the claim loop's context and retries:
+// an item left leased with its run still marked dispatched would be
+// reclaimed after its lease and lost ("outcome unknown") although it
+// never ran.
+func (h *Hub) handBack(l queue.Lease, undo func(tx store.Tx) error) {
+	var err error
+	for attempt := range 5 {
+		if attempt > 0 {
+			select {
+			case <-time.After(time.Duration(attempt) * 50 * time.Millisecond):
+			case <-h.base.Done():
+			}
+		}
+		err = h.c.DB.InTx(context.Background(), func(tx store.Tx) error {
+			if undo != nil {
+				if err := undo(tx); err != nil {
+					return err
+				}
+			}
+			return h.c.Queue.Return(tx, l)
+		})
+		if err == nil || errors.Is(err, queue.ErrLeaseLost) {
+			return
+		}
 	}
+	h.log.Error("hub: handing an unrun item back failed", "item", l.ID, "err", err)
 }
 
 func (h *Hub) fail(ctx context.Context, l queue.Lease, why string) {
@@ -314,7 +355,8 @@ func (h *Hub) forget(f *flight) bool {
 	}
 	h.mu.Unlock()
 	if found {
-		h.router.Hold(f.worker, -1)
+		h.router.Hold(f.worker, f.route, -1)
+		h.c.Queue.Poke() // a slot is free: claim now
 	}
 	return found
 }

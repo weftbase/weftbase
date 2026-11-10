@@ -133,11 +133,22 @@ func TestLocalPrincipalGuards(t *testing.T) {
 	}
 }
 
-// TestCORS: an allowed origin is echoed, never with credentials; a
-// preflight answers 204; every answer varies on Origin.
+// TestCORS: with no AllowOrigins no CORS header is sent at all; a
+// configured origin is echoed, never with credentials; a preflight
+// answers 204; every answer varies on Origin.
 func TestCORS(t *testing.T) {
-	s := newStack(t, stackOpts{})
-	resp, _ := s.do(t, req{path: "/v1/runs", key: s.key, header: map[string]string{"Origin": "http://localhost:5173"}})
+	bare := newStack(t, stackOpts{})
+	resp, _ := bare.do(t, req{path: "/v1/runs", key: bare.key, header: map[string]string{"Origin": "http://localhost:5173"}})
+	if resp.Header.Get("Access-Control-Allow-Origin") != "" || !strings.Contains(resp.Header.Get("Vary"), "Origin") {
+		t.Errorf("no AllowOrigins: CORS headers %v", resp.Header)
+	}
+	resp, _ = bare.do(t, req{method: "OPTIONS", path: "/v1/runs", header: map[string]string{"Origin": "http://127.0.0.1:3000", "Access-Control-Request-Method": "DELETE"}})
+	if resp.Header.Get("Access-Control-Allow-Origin") != "" {
+		t.Errorf("no AllowOrigins: preflight answered %v", resp.Header)
+	}
+
+	s := newStack(t, stackOpts{origins: []string{"http://localhost:5173", "http://127.0.0.1:3000"}})
+	resp, _ = s.do(t, req{path: "/v1/runs", key: s.key, header: map[string]string{"Origin": "http://localhost:5173"}})
 	h := resp.Header
 	if h.Get("Access-Control-Allow-Origin") != "http://localhost:5173" || h.Get("Access-Control-Allow-Credentials") != "" ||
 		!strings.Contains(h.Get("Access-Control-Expose-Headers"), "X-Request-Id") {
@@ -153,6 +164,27 @@ func TestCORS(t *testing.T) {
 	resp, _ = s.do(t, req{method: "OPTIONS", path: "/v1/runs", header: map[string]string{"Origin": "http://127.0.0.1:3000", "Access-Control-Request-Method": "DELETE"}})
 	if resp.StatusCode != http.StatusNoContent || resp.Header.Get("Access-Control-Max-Age") == "" {
 		t.Errorf("preflight: %d %v", resp.StatusCode, resp.Header)
+	}
+}
+
+// TestOpenModeNoCORS: a request with no credential (the Local
+// principal) is never readable cross-origin, not even from an origin
+// AllowOrigins names; a key from that origin is.
+func TestOpenModeNoCORS(t *testing.T) {
+	for _, origins := range [][]string{nil, {"http://localhost:9999"}} {
+		s := newStack(t, stackOpts{open: true, origins: origins})
+		for _, p := range []string{"/v1/meta", "/v1/runs", "/v1/approvals"} {
+			resp, body := s.do(t, req{path: p, host: "127.0.0.1:7331", header: map[string]string{"Origin": "http://localhost:9999", "Sec-Fetch-Site": "same-site"}})
+			if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "" {
+				t.Errorf("origins %v: Local %s -> %d with Access-Control-Allow-Origin %q: %.80s", origins, p, resp.StatusCode, got, body)
+			}
+		}
+		if origins != nil {
+			resp, _ := s.do(t, req{path: "/v1/runs", key: s.key, header: map[string]string{"Origin": "http://localhost:9999"}})
+			if resp.Header.Get("Access-Control-Allow-Origin") != "http://localhost:9999" {
+				t.Errorf("a key from an allowed origin: %v", resp.Header)
+			}
+		}
 	}
 }
 
@@ -233,6 +265,94 @@ func TestConsoleSessionCookie(t *testing.T) {
 	resp, _ = s.do(t, req{method: "POST", path: "/v1/auth/sessions", host: "weftbase.example.com", body: `{"token":"` + link + `"}`})
 	if cs := resp.Cookies(); resp.StatusCode != http.StatusCreated || len(cs) != 1 || !cs[0].Secure {
 		t.Errorf("sign in off loopback: %d %+v", resp.StatusCode, cs)
+	}
+}
+
+// TestSessionChaining: a link a signed-in session mints joins its
+// family: the session traded for it does not outlive the parent's
+// sign-out (it used to be independent, with a fresh 30-day cap).
+// DELETE /v1/auth/sessions ends every session (a secret key or an
+// operator); sign-in and sign-out are audited with the session's ref.
+func TestSessionChaining(t *testing.T) {
+	s := newStack(t, stackOpts{})
+	ctx := context.Background()
+	signIn := func(link string) map[string]string {
+		t.Helper()
+		resp, body := s.do(t, req{method: "POST", path: "/v1/auth/sessions", body: `{"token":"` + link + `"}`})
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("sign in: %d %s", resp.StatusCode, body)
+		}
+		for _, c := range resp.Cookies() {
+			if c.Name == "wb_session" {
+				return map[string]string{"Cookie": "wb_session=" + c.Value, CSRFHeader: "1"}
+			}
+		}
+		t.Fatal("no cookie")
+		return nil
+	}
+	link, _ := s.sessions.CreateLink(ctx, tenant.Default())
+	parent := signIn(link)
+	resp, body := s.do(t, req{method: "POST", path: "/v1/auth/links", header: parent})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("link from a session: %d %s", resp.StatusCode, body)
+	}
+	var doc struct {
+		Token string `json:"token"`
+	}
+	_ = json.Unmarshal([]byte(body), &doc)
+	child := signIn(doc.Token)
+	if resp, _ := s.do(t, req{path: "/v1/meta", header: child}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("child session: %d", resp.StatusCode)
+	}
+	if resp, _ := s.do(t, req{method: "DELETE", path: "/v1/auth/sessions/current", header: parent}); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("sign out: %d", resp.StatusCode)
+	}
+	if resp, _ := s.do(t, req{path: "/v1/meta", header: child}); resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("the child session outlived its parent's sign-out: %d", resp.StatusCode)
+	}
+
+	// End all: a key may, a worker key may not.
+	var cookies []map[string]string
+	for range 2 {
+		l, _ := s.sessions.CreateLink(ctx, tenant.Default())
+		cookies = append(cookies, signIn(l))
+	}
+	_, wk, err := s.keys.Mint(ctx, tenant.Default(), keys.Worker, "w", events.System)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp, _ := s.do(t, req{method: "DELETE", path: "/v1/auth/sessions", key: wk}); resp.StatusCode != http.StatusForbidden {
+		t.Errorf("end all with a worker key: %d", resp.StatusCode)
+	}
+	resp, body = s.do(t, req{method: "DELETE", path: "/v1/auth/sessions", key: s.key})
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, `"sessions_ended":2`) {
+		t.Fatalf("end all: %d %s", resp.StatusCode, body)
+	}
+	for _, c := range cookies {
+		if resp, _ := s.do(t, req{path: "/v1/meta", header: c}); resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("a session outlived end all: %d", resp.StatusCode)
+		}
+	}
+
+	// Audit: who signed in and out, by session ref.
+	evs, err := s.log.List(ctx, events.ForScope(tenant.Default(), true), 0, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created, ended int
+	var linkByRef bool
+	for _, e := range evs {
+		switch e.Type {
+		case events.ConsoleSessionCreated:
+			created++
+		case events.ConsoleSessionEnded:
+			ended++
+		case events.ConsoleLinkCreated:
+			linkByRef = linkByRef || strings.HasPrefix(e.Actor.Credential, "ses_")
+		}
+	}
+	if created != 4 || ended != 2 || !linkByRef {
+		t.Errorf("audit: %d created, %d ended, link by session ref %v; want 4, 2, true", created, ended, linkByRef)
 	}
 }
 

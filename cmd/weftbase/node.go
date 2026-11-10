@@ -58,7 +58,7 @@ func addNodeFlags(fs *flag.FlagSet) *nodeFlags {
 		"`path` to the app's weft.json, served at /v1/manifest and checked against the latest runs (default: $WEFT_MANIFEST, else the nearest weft.json from the working directory upward)")
 	f.retain = retainFlag(fs, "to keep runs after they were last seen: older ones that are not running are deleted from the trace store")
 	f.pricing = pricingFlag(fs)
-	fs.Func("allow-origin", "an `origin` (scheme://host:port) allowed by CORS, repeatable (default: localhost and 127.0.0.1 on any port)",
+	fs.Func("allow-origin", "an `origin` (scheme://host:port) allowed by CORS, repeatable (default: none, no CORS headers are sent; never for a request without a credential)",
 		func(s string) error { f.origins = append(f.origins, s); return nil })
 	fs.Func("build", "a build's executable `path` to run as a local child (the supervisor role), repeatable: it serves its agents with client/worker (worker.Serve(worker.FromEnv(), …)); a newer build of the same agents retires the older one",
 		func(s string) error { f.builds = append(f.builds, s); return nil })

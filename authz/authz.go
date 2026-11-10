@@ -37,8 +37,9 @@ type Principal struct {
 	ID string `json:"id"`
 	// KeyKind is the key's kind for a Key principal.
 	KeyKind keys.Kind `json:"key_kind,omitempty"`
-	// Credential names what it authenticated with (the key id or the
-	// session), for audit.
+	// Credential names what it authenticated with, for audit: the key
+	// id, or the session's ref (SessionRef: "ses_" and a prefix of its
+	// id's hash, never the id).
 	Credential string `json:"credential,omitempty"`
 	// Assurance is how strongly the identity is known.
 	Assurance string `json:"assurance"`
@@ -107,7 +108,7 @@ func (a *Authenticator) Authenticate(ctx context.Context, r *http.Request) (Prin
 		if err != nil {
 			return Principal{}, tenant.Scope{}, ErrInvalid
 		}
-		return Principal{Kind: Operator, ID: s.Operator, Credential: "session", Assurance: "session", AllTenants: true}, sc, nil
+		return Principal{Kind: Operator, ID: s.Operator, Credential: s.Ref, Assurance: "session", AllTenants: true}, sc, nil
 	}
 	if a.open {
 		return Principal{Kind: Local, ID: "local", Assurance: "local", AllTenants: true}, tenant.Default(), nil

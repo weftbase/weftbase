@@ -10,8 +10,10 @@ weft's own `AGENTS.md` maps the framework.
 - `github.com/weftbase/weftbase/client` (`client/`, own `go.mod`): what
   apps and agent builds import. It imports weft, the standard library and
   OpenTelemetry only, never the server (`make client-deps`).
-- The committed `go.work` joins both with `../weft` and `../weft/core`.
-  `go.mod` files never commit a `replace` (`make tidy`).
+- The committed `go.work` joins both; weft comes from the module proxy
+  at the version the `go.mod` files require (to work against a weft
+  checkout, `go work use ../weft ../weft/core` locally, never
+  committed). `go.mod` files never commit a `replace` (`make tidy`).
 
 ## Package map
 
@@ -56,7 +58,7 @@ weft's own `AGENTS.md` maps the framework.
 ## Working here
 
 ```sh
-make check        # build, vet, race tests in both modules, layering, vocabulary
+make check        # build, vet, race tests in both modules, layering, client-deps, vocabulary
 make test         # race tests, both modules
 make layering     # the import checks
 make api-check    # the OpenAPI spec against the route table

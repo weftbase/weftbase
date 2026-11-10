@@ -21,8 +21,13 @@ import (
 // loopback Host. The session lasts 12 h from its last use (it slides:
 // a request more than an hour after the last renewal renews it and
 // sets the cookie again), at most 30 days from the sign-in.
-// DELETE /v1/auth/sessions/current ends it. POST /v1/auth/links mints
-// a new link on a running node (`weftbase signin`).
+// DELETE /v1/auth/sessions/current ends it, with its family (the
+// sessions signed in with links it minted, and theirs: authz.Sessions).
+// POST /v1/auth/links mints a new link on a running node (`weftbase
+// signin`); minted by a signed-in session, the link joins its family.
+// DELETE /v1/auth/sessions ends every Console session of the project
+// and env (`weftbase signout --all`). Sign-in and sign-out are audited
+// (console.session_created, console.session_ended).
 
 // signInBody is POST /v1/auth/sessions' request.
 type signInBody struct {
@@ -118,8 +123,20 @@ func (rt *Router) serveLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p, sc, _ := authz.From(r.Context())
-	tok, exp, err := rt.sessions.CreateLinkBy(r.Context(), sc,
-		events.Actor{Kind: string(p.Kind), ID: p.ID, Credential: p.Credential, Assurance: p.Assurance})
+	var from string
+	if p.Kind == authz.Operator {
+		// A session's link joins its family: the session it is traded
+		// for keeps the family's sign-in time (its 30-day cap) and ends
+		// at the family's sign-out.
+		if c, err := r.Cookie(authz.SessionCookie); err == nil {
+			from = c.Value
+		}
+	}
+	tok, exp, err := rt.sessions.CreateLinkBy(r.Context(), sc, actorOf(p), from)
+	if errors.Is(err, authz.ErrSessionEnded) {
+		writeError(w, r, http.StatusUnauthorized, "unauthorized", "the Console session has ended: sign in again")
+		return
+	}
 	if err != nil {
 		reqlog.Cause(r.Context(), "sign-in link: "+err.Error())
 		writeError(w, r, http.StatusInternalServerError, "internal", "the sign-in link could not be recorded")
@@ -134,7 +151,8 @@ func (rt *Router) serveSignOut(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "bad_request", "no Console session cookie on this request")
 		return
 	}
-	if err := rt.sessions.End(r.Context(), c.Value); err != nil {
+	p, _, _ := authz.From(r.Context())
+	if _, err := rt.sessions.End(r.Context(), c.Value, actorOf(p)); err != nil {
 		reqlog.Cause(r.Context(), "sign out: "+err.Error())
 		writeError(w, r, http.StatusInternalServerError, "internal", "the session could not be ended")
 		return
@@ -144,4 +162,36 @@ func (rt *Router) serveSignOut(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteStrictMode, Secure: !isLoopbackName(hostOnly(r.Host)),
 	})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// actorOf is the audit actor of a principal.
+func actorOf(p authz.Principal) events.Actor {
+	return events.Actor{Kind: string(p.Kind), ID: p.ID, Credential: p.Credential, Assurance: p.Assurance}
+}
+
+// endAllDoc is DELETE /v1/auth/sessions' answer.
+type endAllDoc struct {
+	SessionsEnded int `json:"sessions_ended"`
+}
+
+// serveEndAll is DELETE /v1/auth/sessions: every Console session of the
+// caller's project and env ends, and every unused sign-in link with
+// them (a leaked cookie or link, an operator leaving). Audited
+// (console.session_ended, reason end_all). A caller signed in with a
+// cookie ends its own session too; its cookie is cleared.
+func (rt *Router) serveEndAll(w http.ResponseWriter, r *http.Request) {
+	p, sc, _ := authz.From(r.Context())
+	n, err := rt.sessions.EndAll(r.Context(), sc, actorOf(p))
+	if err != nil {
+		reqlog.Cause(r.Context(), "end all sessions: "+err.Error())
+		writeError(w, r, http.StatusInternalServerError, "internal", "the sessions could not be ended")
+		return
+	}
+	if p.Kind == authz.Operator {
+		http.SetCookie(w, &http.Cookie{
+			Name: authz.SessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true,
+			SameSite: http.SameSiteStrictMode, Secure: !isLoopbackName(hostOnly(r.Host)),
+		})
+	}
+	httpx.WriteJSON(w, r, http.StatusOK, endAllDoc{SessionsEnded: n})
 }
