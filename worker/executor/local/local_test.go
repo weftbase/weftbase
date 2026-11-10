@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -61,7 +62,7 @@ func BuildFixture(out, tag, pkg string) error {
 func newExec(t *testing.T, c Config) *Executor {
 	t.Helper()
 	if c.Output == nil {
-		c.Output = io.Discard
+		c.Output = testOutput(t)
 	}
 	c.SocketDir = t.TempDir()
 	e, err := New(c)
@@ -324,4 +325,32 @@ func TestRetireThenStartOnDemand(t *testing.T) {
 	if ack, err := e.Dispatch(context.Background(), command(reg, "hello")); err != nil || ack.State != wire.AckBusy || e.Running() {
 		t.Errorf("after Drain = %+v, %v; running %v", ack, err, e.Running())
 	}
+}
+
+// testOutput is a child's stdout and stderr in the test's log, shown
+// when the test fails. Writes after the test ended are dropped (a child
+// can outlive its test by a drain).
+func testOutput(t *testing.T) io.Writer {
+	w := &tlog{t: t}
+	t.Cleanup(func() {
+		w.mu.Lock()
+		w.done = true
+		w.mu.Unlock()
+	})
+	return w
+}
+
+type tlog struct {
+	mu   sync.Mutex
+	t    *testing.T
+	done bool
+}
+
+func (w *tlog) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.done {
+		w.t.Logf("child: %s", strings.TrimRight(string(p), "\n"))
+	}
+	return len(p), nil
 }

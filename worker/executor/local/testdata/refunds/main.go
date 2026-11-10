@@ -21,8 +21,11 @@ import (
 	"fmt"
 	"iter"
 	"log"
+	"log/slog"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/weftbase/weft/core"
@@ -97,7 +100,19 @@ func main() {
 		return "", nil
 	})
 	agent := core.New(model{}, core.Name("refunds"), core.Instructions("Refund orders."), refund, wait, crash)
-	if err := worker.Serve(worker.FromEnv(), worker.Agent(agent), worker.Heartbeat(200*time.Millisecond)); err != nil {
+	// What the link does and why the process ends goes to stderr: the
+	// tests show it when one fails.
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	go func() {
+		for s := range sigs {
+			fmt.Fprintf(os.Stderr, "refunds %s (pid %d, ppid %d): got %v\n", build, os.Getpid(), os.Getppid(), s)
+		}
+	}()
+	err := worker.Serve(worker.FromEnv(), worker.Agent(agent), worker.Heartbeat(200*time.Millisecond))
+	fmt.Fprintf(os.Stderr, "refunds %s (pid %d): serve returned %v\n", build, os.Getpid(), err)
+	if err != nil {
 		log.Fatal(err)
 	}
 }
