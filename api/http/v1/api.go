@@ -824,9 +824,12 @@ func outcomeDisplay(outcome string) string {
 }
 
 // sessionDisplays sets the display_status of session rows from the
-// ledger's newest run of each (one read): a turn the ledger holds in
-// hand, or one newer than anything the trace store has of the session
-// (cancelled or failed while queued), reads the ledger's word.
+// ledger's newest run of each (one read): the ledger's word wins for a
+// turn it holds in hand, for one newer than anything the trace store
+// has of the session (cancelled or failed while queued), and for one it
+// ended after the trace store last heard of the session (a waiting turn
+// cancelled, its approval expired into a failure): the trace's own last
+// word for that turn — parked, running — is stale.
 func (c *control) sessionDisplays(rows []sessionRow) {
 	if !c.controlled() || len(rows) == 0 || c.err != nil {
 		return
@@ -846,7 +849,8 @@ func (c *control) sessionDisplays(rows []sessionRow) {
 			continue
 		}
 		word := displayStatus(&runRow{}, &lr)
-		if word == displayQueued || word == displayRunning || word == displayWaiting || lr.CreatedAt.After(rows[i].LastSeen) {
+		endedSince := lr.FinishedAt != nil && lr.FinishedAt.After(rows[i].LastSeen)
+		if word == displayQueued || word == displayRunning || word == displayWaiting || lr.CreatedAt.After(rows[i].LastSeen) || endedSince {
 			rows[i].DisplayStatus = word
 		}
 	}

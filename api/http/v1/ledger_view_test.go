@@ -570,3 +570,41 @@ func TestCancelledWhileParkedKeepsItsWait(t *testing.T) {
 		t.Errorf("the list's row = %v", page)
 	}
 }
+
+// A session whose waiting turn is cancelled reads cancelled — the
+// sessions list row, the session document and the conversation's
+// session alike — as the turn itself does: the ledger ended the turn
+// after the trace store last heard of it, so the ledger's word wins.
+func TestSessionReadsItsCancelledTurn(t *testing.T) {
+	f := newLedgerFixture(t)
+	ctx := context.Background()
+	if _, err := f.ledger.Admit(ctx, f.s, events.System, sessions.AdmitRequest{Agent: "support", SessionID: "s1", Input: wire.Input{Prompt: "refund"}}); err != nil {
+		t.Fatal(err)
+	}
+	head := f.run(t, wire.Ack{Status: wire.StatusParked, Checkpoint: json.RawMessage(`{}`),
+		Pending: []wire.PendingCall{{CallID: "c1", Tool: "refund", Args: json.RawMessage(`{}`)}}})
+	attrs := map[string]any{"weft.record": "event", "weft.run.id": head, "weft.event.type": "run_start", "weft.event.pos": int64(0),
+		"gen_ai.agent.name": "support", "weft.session.id": "s1", "weft.turn": int64(1)}
+	if err := f.traces.Write(ctx, obsdb.Batch{Records: []obsdb.Record{{Time: time.Now(), EventName: "weft.event",
+		TraceID: "0102030405060708090a0b0c0d0e0f10", SpanID: "0102030405060708", Severity: 9, Body: `{"type":"run_start","id":"` + head + `"}`,
+		Service: "support", Attrs: attrs, Resource: map[string]any{"service.name": "support"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.ledger.Cancel(ctx, f.s, events.System, head, ""); err != nil {
+		t.Fatal(err)
+	}
+	_, list := f.get(t, "/v1/sessions")
+	rows, _ := list["sessions"].([]any)
+	if len(rows) != 1 || rows[0].(map[string]any)["display_status"] != "cancelled" {
+		t.Errorf("the sessions list = %v, want the session cancelled", list)
+	}
+	if _, doc := f.get(t, "/v1/sessions/s1"); doc["display_status"] != "cancelled" {
+		t.Errorf("the session = %v / %v, want cancelled", doc["status"], doc["display_status"])
+	}
+	_, conv := f.get(t, "/v1/sessions/s1/conversation")
+	sess, _ := conv["session"].(map[string]any)
+	turns, _ := conv["turns"].([]any)
+	if sess["display_status"] != "cancelled" || len(turns) != 1 || turns[0].(map[string]any)["display_status"] != "cancelled" {
+		t.Errorf("the conversation: session %v, turns %v; want both cancelled", sess["display_status"], turns)
+	}
+}
