@@ -12,7 +12,10 @@ const (
 	Public Action = "public"
 	// AuthSession is any authenticated principal acting on its own
 	// session (sign-out).
-	AuthSession     Action = "auth.session"
+	AuthSession Action = "auth.session"
+	// AuthLink mints a one-time Console sign-in link: a secret key or
+	// an operator already signed in.
+	AuthLink        Action = "auth.link"
 	MetaRead        Action = "meta.read"
 	RunsRead        Action = "runs.read"
 	RunsContent     Action = "runs.content" // prompts, tool arguments, transcripts
@@ -36,7 +39,7 @@ const (
 
 // Actions lists every action, for the route-completeness test.
 var Actions = []Action{
-	Public, AuthSession, MetaRead, RunsRead, RunsContent, RunsDelete, RunsCancel, RunsSteer, RunsCreate,
+	Public, AuthSession, AuthLink, MetaRead, RunsRead, RunsContent, RunsDelete, RunsCancel, RunsSteer, RunsCreate,
 	SessionsRead, SessionsWrite, TracesRead, EventsRead, ApprovalsRead, ApprovalsDecide, AgentsRead, AgentsWrite,
 	SettingsRead, KeysManage, IngestWrite, WorkerConnect,
 }

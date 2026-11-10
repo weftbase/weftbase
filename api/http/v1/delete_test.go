@@ -95,7 +95,7 @@ func TestDeleteRunRoute(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("DELETE run = %d %s", code, body)
 	}
-	var doc map[string]string
+	var doc map[string]any
 	if err := json.Unmarshal([]byte(body), &doc); err != nil {
 		t.Fatal(err)
 	}

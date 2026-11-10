@@ -2,6 +2,24 @@
   "weft_version": "v0.24.2",
   "server_version": "v0.1.0",
   "capabilities": [],
+  "capabilities_off": [
+    {
+      "name": "ingest",
+      "reason": "this node does not run the ingest role: OTLP at /otlp/v1/* is served by the nodes started with --roles ingest"
+    },
+    {
+      "name": "runs",
+      "reason": "this server runs no agents (no run ledger): POST /v1/runs, cancel, steer, resume and /v1/approvals answer 501"
+    },
+    {
+      "name": "agents",
+      "reason": "this server has no agent registry: /v1/agents and /v1/tools answer 501"
+    },
+    {
+      "name": "events",
+      "reason": "this server has no control-store outbox: GET /v1/events answers 501"
+    }
+  ],
   "principal": {
     "kind": "local",
     "id": "local",

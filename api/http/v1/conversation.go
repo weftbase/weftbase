@@ -16,11 +16,18 @@ import (
 // parked and was resumed is one turn (its runs are a chain). Paged by
 // turn: limit (20, at most 100) and offset.
 type conversationDoc struct {
-	SessionID string             `json:"session_id"`
-	PublicID  string             `json:"public_id,omitempty"`
-	Agent     string             `json:"agent"`
-	Title     string             `json:"title,omitempty"`
-	Status    string             `json:"status"`
+	SessionID string `json:"session_id"`
+	PublicID  string `json:"public_id,omitempty"`
+	Agent     string `json:"agent"`
+	Title     string `json:"title,omitempty"`
+	Status    string `json:"status"`
+	// Session is the session's own row, as GET /v1/sessions lists it:
+	// its totals (usage, cost), first_seen and last_seen, and its
+	// lineage (forked_from_session, parent_session and the turn, call
+	// and run that delegated to it). Delegated are the sessions its
+	// turns handed work to.
+	Session   sessionRow         `json:"session"`
+	Delegated []sessionRow       `json:"delegated"`
 	Turns     []conversationTurn `json:"turns"`
 	// TotalTurns counts the session's turns (chains folded).
 	TotalTurns int  `json:"total_turns"`
@@ -59,6 +66,9 @@ type conversationTurn struct {
 	EndedBy     string `json:"ended_by,omitempty"`
 	EndedByTurn int    `json:"ended_by_turn,omitempty"`
 	EndedKind   string `json:"ended_kind,omitempty"`
+	// OffPath: the turn was rolled back; the conversation continued
+	// from before it, and what it said is not part of what followed.
+	OffPath bool `json:"off_path,omitempty"`
 
 	Started    time.Time  `json:"started"`
 	Finished   *time.Time `json:"finished"`
@@ -104,6 +114,15 @@ func (s *Server) serveSessionConversation(w http.ResponseWriter, r *http.Request
 	if limit == 0 || limit > 100 {
 		limit = min(max(limit, 20), 100)
 	}
+	tail := false
+	if v := q.Get("tail"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			badRequest(w, r, "tail must be true or false (1 or 0)")
+			return
+		}
+		tail = b
+	}
 	det, err := s.db.Session(r.Context(), id)
 	if err != nil {
 		dbError(w, r, "session", id, err)
@@ -133,8 +152,17 @@ func (s *Server) serveSessionConversation(w http.ResponseWriter, r *http.Request
 		turns = append(turns, []runRow{row})
 	}
 
+	// tail=1: the newest page, whatever offset says.
+	if tail {
+		offset = max(len(turns)-limit, 0)
+	}
 	sr := sessRow(det.SessionRow)
+	total, _, all := s.sessionCost(r.Context(), id)
+	sr.costFields, sr.Derived = total.fields(), allDerived(all)
+	var sd sessionDoc
+	s.delegatedSessions(r.Context(), id, &sd)
 	doc := conversationDoc{SessionID: id, PublicID: det.PublicID, Agent: det.Agent, Title: sr.Title, Status: sr.Status,
+		Session: sr, Delegated: sd.Delegated,
 		Turns: []conversationTurn{}, TotalTurns: len(turns), Offset: offset, SessionMarks: []sessionEntry{}}
 
 	// The session's marks, by run.
@@ -189,6 +217,14 @@ func (s *Server) conversationTurn(r *http.Request, ctl *control, cost *coster, r
 		t.DelegatedSessions += run.DelegatedSessions
 		if run.EndedBy != "" {
 			t.EndedBy, t.EndedByTurn, t.EndedKind = run.EndedBy, run.EndedByTurn, run.EndedKind
+			t.OffPath = run.EndedKind == "rollback"
+		}
+		if run.Status == string(obsdb.StatusRunning) && run.Usage == (core.Usage{}) {
+			// A running run's row has no usage yet: what its finished
+			// steps reported so far.
+			calls, used := s.progress(r, run.ID)
+			t.ModelCalls += max(calls-run.Steps, 0)
+			t.Usage = t.Usage.Add(used)
 		}
 		for _, c := range []*float64{run.CostUSD, run.DelegatedCostUSD} {
 			if c != nil {
@@ -245,4 +281,24 @@ func (s *Server) conversationTurn(r *http.Request, ctl *control, cost *coster, r
 		t.Reply = nil // text before a failure, a park or a cancel is not the turn's answer
 	}
 	return t
+}
+
+// progress is what a running run has done so far, from its step_finish
+// events: the steps that ended, and their usage.
+func (s *Server) progress(r *http.Request, id string) (steps int, used core.Usage) {
+	page, err := s.db.Events(r.Context(), id, -1, 5000)
+	if err != nil {
+		return 0, core.Usage{}
+	}
+	for _, e := range page.Events {
+		var ev struct {
+			Type  string     `json:"type"`
+			Usage core.Usage `json:"usage"`
+		}
+		if json.Unmarshal(e.Event, &ev) == nil && ev.Type == "step_finish" {
+			steps++
+			used = used.Add(ev.Usage)
+		}
+	}
+	return steps, used
 }

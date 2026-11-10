@@ -117,6 +117,7 @@ func (rt *Router) ownRoutes() []Route {
 		out = append(out,
 			Route{"POST", "/v1/auth/sessions", authz.Public, http.HandlerFunc(rt.serveSignIn)},
 			Route{"DELETE", "/v1/auth/sessions/current", authz.AuthSession, http.HandlerFunc(rt.serveSignOut)},
+			Route{"POST", "/v1/auth/links", authz.AuthLink, http.HandlerFunc(rt.serveLink)},
 		)
 	}
 	return out
@@ -194,6 +195,7 @@ func (rt *Router) wrap(route Route) http.Handler {
 	label := route.Method + " " + route.Pattern
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cw := &countingWriter{ResponseWriter: w}
+		defer rt.metrics.begin(label)()
 		defer func() { rt.metrics.request(label, cw.status()) }()
 		w = cw.writer()
 		if r.URL.Query().Has("token") {
@@ -230,6 +232,9 @@ func (rt *Router) wrap(route Route) http.Handler {
 			writeError(w, r, http.StatusForbidden, "forbidden",
 				"not allowed to "+string(route.Action)+": "+d.Reason)
 			return
+		}
+		if p.Credential == "session" && route.Pattern != "/v1/auth/sessions/current" {
+			rt.renew(w, r) // the Console session slides with its use
 		}
 		route.Handler.ServeHTTP(w, r.WithContext(authz.With(r.Context(), p, sc)))
 	})

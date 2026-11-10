@@ -23,7 +23,7 @@ import (
 // steer reaches a running embedded run.
 
 func TestQueueTTLEndToEnd(t *testing.T) {
-	app, ts, _ := startApp(t, t.TempDir(), QueueTTL(200*time.Millisecond), timerPoll(20*time.Millisecond))
+	app, ts, _ := startApp(t, t.TempDir(), QueueTTL(200*time.Millisecond), TimerPoll(20*time.Millisecond))
 	agent := core.New(wefttest.Script(wefttest.Say("never")), core.Name("unserved"))
 	m, err := core.Manifest(agent)
 	if err != nil {
@@ -53,7 +53,7 @@ func TestSilentWorkerLosesItsRun(t *testing.T) {
 }
 
 func TestApprovalExpiryEndToEnd(t *testing.T) {
-	app, ts, _ := startApp(t, t.TempDir(), BuildDigest(digestA), ApprovalExpiry(300*time.Millisecond), timerPoll(20*time.Millisecond))
+	app, ts, _ := startApp(t, t.TempDir(), BuildDigest(digestA), ApprovalExpiry(300*time.Millisecond), TimerPoll(20*time.Millisecond))
 	var refunded atomic.Int32
 	model := wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order":42}`}), wefttest.Say("not refunded"))
 	if err := app.Agent(refunds(model, &refunded)); err != nil {

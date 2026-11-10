@@ -70,7 +70,49 @@ func (s *Server) serveApprovals(w http.ResponseWriter, r *http.Request) {
 		approvalError(w, r, err)
 		return
 	}
-	writeJSON(w, r, http.StatusOK, page)
+	ctl := s.control(r)
+	out := approvalsPage{Approvals: make([]approvalDoc, 0, len(page.Approvals)), Total: page.Total, Pending: page.Pending, NextOffset: page.NextOffset}
+	for _, a := range page.Approvals {
+		out.Approvals = append(out.Approvals, ctl.approval(a))
+	}
+	writeJSON(w, r, http.StatusOK, out)
+}
+
+// approvalDoc is an approval on the wire: the ledger's record, with its
+// AgentVersion as run rows carry it (id, number, the labels it holds
+// now).
+type approvalDoc struct {
+	sessions.Approval
+	AgentVersion versionRef `json:"agent_version"`
+}
+
+type approvalsPage struct {
+	Approvals  []approvalDoc `json:"approvals"`
+	Total      int           `json:"total"`
+	Pending    int           `json:"pending"`
+	NextOffset *int          `json:"next_offset"`
+}
+
+func (c *control) approval(a sessions.Approval) approvalDoc {
+	ref := versionRef{ID: a.AgentVersion, Labels: []string{}}
+	if v, _, ok := c.version(a.Agent, a.AgentVersion); ok {
+		ref.Number = v.Number
+		if v.Labels != nil {
+			ref.Labels = v.Labels
+		}
+	}
+	return approvalDoc{Approval: a, AgentVersion: ref}
+}
+
+func (c *control) approvalDocs(as []sessions.Approval) []approvalDoc {
+	if as == nil {
+		return nil
+	}
+	out := make([]approvalDoc, len(as))
+	for i, a := range as {
+		out[i] = c.approval(a)
+	}
+	return out
 }
 
 // serveApproval is GET /v1/approvals/{id}.
@@ -84,7 +126,7 @@ func (s *Server) serveApproval(w http.ResponseWriter, r *http.Request, id string
 		approvalError(w, r, err)
 		return
 	}
-	writeJSON(w, r, http.StatusOK, a)
+	writeJSON(w, r, http.StatusOK, s.control(r).approval(a))
 }
 
 // serveApprovalDecision is POST /v1/approvals/{id}/decision: approve,
@@ -113,5 +155,5 @@ func (s *Server) serveApprovalDecision(w http.ResponseWriter, r *http.Request, i
 		approvalError(w, r, err)
 		return
 	}
-	writeJSON(w, r, http.StatusOK, a)
+	writeJSON(w, r, http.StatusOK, s.control(r).approval(a))
 }

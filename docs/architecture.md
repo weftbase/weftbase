@@ -191,6 +191,23 @@ derives a run's state itself (`api/http/v1/runview.go`):
   timestamps, cost and durations; `GET /v1/sessions/{id}/conversation`
   is a session turn by turn (a park and its resume are one turn).
 
+Deleting a run (`DELETE /v1/runs/{id}`) removes the whole logical run
+from both stores: every run of its chain, their children, the ledger
+rows and the approval records, with one audited `run.deleted` event. A
+run the ledger still has in hand (queued, running, waiting) is refused
+with 409 `run_active`. `GET /v1/events` replays the outbox from its
+start by default; `after=now` starts at the tail.
+
+## Console sign-in
+
+A one-time link (`<origin>/#signin=<token>`, 15 minutes) is exchanged
+for the `wb_session` cookie. The session lasts 12 hours from its last
+use: a request more than an hour after the last renewal renews it and
+sets the cookie again, up to 30 days after the sign-in.
+`POST /v1/auth/links` mints a fresh link on a running node for a secret
+key or a signed-in operator (audited, `console.link_created`);
+`weftbase signin` calls it.
+
 ## Telemetry of a local build
 
 The supervisor hands every child `WEFTBASE_URL` (what `App.Serving`

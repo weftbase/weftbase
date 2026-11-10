@@ -16,7 +16,6 @@ import (
 	"github.com/weftbase/weft/version"
 	"github.com/weftbase/weftbase/internal/httpx"
 	"github.com/weftbase/weftbase/obsdb"
-	"github.com/weftbase/weftbase/sessions"
 )
 
 // The JSON API (S4.2/S4.3). Every response is application/json; errors
@@ -387,7 +386,7 @@ type runPage struct {
 	// Approvals are the ledger's approval records of the calls this
 	// run parked on (pending or decided, with who decided). Absent on
 	// a run that never parked, and on one the ledger does not hold.
-	Approvals []sessions.Approval `json:"approvals,omitempty"`
+	Approvals []approvalDoc `json:"approvals,omitempty"`
 	// Summarizer is what the summarizer calls filed under this run cost
 	// (UX-B-13, U15.1-fix): the compaction markers and SummarizeLeft
 	// branch records under it that name summarizer_usage, priced as the
@@ -676,10 +675,14 @@ func spans(in []obsdb.Span) spansDoc {
 // ended (thread's busy policy), parked (an open park) or resumed (a
 // decided one), which no ?status= keeps.
 type sessionRow struct {
-	ID        string     `json:"id"`
-	PublicID  string     `json:"public_id"`
-	Agent     string     `json:"agent"`
+	ID       string `json:"id"`
+	PublicID string `json:"public_id"`
+	Agent    string `json:"agent"`
+	// Turns counts the session's turns as a person counts them: a run
+	// that resumes a parked one continues its turn. Runs counts every
+	// run (turns plus resumes).
 	Turns     int        `json:"turns"`
+	Runs      int        `json:"runs"`
 	FirstSeen time.Time  `json:"first_seen"`
 	LastSeen  time.Time  `json:"last_seen"`
 	Status    string     `json:"status"`
@@ -754,7 +757,7 @@ func sessRow(r obsdb.SessionRow) sessionRow {
 	}
 	return sessionRow{
 		SummarizerUsage: sum,
-		ID:              r.ID, PublicID: r.PublicID, Agent: r.Agent, Turns: r.Turns,
+		ID:              r.ID, PublicID: r.PublicID, Agent: r.Agent, Turns: max(r.Turns-r.Resumes, 0), Runs: r.Turns,
 		FirstSeen: r.FirstSeen, LastSeen: r.LastSeen,
 		Status: sessionStatus(r), Usage: r.Usage,
 		Title: r.Title, FirstPrompt: r.FirstPrompt, ContentOff: r.ContentOff,
@@ -888,25 +891,9 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	query.Status = st
-	display, dst, ok := displayParam(w, r, q)
+	display, chains, ok := viewParams(w, r, q, &query.Status)
 	if !ok {
 		return
-	}
-	if display != "" {
-		if st != "" {
-			badRequest(w, r, "give status or display_status, not both")
-			return
-		}
-		query.Status = dst
-	}
-	chains := false
-	if v := q.Get("chains"); v != "" {
-		b, err := strconv.ParseBool(v)
-		if err != nil {
-			badRequest(w, r, "chains must be true or false (1 or 0)")
-			return
-		}
-		chains = b
 	}
 	if v := q.Get("all"); v != "" {
 		b, err := strconv.ParseBool(v)
@@ -1950,11 +1937,14 @@ func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	// The turn-state filters (U16, UX-B-28): awaiting / failed /
 	// compacted booleans, lineage child|fork, since (RFC 3339, on
-	// last-seen).
+	// last-seen). cancelled keeps the sessions with a cancelled turn;
+	// it is held after the store pages (a page can be short, total is
+	// the store's).
+	cancelled := false
 	for _, f := range []struct {
 		key string
 		dst *bool
-	}{{"awaiting", &query.Awaiting}, {"failed", &query.Failed}, {"compacted", &query.Compacted}} {
+	}{{"awaiting", &query.Awaiting}, {"failed", &query.Failed}, {"compacted", &query.Compacted}, {"cancelled", &cancelled}} {
 		if v := q.Get(f.key); v != "" {
 			b, err := strconv.ParseBool(v)
 			if err != nil {
@@ -2002,6 +1992,9 @@ func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 		srow := sessRow(sr)
 		srow.costFields = sc.fields()
 		srow.Derived = allDerived(runs)
+		if cancelled && srow.Cancelled == 0 {
+			continue
+		}
 		out.Sessions = append(out.Sessions, srow)
 	}
 	if page.NextBefore != nil { // the database's own cursor, as in serveRuns

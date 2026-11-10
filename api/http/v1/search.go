@@ -188,6 +188,13 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 	if query.Status, ok = statusParam(w, r, q); !ok {
 		return
 	}
+	// display_status and chains, as on the list (runview.go). The
+	// search pages and counts first: total and next_offset are the trace
+	// store's matches, and a page can hold fewer rows than limit.
+	display, chains, ok := viewParams(w, r, q, &query.Status)
+	if !ok {
+		return
+	}
 	if v := q.Get("all"); v != "" {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
@@ -237,7 +244,7 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if byCost || minCost != nil {
-		s.serveCostSearch(w, r, srch, query, byCost, minCost, facets)
+		s.serveCostSearch(w, r, srch, query, byCost, minCost, facets, display, chains)
 		return
 	}
 	page, err := srch.Search(r.Context(), query)
@@ -258,7 +265,7 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 	for _, rec := range page.Runs {
 		out.Runs = append(out.Runs, c.row(rec))
 	}
-	s.control(r).decorate(out.Runs)
+	out.Runs = s.foldRows(r, s.control(r), c, out.Runs, display, chains, true)
 	if next := query.Offset + len(page.Runs); len(page.Runs) > 0 && next < page.Total {
 		out.NextOffset = &next
 	}
@@ -271,7 +278,7 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 // ties keep the newest-first order; unpriced runs last), then paged by
 // query's offset and limit.
 func (s *Server) serveCostSearch(w http.ResponseWriter, r *http.Request, srch obsdb.Searcher,
-	query obsdb.SearchQuery, byCost bool, minCost *float64, facets *searchFacets) {
+	query obsdb.SearchQuery, byCost bool, minCost *float64, facets *searchFacets, display string, chains bool) {
 	offset, limit := query.Offset, obsdb.LimitOf(query.Limit)
 	scan := query
 	scan.Offset, scan.Limit = 0, 500
@@ -344,8 +351,9 @@ func (s *Server) serveCostSearch(w http.ResponseWriter, r *http.Request, srch ob
 	for i := offset; i < len(hits) && i < offset+limit; i++ {
 		out.Runs = append(out.Runs, c.row(hits[i].rec))
 	}
-	s.control(r).decorate(out.Runs)
-	if next := offset + len(out.Runs); len(out.Runs) > 0 && next < out.Total {
+	read := len(out.Runs)
+	out.Runs = s.foldRows(r, s.control(r), c, out.Runs, display, chains, true)
+	if next := offset + read; read > 0 && next < out.Total {
 		out.NextOffset = &next
 	}
 	writeJSON(w, r, http.StatusOK, out)

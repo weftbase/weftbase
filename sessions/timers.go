@@ -14,9 +14,13 @@ import (
 
 // parkTimers schedules a parked run's approval expiry and maximum pin
 // age, per the Policy.
-func (l *Ledger) parkTimers(tx store.Tx, s tenant.Scope, runID string) error {
+func (l *Ledger) parkTimers(tx store.Tx, s tenant.Scope, runID, agent string) error {
 	now := l.now()
-	if d := l.policy.ApprovalExpiry; d > 0 {
+	expiry := l.policy.ApprovalExpiry
+	if d, ok := l.policy.AgentApprovalExpiry[agent]; ok {
+		expiry = d
+	}
+	if d := expiry; d > 0 {
 		if _, err := l.q.At(tx, s, queue.Timer{Kind: TimerApprovalExpiry, Ref: runID, DueAt: now.Add(d)}); err != nil {
 			return err
 		}

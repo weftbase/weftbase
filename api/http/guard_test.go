@@ -2,9 +2,11 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/weftbase/weftbase/events"
 	"github.com/weftbase/weftbase/tenant"
@@ -309,5 +311,41 @@ func TestRequestIDAndMetrics(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("metrics lack %q:\n%s", want, body)
 		}
+	}
+}
+
+// POST /v1/auth/links mints a fresh one-time link on a running node
+// for a secret key (never a worker or publishable key, never without a
+// credential), and the link signs in.
+func TestSignInLinkFromARunningNode(t *testing.T) {
+	s := newStack(t, stackOpts{})
+	ctx := context.Background()
+	if resp, _ := s.do(t, req{method: "POST", path: "/v1/auth/links"}); resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("no credential: %d, want 401", resp.StatusCode)
+	}
+	_, wk, err := s.keys.Mint(ctx, tenant.Default(), keys.Worker, "w", events.System)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp, _ := s.do(t, req{method: "POST", path: "/v1/auth/links", key: wk}); resp.StatusCode != http.StatusForbidden {
+		t.Errorf("a worker key: %d, want 403", resp.StatusCode)
+	}
+	resp, body := s.do(t, req{method: "POST", path: "/v1/auth/links", key: s.key, body: `{"origin":"http://localhost:3000/"}`})
+	var doc struct {
+		Link, Token string
+		ExpiresAt   time.Time `json:"expires_at"`
+	}
+	if err := json.Unmarshal([]byte(body), &doc); resp.StatusCode != http.StatusCreated || err != nil ||
+		doc.Link != "http://localhost:3000/#signin="+doc.Token || doc.Token == "" || time.Until(doc.ExpiresAt) < 14*time.Minute {
+		t.Fatalf("mint: %d %s", resp.StatusCode, body)
+	}
+	if resp, body := s.do(t, req{method: "POST", path: "/v1/auth/links", key: s.key}); resp.StatusCode != http.StatusCreated || !strings.Contains(body, `"link":"http://127.0.0.1:`) {
+		t.Errorf("default origin: %d %s", resp.StatusCode, body)
+	}
+	if resp, _ := s.do(t, req{method: "POST", path: "/v1/auth/links", key: s.key, body: `{"origin":"javascript:alert(1)"}`}); resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("a bad origin: %d, want 400", resp.StatusCode)
+	}
+	if resp, body := s.do(t, req{method: "POST", path: "/v1/auth/sessions", body: `{"token":"` + doc.Token + `"}`}); resp.StatusCode != http.StatusCreated {
+		t.Errorf("signing in with the minted link: %d %s", resp.StatusCode, body)
 	}
 }

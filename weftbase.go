@@ -152,6 +152,7 @@ func New(opts ...Option) (_ *App, err error) {
 	a.events = events.New(a.control)
 	a.keys = keys.New(a.control, a.events)
 	a.sessions = authz.NewSessions(a.control)
+	a.sessions.Audit(a.events)
 	a.registry = registry.New(a.control, a.events)
 	a.queue = queue.New(a.control)
 	a.ledger = sessions.New(a.control, a.events, a.registry, a.queue, sessions.WithPolicy(c.policy))

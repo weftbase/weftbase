@@ -476,6 +476,24 @@ func TestApprovalRoutes(t *testing.T) {
 		t.Fatalf("GET /v1/approvals: %d %v", code, inbox)
 	}
 	a := items[0].(map[string]any)
+	// The ledger knows of the park before the trace store has the
+	// run's end (here it never gets one): the run still reads waiting,
+	// with the wait and what the ack reported, never an empty chain.
+	if code, doc := getJSON(t, ts.URL+"/v1/runs/"+run["id"].(string)); code != 200 || doc["display_status"] != "waiting" {
+		t.Errorf("the parked run: %d %v", code, doc)
+	} else {
+		chain, _ := doc["chain"].(map[string]any)
+		waits, _ := chain["waits"].([]any)
+		usage, _ := doc["usage"].(map[string]any)
+		if len(waits) != 1 || waits[0].(map[string]any)["from"] == nil || len(waits[0].(map[string]any)["approvals"].([]any)) != 1 ||
+			waits[0].(map[string]any)["to"] != nil || usage["output_tokens"].(float64) != 5 {
+			t.Errorf("the parked run's chain = %v, usage %v", chain, usage)
+		}
+	}
+	// A run in hand is not deleted: cancel it first.
+	if code, body := call(t, "DELETE", ts.URL+"/v1/runs/"+run["id"].(string), bootstrap, "", nil); code != 409 || !strings.Contains(body, `"run_active"`) {
+		t.Errorf("delete of a waiting run: %d %s", code, body)
+	}
 	url := ts.URL + "/v1/approvals/" + a["id"].(string)
 	if a["run_id"] != run["id"] || a["object"] != "approval" || a["args"].(map[string]any)["order"].(float64) != 42 {
 		t.Errorf("approval = %v", a)
@@ -508,5 +526,88 @@ func TestApprovalRoutes(t *testing.T) {
 	}
 	if got := runEvents(t, app, run["id"].(string)); !strings.Contains(strings.Join(got, ","), "run.parked") {
 		t.Errorf("events = %v", got)
+	}
+	// Deleting either run of the chain removes the whole logical run:
+	// both ledger rows and the approval, audited.
+	code, body := call(t, "DELETE", ts.URL+"/v1/runs/"+decided["resumed_by"].(string), bootstrap, "", nil)
+	var del struct {
+		RunIDs     []string `json:"run_ids"`
+		LedgerRuns int      `json:"ledger_runs"`
+		Approvals  int      `json:"approvals"`
+	}
+	if err := json.Unmarshal([]byte(body), &del); code != 200 || err != nil || len(del.RunIDs) != 2 || del.RunIDs[0] != run["id"] || del.LedgerRuns != 2 || del.Approvals != 1 {
+		t.Fatalf("delete: %d %s", code, body)
+	}
+	if code, page := getJSON(t, ts.URL+"/v1/runs?all=1"); code != 200 || len(page["runs"].([]any)) != 0 {
+		t.Errorf("after the delete, runs: %d %v", code, page)
+	}
+	if code, page := getJSON(t, ts.URL+"/v1/approvals"); code != 200 || page["total"].(float64) != 0 {
+		t.Errorf("after the delete, approvals: %d %v", code, page)
+	}
+	if code, _ := getJSON(t, ts.URL+"/v1/runs/"+run["id"].(string)+"/status"); code != 404 {
+		t.Errorf("the deleted run's status: %d", code)
+	}
+	if code, _ := call(t, "DELETE", ts.URL+"/v1/runs/"+run["id"].(string), bootstrap, "", nil); code != 404 {
+		t.Errorf("a second delete: %d", code)
+	}
+	var n int
+	if err := app.control.Read(context.Background(), func(tx store.Tx) error {
+		return store.QueryRow(tx, `SELECT COUNT(*) FROM events WHERE type = 'run.deleted' AND audited = 1`).Scan(&n)
+	}); err != nil || n != 1 {
+		t.Errorf("run.deleted events = %d (%v)", n, err)
+	}
+}
+
+// A run that parks twice is one chain of three runs with two waits,
+// each with its approval and who decided, from either end of the chain.
+func TestChainWithTwoWaits(t *testing.T) {
+	app, ts, _ := startApp(t, t.TempDir(), BuildDigest(digestA))
+	gated := func(name string) *core.ToolDef {
+		return core.Tool(name, "Needs a person.", func(_ context.Context, in orderIn) (string, error) { return "done", nil }, core.RequireApproval())
+	}
+	model := wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{ID: "c1", Name: "refund", Args: `{"order":7}`}),
+		wefttest.ToolCalls(wefttest.Call{ID: "c2", Name: "close", Args: `{"order":7}`}),
+		wefttest.Say("refunded and closed"))
+	if err := app.Agent(core.New(model, core.Name("refunds"), gated("refund"), gated("close"))); err != nil {
+		t.Fatal(err)
+	}
+	_, run := postJSON(t, ts.URL+"/v1/runs", map[string]any{"agent": "refunds", "input": map[string]any{"prompt": "refund 7 and close"}})
+	id := run["id"].(string)
+	for _, tool := range []string{"refund", "close"} {
+		waitRun(t, app, id, sessions.StatusParked)
+		_, inbox := getJSON(t, ts.URL+"/v1/approvals?status=pending")
+		a := inbox["approvals"].([]any)[0].(map[string]any)
+		if a["tool"] != tool || a["run_id"] != id {
+			t.Fatalf("pending = %v, want %s on %s", a, tool, id)
+		}
+		code, decided := postJSON(t, ts.URL+"/v1/approvals/"+a["id"].(string)+"/decision", map[string]any{"decision": "approve", "args_sha256": a["args_sha256"]})
+		if code != 200 {
+			t.Fatalf("decide %s: %d %v", tool, code, decided)
+		}
+		id = decided["resumed_by"].(string)
+	}
+	waitRun(t, app, id, sessions.StatusSucceeded)
+	for _, of := range []string{run["id"].(string), id} {
+		code, doc := getJSON(t, ts.URL+"/v1/runs/"+of)
+		chain, _ := doc["chain"].(map[string]any)
+		runs, _ := chain["runs"].([]any)
+		waits, _ := chain["waits"].([]any)
+		if code != 200 || len(runs) != 3 || len(waits) != 2 || chain["display_status"] != "succeeded" || runs[0].(map[string]any)["id"] != run["id"] {
+			t.Fatalf("chain of %s: %d %v", of, code, chain)
+		}
+		for i, tool := range []string{"refund", "close"} {
+			w := waits[i].(map[string]any)
+			a := w["approvals"].([]any)[0].(map[string]any)
+			if a["tool"] != tool || a["status"] != "approved" || w["decided_by"].([]any)[0].(map[string]any)["kind"] != "key" || w["resumed_by"] == nil {
+				t.Errorf("wait %d of %s = %v", i, of, w)
+			}
+		}
+	}
+	// One row for the three runs.
+	if code, page := getJSON(t, ts.URL+"/v1/runs?chains=1"); code != 200 || len(page["runs"].([]any)) != 0 {
+		// No trace store rows here (nothing exports): the ledger lists
+		// only queued runs, and none is.
+		t.Errorf("chains list: %d %v", code, page)
 	}
 }

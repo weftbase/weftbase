@@ -228,3 +228,55 @@ func TestImportBootstrapKey(t *testing.T) {
 		t.Errorf("List = %+v %v", ks, err)
 	}
 }
+
+// A Console session slides with its use: renewed once an hour has
+// passed since the last renewal, never past MaxSessionAge.
+func TestConsoleSessionSlides(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+	start := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	now := start
+	f.sessions.now = func() time.Time { return now }
+	link, exp, err := f.sessions.CreateLinkBy(ctx, tenant.Default(), events.System)
+	if err != nil || !exp.Equal(start.Add(LinkTTL)) {
+		t.Fatalf("CreateLinkBy: %v %v", exp, err)
+	}
+	id, first, err := f.sessions.Exchange(ctx, link, "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Within the hour nothing moves.
+	now = start.Add(30 * time.Minute)
+	if exp, renewed, err := f.sessions.Renew(ctx, id); err != nil || renewed || !exp.Equal(first) {
+		t.Errorf("renew after 30 min = %v %v %v, want the first end, not renewed", exp, renewed, err)
+	}
+	// Later it slides: 12 h from the use.
+	now = start.Add(11 * time.Hour)
+	exp, renewed, err := f.sessions.Renew(ctx, id)
+	if err != nil || !renewed || !exp.Equal(now.Add(SessionTTL)) {
+		t.Fatalf("renew after 11 h = %v %v %v", exp, renewed, err)
+	}
+	now = start.Add(20 * time.Hour) // past the first end, inside the renewed one
+	if _, err := f.sessions.Lookup(ctx, id); err != nil {
+		t.Errorf("the renewed session at 20 h: %v", err)
+	}
+	// A session left alone for 12 h is over, and is not revived.
+	now = now.Add(SessionTTL + time.Hour)
+	if _, renewed, _ := f.sessions.Renew(ctx, id); renewed {
+		t.Error("an expired session was renewed")
+	}
+	if _, err := f.sessions.Lookup(ctx, id); err == nil {
+		t.Error("an expired session is live")
+	}
+	// The cap: no end past MaxSessionAge after the sign-in.
+	now = start
+	link, _, _ = f.sessions.CreateLinkBy(ctx, tenant.Default(), events.System)
+	id, _, _ = f.sessions.Exchange(ctx, link, "operator")
+	for now.Before(start.Add(MaxSessionAge - time.Hour)) {
+		now = now.Add(6 * time.Hour)
+		exp, _, _ = f.sessions.Renew(ctx, id)
+	}
+	if exp.After(start.Add(MaxSessionAge)) {
+		t.Errorf("the session's end %v is past the cap %v", exp, start.Add(MaxSessionAge))
+	}
+}

@@ -40,7 +40,16 @@ versions each, and a new run every few seconds.
 ```sh
 go run ./examples/demo                # or: make demo; prints the API key and a Console sign-in link
 go run ./examples/demo -every 0       # the first batch only; -speed 0 removes the scripted latency
+                                      # Enter prints a fresh sign-in link; -pending-every 3 leaves refunds for you to decide
 cd console/app && bun run dev         # beside it: the Console dev server on :3000, proxying /v1 to :7331
+```
+
+A sign-in link works once and for 15 minutes; a Console session lasts
+12 hours from its last use. For a fresh link from a running server:
+
+```sh
+weftbase signin                       # beside `weftbase dev`: no flag needed
+weftbase signin --url http://127.0.0.1:7331 --token wb_sk_…   # any server, with a secret key
 ```
 
 Any OpenTelemetry app can send to it:

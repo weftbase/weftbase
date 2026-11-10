@@ -84,7 +84,8 @@ func spanStatsInsert(filter string) string {
 		FROM spans WHERE ` + filter + `) AS x
 	WHERE run_id <> '' AND op IN ('invoke_agent', 'chat', 'execute_tool')
 		AND COALESCE(json_extract(attrs, '$."weft.chat.role"'), '') = ''
-		AND NOT (op = 'execute_tool' AND COALESCE(json_extract(attrs, '$."weft.tool.denied"'), 0) IN (1, 'true'))`
+		AND NOT (op = 'execute_tool' AND COALESCE(json_extract(attrs, '$."weft.tool.denied"'), 0) IN (1, 'true'))
+		AND NOT (op = 'execute_tool' AND COALESCE(json_extract(attrs, '$."weft.tool.pending"'), 0) IN (1, 'true'))`
 }
 
 // spanStatWriter is the writer's half, one per Write: the rollup row

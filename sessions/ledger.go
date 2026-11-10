@@ -94,6 +94,9 @@ type Policy struct {
 	// canceled version_retired when it has none (P§5.6). 0:
 	// DefaultMaxPinAge; negative: never.
 	MaxPinAge time.Duration
+	// AgentApprovalExpiry overrides ApprovalExpiry for the runs of the
+	// named agents.
+	AgentApprovalExpiry map[string]time.Duration
 }
 
 // Policy defaults.
@@ -644,7 +647,7 @@ func (l *Ledger) end(tx store.Tx, s tenant.Scope, actor events.Actor, run *Run, 
 		return err
 	}
 	if status == StatusParked {
-		if err := l.parkTimers(tx, s, run.ID); err != nil {
+		if err := l.parkTimers(tx, s, run.ID, run.Agent); err != nil {
 			return err
 		}
 		if err := l.request(tx, s, *run, ack.Pending); err != nil {
@@ -739,4 +742,56 @@ func (l *Ledger) Queued(ctx context.Context, s tenant.Scope, agent string, limit
 		return rows.Err()
 	})
 	return out, err
+}
+
+// ErrActive: a delete of a run that is queued, running or waiting on a
+// person (409 run_active): cancel it first.
+var ErrActive = errors.New("sessions: the run is still active")
+
+// Delete removes ended runs from the ledger with their approval
+// records, in one transaction, and writes one audited run.deleted
+// event naming them. Ids the scope does not hold are skipped; a run
+// that is queued, running, or parked and not resumed is ErrActive and
+// nothing is deleted. It returns how many runs and approvals went.
+func (l *Ledger) Delete(ctx context.Context, s tenant.Scope, actor events.Actor, ids []string) (runs, approvals int, err error) {
+	if s.IsZero() {
+		return 0, 0, tenant.ErrZeroScope
+	}
+	err = l.db.InTx(ctx, func(tx store.Tx) error {
+		runs, approvals = 0, 0
+		var gone []string
+		for _, id := range ids {
+			run, ok, err := l.getOpt(tx, s, id)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				continue
+			}
+			if run.Status == StatusQueued || run.Status == StatusRunning || (run.Status == StatusParked && run.ResumedBy == "") {
+				return fmt.Errorf("%w: run %s is %s", ErrActive, id, run.Status)
+			}
+			gone = append(gone, id)
+		}
+		for _, id := range gone {
+			res, err := store.Exec(tx, `DELETE FROM approvals WHERE run_id = ? AND project_id = ? AND env = ? AND tenant_id = ?`,
+				id, s.Project(), s.Env(), s.Tenant())
+			if err != nil {
+				return err
+			}
+			n, _ := res.RowsAffected()
+			approvals += int(n)
+			if _, err := store.Exec(tx, `DELETE FROM runs WHERE id = ? AND project_id = ? AND env = ? AND tenant_id = ?`,
+				id, s.Project(), s.Env(), s.Tenant()); err != nil {
+				return err
+			}
+		}
+		if runs = len(gone); runs == 0 {
+			return nil
+		}
+		_, err := l.log.Emit(tx, s, events.Event{Type: events.RunDeleted, ResourceKind: "run", ResourceID: gone[0], Actor: actor, Audited: true},
+			map[string]any{"run_ids": gone, "approvals": approvals})
+		return err
+	})
+	return runs, approvals, err
 }

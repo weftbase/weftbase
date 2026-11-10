@@ -14,7 +14,10 @@
 //     twice and run by the node as supervised child processes
 //     (weftbase.App.Local).
 //
-// Each agent has two AgentVersions, labelled prod and staging. Every
+// Each of the two has two AgentVersions, labelled prod and staging.
+// extras.go adds three small agents for the less common things a run
+// can be, and threads.go a conversation kept by weft's thread package.
+// Every
 // run is admitted through the public API (POST /v1/runs), and every
 // model is scripted (package shop): succeeded runs with parallel tool
 // calls, a delegation to a subagent, a run that fails on a tool and
@@ -25,6 +28,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -39,7 +43,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -56,7 +59,6 @@ import (
 	"github.com/weftbase/weftbase"
 	"github.com/weftbase/weftbase/client/exporter"
 	"github.com/weftbase/weftbase/examples/demo/shop"
-	"github.com/weftbase/weftbase/tenant"
 	"github.com/weftbase/weftbase/worker/executor"
 )
 
@@ -66,16 +68,19 @@ type config struct {
 	speed   float64       // scales the scripted latency (0: none)
 	every   time.Duration // a new run this often after the first batch (0: never)
 	console string        // a Console dev server to print a second sign-in link for
+	pending int           // after the first batch, every Nth refund is left for a person (0: none)
+	in      io.Reader     // Enter on it prints a fresh sign-in link (nil: never)
 	out     io.Writer
 }
 
 func main() {
-	cfg := config{out: os.Stdout}
+	cfg := config{in: os.Stdin, out: os.Stdout}
 	flag.StringVar(&cfg.addr, "addr", "127.0.0.1:7331", "listen `address` (the Console dev server proxies /v1 to :7331)")
 	flag.StringVar(&cfg.dir, "data", "", "data `dir`ectory (default: a temporary one, removed on exit)")
 	flag.Float64Var(&cfg.speed, "speed", 1, "scale of the scripted latency: 1 is realistic, 0 is none")
 	flag.DurationVar(&cfg.every, "every", 4*time.Second, "start a new run this often after the first batch (0: never)")
 	flag.StringVar(&cfg.console, "console", "http://localhost:3000", "also print a sign-in link for a Console dev server at this `url` (\"\": none)")
+	flag.IntVar(&cfg.pending, "pending-every", 0, "after the first batch, leave every `n`th refund pending for you to decide (0: decide them all)")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -118,7 +123,11 @@ func run(ctx context.Context, cfg config, ready func(url, key string)) error {
 	// <data>/bootstrap.key).
 	key := newKey()
 	logger := slog.New(slog.NewTextHandler(cfg.out, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	app, err := weftbase.New(weftbase.DataDir(dir), weftbase.BootstrapKey(key), weftbase.Logger(logger))
+	app, err := weftbase.New(weftbase.DataDir(dir), weftbase.BootstrapKey(key), weftbase.Logger(logger),
+		// A payout nobody decides is denied after a few seconds (the
+		// other agents' approvals wait for as long as it takes).
+		weftbase.AgentApprovalExpiry("payouts", max(time.Duration(float64(6*time.Second)*cfg.speed), 400*time.Millisecond)),
+		weftbase.TimerPoll(100*time.Millisecond))
 	if err != nil {
 		return err
 	}
@@ -177,6 +186,31 @@ func run(ctx context.Context, cfg config, ready func(url, key string)) error {
 		versions["refunds"] = append(versions["refunds"], vs[0].ID)
 	}
 
+	// Three more embedded agents, each for one thing worth seeing
+	// (extras.go): concierge (retries, a fallback model, an MCP tool, a
+	// typed answer), reports (one run at a time: the next one queues)
+	// and payouts (approvals that expire; registered with a stale
+	// manifest).
+	gift, err := concierge(nodeCtx, speed)
+	if err != nil {
+		return err
+	}
+	extras, err := executor.NewEmbedded(digestOf("extras", 1), []*core.Agent{gift, reports(speed)}, executor.Concurrency("reports", 1))
+	if err != nil {
+		return err
+	}
+	if _, err := app.Executor(extras); err != nil {
+		return err
+	}
+	const payoutRules = "You pay the store's suppliers. Every payout needs a person's approval. Amounts are in USD."
+	paying, err := executor.NewEmbedded(digestOf("payouts", 1), []*core.Agent{payouts(speed, payoutRules)})
+	if err != nil {
+		return err
+	}
+	if _, err := app.Executor(&staleManifest{Executor: paying, agent: "payouts", from: payoutRules, to: "You pay the store's suppliers."}); err != nil {
+		return err
+	}
+
 	// Labels: the first release is prod, the second is staging.
 	c := client{base: base, key: key}
 	for agent, vs := range versions {
@@ -189,19 +223,40 @@ func run(ctx context.Context, cfg config, ready func(url, key string)) error {
 
 	say("serving %s (data in %s)", base, dir)
 	say("API key: %s", key)
-	for _, origin := range []string{base, cfg.console} {
-		if origin == "" {
-			continue
+	// A sign-in link works once and for 15 minutes; a session lasts 12 h
+	// from its last use. A fresh link comes from the running node:
+	// POST /v1/auth/links, which is what `weftbase signin` calls.
+	links := func() error {
+		for _, origin := range []string{base, cfg.console} {
+			if origin == "" {
+				continue
+			}
+			var link struct {
+				Link string `json:"link"`
+			}
+			if err := c.post(ctx, "/v1/auth/links", map[string]string{"origin": origin}, &link); err != nil {
+				return err
+			}
+			say("sign in to the Console: %s (one use, 15 min)", link.Link)
 		}
-		tok, err := app.Sessions().CreateLink(ctx, tenant.Default())
-		if err != nil {
-			return err
-		}
-		say("sign in to the Console: %s/#signin=%s (one use, 15 min)", strings.TrimRight(origin, "/"), url.QueryEscape(tok))
+		return nil
+	}
+	if err := links(); err != nil {
+		return err
+	}
+	if cfg.in != nil {
+		say("press Enter for a fresh sign-in link (or: weftbase signin --url %s --token <the API key>)", base)
+		go func() {
+			for sc := bufio.NewScanner(cfg.in); sc.Scan(); {
+				if err := links(); err != nil {
+					return
+				}
+			}
+		}()
 	}
 
 	say("playing the first batch of runs…")
-	if err := c.playAll(ctx, speed, firstBatch()); err != nil {
+	if err := c.playAll(ctx, speed, firstBatch(base, key)); err != nil {
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -218,6 +273,7 @@ func run(ctx context.Context, cfg config, ready func(url, key string)) error {
 
 	var wg sync.WaitGroup
 	defer wg.Wait()
+	refunds := 0
 	if cfg.every > 0 {
 		tick := time.NewTicker(cfg.every)
 		defer tick.Stop()
@@ -227,6 +283,11 @@ func run(ctx context.Context, cfg config, ready func(url, key string)) error {
 				return nil
 			case <-tick.C:
 				s := steady[i%len(steady)]
+				if s.agent == "refunds" && s.then != "" && cfg.pending > 0 {
+					if refunds++; refunds%cfg.pending == 0 {
+						s.then = "leave pending"
+					}
+				}
 				wg.Go(func() {
 					if err := c.play(ctx, speed, s); err != nil && ctx.Err() == nil {
 						say("%v", err)
@@ -243,19 +304,26 @@ func run(ctx context.Context, cfg config, ready func(url, key string)) error {
 
 // scene is one conversation: an agent, the version to run ("" is the
 // prod label), the user's messages (each one is a run; more than one
-// makes a session), and what happens to the run afterwards.
+// makes a session), and what happens when a run waits for a person:
+// "approve", "deny", "leave pending", "expire" (nobody decides: the
+// node denies it when the agent's approval expiry passes), or "cancel"
+// (the run is cancelled while it runs). A scene can also be a function
+// of its own (do).
 type scene struct {
 	agent   string
 	version string
 	prompts []string
-	then    string // "", "approve", "deny", "cancel", "leave pending"
+	then    string
+	meta    map[string]string // run metadata (identity: a public id, the page it came from)
+	do      func(ctx context.Context, speed shop.Speed) error
 }
 
-func firstBatch() []scene {
+func firstBatch(base, key string) []scene {
 	return []scene{
 		{agent: "support", prompts: []string{shop.AskTracking}},
 		{agent: "support", version: "label:staging", prompts: []string{shop.AskStock}},
 		{agent: "support", prompts: []string{shop.AskCharge}},  // delegates to the billing subagent
+		{agent: "support", prompts: []string{shop.AskInvoice}}, // the subagent's run fails; the parent carries on
 		{agent: "support", prompts: []string{shop.AskAddress}}, // fails: the tool keeps erroring
 		{agent: "support", prompts: []string{shop.AskOutage}},  // fails: the model call errors
 		{agent: "support", prompts: []string{shop.AskExport}, then: "cancel"},
@@ -264,7 +332,17 @@ func firstBatch() []scene {
 		{agent: "refunds", prompts: []string{shop.AskRefund}, then: "approve"},
 		{agent: "refunds", prompts: []string{shop.AskRefund90}, then: "deny"},
 		{agent: "refunds", prompts: []string{shop.AskRefund, shop.AskThanks}, then: "approve"}, // a conversation that waits on a person
+		{agent: "refunds", prompts: []string{shop.AskClose}, then: "approve"},                  // waits twice: two approvals in a row
 		{agent: "refunds", version: "label:staging", prompts: []string{shop.AskRefund77}, then: "leave pending"},
+		// extras.go
+		{agent: "concierge", prompts: []string{askGift},
+			meta: map[string]string{"weft.public_id": "pub_gift_4471", "weft.page_url": "https://shop.example/gifts/coffee"}},
+		{agent: "reports", prompts: []string{askReport}},
+		{agent: "reports", prompts: []string{askReport}}, // queued behind the first
+		{agent: "payouts", prompts: []string{askPayout}, then: "expire"},
+		{do: func(ctx context.Context, _ shop.Speed) error { return sendStockTraces(ctx, base, key) }},
+		// threads.go
+		{do: deskSession},
 	}
 }
 
@@ -279,6 +357,11 @@ var steady = []scene{
 	{agent: "refunds", version: "label:staging", prompts: []string{shop.AskRefund77}, then: "deny"},
 	{agent: "support", prompts: []string{shop.AskOutage}},
 	{agent: "support", prompts: []string{shop.AskExport}, then: "cancel"},
+	{agent: "concierge", prompts: []string{askGift}, meta: map[string]string{"weft.page_url": "https://shop.example/gifts/coffee"}},
+	{agent: "refunds", prompts: []string{shop.AskClose}, then: "approve"},
+	{agent: "support", prompts: []string{shop.AskInvoice}},
+	{agent: "reports", prompts: []string{askReport}},
+	{agent: "payouts", prompts: []string{askPayout}, then: "expire"},
 }
 
 // ── Playing a scene over /v1 ─────────────────────────────────────────
@@ -288,8 +371,9 @@ type client struct{ base, key string }
 // runStatus is the part of a run's status (GET /v1/runs/{id}/status)
 // the demo reads.
 type runStatus struct {
-	ID     string `json:"id"`
-	Status string `json:"status"`
+	ID        string `json:"id"`
+	Status    string `json:"status"`
+	ResumedBy string `json:"resumed_by"`
 }
 
 func (c client) playAll(ctx context.Context, speed shop.Speed, scenes []scene) error {
@@ -306,6 +390,9 @@ func (c client) playAll(ctx context.Context, speed shop.Speed, scenes []scene) e
 // share a session id (the weft.session.id metadata key), and each run
 // gets the conversation so far as its input.
 func (c client) play(ctx context.Context, speed shop.Speed, s scene) error {
+	if s.do != nil {
+		return s.do(ctx, speed)
+	}
 	var session string
 	if len(s.prompts) > 1 {
 		session = "ses_" + newID()
@@ -313,12 +400,16 @@ func (c client) play(ctx context.Context, speed shop.Speed, s scene) error {
 	var history []core.Message
 	for turn, prompt := range s.prompts {
 		history = append(history, core.User(prompt))
-		req := map[string]any{"agent": s.agent, "version": s.version, "input": map[string]any{"messages": history}}
+		meta := map[string]string{}
+		for k, v := range s.meta {
+			meta[k] = v
+		}
 		if session != "" {
-			req["metadata"] = map[string]string{"weft.session.id": session, "weft.turn": strconv.Itoa(turn + 1)}
+			meta["weft.session.id"], meta["weft.turn"] = session, strconv.Itoa(turn+1)
 		}
 		var run runStatus
-		if err := c.post(ctx, "/v1/runs", req, &run); err != nil {
+		if err := c.post(ctx, "/v1/runs", map[string]any{"agent": s.agent, "version": s.version,
+			"input": map[string]any{"messages": history}, "metadata": meta}, &run); err != nil {
 			return err
 		}
 		if s.then == "cancel" {
@@ -328,47 +419,71 @@ func (c client) play(ctx context.Context, speed shop.Speed, s scene) error {
 			pause(ctx, speed, 2500*time.Millisecond)
 			return c.post(ctx, "/v1/runs/"+run.ID+"/cancel", map[string]any{"reason": "the customer closed the chat"}, nil)
 		}
-		done, err := c.wait(ctx, run.ID, "succeeded", "failed", "canceled", "parked")
-		if err != nil {
-			return err
-		}
-		if done.Status == "parked" {
-			// The run waits for a person: each call it parked on is an
-			// approval. Deciding the last one resumes the run, as a
-			// new run on the same AgentVersion.
-			if s.then == "leave pending" {
-				return nil
-			}
-			pause(ctx, speed, 5*time.Second)
-			var inbox struct {
-				Approvals []struct {
-					ID         string `json:"id"`
-					ArgsSHA256 string `json:"args_sha256"`
-				} `json:"approvals"`
-			}
-			if err := c.get(ctx, "/v1/approvals?status=pending&run="+run.ID, &inbox); err != nil {
+		// A run that waits for a person is parked: each call it waits
+		// on is an approval. Deciding the last one resumes the run as a
+		// new run on the same AgentVersion, which may park again.
+		for id := run.ID; ; {
+			done, err := c.wait(ctx, id, "succeeded", "failed", "canceled", "parked")
+			if err != nil {
 				return err
 			}
-			var decided struct {
-				ResumedBy string `json:"resumed_by"`
+			if done.Status != "parked" {
+				break
 			}
-			for _, a := range inbox.Approvals {
-				// args_sha256 binds the decision to the arguments shown.
-				decision := map[string]any{"decision": s.then, "args_sha256": a.ArgsSHA256}
-				if s.then == "deny" {
-					decision["reason"] = "outside the 30-day refund window"
-				}
-				if err := c.post(ctx, "/v1/approvals/"+a.ID+"/decision", decision, &decided); err != nil {
-					return err
-				}
-			}
-			if _, err := c.wait(ctx, decided.ResumedBy, "succeeded", "failed", "canceled"); err != nil {
+			if id, err = c.decide(ctx, speed, id, s.then); err != nil || id == "" {
 				return err
 			}
 		}
 		history = append(history, core.Assistant(shop.Reply(prompt)))
 	}
 	return nil
+}
+
+// decide answers a parked run's approvals as the scene says, and
+// returns the run that resumes it ("" when the run is left waiting).
+func (c client) decide(ctx context.Context, speed shop.Speed, runID, then string) (string, error) {
+	switch then {
+	case "leave pending":
+		return "", nil
+	case "expire":
+		// Nobody decides. The node denies the calls once the agent's
+		// approval expiry passes, and resumes the run.
+		for {
+			var run runStatus
+			if err := c.get(ctx, "/v1/runs/"+runID+"/status", &run); err != nil || run.ResumedBy != "" {
+				return run.ResumedBy, err
+			}
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(50 * time.Millisecond):
+			}
+		}
+	}
+	pause(ctx, speed, 5*time.Second)
+	var inbox struct {
+		Approvals []struct {
+			ID         string `json:"id"`
+			ArgsSHA256 string `json:"args_sha256"`
+		} `json:"approvals"`
+	}
+	if err := c.get(ctx, "/v1/approvals?status=pending&run="+runID, &inbox); err != nil {
+		return "", err
+	}
+	var decided struct {
+		ResumedBy string `json:"resumed_by"`
+	}
+	for _, a := range inbox.Approvals {
+		// args_sha256 binds the decision to the arguments shown.
+		decision := map[string]any{"decision": then, "args_sha256": a.ArgsSHA256}
+		if then == "deny" {
+			decision["reason"] = "outside the 30-day refund window"
+		}
+		if err := c.post(ctx, "/v1/approvals/"+a.ID+"/decision", decision, &decided); err != nil {
+			return "", err
+		}
+	}
+	return decided.ResumedBy, nil
 }
 
 // wait polls a run's status until it is one of want.

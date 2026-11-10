@@ -33,8 +33,9 @@ var ErrClosed = errors.New("executor: closed")
 // One version per agent per Embedded value; a parked run of another
 // build resumes only where that build is served.
 type Embedded struct {
-	r         *buildworker.Runner
-	heartbeat time.Duration
+	r           *buildworker.Runner
+	heartbeat   time.Duration
+	concurrency map[string]int
 }
 
 var _ worker.Executor = (*Embedded)(nil)
@@ -45,6 +46,18 @@ type EmbeddedOption func(*Embedded)
 // Heartbeat sets how often a running command is re-acked (default 60 s).
 func Heartbeat(d time.Duration) EmbeddedOption {
 	return func(e *Embedded) { e.heartbeat = d }
+}
+
+// Concurrency bounds how many runs of the named agent execute at once
+// here; one past it waits in the queue (it is handed back busy and
+// claimed again). 0 sets no bound.
+func Concurrency(agent string, n int) EmbeddedOption {
+	return func(e *Embedded) {
+		if e.concurrency == nil {
+			e.concurrency = map[string]int{}
+		}
+		e.concurrency[agent] = n
+	}
 }
 
 // NewEmbedded serves agents in-process as the build with digest
@@ -58,6 +71,9 @@ func NewEmbedded(digest string, agents []*core.Agent, opts ...EmbeddedOption) (*
 	specs := make([]buildworker.AgentSpec, len(agents))
 	for i, a := range agents {
 		specs[i] = buildworker.Spec(a)
+		if a != nil {
+			specs[i].Concurrency = max(e.concurrency[a.Name()], 0)
+		}
 	}
 	r, err := buildworker.NewRunner(wire.Build{Digest: digest, Kind: wire.BuildEmbedded}, specs, buildworker.WithHeartbeat(e.heartbeat))
 	if err != nil {

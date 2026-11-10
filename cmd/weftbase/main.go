@@ -9,6 +9,7 @@
 //	weftbase dev    [node flags] [--open] [--no-watch] [--watch dir] -- command args…
 //	weftbase runs   [--url] [--token] [--agent] [--since] [--failed] [--status] [--limit] [--json]
 //	weftbase open   [run id | public id | session id | trace id] [--open]
+//	weftbase signin [--origin url] [--open]
 //	weftbase export <run id> [--format json|jsonl|otlp]
 //	weftbase doctor
 //	weftbase mcp
@@ -159,6 +160,7 @@ Usage:
   weftbase dev     [dev's flags] [--no-watch] [--watch dir] -- command args…   (server and your app: go run ., go run ./cmd/app)
   weftbase runs    [--url] [--token] [--agent] [--since] [--failed] [--status] [--limit] [--json]
   weftbase open    [id] [--url] [--token] [--open]   (a run, public, session or trace id; none: the server root)
+  weftbase signin  [--url] [--token] [--origin url] [--open]   (a fresh one-time Console sign-in link from the running server)
   weftbase export  <run id> [--url] [--token] [--format json|jsonl|otlp]
   weftbase doctor  [--url] [--token]
   weftbase mcp     [--url] [--token]   (a read-only stdio MCP server over the /v1 API; weftbase mcp -h lists its tools)
@@ -232,6 +234,8 @@ func dispatch(args []string, stdout, stderr io.Writer) error {
 		return runRuns(rest, stdout, stderr)
 	case "open":
 		return runOpen(rest, stdout, stderr)
+	case "signin":
+		return runSignIn(rest, stdout, stderr)
 	case "export":
 		return runExport(rest, stdout, stderr)
 	case "doctor":

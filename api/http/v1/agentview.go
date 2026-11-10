@@ -142,6 +142,8 @@ type versionPage struct {
 	// Changes compares the version with the one before it (by number);
 	// null on an agent's first version.
 	Changes *versionDiff `json:"changes"`
+	// ManifestDrift is set on GET /v1/agents/{name}'s versions.
+	ManifestDrift *versionDrift `json:"manifest_drift,omitempty"`
 }
 
 // versionDiff is what changed between two versions' manifests.
@@ -342,8 +344,71 @@ type agentSummary struct {
 	Stats         *windowStats   `json:"stats"`
 }
 
+// labelRef is the version a label points to.
+type labelRef struct {
+	ID     string `json:"id"`
+	Number int    `json:"number"`
+}
+
+// labelVersions resolves an agent's labels (label → version id) against
+// its versions.
+func labelVersions(labels map[string]string, vs []registry.Version) map[string]labelRef {
+	out := map[string]labelRef{}
+	for label, id := range labels {
+		ref := labelRef{ID: id}
+		for _, v := range vs {
+			if v.ID == id {
+				ref.Number = v.Number
+			}
+		}
+		out[label] = ref
+	}
+	return out
+}
+
+// versionDrift says whether runs of a version reported another manifest
+// than the one it registered: the build serving it is not the code the
+// version was made from (a rebuilt binary registered under one digest,
+// an agent built at run time). Checked over the version's newest runs.
+type versionDrift struct {
+	Drift bool `json:"drift"`
+	// RunsChecked are the version's newest runs read (at most 50);
+	// RunsDrifted those of them that reported another manifest.
+	RunsChecked int `json:"runs_checked"`
+	RunsDrifted int `json:"runs_drifted"`
+	// Since is the oldest drifted run read; LastRunID the newest.
+	Since     *time.Time `json:"since"`
+	LastRunID string     `json:"last_run_id,omitempty"`
+	// ManifestHash is the manifest the newest drifted run reported.
+	ManifestHash string `json:"manifest_hash,omitempty"`
+}
+
+func (inv *inventory) drift(v registry.Version) versionDrift {
+	var d versionDrift
+	page, err := inv.s.db.Runs(inv.ctx, obsdb.RunQuery{Agent: v.Agent, Meta: map[string]string{"weftbase.agent_version": v.ID}, Limit: 50})
+	if err != nil {
+		return d
+	}
+	for _, r := range page.Runs { // newest first
+		d.RunsChecked++
+		if r.ManifestHash == "" || r.ManifestHash == v.ManifestHash {
+			continue
+		}
+		d.Drift = true
+		d.RunsDrifted++
+		started := r.Started
+		d.Since = &started
+		if d.LastRunID == "" {
+			d.LastRunID, d.ManifestHash = r.ID, r.ManifestHash
+		}
+	}
+	return d
+}
+
 type agentListRow struct {
 	registry.Agent
+	// LabelVersions is labels with each version's number.
+	LabelVersions map[string]labelRef `json:"label_versions"`
 	// Registered is false on an agent that only runs name: one the
 	// window's traces saw and no build registered (a subagent, an app's
 	// own agent reporting over OTLP). It has no id, labels or versions.
@@ -374,7 +439,9 @@ func (s *Server) serveAgentsSummary(w http.ResponseWriter, r *http.Request, agen
 	tools := map[string]bool{}
 	for _, a := range agents {
 		row := agentListRow{Agent: a, Registered: true, Summary: &agentSummary{Stats: stats[a.Name]}}
+		row.LabelVersions = map[string]labelRef{}
 		if vs, err := s.registry.Versions(r.Context(), inv.sc, a.Name); err == nil && len(vs) > 0 {
+			row.LabelVersions = labelVersions(a.Labels, vs)
 			d := inv.doc(vs[0])
 			row.Summary.Version, row.Summary.Number, row.Summary.Placement = d.ID, d.Number, d.Placement
 			if d.Placement != "" && !slices.Contains(totals.Placements, d.Placement) {
@@ -407,7 +474,7 @@ func (s *Server) serveAgentsSummary(w http.ResponseWriter, r *http.Request, agen
 					started := p.Runs[0].Started
 					ws.LastRunID, ws.LastRunAt = p.Runs[0].ID, &started
 				}
-				rows = append(rows, agentListRow{Agent: registry.Agent{Name: g.Key, Labels: map[string]string{}},
+				rows = append(rows, agentListRow{Agent: registry.Agent{Name: g.Key, Labels: map[string]string{}}, LabelVersions: map[string]labelRef{},
 					Summary: &agentSummary{Stats: ws}})
 			}
 		}
@@ -423,6 +490,8 @@ type agentPage struct {
 	// Placement and Model are the newest version's.
 	Placement string         `json:"placement"`
 	Model     core.ModelInfo `json:"model"`
+	// LabelVersions is labels with each version's number.
+	LabelVersions map[string]labelRef `json:"label_versions"`
 	// Newest is the newest version; ByLabel the version each label
 	// points to. Both are entries of VersionList, repeated so a reader
 	// needs no lookup.
@@ -457,9 +526,11 @@ func (s *Server) serveAgent(w http.ResponseWriter, r *http.Request, name string)
 	if !ok {
 		return
 	}
-	doc := agentPage{Agent: agents[i], ByLabel: map[string]versionPage{}, VersionList: make([]versionPage, 0, len(vs)), Stats: stats[name]}
+	doc := agentPage{Agent: agents[i], LabelVersions: labelVersions(agents[i].Labels, vs), ByLabel: map[string]versionPage{}, VersionList: make([]versionPage, 0, len(vs)), Stats: stats[name]}
 	for k, v := range vs { // newest first
 		d := inv.doc(v)
+		drift := inv.drift(v)
+		d.ManifestDrift = &drift
 		if k+1 < len(vs) {
 			diff := diffManifests(inv.load(vs[k+1]), inv.load(v))
 			d.Changes = &diff

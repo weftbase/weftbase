@@ -101,6 +101,16 @@ func (sw *sseWriter) frame(format string, args ...any) {
 	_, sw.err = fmt.Fprintf(sw.w, format, args...)
 }
 
+// open sends the first bytes of a stream at once: the headers and a
+// comment line. A proxy that holds headers back until a body byte
+// passes, and a client that waits for one, both see the stream open now
+// rather than at the first frame or ping (15 s on a quiet stream). A
+// comment is no event: an SSE client's handlers never see it.
+func (sw *sseWriter) open() {
+	sw.frame(": open\n\n")
+	sw.flush()
+}
+
 func (sw *sseWriter) flush() {
 	if sw.err != nil {
 		return
@@ -447,7 +457,7 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 	h.Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	sw := &sseWriter{w: w, rc: http.NewResponseController(w)}
-	sw.flush()
+	sw.open()
 	sent := newLiveDedup(liveDedupSize)
 	if r.Header.Get("Last-Event-ID") != "" {
 		// Nothing is evicted while the backfill writes, nor until the

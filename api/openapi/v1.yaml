@@ -89,8 +89,11 @@ paths:
       summary: Exchange a one-time sign-in link token for a Console session
       description: |
         Sets `wb_session` (HttpOnly, SameSite=Strict, Path=/, Secure
-        except on a loopback Host, 12 h). The link token is printed by
-        `weftbase dev` (`#signin=<token>`) and is spent once.
+        except on a loopback Host). The session lasts 12 h from its last
+        use (it slides: a request more than an hour after the last
+        renewal renews it and sets the cookie again), at most 30 days
+        from the sign-in. The link token is printed by `weftbase dev`
+        and `weftbase signin` (`#signin=<token>`) and is spent once.
       x-weftbase-action: public
       security: []
       requestBody:
@@ -107,6 +110,41 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/SignInResponse" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /v1/auth/links:
+    post:
+      operationId: createSignInLink
+      summary: Mint a one-time Console sign-in link on a running node
+      description: |
+        For a caller that holds a secret key, or is signed in already
+        (`weftbase signin` uses it). The link is
+        `<origin>/#signin=<token>`, valid once, for 15 minutes; origin
+        defaults to this request's scheme and Host. Audited
+        (`console.link_created`).
+      x-weftbase-action: auth.link
+      parameters:
+        - $ref: "#/components/parameters/CSRF"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                origin: { type: string, description: "Where the Console is opened, e.g. http://localhost:3000." }
+      responses:
+        "201":
+          description: The link.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [link, token, expires_at]
+                properties:
+                  link: { type: string }
+                  token: { type: string }
+                  expires_at: { type: string, format: date-time }
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
@@ -391,7 +429,13 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
     delete:
       operationId: deleteRun
-      summary: Delete a run's trace rows and its children's
+      summary: Delete the whole logical run
+      description: >-
+        Every run of the run's chain (a parked run and what resumed
+        it), their subagent children, the ledger rows and the approval
+        records; one audited run.deleted event. 409 run_active while a
+        run of the chain is queued, running or waiting on a person:
+        cancel it first.
       x-weftbase-action: runs.delete
       parameters:
         - $ref: "#/components/parameters/CSRF"
@@ -402,6 +446,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/DeleteResult" }
         "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /v1/runs/{id}/status:
     get:
       operationId: getRunStatus
@@ -653,8 +698,9 @@ paths:
       parameters:
         - { name: agent, in: query, schema: { type: string } }
         - { name: public_id, in: query, schema: { type: string } }
-        - { name: q, in: query, schema: { type: string } }
+        - { name: q, in: query, description: "Every term in the title, the first prompt, the session id, the public id or the agent.", schema: { type: string } }
         - { name: id_prefix, in: query, schema: { type: string } }
+        - { name: cancelled, in: query, description: "1: only sessions with a cancelled turn (held after the store pages).", schema: { type: string, enum: ["1"] } }
         - { name: status, in: query, schema: { type: string } }
         - { name: since, in: query, schema: { type: string, format: date-time } }
         - { name: before, in: query, schema: { type: string, format: date-time } }
@@ -675,7 +721,11 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
     delete:
       operationId: deleteSession
-      summary: Delete a session's trace rows (never the app's conversation store)
+      summary: Delete a session with its runs (never the app's conversation store)
+      description: >-
+        The session's trace rows, and its runs' ledger rows and approval
+        records. 409 run_active while one of its runs is queued, running
+        or waiting on a person.
       x-weftbase-action: sessions.write
       parameters:
         - $ref: "#/components/parameters/CSRF"
@@ -685,6 +735,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/DeleteResult" }
+        "409": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
   /v1/sessions/{id}/public_id:
     get:
@@ -846,7 +897,12 @@ paths:
         `id:` is the event's seq, `event:` its type, `data:` the
         OutboxEvent. Last-Event-ID (or after=) replays every stored
         event after it, then live ones, each once, in seq order; every
-        row is matched against the caller's scope.
+        row is matched against the caller's scope. With no cursor the
+        stream starts at the beginning of the outbox (the default, for
+        a consumer that must miss nothing); after=now starts at the
+        tail: nothing stored is replayed, only what happens next. The
+        stream's first bytes are a comment line (": open"), sent at
+        once.
       x-weftbase-action: events.read
       x-weftbase-events:
         "<event type>": OutboxEvent
@@ -1048,7 +1104,9 @@ paths:
         duration_ms, waiting_ms, model_calls, tool_calls, usage,
         cost_usd, cost_known, agent_version?, waits[], marks[],
         compactions?, delegated_sessions?}], total_turns, offset,
-        next_offset, session_marks[]. A turn that parked and was
+        next_offset, session_marks[], session (the session's row: its
+        totals, first_seen / last_seen, public_id, lineage), delegated[].
+        A turn carries off_path when it was rolled back. A turn that parked and was
         resumed is one turn: runs lists its chain, waits the waits on a
         person with their approvals. marks are the timeline's.
       x-weftbase-action: runs.content
@@ -1056,6 +1114,7 @@ paths:
         - $ref: "#/components/parameters/SessionID"
         - { name: offset, in: query, schema: { type: integer, minimum: 0 } }
         - { name: limit, in: query, schema: { type: integer, minimum: 0, maximum: 100, default: 20 } }
+        - { name: tail, in: query, description: "1: the newest page (the last limit turns), whatever offset says.", schema: { type: string, enum: ["1"] } }
       responses:
         "200": { $ref: "#/components/responses/Loose" }
         "400": { $ref: "#/components/responses/Error" }
@@ -1193,7 +1252,14 @@ components:
         run_id: { type: string, description: The parked run. }
         call_id: { type: string }
         agent: { type: string }
-        agent_version: { type: string }
+        agent_version:
+          type: object
+          description: The version as run rows carry it; labels are the ones it holds now.
+          required: [id, number, labels]
+          properties:
+            id: { type: string }
+            number: { type: integer }
+            labels: { type: array, items: { type: string } }
         tool: { type: string }
         args: {}
         args_sha256: { type: string, description: sha256 (hex) of the stored arguments; a decision echoes it. }
@@ -1468,6 +1534,9 @@ components:
         deleted: { type: string, enum: [run, session] }
         run_id: { type: string }
         session_id: { type: string }
+        run_ids: { type: array, items: { type: string }, description: "The runs removed: the run's chain, or the session's runs." }
+        ledger_runs: { type: integer, description: Ledger rows removed. }
+        approvals: { type: integer, description: Approval records removed. }
         note: { type: string }
     StoredManifest:
       type: object
