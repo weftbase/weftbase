@@ -178,14 +178,16 @@ Exact list, in the order they block.
    binary serves; the Go gates do not check its freshness).
 3. **Run what these rounds did not**: the ClickHouse suite
    (`WEFT_CLICKHOUSE_DSN=… go test -race ./obsdb/clickhouse/...`; one
-   stats clause changed there, untested), `make stress`, `make lint`
-   and `make offline` in full, and CI: nothing of this branch was
-   pushed, so no workflow has run on it. `examples/demo`'s test builds
-   two binaries with the go tool and starts child processes; CI has
-   not seen it yet.
-4. **weft**: a v0.24.3 patch (a `thread/pool` timing bug) was being
-   prepared; if it is out, bump both `go.mod` files and re-run the
-   gates. weftbase does not use `thread/pool` itself.
+   stats clause changed there, untested), `make stress`, and CI:
+   nothing of this branch was pushed, so no workflow has run on it.
+   `examples/demo`'s test builds two binaries with the go tool and
+   starts child processes; CI has not seen it yet. (`make lint` is
+   clean; `make offline` caught a lost-wakeup race in the events hub's
+   pump, fixed in a4af1d88 with a regression test.)
+4. **weft**: no v0.24.3 is needed. The `thread/pool` CI failures were
+   three tests that assumed a scheduling order; the fix is tests and
+   comments only, on weft `main` (7059609a) with CI green. weftbase
+   stays on v0.24.2.
 5. **Set the date** on the `v0.1.0` heading of `CHANGELOG.md`.
 
 Known and accepted for v0.1.0 (each is in `CHANGELOG.md`, "Not in
