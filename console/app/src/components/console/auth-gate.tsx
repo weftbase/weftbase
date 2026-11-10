@@ -6,7 +6,7 @@ import { ErrorState } from "@/components/console/empty-state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { WeftbaseBrand } from "@/components/ui/weftbase-logo"
-import { signInFromLink, tokenFromPaste } from "@/lib/api/auth"
+import { onSignInLink, signInFromLink, tokenFromPaste } from "@/lib/api/auth"
 import { isUnauthorized } from "@/lib/api/errors"
 import { api } from "@/lib/api/http"
 import { q } from "@/lib/api/queries"
@@ -33,6 +33,22 @@ export function AuthGate() {
       live = false
     }
   }, [])
+
+  // A link opened in this tab later (same page, only the hash changes).
+  React.useEffect(
+    () =>
+      onSignInLink((token) => {
+        api
+          .signIn(token)
+          .then(() => {
+            setLinkError(null)
+            // Everything read before belongs to the old session.
+            void qc.invalidateQueries()
+          })
+          .catch((e: unknown) => setLinkError(e))
+      }),
+    [qc]
+  )
 
   const meta = useQuery({ ...q.meta(), enabled: !linking })
 

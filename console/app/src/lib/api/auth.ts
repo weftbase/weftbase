@@ -38,6 +38,20 @@ export function tokenFromPaste(text: string): string {
   return i < 0 ? t : t.slice(i + PARAM.length + 2)
 }
 
+/** onSignInLink calls handle with the token of a sign-in link opened in
+ * this tab after the page loaded. Opening `<console>/#signin=…` in a tab
+ * already showing the Console changes only the hash: the page does not
+ * reload, so the load-time exchange never sees it. Returns the cleanup. */
+export function onSignInLink(handle: (token: string) => void): () => void {
+  if (typeof window === "undefined") return () => {}
+  const listener = () => {
+    const token = takeSignInToken()
+    if (token) handle(token)
+  }
+  window.addEventListener("hashchange", listener)
+  return () => window.removeEventListener("hashchange", listener)
+}
+
 let exchange: Promise<SignInResponse | null> | undefined
 
 /** signInFromLink runs the link exchange once per page load. It resolves

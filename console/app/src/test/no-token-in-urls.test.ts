@@ -13,7 +13,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs"
 import { join, relative, resolve } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { takeSignInToken, tokenFromPaste } from "@/lib/api/auth"
+import { onSignInLink, takeSignInToken, tokenFromPaste } from "@/lib/api/auth"
 import { api } from "@/lib/api/http"
 import { streamEvents, streamRuns } from "@/lib/api/stream"
 import { validateOverview, validateRun, validateRuns } from "@/lib/search"
@@ -105,6 +105,24 @@ describe("no token in URLs: the sign-in link", () => {
       "/runs?status=failed"
     )
     expect(takeSignInToken()).toBeNull()
+  })
+
+  it("takes a link opened in a tab already on the Console", () => {
+    // Same page, only the hash changes: no reload, no load-time exchange.
+    const got: string[] = []
+    const stop = onSignInLink((t) => got.push(t))
+    window.history.replaceState(null, "", "/#signin=tok_LATER")
+    window.dispatchEvent(new HashChangeEvent("hashchange"))
+    expect(got).toEqual(["tok_LATER"])
+    expect(window.location.href).not.toContain("tok_LATER")
+    // A hash change without a token does nothing.
+    window.history.replaceState(null, "", "/#other=1")
+    window.dispatchEvent(new HashChangeEvent("hashchange"))
+    expect(got).toEqual(["tok_LATER"])
+    stop()
+    window.history.replaceState(null, "", "/#signin=tok_AFTER")
+    window.dispatchEvent(new HashChangeEvent("hashchange"))
+    expect(got).toEqual(["tok_LATER"])
   })
 
   it("accepts a pasted link or a bare token", () => {
